@@ -17,19 +17,25 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shibi.orbis.R
+import com.shibi.orbis.ubo.UboState
+import kotlinx.coroutines.flow.StateFlow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    uboStateFlow: StateFlow<UboState>,
     onBack: () -> Unit,
     onOpenErrorLog: () -> Unit,
-    onOpenUboOnboarding: () -> Unit,
+    onOpenUbo: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val uboState by uboStateFlow.collectAsStateWithLifecycle()
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
@@ -65,11 +71,11 @@ fun SettingsScreen(
                     .clickable(onClick = onOpenErrorLog),
             )
             ListItem(
-                headlineContent = { Text(stringResource(R.string.settings_ubo_onboarding)) },
-                supportingContent = { Text(stringResource(R.string.ubo_stub_todo)) },
+                headlineContent = { Text(stringResource(R.string.ubo_name)) },
+                supportingContent = { Text(uboStatusLine(uboState)) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(onClick = onOpenUboOnboarding),
+                    .clickable(onClick = onOpenUbo),
             )
         }
     }
