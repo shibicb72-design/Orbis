@@ -39,7 +39,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Assemble debug APK and run unit tests
-        run: ./gradlew assembleDebug testDebugUnitTest --stacktrace
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug testDebugUnitTest --stacktrace
 
       - name: Upload debug APK (arm64-v8a)
         uses: actions/upload-artifact@v4
