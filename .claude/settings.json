@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "model": "opusplan",
+  "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "haiku",
+    "BASH_MAX_OUTPUT_LENGTH": "12000"
+  },
+  "permissions": {
+    "deny": [
+      "Read(./.gradle/**)",
+      "Read(./**/build/intermediates/**)",
+      "Read(./**/build/tmp/**)",
+      "Read(./**/build/generated/**)",
+      "Read(./**/*.apk)",
+      "Read(./**/*.aab)",
+      "Agent(android-implementer)",
+      "Agent(general-purpose)"
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Orbis</string>
+    <string name="address_bar_hint">Search or enter address</string>
+    <string name="go">Go</string>
+    <string name="settings">Settings</string>
+    <string name="back">Back</string>
+    <string name="reload">Reload</string>
+    <string name="settings_title">Settings</string>
+    <string name="settings_error_log">Error log</string>
+    <string name="settings_ubo_onboarding">uBlock Origin onboarding</string>
+    <string name="settings_etp_note">Enhanced Tracking Protection: Strict (always on)</string>
+    <string name="debug_title">Error log</string>
+    <string name="debug_copy_all">Copy all</string>
+    <string name="debug_clear">Clear</string>
+    <string name="debug_empty">No log entries yet.</string>
+    <string name="debug_copied">Copied</string>
+    <string name="ubo_stub_title">uBlock Origin</string>
+    <string name="ubo_stub_body">v1 plan: default-on AMO onboarding install of unmodified Mozilla-signed uBlock Origin. Not bundled in the APK. Network install not implemented yet.</string>
+    <string name="ubo_stub_todo">TODO: WebExtensionController install from AMO</string>
+</resources>
