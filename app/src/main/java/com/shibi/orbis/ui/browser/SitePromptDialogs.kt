@@ -1,0 +1,238 @@
+package com.shibi.orbis.ui.browser
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import com.shibi.orbis.R
+import com.shibi.orbis.engine.SitePrompt
+
+/**
+ * The dialog for one site prompt. The title names the origin the browser itself committed ([SitePrompt.originHost]);
+ * page-supplied text only ever appears in the body. A file pick has no dialog: the system picker is its UI
+ * (see BrowserScreen), so it renders nothing here.
+ */
+@Composable
+fun SitePromptDialog(prompt: SitePrompt) {
+    val title =
+        if (prompt.originHost.isNotEmpty()) {
+            stringResource(R.string.prompt_title_origin, prompt.originHost)
+        } else {
+            stringResource(R.string.prompt_title_page)
+        }
+    when (prompt) {
+        is SitePrompt.Alert ->
+            PromptDialog(
+                title = title,
+                onDismiss = prompt::dismiss,
+                confirmButton = { TextButton(onClick = prompt::acknowledge) { Text(stringResource(R.string.prompt_ok)) } },
+            ) { Text(prompt.message) }
+
+        is SitePrompt.Confirm ->
+            PromptDialog(
+                title = title,
+                onDismiss = prompt::dismiss,
+                confirmButton = { TextButton(onClick = prompt::accept) { Text(stringResource(R.string.prompt_ok)) } },
+                dismissButton = { TextButton(onClick = prompt::reject) { Text(stringResource(R.string.prompt_cancel)) } },
+            ) { Text(prompt.message) }
+
+        is SitePrompt.TextInput -> {
+            var text by remember(prompt) { mutableStateOf(prompt.defaultValue) }
+            PromptDialog(
+                title = title,
+                onDismiss = prompt::dismiss,
+                confirmButton = { TextButton(onClick = { prompt.submit(text) }) { Text(stringResource(R.string.prompt_ok)) } },
+                dismissButton = { TextButton(onClick = prompt::dismiss) { Text(stringResource(R.string.prompt_cancel)) } },
+            ) {
+                Column {
+                    if (prompt.message.isNotEmpty()) Text(prompt.message, Modifier.padding(bottom = 8.dp))
+                    OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.fillMaxWidth())
+                }
+            }
+        }
+
+        is SitePrompt.Choice -> ChoiceDialog(prompt, title)
+
+        is SitePrompt.Auth -> {
+            var user by remember(prompt) { mutableStateOf(prompt.username) }
+            var password by remember(prompt) { mutableStateOf("") }
+            PromptDialog(
+                title =
+                    if (prompt.originHost.isNotEmpty()) {
+                        stringResource(R.string.prompt_auth_title, prompt.originHost)
+                    } else {
+                        stringResource(R.string.prompt_auth_title_generic)
+                    },
+                onDismiss = prompt::dismiss,
+                confirmButton = {
+                    TextButton(onClick = { prompt.submit(user, password) }) {
+                        Text(stringResource(R.string.prompt_auth_sign_in))
+                    }
+                },
+                dismissButton = { TextButton(onClick = prompt::dismiss) { Text(stringResource(R.string.prompt_cancel)) } },
+            ) {
+                Column {
+                    if (prompt.message.isNotEmpty()) Text(prompt.message, Modifier.padding(bottom = 8.dp))
+                    if (prompt.previousFailed) {
+                        Text(
+                            stringResource(R.string.prompt_auth_previous_failed),
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                    }
+                    if (!prompt.passwordOnly) {
+                        OutlinedTextField(
+                            value = user,
+                            onValueChange = { user = it },
+                            singleLine = true,
+                            label = { Text(stringResource(R.string.prompt_auth_username)) },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        )
+                    }
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        singleLine = true,
+                        label = { Text(stringResource(R.string.prompt_auth_password)) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
+
+        is SitePrompt.BeforeUnload ->
+            PromptDialog(
+                title = title,
+                onDismiss = prompt::dismiss,
+                confirmButton = { TextButton(onClick = prompt::leave) { Text(stringResource(R.string.prompt_leave)) } },
+                dismissButton = { TextButton(onClick = prompt::stay) { Text(stringResource(R.string.prompt_stay)) } },
+            ) { Text(stringResource(R.string.prompt_leave_message)) }
+
+        is SitePrompt.Repost ->
+            PromptDialog(
+                title = title,
+                onDismiss = prompt::dismiss,
+                confirmButton = { TextButton(onClick = prompt::resend) { Text(stringResource(R.string.prompt_resend)) } },
+                dismissButton = { TextButton(onClick = prompt::cancel) { Text(stringResource(R.string.prompt_cancel)) } },
+            ) { Text(stringResource(R.string.prompt_repost_message)) }
+
+        is SitePrompt.FilePick -> Unit
+    }
+}
+
+@Composable
+private fun ChoiceDialog(prompt: SitePrompt.Choice, title: String) {
+    var chosen by remember(prompt) {
+        mutableStateOf(prompt.options.filter { it.selected && it.enabled && !it.isGroupHeader }.map { it.id }.toSet())
+    }
+    PromptDialog(
+        title = title,
+        onDismiss = prompt::dismiss,
+        // A single choice answers on tap, so it only needs Cancel; a multiple choice needs an explicit OK.
+        confirmButton = {
+            if (prompt.multiple) {
+                TextButton(onClick = { prompt.submit(prompt.options.filter { it.id in chosen && !it.isGroupHeader }.map { it.id }) }) {
+                    Text(stringResource(R.string.prompt_ok))
+                }
+            } else {
+                TextButton(onClick = prompt::dismiss) { Text(stringResource(R.string.prompt_cancel)) }
+            }
+        },
+        dismissButton =
+            if (prompt.multiple) {
+                { TextButton(onClick = prompt::dismiss) { Text(stringResource(R.string.prompt_cancel)) } }
+            } else {
+                null
+            },
+    ) {
+        Column {
+            if (prompt.message.isNotEmpty()) Text(prompt.message, Modifier.padding(bottom = 8.dp))
+            for (option in prompt.options) {
+                if (option.isGroupHeader) {
+                    Text(
+                        option.label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(start = (option.depth * 16).dp, top = 8.dp, bottom = 4.dp),
+                    )
+                    continue
+                }
+                val isChosen = if (prompt.multiple) option.id in chosen else option.selected
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .alpha(if (option.enabled) 1f else 0.38f)
+                        .clickable(enabled = option.enabled) {
+                            if (prompt.multiple) {
+                                chosen = if (option.id in chosen) chosen - option.id else chosen + option.id
+                            } else {
+                                prompt.submit(listOf(option.id))
+                            }
+                        }
+                        .padding(start = (option.depth * 16).dp, top = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (prompt.multiple) {
+                        Checkbox(checked = isChosen, onCheckedChange = null, enabled = option.enabled)
+                    } else {
+                        RadioButton(selected = isChosen, onClick = null, enabled = option.enabled)
+                    }
+                    Text(option.label, Modifier.padding(start = 12.dp))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Shared shell. Colours come from the dialog's own container (never from the page or the screen behind it), so text
+ * can never end up dark-on-dark; long page messages scroll instead of pushing the buttons off screen.
+ */
+@Composable
+private fun PromptDialog(
+    title: String,
+    onDismiss: () -> Unit,
+    confirmButton: @Composable () -> Unit,
+    dismissButton: (@Composable () -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) { content() }
+        },
+        confirmButton = confirmButton,
+        dismissButton = dismissButton,
+        containerColor = MaterialTheme.colorScheme.surface,
+        titleContentColor = MaterialTheme.colorScheme.onSurface,
+        textContentColor = MaterialTheme.colorScheme.onSurface,
+    )
+}

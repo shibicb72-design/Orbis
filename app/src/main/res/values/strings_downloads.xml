@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="downloads_title">Downloads</string>
+    <string name="downloads_back">Back</string>
+    <string name="downloads_empty">No downloads yet.</string>
+    <string name="downloads_cancel">Cancel</string>
+    <string name="downloads_open">Open</string>
+    <string name="downloads_share">Share</string>
+    <string name="downloads_delete">Delete</string>
+    <string name="downloads_open_chooser">Open with</string>
+    <string name="downloads_share_chooser">Share with</string>
+    <string name="downloads_from_host">From %1$s</string>
+    <string name="downloads_progress_known">%1$s of %2$s</string>
+    <string name="downloads_progress_unknown">%1$s downloaded</string>
+    <string name="downloads_status_failed">Download failed</string>
+    <string name="downloads_status_cancelled">Download cancelled</string>
+    <string name="downloads_file_missing">This file is no longer available.</string>
+    <string name="downloads_no_app">No app can open this file.</string>
+    <string name="downloads_action_failed">The file could not be opened.</string>
+    <string name="downloads_delete_confirm_title">Delete this download?</string>
+    <string name="downloads_delete_confirm_body">The file will be removed from your device.</string>
+</resources>
