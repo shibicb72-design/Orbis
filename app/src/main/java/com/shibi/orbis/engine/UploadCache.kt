@@ -190,13 +190,16 @@ class UploadCache(cacheDir: File, private val dispatcher: CoroutineDispatcher = 
 
     /** Deletes the files [copy] returned (their private directories) when the prompt ended before they were used. */
     suspend fun discard(files: List<File>) {
-        withContext(dispatcher) {
-            lock.read {
-                for (file in files) {
-                    val dir = file.parentFile ?: continue
-                    // Only ever a direct child of the root: never a path the caller made up.
-                    if (dir.parentFile == root) dir.deleteRecursively()
-                }
+        withContext(dispatcher) { discardNow(files) }
+    }
+
+    /** [discard] for a caller that is already off the main thread. */
+    fun discardNow(files: List<File>) {
+        lock.read {
+            for (file in files) {
+                val dir = file.parentFile ?: continue
+                // Only ever a direct child of the root: never a path the caller made up.
+                if (dir.parentFile == root) dir.deleteRecursively()
             }
         }
     }

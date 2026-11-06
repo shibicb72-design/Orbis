@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -314,7 +315,11 @@ private fun BrowserContent(
             ) {
                 // Keyed by tab: typed text, focus and the edit mode never leak from one tab into another.
                 key(selectedTab.id) {
-                    var typed by rememberSaveable { mutableStateOf("") }
+                    // Saved instance state is written outside the app's control; a private tab's typed text stays in
+                    // plain memory. The mode of a tab id never changes, so the branch is stable inside this key.
+                    val typedState =
+                        if (selectedTab.isPrivate) remember { mutableStateOf("") } else rememberSaveable { mutableStateOf("") }
+                    var typed by typedState
                     var addressFocused by remember { mutableStateOf(false) }
                     val focusRequester = remember { FocusRequester() }
                     val tabId = selectedTab.id
@@ -352,16 +357,22 @@ private fun BrowserContent(
                         ),
                     )
                 }
-                val tabsDescription = stringResource(R.string.tabs_button, tabList.size)
+                val tabsDescription =
+                    stringResource(if (selectedTab.isPrivate) R.string.tabs_button_private else R.string.tabs_button, tabList.size)
+                val tabsColor = if (selectedTab.isPrivate) MaterialTheme.colorScheme.tertiary else LocalContentColor.current
                 IconButton(onClick = { showTabs = true }) {
                     Box(
                         Modifier
                             .size(24.dp)
-                            .border(2.dp, LocalContentColor.current, RoundedCornerShape(6.dp))
+                            .border(2.dp, tabsColor, RoundedCornerShape(6.dp))
                             .semantics { contentDescription = tabsDescription },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(tabList.size.coerceAtMost(99).toString(), style = MaterialTheme.typography.labelSmall)
+                        Text(
+                            tabList.size.coerceAtMost(99).toString(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = tabsColor,
+                        )
                     }
                 }
                 Box {
@@ -374,6 +385,13 @@ private fun BrowserContent(
                             onClick = {
                                 menuOpen = false
                                 focusAddressFor = tabs.newTab()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.menu_new_private_tab)) },
+                            onClick = {
+                                menuOpen = false
+                                focusAddressFor = tabs.newPrivateTab()
                             },
                         )
                         DropdownMenuItem(
@@ -445,6 +463,33 @@ private fun BrowserContent(
                                 onOpenSettings()
                             },
                         )
+                    }
+                }
+            }
+            if (selectedTab.isPrivate) {
+                Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        Modifier.padding(start = 16.dp, end = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.VisibilityOff, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text(
+                            stringResource(R.string.private_banner_title),
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.weight(1f).padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
+                        )
+                        TextButton(
+                            onClick = { tabs.closeAllPrivate() },
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                            ),
+                        ) {
+                            Text(stringResource(R.string.private_close_all))
+                        }
                     }
                 }
             }
@@ -559,7 +604,9 @@ private fun BrowserContent(
                     ) {
                         Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                             Text(
-                                stringResource(R.string.browser_empty_state),
+                                stringResource(
+                                    if (selectedTab.isPrivate) R.string.browser_private_empty_state else R.string.browser_empty_state,
+                                ),
                                 style = MaterialTheme.typography.bodyLarge,
                             )
                         }
@@ -579,6 +626,14 @@ private fun BrowserContent(
             onClose = { tabs.close(it) },
             onNewTab = {
                 focusAddressFor = tabs.newTab()
+                showTabs = false
+            },
+            onNewPrivateTab = {
+                focusAddressFor = tabs.newPrivateTab()
+                showTabs = false
+            },
+            onClosePrivateTabs = {
+                tabs.closeAllPrivate()
                 showTabs = false
             },
             onDismiss = { showTabs = false },
@@ -606,7 +661,8 @@ private fun BrowserContent(
         DownloadConfirmDialog(
             pending = pending,
             onConfirm = {
-                container.downloads.start(pending.download)
+                // A private tab's download keeps no source host in the index; the file itself stays.
+                container.downloads.start(pending.download, recordSource = !pending.isPrivate)
                 tabs.resolveDownload(pending)
                 // After start: the notification permission never delays or blocks the download.
                 requestNotificationPermission()

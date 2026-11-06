@@ -15,6 +15,7 @@ import com.shibi.orbis.downloads.DownloadIntents
 import com.shibi.orbis.history.VisitTracker
 import java.io.File
 import java.io.InputStream
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.resume
@@ -120,12 +121,34 @@ class GeckoEngineImpl(
         }
     }
 
+    /**
+     * Storage scope shared by every session of the current private set (main thread). Rotated by [clearPrivateData],
+     * so a session of a later set can never be given the id of an earlier one.
+     */
+    private var privateContextId = newPrivateContextId()
+
     override fun createSession(init: SessionInit): BrowserSession {
         val session = buildSession(init)
         session.start(init)
-        debugLog.log("GeckoEngine", "session opened; useTrackingProtection=true")
+        debugLog.log("GeckoEngine", "session opened; useTrackingProtection=true private=${init.isPrivate}")
         return session
     }
+
+    override fun clearPrivateData() {
+        val ended = privateContextId
+        // Rotated first: whatever races with the teardown below, a later private set starts in a scope the earlier one
+        // never wrote to.
+        privateContextId = newPrivateContextId()
+        try {
+            // Only this id's data. StorageController.clearData(...) has no private scope and would wipe the normal
+            // profile (cookies, cache, site data), so it must never be used here.
+            runtime?.storageController?.clearDataForSessionContext(ended)
+        } catch (e: Exception) {
+            debugLog.log("GeckoEngine", "private data clear failed: ${e.javaClass.simpleName}")
+        }
+    }
+
+    private fun newPrivateContextId() = "orbis-private-${UUID.randomUUID()}"
 
     /**
      * The ONLY place a GeckoSession is constructed (new, restored and popup children), so every session gets
@@ -152,6 +175,7 @@ class GeckoEngineImpl(
                 )
                 // Defaults to false: without this ETP does nothing on the session.
                 .useTrackingProtection(true)
+                .apply { if (init.isPrivate) usePrivateMode(true).contextId(privateContextId) }
                 .build()
         return GeckoBrowserSession(
             runtime = requireRuntime(),
@@ -160,12 +184,15 @@ class GeckoEngineImpl(
             captureFiles = captureFiles,
             session = GeckoSession(sessionSettings),
             initialDesktopMode = init.desktopMode,
+            isPrivate = init.isPrivate,
             debugLog = debugLog,
             decisions = decisions,
             broker = broker,
             reconciler = reconciler,
-            // A popup child inherits the opener's desktop/mobile choice and is never opened by us.
-            newPopupChild = { opener -> buildSession(SessionInit(desktopMode = opener.state.value.desktopMode)) },
+            // A popup child inherits the opener's desktop/mobile choice and its privacy, and is never opened by us.
+            newPopupChild = { opener ->
+                buildSession(SessionInit(desktopMode = opener.state.value.desktopMode, isPrivate = opener.isPrivate))
+            },
         )
     }
 
@@ -196,6 +223,7 @@ private class GeckoBrowserSession(
     private val captureFiles: CameraCaptureFiles,
     private val session: GeckoSession,
     initialDesktopMode: Boolean,
+    override val isPrivate: Boolean,
     private val debugLog: DebugLog,
     private val decisions: SitePermissionDecisions,
     private val broker: AndroidPermissionBroker,
@@ -221,6 +249,9 @@ private class GeckoBrowserSession(
     /** Identical pending camera/microphone asks share one dialog. */
     private data class MediaAsk(val origin: String, val embedder: String?, val kinds: Set<SitePermissionKind>)
 
+    /** Private sessions neither read nor write the stored site decisions. */
+    private val permissionPolicy = SessionPermissionPolicy(isPrivate, decisions::lookup, decisions::record)
+
     private val geoCoalescer = PermissionPromptCoalescer<SitePermissionKey>()
     private val mediaCoalescer = PermissionPromptCoalescer<MediaAsk>()
 
@@ -233,6 +264,14 @@ private class GeckoBrowserSession(
 
     private var latestSessionState: GeckoSession.SessionState? = null
     private var findGeneration = 0
+
+    /**
+     * Upload copies handed to Gecko by a private session (main thread only). Normal sessions leave theirs for the wipe at
+     * the next process start; a private one deletes them when it closes. A copy dismissed before Gecko got it is already
+     * discarded and never listed. The camera temp needs no entry: [cameraBridge] deletes it when its prompt ends, which
+     * is right after the copy.
+     */
+    private val privateUploads = ArrayList<File>()
 
     val geckoSession: GeckoSession get() = session
 
@@ -738,6 +777,8 @@ private class GeckoBrowserSession(
                                             // Dismissed while copying: nobody will read these.
                                             uploads.discard(files)
                                         } else {
+                                            // Gecko reads these until the page is gone; a private session deletes them in close().
+                                            if (isPrivate) privateUploads += files
                                             filePick.filesReady(files.map { Uri.fromFile(it) })
                                         }
                                     }
@@ -939,7 +980,7 @@ private class GeckoBrowserSession(
             return GeckoResult.fromValue(geoValue(false))
         }
         val key = SitePermissionKey(SitePermissionKind.LOCATION, requester, if (requester == top) null else top)
-        val stored = decisions.lookup(key)
+        val stored = permissionPolicy.lookup(key)
         if (stored != null) {
             debugLog.log("GeckoSession", "permission ${if (stored) "allowed" else "denied"}: geolocation")
             reconciler.markDirty()
@@ -959,9 +1000,14 @@ private class GeckoBrowserSession(
             }
         if (first) {
             queue.add(
-                SitePrompt.SitePermission(key.origin, key.embedder, listOf(SitePermissionKind.LOCATION)) { answer ->
+                SitePrompt.SitePermission(
+                    key.origin,
+                    key.embedder,
+                    listOf(SitePermissionKind.LOCATION),
+                    offerRemember = permissionPolicy.offerRemember,
+                ) { answer ->
                     // Dismissed (null) denies and records nothing.
-                    if (answer != null) decisions.record(key, answer.allow, answer.remember)
+                    if (answer != null) permissionPolicy.record(key, answer.allow, answer.remember)
                     geoCoalescer.answer(key, answer?.allow == true)
                 },
             )
@@ -1033,7 +1079,7 @@ private class GeckoBrowserSession(
         if (videoSources != null) kinds += SitePermissionKind.CAMERA
         if (audioSources != null) kinds += SitePermissionKind.MICROPHONE
         fun keyOf(kind: SitePermissionKind) = SitePermissionKey(kind, origin, embedder)
-        when (planMediaRequest(kinds) { decisions.lookup(keyOf(it)) }) {
+        when (planMediaRequest(kinds) { permissionPolicy.lookup(keyOf(it)) }) {
             MediaPlan.GRANT -> {
                 debugLog.log("GeckoSession", "camera/microphone allowed")
                 answer.grant(chosenVideo, chosenAudio)
@@ -1058,9 +1104,16 @@ private class GeckoBrowserSession(
                     }
                 if (first) {
                     queue.add(
-                        SitePrompt.SitePermission(origin, embedder, kinds.toList()) { reply ->
+                        SitePrompt.SitePermission(
+                            origin,
+                            embedder,
+                            kinds.toList(),
+                            offerRemember = permissionPolicy.offerRemember,
+                        ) { reply ->
                             // Dismissed (null) denies and records nothing.
-                            if (reply != null) for (kind in kinds) decisions.record(keyOf(kind), reply.allow, reply.remember)
+                            if (reply != null) {
+                                for (kind in kinds) permissionPolicy.record(keyOf(kind), reply.allow, reply.remember)
+                            }
                             mediaCoalescer.answer(ask, reply?.allow == true)
                         },
                     )
@@ -1278,6 +1331,15 @@ private class GeckoBrowserSession(
         host = null
         runCatching { session.close() }
             .onFailure { debugLog.log("GeckoSession", "close failed: ${it.message}") }
+        discardPrivateUploads()
+    }
+
+    private fun discardPrivateUploads() {
+        if (privateUploads.isEmpty()) return
+        val files = privateUploads.toList()
+        privateUploads.clear()
+        // Off the main thread, and not on the session scope: it was cancelled above.
+        Thread({ runCatching { uploads.discardNow(files) } }, "orbis-upload-discard").start()
     }
 }
 
@@ -1344,8 +1406,9 @@ private class GeckoExtensionHost(
                     deniedForeignId = true
                     debugLog.log("Extensions", "install prompt denied for unexpected extension ${extension.id}")
                 }
-                // Private mode and data collection stay off (v1 has no private mode).
-                return GeckoResult.fromValue(WebExtension.PermissionPromptResponse(granted, false, false))
+                // Data collection stays off. Private mode is granted with the install that was granted, so the content
+                // blocker also works in private tabs.
+                return GeckoResult.fromValue(WebExtension.PermissionPromptResponse(granted, granted, false))
             }
 
             override fun onUpdatePrompt(
@@ -1462,6 +1525,16 @@ private class GeckoExtensionHost(
             val updated = pending.awaitResult() ?: error("enable/disable returned nothing")
             updated.toInstalled()
         }
+
+    override suspend fun allowInPrivateBrowsing(id: String) {
+        withContext(Dispatchers.Main.immediate) {
+            val extension = findGecko(id) ?: return@withContext
+            if (extension.metaData.allowedInPrivateBrowsing) return@withContext
+            // Gecko stores the permission and restarts the extension only if it is active; a disabled one stays disabled.
+            controller().setAllowedInPrivateBrowsing(extension, true).awaitResult()
+            debugLog.log("Extensions", "allowed in private browsing: $id")
+        }
+    }
 
     override suspend fun uninstall(id: String) {
         withContext(Dispatchers.Main.immediate) {

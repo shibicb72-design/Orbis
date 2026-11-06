@@ -194,6 +194,29 @@ class DownloadManagerTest {
     }
 
     @Test
+    fun sourceHostIsRecordedByDefault() = runTest {
+        val m = manager()
+        val id = m.start(FakeDownload(contentDisposition = cd("a.txt"), body = { ChunkStream(bytes("x")) }))
+        advanceUntilIdle()
+        assertEquals("example.com", m.byId(id).sourceHost)
+        assertEquals("example.com", store.load().single().sourceHost)
+        assertTrue(indexFile.readText().contains("example.com"))
+    }
+
+    @Test
+    fun recordSourceFalseKeepsTheHostOutOfTheEntryAndTheIndex() = runTest {
+        val m = manager()
+        val id = m.start(FakeDownload(contentDisposition = cd("a.txt"), body = { ChunkStream(bytes("hello")) }), recordSource = false)
+        advanceUntilIdle()
+        val e = m.byId(id)
+        assertNull(e.sourceHost)
+        assertEquals(DownloadStatus.COMPLETED, e.status)
+        assertEquals("hello", File(dir, "a.txt").readText())
+        assertNull(store.load().single().sourceHost)
+        assertFalse(indexFile.readText().contains("example.com"))
+    }
+
+    @Test
     fun entriesAreNewestFirst() = runTest {
         val m = manager()
         val a = m.start(FakeDownload(contentDisposition = cd("1.txt"), body = { ChunkStream(bytes("1")) }))

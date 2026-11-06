@@ -124,6 +124,7 @@ class UboOnboardingController(
                 prefs.decision = UboDecision.ACCEPTED
                 _showOnboarding.value = false
                 _state.value = existing.toUboState()
+                allowInPrivateBrowsing()
                 checkForUpdateIfDue()
             }
             // Accepted earlier but not installed (e.g. the first attempt failed offline): try once more.
@@ -145,6 +146,7 @@ class UboOnboardingController(
                 _state.value = installed.toUboState()
                 _showOnboarding.value = false
                 log("uBO installed ${installed.version}")
+                allowInPrivateBrowsing()
             }
         } catch (e: CancellationException) {
             throw e
@@ -154,6 +156,17 @@ class UboOnboardingController(
         } catch (e: Exception) {
             log("uBO install failed: ${e.javaClass.simpleName}")
             _state.value = UboState.Failed(UboFailure.UNKNOWN)
+        }
+    }
+
+    /** The blocker should also work in private tabs. A failure is only logged: it never changes the state. */
+    private suspend fun allowInPrivateBrowsing() {
+        try {
+            host.allowInPrivateBrowsing(UBO_ID)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log("uBO private browsing permission failed: ${e.javaClass.simpleName}")
         }
     }
 

@@ -65,6 +65,13 @@ fun DownloadConfirmDialog(pending: PendingDownload, onConfirm: () -> Unit, onCan
                 if (host != null) {
                     Text(stringResource(R.string.browser_download_from, host), modifier = Modifier.padding(top = 4.dp))
                 }
+                if (pending.isPrivate) {
+                    Text(
+                        stringResource(R.string.browser_download_private_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
             }
         },
         confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.browser_download_start)) } },

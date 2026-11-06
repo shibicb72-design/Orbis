@@ -25,17 +25,24 @@ interface BrowserEngine {
     fun createSession(init: SessionInit = SessionInit()): BrowserSession
     /** Returns an engine-backed view (GeckoView behind the scenes). */
     fun createContentView(context: Context): View
+    /**
+     * Discards what the ended private set stored in the engine (cookies, site data, cache keyed to it). Call once the
+     * last private session has closed. Never touches the normal profile. Main thread.
+     */
+    fun clearPrivateData()
     fun shutdown()
 }
 
 /**
  * How to start a session. [restoredState] is an opaque blob from [BrowserSession.savedState]; [fallbackUrl] (http/https
- * only) is loaded when there is no state or it cannot be parsed, never in addition to it.
+ * only) is loaded when there is no state or it cannot be parsed, never in addition to it. [isPrivate] sessions leave
+ * nothing in the normal profile and share one storage scope that [BrowserEngine.clearPrivateData] discards.
  */
 data class SessionInit(
     val desktopMode: Boolean = false,
     val restoredState: String? = null,
     val fallbackUrl: String? = null,
+    val isPrivate: Boolean = false,
 )
 
 /** Result of the latest find-in-page query: [current] is 1-based, [total] the match count. */
@@ -60,6 +67,8 @@ data class SessionState(
 )
 
 interface BrowserSession {
+    /** True for a private session. Fixed for the session's lifetime. */
+    val isPrivate: Boolean
     val state: StateFlow<SessionState>
     /** Head of this session's prompt queue; null when nothing is pending. */
     val prompts: StateFlow<SitePrompt?>

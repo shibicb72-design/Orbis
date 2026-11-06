@@ -170,10 +170,14 @@ private fun SitePermissionDialog(prompt: SitePrompt.SitePermission) {
         title = stringResource(R.string.perm_prompt_title, prompt.origin),
         onDismiss = prompt::dismiss,
         confirmButton = {
-            TextButton(onClick = { prompt.allow(rememberChoice) }) { Text(stringResource(R.string.perm_prompt_allow)) }
+            TextButton(onClick = { prompt.allow(prompt.offerRemember && rememberChoice) }) {
+                Text(stringResource(R.string.perm_prompt_allow))
+            }
         },
         dismissButton = {
-            TextButton(onClick = { prompt.deny(rememberChoice) }) { Text(stringResource(R.string.perm_prompt_deny)) }
+            TextButton(onClick = { prompt.deny(prompt.offerRemember && rememberChoice) }) {
+                Text(stringResource(R.string.perm_prompt_deny))
+            }
         },
     ) {
         Column {
@@ -196,15 +200,18 @@ private fun SitePermissionDialog(prompt: SitePrompt.SitePermission) {
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { rememberChoice = !rememberChoice }
-                    .padding(top = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Checkbox(checked = rememberChoice, onCheckedChange = null)
-                Text(stringResource(R.string.perm_prompt_remember), Modifier.padding(start = 12.dp))
+            // Private sessions store no answer, so there is nothing to remember.
+            if (prompt.offerRemember) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { rememberChoice = !rememberChoice }
+                        .padding(top = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = rememberChoice, onCheckedChange = null)
+                    Text(stringResource(R.string.perm_prompt_remember), Modifier.padding(start = 12.dp))
+                }
             }
         }
     }

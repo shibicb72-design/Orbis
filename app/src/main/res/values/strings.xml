@@ -11,15 +11,22 @@
     <string name="browser_crashed">This page crashed.</string>
     <string name="browser_retry">Retry</string>
     <string name="browser_empty_state">Search or enter an address to start browsing.</string>
+    <string name="browser_private_empty_state">Private tab. Pages here stay out of your history, and their cookies and site data are cleared when you close your last private tab. Bookmarks and downloads you save are kept.</string>
+    <string name="private_banner_title">Private tab</string>
+    <string name="private_close_all">Close private tabs</string>
     <string name="menu_more">More options</string>
     <string name="menu_new_tab">New tab</string>
+    <string name="menu_new_private_tab">New private tab</string>
     <string name="menu_downloads">Downloads</string>
     <string name="menu_find">Find in page</string>
     <string name="menu_desktop_site">Desktop site</string>
 
     <string name="tabs_title">Tabs</string>
     <string name="tabs_button">Tabs, %1$d open</string>
+    <string name="tabs_button_private">Tabs, %1$d open, private tab selected</string>
     <string name="tabs_new">New tab</string>
+    <string name="tabs_new_private">New private tab</string>
+    <string name="tabs_private_mark">Private tab</string>
     <string name="tabs_close">Close tab</string>
     <string name="tabs_blank_title">New tab</string>
     <string name="tabs_limit">Too many tabs are open. Close one to open another.</string>
@@ -77,6 +84,7 @@
     <string name="browser_download_size">Size: %1$s</string>
     <string name="browser_download_size_unknown">Size: unknown</string>
     <string name="browser_download_from">From: %1$s</string>
+    <string name="browser_download_private_note">This file stays on your device after private browsing ends.</string>
     <string name="browser_download_start">Download</string>
 
     <string name="settings_title">Settings</string>

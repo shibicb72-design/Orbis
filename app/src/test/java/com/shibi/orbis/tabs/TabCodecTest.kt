@@ -1,6 +1,7 @@
 package com.shibi.orbis.tabs
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -15,6 +16,21 @@ class TabCodecTest {
         val snapshot = TabsSnapshot(listOf(tab(1), tab(2, state = null), tab(3, url = "")), selectedId = 2)
         val decoded = TabCodec.decode(TabCodec.encode(snapshot))
         assertEquals(snapshot, decoded)
+    }
+
+    @Test
+    fun encodedJsonCarriesNoPrivateMarker() {
+        val json = TabCodec.encode(TabsSnapshot(listOf(tab(1), tab(2)), selectedId = 1))
+        assertFalse(json.contains("private", ignoreCase = true))
+        assertFalse(org.json.JSONObject(json).getJSONArray("tabs").getJSONObject(0).has("private"))
+    }
+
+    @Test
+    fun anUnknownPrivateFieldDecodesAsAnOrdinaryTab() {
+        val json =
+            """{"version":1,"selected":1,"tabs":[{"id":1,"url":"https://example.com/","title":"T","desktop":false,"private":true}]}"""
+        val decoded = TabCodec.decode(json)
+        assertEquals(TabsSnapshot(listOf(PersistedTab(1, "https://example.com/", "T", false, null)), 1), decoded)
     }
 
     @Test

@@ -34,6 +34,11 @@ private class FakeHost : ExtensionHost {
     var updateThrows = false
     var updateCalls = 0
     var uninstallCalls = 0
+    val allowCalls = mutableListOf<String>()
+    var allowThrows = false
+
+    /** Order of the calls the private-browsing tests care about. */
+    val order = mutableListOf<String>()
 
     override suspend fun find(id: String): InstalledExtension? = installed
 
@@ -51,12 +56,19 @@ private class FakeHost : ExtensionHost {
         return updated
     }
 
+    override suspend fun allowInPrivateBrowsing(id: String) {
+        order += "allow"
+        allowCalls += id
+        if (allowThrows) throw IllegalStateException("private permission refused")
+    }
+
     override suspend fun uninstall(id: String) {
         uninstallCalls++
         installed = null
     }
 
     override suspend fun checkForUpdate(id: String): InstalledExtension? {
+        order += "update"
         updateCalls++
         if (updateThrows) throw ExtensionInstallException(ExtensionInstallError.NETWORK)
         return updateResult?.also { installed = it }
@@ -127,6 +139,61 @@ class UboOnboardingControllerTest {
         assertFalse(c.showOnboarding.value)
         assertEquals(UboDecision.ACCEPTED, prefs.decision)
         assertEquals(listOf(UBO_XPI_URL to UBO_ID), host.installCalls)
+    }
+
+    @Test
+    fun existingInstallIsAllowedInPrivateBrowsingBeforeTheUpdateCheck() = runTest {
+        val host = FakeHost().apply { installed = ext() }
+        val c = started(host, MemoryPrefs())
+        advanceUntilIdle()
+        assertEquals(listOf(UBO_ID), host.allowCalls)
+        assertEquals(listOf("allow", "update"), host.order)
+        assertEquals(UboState.Installed("1.0", true, false), c.state.value)
+    }
+
+    @Test
+    fun freshInstallIsAllowedInPrivateBrowsing() = runTest {
+        val host = FakeHost()
+        val c = started(host, MemoryPrefs())
+        assertTrue(host.allowCalls.isEmpty())
+        c.accept()
+        advanceUntilIdle()
+        assertEquals(UboState.Installed("1.0", true, false), c.state.value)
+        assertEquals(listOf(UBO_ID), host.allowCalls)
+    }
+
+    @Test
+    fun aFailedInstallIsNotAllowedInPrivateBrowsing() = runTest {
+        val host = FakeHost().apply { nextInstallError = ExtensionInstallError.NETWORK }
+        val c = started(host, MemoryPrefs())
+        c.accept()
+        advanceUntilIdle()
+        assertEquals(UboState.Failed(UboFailure.NETWORK), c.state.value)
+        assertTrue(host.allowCalls.isEmpty())
+    }
+
+    @Test
+    fun privateBrowsingFailureAfterInstallLeavesStateInstalled() = runTest {
+        val host = FakeHost().apply { allowThrows = true }
+        val c = started(host, MemoryPrefs())
+        c.accept()
+        advanceUntilIdle()
+        assertEquals(UboState.Installed("1.0", true, false), c.state.value)
+        assertFalse(c.showOnboarding.value)
+        assertEquals(1, host.allowCalls.size)
+    }
+
+    @Test
+    fun privateBrowsingFailureForAnExistingInstallLeavesStateInstalledAndStillChecksForUpdates() = runTest {
+        val host = FakeHost().apply { installed = ext(); allowThrows = true }
+        val c = started(host, MemoryPrefs())
+        advanceUntilIdle()
+        assertEquals(UboState.Installed("1.0", true, false), c.state.value)
+        assertEquals(1, host.updateCalls)
+        // Only the exception class is logged.
+        val failure = logs.single { it.contains("private browsing") }
+        assertTrue(failure, failure.contains("IllegalStateException"))
+        assertFalse(failure, failure.contains("refused"))
     }
 
     @Test

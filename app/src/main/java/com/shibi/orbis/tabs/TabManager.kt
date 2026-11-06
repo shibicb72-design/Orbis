@@ -39,19 +39,24 @@ data class Tab(
     val desktopMode: Boolean,
     val savedState: String?,
     val openerTabId: Long?,
+    /**
+     * A private tab. Invariant: never persisted, never restored, never reported to history. Fixed for the life of the
+     * tab (a tab id never changes mode), and inherited by every tab it opens.
+     */
+    val isPrivate: Boolean = false,
 )
 
 /** What the tab switcher draws. */
-data class TabUi(val id: Long, val title: String, val url: String, val selected: Boolean)
+data class TabUi(val id: Long, val title: String, val url: String, val selected: Boolean, val isPrivate: Boolean = false)
 
 /** One-shot messages for the UI. */
 enum class TabEvent { TAB_LIMIT }
 
 /** A download waiting for the user's yes/no. Exactly one is held at a time. */
-data class PendingDownload(val download: IncomingDownload, val sourceTabId: Long)
+data class PendingDownload(val download: IncomingDownload, val sourceTabId: Long, val isPrivate: Boolean = false)
 
-/** A long-press on a link in tab [tabId]. */
-data class LinkMenuRequest(val url: String, val tabId: Long)
+/** A long-press on a link in tab [tabId]; [isPrivate] is that tab's mode, so a tab opened from it matches. */
+data class LinkMenuRequest(val url: String, val tabId: Long, val isPrivate: Boolean = false)
 
 /**
  * Owns the tabs and their sessions. Main thread only (it is the [SessionHost] of every session it creates).
@@ -69,10 +74,15 @@ class TabManager(
     private val maxTabs: Int = MAX_TABS,
     private val persistDebounceMillis: Long = PERSIST_DEBOUNCE_MILLIS,
     private val visits: VisitSink = VisitSink.None,
+    /** Called once when the last private tab has closed, so the engine can drop what the private set stored. */
+    private val onPrivateBrowsingEnded: () -> Unit = {},
 ) : SessionHost {
     private val list = ArrayList<Tab>()
     private var selectedId: Long
     private var nextId = 1L
+
+    /** The normal tab the user last looked at; what a saved snapshot selects while a private tab is selected. */
+    private var lastNormalSelectedId: Long? = null
 
     /** True until anything changes the tab list; only then may a restore replace the placeholder tab. */
     private var pristine = true
@@ -149,11 +159,7 @@ class TabManager(
         }
     }
 
-    private fun snapshot(): TabsSnapshot =
-        TabsSnapshot(
-            tabs = list.map { PersistedTab(it.id, it.url, it.title, it.desktopMode, it.session?.savedState() ?: it.savedState) },
-            selectedId = selectedId,
-        )
+    private fun snapshot(): TabsSnapshot = persistableSnapshot(list, selectedId, lastNormalSelectedId)
 
     private fun enqueueWrite() {
         // Before the stored list has been read, the in-memory one is just a placeholder: never overwrite with it.
@@ -198,7 +204,8 @@ class TabManager(
 
     private fun publish() {
         val sel = list.firstOrNull { it.id == selectedId } ?: list.first().also { selectedId = it.id }
-        _tabs.value = list.map { TabUi(it.id, it.title, it.url, it.id == selectedId) }
+        _tabs.value = list.map { TabUi(it.id, it.title, it.url, it.id == selectedId, it.isPrivate) }
+        if (!sel.isPrivate) lastNormalSelectedId = sel.id
         _selected.value = sel
     }
 
@@ -220,7 +227,14 @@ class TabManager(
         if (tab.session != null) return tab
         val session =
             try {
-                factory(SessionInit(tab.desktopMode, tab.savedState, tab.url.takeIf { isWebUrl(it) }))
+                factory(
+                    if (tab.isPrivate) {
+                        // Never restored from disk: a private tab is not stored, so there is nothing to restore.
+                        SessionInit(desktopMode = tab.desktopMode, isPrivate = true)
+                    } else {
+                        SessionInit(tab.desktopMode, tab.savedState, tab.url.takeIf { isWebUrl(it) })
+                    },
+                )
             } catch (e: Exception) {
                 // Leave the tab session-less; the UI shows an empty page rather than crashing.
                 log("session create failed: ${e.javaClass.simpleName}")
@@ -251,7 +265,7 @@ class TabManager(
         if (tab.url == url && tab.title == title && tab.desktopMode == st.desktopMode) return
         list[i] = tab.copy(url = url, title = title, desktopMode = st.desktopMode)
         publish()
-        schedulePersist()
+        if (!tab.isPrivate) schedulePersist()
     }
 
     private fun isBlank(tab: Tab): Boolean {
@@ -294,14 +308,18 @@ class TabManager(
     /** A new blank tab (or [url]) that becomes the selected one. Null if the tab cap stopped it. */
     fun newTab(url: String? = null): Long? = createTab(url, openerId = null, external = false)
 
+    /** A new private tab (or [url]) that becomes the selected one. Null if the tab cap stopped it. */
+    fun newPrivateTab(url: String? = null): Long? = createTab(url, openerId = null, external = false, isPrivate = true)
+
     /**
      * Opens [url] from another app in a new tab, never in the tab the user is looking at. The one exception is a
      * selected tab that is still completely blank and unloaded: it is used instead of leaving an empty tab behind.
+     * A blank private tab is never used: a link from another app always lands in a normal tab.
      */
     fun openExternal(url: String) {
         if (!isWebUrl(url)) return
         val current = list.firstOrNull { it.id == selectedId }
-        if (current != null && isBlank(current)) {
+        if (current != null && !current.isPrivate && isBlank(current)) {
             val session = ensureSession(current.id)?.session
             if (session != null) {
                 session.setActive(foreground)
@@ -325,14 +343,14 @@ class TabManager(
         changed()
     }
 
-    private fun createTab(url: String?, openerId: Long?, external: Boolean): Long? {
+    private fun createTab(url: String?, openerId: Long?, external: Boolean, isPrivate: Boolean = false): Long? {
         if (list.size >= maxTabs) {
             notifyLimit()
             return null
         }
         val id = nextId++
         list.firstOrNull { it.id == selectedId }?.session?.setActive(false)
-        list += Tab(id, null, "", "", false, null, openerId)
+        list += Tab(id, null, "", "", false, null, openerId, isPrivate)
         selectedId = id
         val session = ensureSession(id)?.session
         session?.setActive(foreground)
@@ -369,12 +387,44 @@ class TabManager(
             id == selectedId -> {
                 val next =
                     list.firstOrNull { it.id == tab.openerTabId }
+                        ?: nearestOfMode(index, tab.isPrivate)
+                        // The last private tab: back to the normal tab the user came from, if it is still open.
+                        ?: lastNormalSelectedId?.takeIf { tab.isPrivate }?.let { last -> list.firstOrNull { it.id == last } }
                         ?: list[minOf(index, list.lastIndex)]
                 selectedId = next.id
                 ensureSession(next.id)?.session?.setActive(foreground)
             }
         }
         changed()
+        if (tab.isPrivate && list.none { it.isPrivate }) endPrivateBrowsing()
+    }
+
+    /** The tab of the given mode nearest to where a closed tab was: searching forward from [index], then backward. */
+    private fun nearestOfMode(index: Int, isPrivate: Boolean): Tab? {
+        for (i in index until list.size) if (list[i].isPrivate == isPrivate) return list[i]
+        for (i in minOf(index, list.size) - 1 downTo 0) if (list[i].isPrivate == isPrivate) return list[i]
+        return null
+    }
+
+    /** Closes every private tab; the engine's private data is dropped once, with the last of them. */
+    fun closeAllPrivate() {
+        val ids = list.filter { it.isPrivate }.map { it.id }
+        if (ids.isEmpty()) return
+        // Back to the normal tab the user came from first, so closing does not step through the private tabs.
+        if (list.firstOrNull { it.id == selectedId }?.isPrivate == true) {
+            lastNormalSelectedId?.takeIf { indexOf(it) >= 0 }?.let { select(it) }
+        }
+        for (id in ids) close(id)
+    }
+
+    private fun endPrivateBrowsing() {
+        try {
+            onPrivateBrowsingEnded()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log("private data clear failed: ${e.javaClass.simpleName}")
+        }
     }
 
     // ---- downloads and link menu ---------------------------------------------------------------------------
@@ -392,7 +442,7 @@ class TabManager(
     fun openLinkInNewTab(request: LinkMenuRequest) {
         _linkMenu.value = null
         if (!isWebUrl(request.url)) return
-        createTab(request.url, openerId = request.tabId, external = false)
+        createTab(request.url, openerId = request.tabId, external = false, isPrivate = request.isPrivate)
     }
 
     // ---- SessionHost ---------------------------------------------------------------------------------------
@@ -406,7 +456,8 @@ class TabManager(
     override fun onOpenInNewTab(url: String, opener: BrowserSession) {
         if (!isWebUrl(url)) return
         val openerId = indexOfSession(opener).takeIf { it >= 0 }?.let { list[it].id }
-        createTab(url, openerId = openerId, external = false)
+        // The session's own flag, so a private opener makes a private tab even if its tab is already gone.
+        createTab(url, openerId = openerId, external = false, isPrivate = opener.isPrivate)
     }
 
     override fun onPopupSession(child: BrowserSession, opener: BrowserSession) {
@@ -428,6 +479,7 @@ class TabManager(
             desktopMode = child.state.value.desktopMode,
             savedState = null,
             openerTabId = if (openerIndex >= 0) list[openerIndex].id else null,
+            isPrivate = child.isPrivate,
         )
         selectedId = id
         observe(id, child)
@@ -448,25 +500,48 @@ class TabManager(
             download.discard()
             return
         }
-        _pendingDownload.value = PendingDownload(download, list[i].id)
+        _pendingDownload.value = PendingDownload(download, list[i].id, list[i].isPrivate)
     }
 
     override fun onLinkContextMenu(url: String, session: BrowserSession) {
         val i = indexOfSession(session)
         if (i < 0 || list[i].id != selectedId) return
-        _linkMenu.value = LinkMenuRequest(url, list[i].id)
+        _linkMenu.value = LinkMenuRequest(url, list[i].id, list[i].isPrivate)
     }
 
     override fun onSessionStateChanged(session: BrowserSession) {
-        if (indexOfSession(session) >= 0) schedulePersist()
+        // A private tab is never stored, so its state changes schedule nothing.
+        val i = indexOfSession(session)
+        if (i >= 0 && !list[i].isPrivate) schedulePersist()
     }
 
-    // Only sessions this manager still owns: a closed tab's late callback must not add history.
+    // Only sessions this manager still owns: a closed tab's late callback must not add history. Never a private tab's.
     override fun onVisit(session: BrowserSession, url: String, title: String) {
-        if (indexOfSession(session) >= 0) visits.onVisit(url, title)
+        val i = indexOfSession(session)
+        if (i >= 0 && !list[i].isPrivate) visits.onVisit(url, title)
     }
 
     override fun onVisitTitle(session: BrowserSession, url: String, title: String) {
-        if (indexOfSession(session) >= 0) visits.onTitle(url, title)
+        val i = indexOfSession(session)
+        if (i >= 0 && !list[i].isPrivate) visits.onTitle(url, title)
     }
+}
+
+/**
+ * What goes to disk for [tabs]: normal tabs only, and the engine state is read from no private session at all. The
+ * selection is [selectedId] when that tab is normal, else [lastNormalSelectedId] if it is still listed, else the first
+ * normal tab. With no normal tab the snapshot is empty and selects -1; the codec then yields nothing and the next launch
+ * starts with one blank tab.
+ */
+internal fun persistableSnapshot(tabs: List<Tab>, selectedId: Long, lastNormalSelectedId: Long?): TabsSnapshot {
+    val normal = tabs.filter { !it.isPrivate }
+    if (normal.isEmpty()) return TabsSnapshot(emptyList(), -1L)
+    val selected =
+        normal.firstOrNull { it.id == selectedId }
+            ?: normal.firstOrNull { it.id == lastNormalSelectedId }
+            ?: normal.first()
+    return TabsSnapshot(
+        tabs = normal.map { PersistedTab(it.id, it.url, it.title, it.desktopMode, it.session?.savedState() ?: it.savedState) },
+        selectedId = selected.id,
+    )
 }

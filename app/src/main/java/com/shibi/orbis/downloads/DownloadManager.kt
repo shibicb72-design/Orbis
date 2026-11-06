@@ -85,7 +85,11 @@ class DownloadManager(
         }
     }
 
-    fun start(download: IncomingDownload): Long {
+    /**
+     * Starts [download]. With [recordSource] false (a private tab's download) the entry carries no source host, so
+     * the index file names no site from a private session. The file and its listing are otherwise the same.
+     */
+    fun start(download: IncomingDownload, recordSource: Boolean = true): Long {
         val id = nextId.incrementAndGet()
         val name =
             try {
@@ -99,7 +103,7 @@ class DownloadManager(
                 id = id,
                 fileName = name,
                 mimeType = DownloadFileNames.cleanMime(download.contentType),
-                sourceHost = DownloadFileNames.sourceHost(download.url),
+                sourceHost = if (recordSource) DownloadFileNames.sourceHost(download.url) else null,
                 totalBytes = total,
                 receivedBytes = 0L,
                 status = DownloadStatus.IN_PROGRESS,

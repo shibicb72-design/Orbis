@@ -9,6 +9,12 @@ interface ExtensionHost {
 
     suspend fun setEnabled(id: String, enabled: Boolean): InstalledExtension
 
+    /**
+     * Lets extension [id] run in private tabs. Does nothing when it is missing or already allowed (the engine restarts
+     * the extension on every call, so repeating it is not free). Never enables an extension the user disabled.
+     */
+    suspend fun allowInPrivateBrowsing(id: String)
+
     suspend fun uninstall(id: String)
 
     /** Returns the updated extension, or null when no update was available. */

@@ -345,6 +345,26 @@ class SitePermissionDecisions(
     }
 }
 
+/**
+ * How one session uses the decision store. A private session never reads it (every request asks, so a remembered
+ * answer from normal browsing does not show through) and never writes it (the answer applies to that request only, so no
+ * private origin reaches site_permissions.json or the Settings list). Normal sessions pass straight through.
+ */
+class SessionPermissionPolicy(
+    private val isPrivate: Boolean,
+    private val lookup: (SitePermissionKey) -> Boolean?,
+    private val record: (SitePermissionKey, Boolean, Boolean) -> Unit,
+) {
+    /** False when the dialog should not offer "remember": the answer is never stored. */
+    val offerRemember: Boolean get() = !isPrivate
+
+    fun lookup(key: SitePermissionKey): Boolean? = if (isPrivate) null else lookup.invoke(key)
+
+    fun record(key: SitePermissionKey, allow: Boolean, remember: Boolean) {
+        if (!isPrivate) record.invoke(key, allow, remember)
+    }
+}
+
 enum class MediaPlan { GRANT, DENY, ASK }
 
 /**

@@ -336,12 +336,14 @@ sealed class SitePrompt(val originHost: String) {
     /**
      * Camera, microphone or location. [origin] is the requester's origin from [siteOriginOf] (punycode), never page
      * text; [embedder] is the top-level origin when the requester is a frame of another site. [respond] gets the
-     * user's choice, or null when the prompt was dismissed: that means "deny, and remember nothing".
+     * user's choice, or null when the prompt was dismissed: that means "deny, and remember nothing". [offerRemember]
+     * false (private sessions) means the dialog has no "remember" choice: the answer is never stored.
      */
     class SitePermission(
         val origin: String,
         val embedder: String?,
         val kinds: List<SitePermissionKind>,
+        val offerRemember: Boolean = true,
         private val respond: (SitePermissionAnswer?) -> Unit,
     ) : SitePrompt(hostOfUrl(origin).orEmpty()) {
         /** [remember] false keeps the answer for this session only. */

@@ -28,6 +28,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 private class FakeSession(val init: SessionInit) : BrowserSession {
+    override val isPrivate get() = init.isPrivate
     val _state = MutableStateFlow(SessionState(desktopMode = init.desktopMode))
     override val state: StateFlow<SessionState> = _state
     override val prompts: StateFlow<SitePrompt?> = MutableStateFlow(null)

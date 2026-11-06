@@ -103,6 +103,7 @@ class OrbisApp : Application() {
 
                     override fun onTitle(url: String, title: String) = history.updateTitle(url, title)
                 },
+                onPrivateBrowsingEnded = { engine.clearPrivateData() },
             )
         val downloads =
             DownloadManager(
