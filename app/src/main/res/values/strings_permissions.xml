@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="perm_prompt_title">Allow %1$s to:</string>
+    <string name="perm_prompt_embedded">Embedded in %1$s</string>
+    <string name="perm_prompt_camera">Use your camera</string>
+    <string name="perm_prompt_microphone">Use your microphone</string>
+    <string name="perm_prompt_location">Know your location</string>
+    <string name="perm_prompt_remember">Remember for this site</string>
+    <string name="perm_prompt_allow">Allow</string>
+    <string name="perm_prompt_deny">Deny</string>
+
+    <string name="perm_blocked_title">Permission is blocked</string>
+    <string name="perm_blocked_body">Android is no longer asking for this permission. You can turn it on in this app\'s system settings.</string>
+    <string name="perm_open_settings">Open settings</string>
+    <string name="perm_not_now">Not now</string>
+
+    <string name="perm_settings_title">Site permissions</string>
+    <string name="perm_settings_summary">Camera, microphone and location answers</string>
+    <string name="perm_settings_empty">No site permissions saved yet.</string>
+    <string name="perm_settings_note">Answers marked \"this session\" are forgotten after an hour or when Orbis restarts.</string>
+    <string name="perm_kind_camera">Camera</string>
+    <string name="perm_kind_microphone">Microphone</string>
+    <string name="perm_kind_location">Location</string>
+    <string name="perm_state_allowed">Allowed</string>
+    <string name="perm_state_denied">Blocked</string>
+    <string name="perm_state_session">this session</string>
+    <string name="perm_embedded_on">embedded on %1$s</string>
+    <string name="perm_remove">Remove</string>
+    <string name="perm_remove_description">Remove %1$s for %2$s</string>
+</resources>

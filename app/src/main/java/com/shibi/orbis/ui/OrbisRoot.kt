@@ -12,6 +12,7 @@ import com.shibi.orbis.ui.browser.BrowserScreen
 import com.shibi.orbis.ui.downloads.DownloadsScreen
 import com.shibi.orbis.ui.settings.DebugLogScreen
 import com.shibi.orbis.ui.settings.SettingsScreen
+import com.shibi.orbis.ui.settings.SitePermissionsScreen
 import com.shibi.orbis.ui.settings.UboOnboardingScreen
 import com.shibi.orbis.ui.settings.UboSettingsScreen
 
@@ -21,6 +22,7 @@ private object Routes {
     const val Settings = "settings"
     const val ErrorLog = "settings/error_log"
     const val Ubo = "settings/ubo"
+    const val SitePermissions = "settings/site_permissions"
 }
 
 @Composable
@@ -36,6 +38,16 @@ fun OrbisRoot(container: AppContainer) {
     val pendingExternalUrl by container.pendingExternalUrl.collectAsStateWithLifecycle()
     LaunchedEffect(pendingExternalUrl) {
         if (pendingExternalUrl != null) nav.popBackStack(Routes.Browser, inclusive = false)
+    }
+    // A download notification was tapped: open the Downloads screen once. Reached only after onboarding, so an
+    // earlier tap simply waits.
+    val pendingShowDownloads by container.pendingShowDownloads.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingShowDownloads) {
+        if (pendingShowDownloads) {
+            container.pendingShowDownloads.value = false
+            nav.popBackStack(Routes.Browser, inclusive = false)
+            nav.navigate(Routes.Downloads) { launchSingleTop = true }
+        }
     }
     NavHost(navController = nav, startDestination = Routes.Browser) {
         composable(Routes.Browser) {
@@ -57,6 +69,15 @@ fun OrbisRoot(container: AppContainer) {
                 onBack = { nav.popBackStack() },
                 onOpenErrorLog = { nav.navigate(Routes.ErrorLog) },
                 onOpenUbo = { nav.navigate(Routes.Ubo) },
+                onOpenSitePermissions = { nav.navigate(Routes.SitePermissions) },
+            )
+        }
+        composable(Routes.SitePermissions) {
+            SitePermissionsScreen(
+                decisions = container.sitePermissions,
+                // The engine's own copy of a location answer is reset so a removed site is asked again.
+                onRemoved = { container.engine.reconcileSitePermissions() },
+                onBack = { nav.popBackStack() },
             )
         }
         composable(Routes.ErrorLog) {

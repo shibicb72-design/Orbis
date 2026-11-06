@@ -10,6 +10,13 @@ import kotlinx.coroutines.flow.StateFlow
  */
 interface BrowserEngine {
     val extensions: ExtensionHost
+    /** The system permission dialogs Gecko needs. App level (not per tab); the browser screen launches them. */
+    val androidPermissions: AndroidPermissionBroker
+    /**
+     * Our decision store is the only authority for location: tells the engine to forget its own copies of location
+     * answers. Call after a stored decision was removed. Main thread.
+     */
+    fun reconcileSitePermissions()
     fun warmUp()
     /**
      * Main thread only. The ONE factory for sessions (new, restored and popup children alike), so ETP Strict

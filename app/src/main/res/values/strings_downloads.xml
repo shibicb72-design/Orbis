@@ -19,4 +19,17 @@
     <string name="downloads_action_failed">The file could not be opened.</string>
     <string name="downloads_delete_confirm_title">Delete this download?</string>
     <string name="downloads_delete_confirm_body">The file will be removed from your device.</string>
+    <string name="downloads_notif_channel_name">Downloads</string>
+    <string name="downloads_notif_channel_description">Progress and results of file downloads</string>
+    <string name="downloads_notif_running">Downloading</string>
+    <string name="downloads_notif_starting">Starting download</string>
+    <plurals name="downloads_notif_many_title">
+        <item quantity="one">%d download</item>
+        <item quantity="other">%d downloads</item>
+    </plurals>
+    <string name="downloads_cancel_all">Cancel all</string>
+    <string name="downloads_notif_public_title">Orbis</string>
+    <string name="downloads_notif_public_text">Downloading files</string>
+    <string name="downloads_notif_done">Download complete</string>
+    <string name="downloads_notif_done_public">A download finished</string>
 </resources>

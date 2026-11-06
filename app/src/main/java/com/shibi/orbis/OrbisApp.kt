@@ -3,12 +3,18 @@ package com.shibi.orbis
 import android.app.Application
 import android.content.Context
 import android.os.Environment
+import android.os.SystemClock
 import android.webkit.MimeTypeMap
 import com.shibi.orbis.debug.DebugLog
+import com.shibi.orbis.downloads.DownloadForegroundController
 import com.shibi.orbis.downloads.DownloadManager
 import com.shibi.orbis.downloads.DownloadStore
+import com.shibi.orbis.engine.AndroidPermissionBroker
 import com.shibi.orbis.engine.BrowserEngine
+import com.shibi.orbis.engine.FileSitePermissionStore
 import com.shibi.orbis.engine.GeckoEngineImpl
+import com.shibi.orbis.engine.SharedPreferencesAskedPermissions
+import com.shibi.orbis.engine.SitePermissionDecisions
 import com.shibi.orbis.tabs.FileTabStore
 import com.shibi.orbis.tabs.TabManager
 import com.shibi.orbis.ubo.SharedPreferencesUboPrefs
@@ -23,14 +29,33 @@ class OrbisApp : Application() {
     lateinit var container: AppContainer
         private set
 
+    /** Keeps the process alive while downloads run. Null in Gecko child processes, like [container]. */
+    var downloadForeground: DownloadForegroundController? = null
+        private set
+
     override fun onCreate() {
         super.onCreate()
         // Gecko child processes (":tab", ":gpu", ...) run this too; they must not create a runtime or container.
         if (Application.getProcessName() != packageName) return
         val debugLog = DebugLog(filesDir)
-        val engine: BrowserEngine = GeckoEngineImpl(this, debugLog)
         // App-lifetime scope: installs must survive screens leaving composition.
         val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val sitePermissions =
+            SitePermissionDecisions(
+                store = FileSitePermissionStore(File(filesDir, "site_permissions.json")),
+                scope = appScope,
+                io = Dispatchers.IO,
+                now = SystemClock::elapsedRealtime,
+                log = { debugLog.log("SitePermissions", it) },
+            )
+        val androidPermissions =
+            AndroidPermissionBroker(
+                asked = SharedPreferencesAskedPermissions(
+                    getSharedPreferences(SharedPreferencesAskedPermissions.FILE_NAME, Context.MODE_PRIVATE),
+                ),
+                now = SystemClock::elapsedRealtime,
+            )
+        val engine: BrowserEngine = GeckoEngineImpl(this, debugLog, sitePermissions, androidPermissions)
         val uboPrefs =
             SharedPreferencesUboPrefs(
                 getSharedPreferences(SharedPreferencesUboPrefs.FILE_NAME, Context.MODE_PRIVATE),
@@ -62,11 +87,29 @@ class OrbisApp : Application() {
                 now = System::currentTimeMillis,
                 extensionForMime = { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) },
             )
-        container = AppContainer(debugLog = debugLog, engine = engine, ubo = ubo, tabs = tabs, downloads = downloads)
+        container =
+            AppContainer(
+                debugLog = debugLog,
+                engine = engine,
+                ubo = ubo,
+                tabs = tabs,
+                downloads = downloads,
+                sitePermissions = sitePermissions,
+            )
+        // Sessions only appear after the onboarding decision; this has long finished by then.
+        sitePermissions.load()
         runCatching { engine.warmUp() }
             .onFailure { debugLog.log("OrbisApp", "engine warmUp failed: ${it.message}") }
         tabs.restore()
         downloads.restore()
+        // After restore(): restored entries are never IN_PROGRESS, so this cannot start the service at launch.
+        downloadForeground =
+            DownloadForegroundController(
+                context = this,
+                downloads = downloads,
+                scope = appScope,
+                log = { debugLog.log("Downloads", it) },
+            ).also { it.start() }
         ubo.start()
     }
 
@@ -83,10 +126,15 @@ class AppContainer(
     /** Owns every tab and session; outlives screens, so Settings never destroys a page. */
     val tabs: TabManager,
     val downloads: DownloadManager,
+    /** The user's camera, microphone and location answers; Settings lists and removes them. */
+    val sitePermissions: SitePermissionDecisions,
 ) {
     /**
      * An http(s) URL another app asked us to open. Set by MainActivity, consumed (and cleared) by BrowserScreen, which
      * only exists after the onboarding decision, so an intent arriving earlier waits and causes no network load.
      */
     val pendingExternalUrl = MutableStateFlow<String?>(null)
+
+    /** A download notification was tapped. Consumed by OrbisRoot, which navigates once, and only after onboarding. */
+    val pendingShowDownloads = MutableStateFlow(false)
 }

@@ -1,11 +1,13 @@
 package com.shibi.orbis.engine
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.View
+import androidx.core.content.ContextCompat
 import com.shibi.orbis.debug.DebugLog
 import java.io.InputStream
 import java.util.concurrent.atomic.AtomicBoolean
@@ -45,9 +47,17 @@ import org.mozilla.geckoview.WebResponse
 class GeckoEngineImpl(
     private val appContext: Context,
     private val debugLog: DebugLog,
+    private val decisions: SitePermissionDecisions,
+    private val broker: AndroidPermissionBroker,
 ) : BrowserEngine {
     @Volatile
     private var runtime: GeckoRuntime? = null
+
+    private val reconciler = GeolocationReconciler({ runtime }, debugLog)
+
+    override val androidPermissions: AndroidPermissionBroker get() = broker
+
+    override fun reconcileSitePermissions() = reconciler.runNow()
 
     private val extensionHost =
         GeckoExtensionHost(debugLog) {
@@ -91,6 +101,8 @@ class GeckoEngineImpl(
                 "GeckoEngine",
                 "runtime created; ETP level=STRICT category=STRICT antiTracking=STRICT cookies=isolate-others",
             )
+            // Older builds denied location silently and Gecko stored every such answer for good.
+            reconciler.runNow()
         }
     }
 
@@ -134,6 +146,9 @@ class GeckoEngineImpl(
             session = GeckoSession(sessionSettings),
             initialDesktopMode = init.desktopMode,
             debugLog = debugLog,
+            decisions = decisions,
+            broker = broker,
+            reconciler = reconciler,
             // A popup child inherits the opener's desktop/mobile choice and is never opened by us.
             newPopupChild = { opener -> buildSession(SessionInit(desktopMode = opener.state.value.desktopMode)) },
         )
@@ -166,6 +181,9 @@ private class GeckoBrowserSession(
     private val session: GeckoSession,
     initialDesktopMode: Boolean,
     private val debugLog: DebugLog,
+    private val decisions: SitePermissionDecisions,
+    private val broker: AndroidPermissionBroker,
+    private val reconciler: GeolocationReconciler,
     private val newPopupChild: (GeckoBrowserSession) -> GeckoBrowserSession,
 ) : BrowserSession {
     private val _state = MutableStateFlow(SessionState(desktopMode = initialDesktopMode))
@@ -180,6 +198,12 @@ private class GeckoBrowserSession(
     override var host: SessionHost? = null
 
     private val abuseGuard = DialogAbuseGuard(now = { SystemClock.elapsedRealtime() })
+
+    /** Identical pending camera/microphone asks share one dialog. */
+    private data class MediaAsk(val origin: String, val embedder: String?, val kinds: Set<SitePermissionKind>)
+
+    private val geoCoalescer = PermissionPromptCoalescer<SitePermissionKey>()
+    private val mediaCoalescer = PermissionPromptCoalescer<MediaAsk>()
 
     /** Set once [close] has run; every later call is ignored (composition may still touch a closed session). */
     @Volatile
@@ -306,6 +330,9 @@ private class GeckoBrowserSession(
             override fun onPageStart(session: GeckoSession, url: String) {
                 // A new top-level page ends any dialog-spam lockout and invalidates the find highlight.
                 abuseGuard.onPageStart()
+                // A permission dialog must not outlive the page that asked; dismissing denies without recording.
+                queue.dismissWhere { it is SitePrompt.SitePermission }
+                reconciler.onPageStart()
                 applyActive()
                 _state.update {
                     // url is not written here (see onLocationChange).
@@ -810,9 +837,191 @@ private class GeckoBrowserSession(
             else -> "other"
         }
 
+    private fun geoValue(allow: Boolean): Int =
+        if (allow) {
+            GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW
+        } else {
+            GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY
+        }
+
     /**
-     * Deny by default. Only inaudible autoplay is allowed; location, notifications and the rest are denied, and no
-     * Android runtime permission is ever requested (the manifest declares none for them), so there is no dialog.
+     * Location. Our store decides: a stored answer is applied silently, otherwise the user is asked, once for any number
+     * of identical pending requests. A missing or unparsable origin is denied without a dialog. Gecko stores whatever
+     * we answer for good, so every answer schedules a reconcile that resets its copy (see [GeolocationReconciler]).
+     */
+    private fun geolocationRequest(
+        perm: GeckoSession.PermissionDelegate.ContentPermission,
+    ): GeckoResult<Int> {
+        val top = siteOriginOf(perm.uri)
+        val thirdParty = perm.thirdPartyOrigin
+        val requester = if (thirdParty == null) top else siteOriginOf(thirdParty)
+        if (closed || top == null || requester == null) {
+            debugLog.log("GeckoSession", "permission denied: geolocation")
+            reconciler.markDirty()
+            return GeckoResult.fromValue(geoValue(false))
+        }
+        val key = SitePermissionKey(SitePermissionKind.LOCATION, requester, if (requester == top) null else top)
+        val stored = decisions.lookup(key)
+        if (stored != null) {
+            debugLog.log("GeckoSession", "permission ${if (stored) "allowed" else "denied"}: geolocation")
+            reconciler.markDirty()
+            return GeckoResult.fromValue(geoValue(stored))
+        }
+        if (abuseGuard.shouldSuppress()) {
+            debugLog.log("GeckoSession", "permission denied: geolocation")
+            reconciler.markDirty()
+            return GeckoResult.fromValue(geoValue(false))
+        }
+        val result = GeckoResult<Int>()
+        val first =
+            geoCoalescer.join(key) { allow ->
+                debugLog.log("GeckoSession", "permission ${if (allow) "allowed" else "denied"}: geolocation")
+                reconciler.markDirty()
+                runCatching { result.complete(geoValue(allow)) }
+            }
+        if (first) {
+            queue.add(
+                SitePrompt.SitePermission(key.origin, key.embedder, listOf(SitePermissionKind.LOCATION)) { answer ->
+                    // Dismissed (null) denies and records nothing.
+                    if (answer != null) decisions.record(key, answer.allow, answer.remember)
+                    geoCoalescer.answer(key, answer?.allow == true)
+                },
+            )
+        }
+        return result
+    }
+
+    /** Ends a media request exactly once; a closed session may refuse the call, which must not crash us. */
+    private class MediaAnswer(private val callback: GeckoSession.PermissionDelegate.MediaCallback) {
+        private val done = AtomicBoolean(false)
+
+        fun grant(
+            video: GeckoSession.PermissionDelegate.MediaSource?,
+            audio: GeckoSession.PermissionDelegate.MediaSource?,
+        ) {
+            if (!done.compareAndSet(false, true)) return
+            runCatching { callback.grant(video, audio) }.onFailure { runCatching { callback.reject() } }
+        }
+
+        fun reject() {
+            if (!done.compareAndSet(false, true)) return
+            runCatching { callback.reject() }
+        }
+    }
+
+    private class AndroidAnswer(private val callback: GeckoSession.PermissionDelegate.Callback) {
+        private val done = AtomicBoolean(false)
+
+        fun grant() {
+            if (!done.compareAndSet(false, true)) return
+            runCatching { callback.grant() }.onFailure { runCatching { callback.reject() } }
+        }
+
+        fun reject() {
+            if (!done.compareAndSet(false, true)) return
+            runCatching { callback.reject() }
+        }
+    }
+
+    /**
+     * Camera and microphone. Only real camera and microphone sources are ever offered (never screen or audio capture).
+     * The first source of a kind is the one Gecko ranked best for the page's constraints.
+     */
+    private fun mediaRequest(
+        uri: String,
+        video: Array<GeckoSession.PermissionDelegate.MediaSource>?,
+        audio: Array<GeckoSession.PermissionDelegate.MediaSource>?,
+        answer: MediaAnswer,
+    ) {
+        val videoSources = video?.filter { it.source == GeckoSession.PermissionDelegate.MediaSource.SOURCE_CAMERA }
+        val audioSources = audio?.filter { it.source == GeckoSession.PermissionDelegate.MediaSource.SOURCE_MICROPHONE }
+        // A kind the page asked for but that has no usable source cannot be satisfied.
+        val unusable =
+            (video == null && audio == null) ||
+                (videoSources != null && videoSources.isEmpty()) ||
+                (audioSources != null && audioSources.isEmpty())
+        val origin = siteOriginOf(uri)
+        // The embedder is the committed top-level page; without one the request cannot be attributed.
+        val top = siteOriginOf(_state.value.url)
+        if (closed || unusable || origin == null || top == null) {
+            debugLog.log("GeckoSession", "camera/microphone request rejected")
+            answer.reject()
+            return
+        }
+        val chosenVideo = videoSources?.firstOrNull()
+        val chosenAudio = audioSources?.firstOrNull()
+        val embedder = if (origin == top) null else top
+        val kinds = LinkedHashSet<SitePermissionKind>()
+        if (videoSources != null) kinds += SitePermissionKind.CAMERA
+        if (audioSources != null) kinds += SitePermissionKind.MICROPHONE
+        fun keyOf(kind: SitePermissionKind) = SitePermissionKey(kind, origin, embedder)
+        when (planMediaRequest(kinds) { decisions.lookup(keyOf(it)) }) {
+            MediaPlan.GRANT -> {
+                debugLog.log("GeckoSession", "camera/microphone allowed")
+                answer.grant(chosenVideo, chosenAudio)
+            }
+
+            MediaPlan.DENY -> {
+                debugLog.log("GeckoSession", "camera/microphone denied")
+                answer.reject()
+            }
+
+            MediaPlan.ASK -> {
+                if (abuseGuard.shouldSuppress()) {
+                    debugLog.log("GeckoSession", "camera/microphone denied")
+                    answer.reject()
+                    return
+                }
+                val ask = MediaAsk(origin, embedder, kinds)
+                val first =
+                    mediaCoalescer.join(ask) { allow ->
+                        debugLog.log("GeckoSession", "camera/microphone ${if (allow) "allowed" else "denied"}")
+                        if (allow) answer.grant(chosenVideo, chosenAudio) else answer.reject()
+                    }
+                if (first) {
+                    queue.add(
+                        SitePrompt.SitePermission(origin, embedder, kinds.toList()) { reply ->
+                            // Dismissed (null) denies and records nothing.
+                            if (reply != null) for (kind in kinds) decisions.record(keyOf(kind), reply.allow, reply.remember)
+                            mediaCoalescer.answer(ask, reply?.allow == true)
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    private fun androidPermissionsRequest(permissions: Array<out String>?, callback: GeckoSession.PermissionDelegate.Callback) {
+        val answer = AndroidAnswer(callback)
+        val requested = permissions?.toList().orEmpty()
+        if (closed || requested.isEmpty() || requested.any { it !in AndroidPermissionBroker.ALLOWED }) {
+            debugLog.log("GeckoSession", "android permission request rejected")
+            answer.reject()
+            return
+        }
+        val granted =
+            AndroidPermissionBroker.isSatisfied(requested) {
+                ContextCompat.checkSelfPermission(appContext, it) == PackageManager.PERMISSION_GRANTED
+            }
+        if (granted) {
+            answer.grant()
+            return
+        }
+        val location =
+            requested.any {
+                it == AndroidPermissionBroker.FINE_LOCATION || it == AndroidPermissionBroker.COARSE_LOCATION
+            }
+        broker.request(requested) { ok ->
+            debugLog.log("GeckoSession", "android permission ${if (ok) "granted" else "denied"}")
+            if (ok) answer.grant() else answer.reject()
+            // On a denial Gecko turns the location answer into a stored deny just after this.
+            if (location) reconciler.afterLocationResult()
+        }
+    }
+
+    /**
+     * Location and camera/microphone go through the user (see above). Every other kind is unchanged: only inaudible
+     * autoplay is allowed, notifications and the rest are denied with no dialog.
      */
     private fun permissionDelegate() =
         object : GeckoSession.PermissionDelegate {
@@ -820,6 +1029,9 @@ private class GeckoBrowserSession(
                 session: GeckoSession,
                 perm: GeckoSession.PermissionDelegate.ContentPermission,
             ): GeckoResult<Int> {
+                if (perm.permission == GeckoSession.PermissionDelegate.PERMISSION_GEOLOCATION) {
+                    return geolocationRequest(perm)
+                }
                 val allow = perm.permission == GeckoSession.PermissionDelegate.PERMISSION_AUTOPLAY_INAUDIBLE
                 // The kind only: the page address is not logged.
                 debugLog.log(
@@ -839,10 +1051,7 @@ private class GeckoBrowserSession(
                 session: GeckoSession,
                 permissions: Array<out String>?,
                 callback: GeckoSession.PermissionDelegate.Callback,
-            ) {
-                debugLog.log("GeckoSession", "android permission request rejected")
-                callback.reject()
-            }
+            ) = androidPermissionsRequest(permissions, callback)
 
             override fun onMediaPermissionRequest(
                 session: GeckoSession,
@@ -850,10 +1059,7 @@ private class GeckoBrowserSession(
                 video: Array<GeckoSession.PermissionDelegate.MediaSource>?,
                 audio: Array<GeckoSession.PermissionDelegate.MediaSource>?,
                 callback: GeckoSession.PermissionDelegate.MediaCallback,
-            ) {
-                debugLog.log("GeckoSession", "camera/microphone request rejected")
-                callback.reject()
-            }
+            ) = mediaRequest(uri, video, audio, MediaAnswer(callback))
         }
 
     // ---- BrowserSession ------------------------------------------------------------------------------------
@@ -1213,4 +1419,77 @@ private class GeckoExtensionHost(
             WebExtension.InstallException.ErrorCodes.ERROR_USER_CANCELED -> ExtensionInstallError.CANCELLED
             else -> ExtensionInstallError.UNKNOWN
         }
+}
+
+/**
+ * Gecko stores every location answer for good (EXPIRE_NEVER) and then never asks us again for that site. Our decision
+ * store is the only authority, so every stored location entry is reset to "ask" (VALUE_PROMPT): on runtime start (this
+ * clears the silent denies older builds left behind), shortly after each answer (Gecko writes after we answer), after
+ * a location system-permission result, at a top-level page start when something is outstanding, and when a stored
+ * decision is removed. Only location entries are touched. Main thread; failures log the exception class only.
+ */
+internal class GeolocationReconciler(
+    private val runtime: () -> GeckoRuntime?,
+    private val debugLog: DebugLog,
+) {
+    private val handler = Handler(Looper.getMainLooper())
+    private val task = Runnable { reconcile() }
+    private var dirty = false
+
+    /** An answer was just given; Gecko is about to write its copy of it. */
+    fun markDirty() {
+        dirty = true
+        postDelayed(ANSWER_DELAY_MS)
+    }
+
+    /** Gecko writes a stored deny just after a failed system-permission request. */
+    fun afterLocationResult() {
+        dirty = true
+        postDelayed(PERMISSION_DELAY_MS)
+    }
+
+    fun onPageStart() {
+        if (dirty) runNow()
+    }
+
+    fun runNow() = postDelayed(0L)
+
+    private fun postDelayed(delayMs: Long) {
+        handler.removeCallbacks(task)
+        handler.postDelayed(task, delayMs)
+    }
+
+    private fun reconcile() {
+        val rt = runtime() ?: return
+        dirty = false
+        try {
+            val storage = rt.storageController
+            storage.getAllPermissions().accept(
+                { list ->
+                    for (entry in list.orEmpty()) {
+                        if (entry.permission != GeckoSession.PermissionDelegate.PERMISSION_GEOLOCATION) continue
+                        if (entry.value == GeckoSession.PermissionDelegate.ContentPermission.VALUE_PROMPT) continue
+                        try {
+                            storage.setPermission(entry, GeckoSession.PermissionDelegate.ContentPermission.VALUE_PROMPT)
+                        } catch (e: Exception) {
+                            dirty = true
+                            debugLog.log("GeckoEngine", "geolocation reconcile failed: ${e.javaClass.simpleName}")
+                        }
+                    }
+                },
+                { e ->
+                    dirty = true
+                    debugLog.log("GeckoEngine", "geolocation reconcile failed: ${e?.javaClass?.simpleName}")
+                },
+            )
+        } catch (e: Exception) {
+            dirty = true
+            debugLog.log("GeckoEngine", "geolocation reconcile failed: ${e.javaClass.simpleName}")
+        }
+    }
+
+    private companion object {
+        const val ANSWER_DELAY_MS = 2_000L
+        const val PERMISSION_DELAY_MS = 1_000L
+    }
 }

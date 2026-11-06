@@ -33,6 +33,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onOpenErrorLog: () -> Unit,
     onOpenUbo: () -> Unit,
+    onOpenSitePermissions: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val uboState by uboStateFlow.collectAsStateWithLifecycle()
@@ -64,6 +65,13 @@ fun SettingsScreen(
                 modifier = Modifier.padding(16.dp),
             )
             HorizontalDivider()
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.perm_settings_title)) },
+                supportingContent = { Text(stringResource(R.string.perm_settings_summary)) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenSitePermissions),
+            )
             ListItem(
                 headlineContent = { Text(stringResource(R.string.settings_error_log)) },
                 modifier = Modifier

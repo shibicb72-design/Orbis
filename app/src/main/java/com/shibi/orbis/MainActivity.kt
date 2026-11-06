@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import com.shibi.orbis.downloads.DownloadNotifications
 import com.shibi.orbis.engine.externalUrlFrom
 import com.shibi.orbis.ui.OrbisRoot
 import com.shibi.orbis.ui.theme.OrbisTheme
@@ -35,11 +36,13 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         app.container.tabs.setForeground(true)
+        app.downloadForeground?.onAppForeground()
     }
 
     override fun onStop() {
         // Invisible: the selected page must not keep running at foreground priority.
         app.container.tabs.setForeground(false)
+        app.downloadForeground?.onAppBackground()
         // The process can be killed any time after this; make sure the tab list is on its way to disk.
         app.container.tabs.flush()
         super.onStop()
@@ -52,6 +55,8 @@ class MainActivity : ComponentActivity() {
      */
     private fun takeViewIntent(incoming: Intent) {
         externalUrlFrom(incoming.action, incoming.dataString)?.let { app.container.pendingExternalUrl.value = it }
+        // A download notification tap: only a flag, no extras or data are read, so it exposes nothing to a caller.
+        if (incoming.action == DownloadNotifications.ACTION_SHOW_DOWNLOADS) app.container.pendingShowDownloads.value = true
         setIntent(Intent())
     }
 }

@@ -207,7 +207,28 @@ sealed class SitePrompt(val originHost: String) {
 
         override fun deliverDismissal() = respond(null)
     }
+
+    /**
+     * Camera, microphone or location. [origin] is the requester's origin from [siteOriginOf] (punycode), never page
+     * text; [embedder] is the top-level origin when the requester is a frame of another site. [respond] gets the
+     * user's choice, or null when the prompt was dismissed: that means "deny, and remember nothing".
+     */
+    class SitePermission(
+        val origin: String,
+        val embedder: String?,
+        val kinds: List<SitePermissionKind>,
+        private val respond: (SitePermissionAnswer?) -> Unit,
+    ) : SitePrompt(hostOfUrl(origin).orEmpty()) {
+        /** [remember] false keeps the answer for this session only. */
+        fun allow(remember: Boolean) = finish { respond(SitePermissionAnswer(allow = true, remember = remember)) }
+
+        fun deny(remember: Boolean) = finish { respond(SitePermissionAnswer(allow = false, remember = remember)) }
+
+        override fun deliverDismissal() = respond(null)
+    }
 }
+
+data class SitePermissionAnswer(val allow: Boolean, val remember: Boolean)
 
 enum class FilePickStage { PICKING, PREPARING, FAILED }
 
@@ -308,6 +329,11 @@ class PromptQueue {
     /** Completes every pending prompt as dismissed (session close, crash, kill). */
     fun dismissAll() {
         for (prompt in queue.toList()) prompt.dismiss()
+    }
+
+    /** Dismisses every pending prompt [predicate] selects (for example those of a page that is gone). */
+    fun dismissWhere(predicate: (SitePrompt) -> Boolean) {
+        for (prompt in queue.toList()) if (predicate(prompt)) prompt.dismiss()
     }
 
     val size: Int get() = queue.size

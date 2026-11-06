@@ -1,5 +1,11 @@
 package com.shibi.orbis.ui.browser
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.view.ViewGroup
 import android.webkit.MimeTypeMap
 import android.widget.Toast
@@ -68,9 +74,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.ActivityCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shibi.orbis.AppContainer
 import com.shibi.orbis.R
+import com.shibi.orbis.engine.AndroidPermissionRequest
 import com.shibi.orbis.engine.BrowserSession
 import com.shibi.orbis.engine.FindResult
 import com.shibi.orbis.engine.SessionState
@@ -96,6 +104,18 @@ private class AttachedSession {
 private class LaunchedPick {
     var prompt: SitePrompt.FilePick? = null
 }
+
+/** The system permission request this composition launched; plain memory, so a recreation starts empty. */
+private class LaunchedAndroidRequest {
+    var request: AndroidPermissionRequest? = null
+}
+
+private tailrec fun Context.findActivity(): Activity? =
+    when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
+    }
 
 @Composable
 fun BrowserScreen(
@@ -151,6 +171,7 @@ private fun BrowserContent(
     val state by (session?.state ?: IDLE_STATE).collectAsStateWithLifecycle()
     val prompt by (session?.prompts ?: NO_PROMPT).collectAsStateWithLifecycle()
     val focusManager = LocalFocusManager.current
+    val requestNotificationPermission = rememberNotificationPermissionRequest()
 
     var showTabs by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
@@ -201,6 +222,45 @@ private fun BrowserContent(
         val types = pickerMimeTypes(p.mimeTypes) { ext -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) }
         runCatching { if (p.multiple) pickMany.launch(types.toTypedArray()) else pickOne.launch(types.toTypedArray()) }
             .onFailure { p.dismiss() }
+    }
+
+    // System permission dialogs for camera, microphone and location. App level, not per tab: Gecko can ask on behalf of
+    // a background tab. One launch per request; a failed launch completes it as denied. The page was already answered
+    // by the time the settings hint shows, so that dialog never holds anything up.
+    val androidContext = LocalContext.current
+    val broker = container.engine.androidPermissions
+    val androidRequest by broker.head.collectAsStateWithLifecycle()
+    val settingsHint by broker.settingsHint.collectAsStateWithLifecycle()
+    val currentAndroidRequest by rememberUpdatedState(androidRequest)
+    val launchedAndroid = remember { LaunchedAndroidRequest() }
+    val androidLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+            // After a recreation the holder is empty and the original request already ended as denied (see onDispose):
+            // this late result may only answer the current request if it is the same question.
+            val target =
+                launchedAndroid.request
+                    ?: currentAndroidRequest?.takeIf { results.keys.containsAll(it.permissions) }
+                    ?: return@rememberLauncherForActivityResult
+            launchedAndroid.request = null
+            val activity = androidContext.findActivity()
+            // Without an activity to ask, "rationale" is assumed so the result is never judged blocked.
+            broker.evaluate(target, results) { p ->
+                activity?.let { ActivityCompat.shouldShowRequestPermissionRationale(it, p) } ?: true
+            }
+        }
+    LaunchedEffect(androidRequest) {
+        val r = androidRequest ?: return@LaunchedEffect
+        if (!r.claimLaunch()) return@LaunchedEffect
+        launchedAndroid.request = r
+        runCatching { androidLauncher.launch(r.permissions.toTypedArray()) }
+            .onFailure {
+                launchedAndroid.request = null
+                broker.failLaunch(r)
+            }
+    }
+    // Leaving this screen drops the launcher's result callback: end what it launched so the queue cannot stall.
+    DisposableEffect(broker) {
+        onDispose { launchedAndroid.request?.let { broker.failLaunch(it) } }
     }
 
     val attached = remember { AttachedSession() }
@@ -458,12 +518,28 @@ private fun BrowserContent(
     // Only the selected tab's prompts are shown; a background tab's wait in its own queue until it is selected.
     prompt?.let { SitePromptDialog(it) }
 
+    if (settingsHint) {
+        PermissionSettingsDialog(
+            onOpenSettings = {
+                broker.dismissSettingsHint()
+                runCatching {
+                    androidContext.startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", androidContext.packageName, null)),
+                    )
+                }
+            },
+            onDismiss = broker::dismissSettingsHint,
+        )
+    }
+
     pendingDownload?.let { pending ->
         DownloadConfirmDialog(
             pending = pending,
             onConfirm = {
                 container.downloads.start(pending.download)
                 tabs.resolveDownload(pending)
+                // After start: the notification permission never delays or blocks the download.
+                requestNotificationPermission()
             },
             onCancel = {
                 pending.download.discard()

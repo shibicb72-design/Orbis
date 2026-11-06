@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shibi.orbis.R
 import com.shibi.orbis.engine.FilePickStage
+import com.shibi.orbis.engine.SitePermissionKind
 import com.shibi.orbis.engine.SitePrompt
 
 /**
@@ -152,7 +153,75 @@ fun SitePromptDialog(prompt: SitePrompt) {
         is SitePrompt.ColorPick -> ColorPromptDialog(prompt, title)
 
         is SitePrompt.FilePick -> FilePickDialog(prompt, title)
+
+        is SitePrompt.SitePermission -> SitePermissionDialog(prompt)
     }
+}
+
+/**
+ * Camera, microphone or location. The title is the requesting origin as the browser computed it (punycode, never page
+ * text). Dismissing (back, tap outside, navigation) denies and remembers nothing; Allow and Deny both record, for this
+ * session unless "Remember for this site" is ticked.
+ */
+@Composable
+private fun SitePermissionDialog(prompt: SitePrompt.SitePermission) {
+    var rememberChoice by remember(prompt) { mutableStateOf(false) }
+    PromptDialog(
+        title = stringResource(R.string.perm_prompt_title, prompt.origin),
+        onDismiss = prompt::dismiss,
+        confirmButton = {
+            TextButton(onClick = { prompt.allow(rememberChoice) }) { Text(stringResource(R.string.perm_prompt_allow)) }
+        },
+        dismissButton = {
+            TextButton(onClick = { prompt.deny(rememberChoice) }) { Text(stringResource(R.string.perm_prompt_deny)) }
+        },
+    ) {
+        Column {
+            for (kind in prompt.kinds) {
+                Text(
+                    stringResource(
+                        when (kind) {
+                            SitePermissionKind.CAMERA -> R.string.perm_prompt_camera
+                            SitePermissionKind.MICROPHONE -> R.string.perm_prompt_microphone
+                            SitePermissionKind.LOCATION -> R.string.perm_prompt_location
+                        },
+                    ),
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
+            prompt.embedder?.let { embedder ->
+                Text(
+                    stringResource(R.string.perm_prompt_embedded, embedder),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { rememberChoice = !rememberChoice }
+                    .padding(top = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(checked = rememberChoice, onCheckedChange = null)
+                Text(stringResource(R.string.perm_prompt_remember), Modifier.padding(start = 12.dp))
+            }
+        }
+    }
+}
+
+/**
+ * Shown after Android refused to show a permission dialog again. Not a site prompt: the page was already answered, so
+ * this only offers the way out and holds nothing up.
+ */
+@Composable
+fun PermissionSettingsDialog(onOpenSettings: () -> Unit, onDismiss: () -> Unit) {
+    PromptDialog(
+        title = stringResource(R.string.perm_blocked_title),
+        onDismiss = onDismiss,
+        confirmButton = { TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.perm_open_settings)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.perm_not_now)) } },
+    ) { Text(stringResource(R.string.perm_blocked_body)) }
 }
 
 /**
