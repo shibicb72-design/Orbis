@@ -7,8 +7,12 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.View
+import android.webkit.MimeTypeMap
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import com.shibi.orbis.debug.DebugLog
+import com.shibi.orbis.downloads.DownloadIntents
+import java.io.File
 import java.io.InputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.cancellation.CancellationException
@@ -71,11 +75,20 @@ class GeckoEngineImpl(
     private val uploads = UploadCache(appContext.cacheDir)
     private val uploadsCleared = AtomicBoolean(false)
 
+    /** Temps the camera app writes photos into. Wiped with [uploads]: a photo is copied to uploads before Gecko sees it. */
+    private val captureFiles = CameraCaptureFiles(appContext.cacheDir)
+
     override fun warmUp() {
         synchronized(this) {
             if (runtime != null) return
             if (uploadsCleared.compareAndSet(false, true)) {
-                Thread({ runCatching { uploads.clearAll() } }, "orbis-upload-clear").start()
+                Thread(
+                    {
+                        runCatching { uploads.clearAll() }
+                        runCatching { captureFiles.clearAll() }
+                    },
+                    "orbis-upload-clear",
+                ).start()
             }
             // Built via ContentBlocking.Settings.Builder: setEnhancedTrackingProtectionLevel alone only sets ETP prefs.
             val contentBlocking =
@@ -143,6 +156,7 @@ class GeckoEngineImpl(
             runtime = requireRuntime(),
             appContext = appContext,
             uploads = uploads,
+            captureFiles = captureFiles,
             session = GeckoSession(sessionSettings),
             initialDesktopMode = init.desktopMode,
             debugLog = debugLog,
@@ -178,6 +192,7 @@ private class GeckoBrowserSession(
     private val runtime: GeckoRuntime,
     private val appContext: Context,
     private val uploads: UploadCache,
+    private val captureFiles: CameraCaptureFiles,
     private val session: GeckoSession,
     initialDesktopMode: Boolean,
     private val debugLog: DebugLog,
@@ -472,6 +487,47 @@ private class GeckoBrowserSession(
         return result
     }
 
+    /**
+     * The camera side of one file prompt. The temp is the app's own file shared to the camera app through the
+     * FileProvider; failures log the exception class only, never a name or path.
+     */
+    private fun cameraBridge(): CameraBridge =
+        object : CameraBridge {
+            // Main thread only, like the prompt that owns this bridge.
+            private var file: File? = null
+
+            override fun ensurePermission(onResult: (Boolean) -> Unit) =
+                broker.ensure(
+                    listOf(AndroidPermissionBroker.CAMERA),
+                    { ContextCompat.checkSelfPermission(appContext, it) == PackageManager.PERMISSION_GRANTED },
+                    onResult,
+                )
+
+            override fun newOutput(): Uri? {
+                val created = captureFiles.newFile()
+                if (created == null) {
+                    debugLog.log("GeckoSession", "camera output unavailable")
+                    return null
+                }
+                file = created
+                return try {
+                    FileProvider.getUriForFile(appContext, DownloadIntents.authority(appContext), created)
+                } catch (e: Exception) {
+                    debugLog.log("GeckoSession", "camera output failed: ${e.javaClass.simpleName}")
+                    null
+                }
+            }
+
+            override fun hasPicture(): Boolean = file?.let { captureFiles.hasPicture(it) } == true
+
+            override fun release() {
+                val temp = file ?: return
+                file = null
+                // Off the main thread, and not on the session scope: it may be cancelled right after the prompt ends (close).
+                Thread({ runCatching { captureFiles.discard(temp) } }, "orbis-capture-discard").start()
+            }
+        }
+
     /** Dialog-spam lockout: answered as dismissed without ever reaching the UI. */
     private fun suppressed(prompt: GeckoSession.PromptDelegate.BasePrompt): GeckoResult<Response> {
         debugLog.log("GeckoSession", "prompt suppressed: too many dialogs")
@@ -632,17 +688,26 @@ private class GeckoBrowserSession(
                 session: GeckoSession,
                 prompt: GeckoSession.PromptDelegate.FilePrompt,
             ): GeckoResult<Response> {
-                // Folder upload and camera capture are not offered; the page just sees "nothing chosen".
+                // Folder upload is not offered; the page just sees "nothing chosen".
                 if (prompt.type == GeckoSession.PromptDelegate.FilePrompt.Type.FOLDER) return skip("file-folder", prompt)
                 if (abuseGuard.shouldSuppress()) return suppressed(prompt)
                 val multiple = prompt.type == GeckoSession.PromptDelegate.FilePrompt.Type.MULTIPLE
+                val mimeTypes = prompt.mimeTypes.orEmpty().filterNotNull()
+                // Capture is only an int here and the accept tokens are raw, so the route is decided by our own function.
+                val route =
+                    filePickRoute(
+                        captureRequested = prompt.capture != GeckoSession.PromptDelegate.FilePrompt.Capture.NONE,
+                        mimeTypes = mimeTypes,
+                        cameraAvailable = appContext.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY),
+                        extensionToMime = { ext -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) },
+                    )
                 return present(prompt) { result ->
                     var copyJob: Job? = null
                     lateinit var filePick: SitePrompt.FilePick
                     filePick =
                         SitePrompt.FilePick(
                             originHost(),
-                            prompt.mimeTypes.orEmpty().filterNotNull(),
+                            mimeTypes,
                             multiple,
                             prepare = { picked ->
                                 // Gecko cannot resolve most content:// Uris, so hand it app-private file:// copies.
@@ -683,6 +748,8 @@ private class GeckoBrowserSession(
                                     },
                                 )
                             },
+                            route = route,
+                            camera = if (route == FilePickRoute.DOCUMENTS) null else cameraBridge(),
                         )
                     filePick
                 }

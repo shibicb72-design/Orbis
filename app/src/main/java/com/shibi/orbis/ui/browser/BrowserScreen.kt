@@ -80,6 +80,7 @@ import com.shibi.orbis.AppContainer
 import com.shibi.orbis.R
 import com.shibi.orbis.engine.AndroidPermissionRequest
 import com.shibi.orbis.engine.BrowserSession
+import com.shibi.orbis.engine.FilePickLaunch
 import com.shibi.orbis.engine.FindResult
 import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.engine.SitePrompt
@@ -200,8 +201,8 @@ private fun BrowserContent(
         }
     }
 
-    // File pick: the system document picker is the UI; the prompt is answered from its result. The result goes to the
-    // prompt that launched the picker. After a recreation the holder is empty, so it falls back to the current one.
+    // File pick: the system document picker or camera is the UI; the prompt is answered from its result. The result goes
+    // to the prompt that launched it. After a recreation the holder is empty, so it falls back to the current one.
     // Answering a prompt that already ended does nothing, and a newer prompt is never touched by an older result.
     val currentFilePick by rememberUpdatedState(prompt as? SitePrompt.FilePick)
     val launchedPick = remember { LaunchedPick() }
@@ -214,14 +215,36 @@ private fun BrowserContent(
         rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
             (launchedPick.prompt ?: currentFilePick)?.submit(uris)
         }
+    val takePicture =
+        rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+            (launchedPick.prompt ?: currentFilePick)?.cameraResult(ok)
+        }
     LaunchedEffect(prompt) {
         val p = prompt as? SitePrompt.FilePick ?: return@LaunchedEffect
-        // One launch per prompt, even if the composition was recreated or the user came back to this tab.
-        if (p.isFinished || !p.claimPickerLaunch()) return@LaunchedEffect
-        launchedPick.prompt = p
-        val types = pickerMimeTypes(p.mimeTypes) { ext -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) }
-        runCatching { if (p.multiple) pickMany.launch(types.toTypedArray()) else pickOne.launch(types.toTypedArray()) }
-            .onFailure { p.dismiss() }
+        if (p.isFinished) return@LaunchedEffect
+        p.begin()
+        // The prompt says which system screen to open and when (the camera waits for its permission). Each launch is
+        // claimed once per prompt, so a replayed value after a recreation or coming back to this tab launches nothing.
+        p.launchRequest.collect { request ->
+            when (request) {
+                null -> Unit
+
+                FilePickLaunch.Documents -> {
+                    if (!p.claimPickerLaunch()) return@collect
+                    launchedPick.prompt = p
+                    val types = pickerMimeTypes(p.mimeTypes) { ext -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) }
+                    runCatching { if (p.multiple) pickMany.launch(types.toTypedArray()) else pickOne.launch(types.toTypedArray()) }
+                        .onFailure { p.dismiss() }
+                }
+
+                is FilePickLaunch.Camera -> {
+                    if (!p.claimPickerLaunch()) return@collect
+                    launchedPick.prompt = p
+                    // No camera app (or the permission vanished): the prompt falls back to the document picker.
+                    runCatching { takePicture.launch(request.output) }.onFailure { p.cameraLaunchFailed() }
+                }
+            }
+        }
     }
 
     // System permission dialogs for camera, microphone and location. App level, not per tab: Gecko can ask on behalf of

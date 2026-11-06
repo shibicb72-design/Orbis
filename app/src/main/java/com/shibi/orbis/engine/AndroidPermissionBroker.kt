@@ -78,6 +78,19 @@ class AndroidPermissionBroker(
     }
 
     /**
+     * [request] unless [permissions] are already granted per [isGranted]: then [onResult] gets true at once, with no
+     * dialog and nothing queued. For callers that act on the user's own behalf (a camera capture) and so need the
+     * permission before they start.
+     */
+    fun ensure(permissions: Collection<String>, isGranted: (String) -> Boolean, onResult: (Boolean) -> Unit) {
+        if (isSatisfied(permissions, isGranted)) {
+            deliver(onResult, true)
+            return
+        }
+        request(permissions, onResult)
+    }
+
+    /**
      * The UI's report of a system result. [blocked] is already judged by the caller (see [evaluate]). A request that was
      * already finished is ignored.
      */

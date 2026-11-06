@@ -64,6 +64,9 @@
     <string name="prompt_color_hex_invalid">Use the form #rrggbb</string>
     <string name="prompt_file_preparing">Preparing file&#8230;</string>
     <string name="prompt_file_failed">Couldn\'t read that file. Nothing was attached.</string>
+    <string name="prompt_file_capture_message">This page wants a photo. Take one now or choose a file.</string>
+    <string name="prompt_file_take_picture">Take picture</string>
+    <string name="prompt_file_choose">Choose file</string>
 
     <string name="link_menu_open_new_tab">Open in new tab</string>
     <string name="link_menu_copy">Copy link</string>

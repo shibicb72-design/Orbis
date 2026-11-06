@@ -225,14 +225,28 @@ fun PermissionSettingsDialog(onOpenSettings: () -> Unit, onDismiss: () -> Unit) 
 }
 
 /**
- * A file pick shows nothing while the system picker is open (BrowserScreen launches it). After the user chose, the
- * engine copies the files and the prompt shows that progress, or the failure.
+ * A file pick shows nothing while a system screen is open (BrowserScreen launches the document picker or camera). When
+ * the page asked for a photo it can show Take picture / Choose file / Cancel first. After the user chose, the engine
+ * copies the files and the prompt shows that progress, or the failure.
  */
 @Composable
 private fun FilePickDialog(prompt: SitePrompt.FilePick, title: String) {
     val stage by prompt.stage.collectAsStateWithLifecycle()
     when (stage) {
         FilePickStage.PICKING -> Unit
+
+        FilePickStage.CHOOSING ->
+            PromptDialog(
+                title = title,
+                onDismiss = prompt::dismiss,
+                confirmButton = { TextButton(onClick = prompt::dismiss) { Text(stringResource(R.string.prompt_cancel)) } },
+            ) {
+                Column {
+                    Text(stringResource(R.string.prompt_file_capture_message), Modifier.padding(bottom = 8.dp))
+                    TextButton(onClick = prompt::takePicture) { Text(stringResource(R.string.prompt_file_take_picture)) }
+                    TextButton(onClick = prompt::chooseDocuments) { Text(stringResource(R.string.prompt_file_choose)) }
+                }
+            }
 
         FilePickStage.PREPARING ->
             PromptDialog(
