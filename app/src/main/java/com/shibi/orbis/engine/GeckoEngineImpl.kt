@@ -1,6 +1,7 @@
 package com.shibi.orbis.engine
 
 import android.content.Context
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -11,11 +12,16 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import org.mozilla.geckoview.AllowOrDeny
@@ -51,9 +57,16 @@ class GeckoEngineImpl(
 
     override val extensions: ExtensionHost get() = extensionHost
 
+    /** Picked files copied for upload. Wiped once per process start, never while a page may still hold one. */
+    private val uploads = UploadCache(appContext.cacheDir)
+    private val uploadsCleared = AtomicBoolean(false)
+
     override fun warmUp() {
         synchronized(this) {
             if (runtime != null) return
+            if (uploadsCleared.compareAndSet(false, true)) {
+                Thread({ runCatching { uploads.clearAll() } }, "orbis-upload-clear").start()
+            }
             // Built via ContentBlocking.Settings.Builder: setEnhancedTrackingProtectionLevel alone only sets ETP prefs.
             val contentBlocking =
                 ContentBlocking.Settings.Builder()
@@ -117,6 +130,7 @@ class GeckoEngineImpl(
         return GeckoBrowserSession(
             runtime = requireRuntime(),
             appContext = appContext,
+            uploads = uploads,
             session = GeckoSession(sessionSettings),
             initialDesktopMode = init.desktopMode,
             debugLog = debugLog,
@@ -148,6 +162,7 @@ private typealias AuthFlags = GeckoSession.PromptDelegate.AuthPrompt.AuthOptions
 private class GeckoBrowserSession(
     private val runtime: GeckoRuntime,
     private val appContext: Context,
+    private val uploads: UploadCache,
     private val session: GeckoSession,
     initialDesktopMode: Boolean,
     private val debugLog: DebugLog,
@@ -155,6 +170,9 @@ private class GeckoBrowserSession(
 ) : BrowserSession {
     private val _state = MutableStateFlow(SessionState(desktopMode = initialDesktopMode))
     override val state: StateFlow<SessionState> = _state.asStateFlow()
+
+    /** Work tied to this session's prompts (file copies). Cancelled in [close]. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private val queue = PromptQueue()
     override val prompts: StateFlow<SitePrompt?> = queue.head
@@ -388,6 +406,21 @@ private class GeckoBrowserSession(
         runCatching { prompt.dismiss() }.getOrNull()
 
     /**
+     * Runs [confirm]; if Gecko rejects the answer, falls back to a dismissal so the page's result still completes.
+     * Only the exception class is logged.
+     */
+    private inline fun confirmOrDismiss(
+        prompt: GeckoSession.PromptDelegate.BasePrompt,
+        confirm: () -> Response?,
+    ): Response? =
+        try {
+            confirm()
+        } catch (e: Exception) {
+            debugLog.log("GeckoSession", "prompt confirm failed: ${e.javaClass.simpleName}")
+            dismissResponse(prompt)
+        }
+
+    /**
      * Queues [make]'s prompt and returns the GeckoResult it will complete. Gecko dismissing the prompt itself
      * (navigation, script gone) completes it as dismissed too, so the result is always completed exactly once.
      */
@@ -574,36 +607,114 @@ private class GeckoBrowserSession(
             ): GeckoResult<Response> {
                 // Folder upload and camera capture are not offered; the page just sees "nothing chosen".
                 if (prompt.type == GeckoSession.PromptDelegate.FilePrompt.Type.FOLDER) return skip("file-folder", prompt)
+                if (abuseGuard.shouldSuppress()) return suppressed(prompt)
                 val multiple = prompt.type == GeckoSession.PromptDelegate.FilePrompt.Type.MULTIPLE
                 return present(prompt) { result ->
-                    SitePrompt.FilePick(
+                    var copyJob: Job? = null
+                    lateinit var filePick: SitePrompt.FilePick
+                    filePick =
+                        SitePrompt.FilePick(
+                            originHost(),
+                            prompt.mimeTypes.orEmpty().filterNotNull(),
+                            multiple,
+                            prepare = { picked ->
+                                // Gecko cannot resolve most content:// Uris, so hand it app-private file:// copies.
+                                copyJob =
+                                    scope.launch {
+                                        val files =
+                                            try {
+                                                uploads.copy(picked.map { ContentUriSource(appContext.contentResolver, it) })
+                                            } catch (e: CancellationException) {
+                                                throw e
+                                            } catch (e: Exception) {
+                                                debugLog.log("GeckoSession", "file copy failed: ${e.javaClass.simpleName}")
+                                                filePick.prepareFailed()
+                                                return@launch
+                                            }
+                                        if (filePick.isFinished) {
+                                            // Dismissed while copying: nobody will read these.
+                                            uploads.discard(files)
+                                        } else {
+                                            filePick.filesReady(files.map { Uri.fromFile(it) })
+                                        }
+                                    }
+                            },
+                            respond = { uris ->
+                                if (uris == null) copyJob?.cancel()
+                                complete(
+                                    result,
+                                    if (uris == null) {
+                                        dismissResponse(prompt)
+                                    } else {
+                                        confirmOrDismiss(prompt) {
+                                            if (multiple) {
+                                                prompt.confirm(appContext, uris.toTypedArray())
+                                            } else {
+                                                prompt.confirm(appContext, uris.first())
+                                            }
+                                        }
+                                    },
+                                )
+                            },
+                        )
+                    filePick
+                }
+            }
+
+            override fun onDateTimePrompt(
+                session: GeckoSession,
+                prompt: GeckoSession.PromptDelegate.DateTimePrompt,
+            ): GeckoResult<Response> {
+                val kind =
+                    when (prompt.type) {
+                        GeckoSession.PromptDelegate.DateTimePrompt.Type.DATE -> DateTimeKind.DATE
+                        GeckoSession.PromptDelegate.DateTimePrompt.Type.MONTH -> DateTimeKind.MONTH
+                        GeckoSession.PromptDelegate.DateTimePrompt.Type.WEEK -> DateTimeKind.WEEK
+                        GeckoSession.PromptDelegate.DateTimePrompt.Type.TIME -> DateTimeKind.TIME
+                        GeckoSession.PromptDelegate.DateTimePrompt.Type.DATETIME_LOCAL -> DateTimeKind.DATETIME_LOCAL
+                        else -> return skip("datetime", prompt)
+                    }
+                if (abuseGuard.shouldSuppress()) return suppressed(prompt)
+                return present(prompt) { result ->
+                    SitePrompt.DateTime(
                         originHost(),
-                        prompt.mimeTypes.orEmpty().filterNotNull(),
-                        multiple,
-                    ) { uris ->
+                        kind,
+                        prompt.defaultValue.orEmpty(),
+                        prompt.minValue.orEmpty(),
+                        prompt.maxValue.orEmpty(),
+                        prompt.stepValue.orEmpty(),
+                    ) { value ->
                         complete(
                             result,
-                            when {
-                                uris == null -> dismissResponse(prompt)
-                                multiple -> prompt.confirm(appContext, uris.toTypedArray())
-                                else -> prompt.confirm(appContext, uris.first())
-                            },
+                            if (value == null) dismissResponse(prompt) else confirmOrDismiss(prompt) { prompt.confirm(value) },
+                        )
+                    }
+                }
+            }
+
+            override fun onColorPrompt(
+                session: GeckoSession,
+                prompt: GeckoSession.PromptDelegate.ColorPrompt,
+            ): GeckoResult<Response> {
+                if (abuseGuard.shouldSuppress()) return suppressed(prompt)
+                // Page-supplied: keep only valid "#rrggbb", normalised to lowercase.
+                val suggestions =
+                    prompt.predefinedValues.orEmpty()
+                        .mapNotNull { FormValues.parseColor(it)?.let(FormValues::formatColor) }
+                        .distinct()
+                return present(prompt) { result ->
+                    SitePrompt.ColorPick(originHost(), prompt.defaultValue.orEmpty(), suggestions) { value ->
+                        // Anything but a valid colour is not sent to the page.
+                        val color = value?.let { FormValues.parseColor(it) }?.let(FormValues::formatColor)
+                        complete(
+                            result,
+                            if (color == null) dismissResponse(prompt) else confirmOrDismiss(prompt) { prompt.confirm(color) },
                         )
                     }
                 }
             }
 
             // ---- SKIP: no UI for these; each is answered explicitly so no GeckoResult is left pending. ----
-
-            override fun onDateTimePrompt(
-                session: GeckoSession,
-                prompt: GeckoSession.PromptDelegate.DateTimePrompt,
-            ): GeckoResult<Response> = skip("datetime", prompt)
-
-            override fun onColorPrompt(
-                session: GeckoSession,
-                prompt: GeckoSession.PromptDelegate.ColorPrompt,
-            ): GeckoResult<Response> = skip("color", prompt)
 
             override fun onSharePrompt(
                 session: GeckoSession,
@@ -877,6 +988,8 @@ private class GeckoBrowserSession(
         if (closed) return
         // Answer everything first: a pending GeckoResult must not outlive its session.
         queue.dismissAll()
+        // Cancels any file copy still running; dismissAll already answered its prompt.
+        scope.cancel()
         closed = true
         host = null
         runCatching { session.close() }

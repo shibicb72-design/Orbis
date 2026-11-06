@@ -46,6 +46,24 @@
     <string name="prompt_auth_username">User name</string>
     <string name="prompt_auth_password">Password</string>
     <string name="prompt_auth_sign_in">Sign in</string>
+    <string name="prompt_clear">Clear</string>
+    <string name="prompt_next">Next</string>
+    <string name="prompt_back">Back</string>
+    <string name="prompt_picker_out_of_range">That is outside the range this page allows.</string>
+    <string name="prompt_picker_week_summary">Week %1$d, %2$d</string>
+    <string name="prompt_picker_previous_year">Previous year</string>
+    <string name="prompt_picker_next_year">Next year</string>
+    <string name="prompt_picker_seconds">Seconds</string>
+    <string name="prompt_color_preview">Chosen color</string>
+    <string name="prompt_color_suggestions">Suggested by this page</string>
+    <string name="prompt_color_palette">Palette</string>
+    <string name="prompt_color_red">Red</string>
+    <string name="prompt_color_green">Green</string>
+    <string name="prompt_color_blue">Blue</string>
+    <string name="prompt_color_hex">Hex color</string>
+    <string name="prompt_color_hex_invalid">Use the form #rrggbb</string>
+    <string name="prompt_file_preparing">Preparing file&#8230;</string>
+    <string name="prompt_file_failed">Couldn\'t read that file. Nothing was attached.</string>
 
     <string name="link_menu_open_new_tab">Open in new tab</string>
     <string name="link_menu_copy">Copy link</string>

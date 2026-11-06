@@ -1,6 +1,7 @@
 package com.shibi.orbis.engine
 
 import android.net.Uri
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -127,20 +128,88 @@ sealed class SitePrompt(val originHost: String) {
         override fun deliverDismissal() = respond(null)
     }
 
-    /** `<input type=file>`. Capture (camera) requests are ignored; the result is a plain document pick. */
+    /** date/time-like inputs. Values are HTML strings. respond(null) = dismissed; respond("") = field cleared. */
+    class DateTime(
+        originHost: String,
+        val kind: DateTimeKind,
+        val defaultValue: String,
+        val min: String,
+        val max: String,
+        val step: String,
+        private val respond: (String?) -> Unit,
+    ) : SitePrompt(originHost) {
+        fun submit(value: String) = finish { respond(value) }
+
+        fun clear() = finish { respond("") }
+
+        override fun deliverDismissal() = respond(null)
+    }
+
+    /** `<input type=color>`. Page-suggested colours are filtered to valid "#rrggbb" by the engine. */
+    class ColorPick(
+        originHost: String,
+        val defaultValue: String,
+        val suggestions: List<String>,
+        private val respond: (String?) -> Unit,
+    ) : SitePrompt(originHost) {
+        fun submit(value: String) = finish { respond(value) }
+
+        override fun deliverDismissal() = respond(null)
+    }
+
+    /**
+     * `<input type=file>`. Capture (camera) requests are ignored; the result is a plain document pick.
+     * Two stages: the user picks documents, then the engine copies them to app cache ([prepare] ends in [filesReady]
+     * or [prepareFailed]). The prompt stays queued meanwhile, so later prompts wait and Gecko or the user can still
+     * cancel; dismissal stays exactly-once. [respond] gets the cached file Uris, or null when dismissed.
+     */
     class FilePick(
         originHost: String,
         val mimeTypes: List<String>,
         val multiple: Boolean,
+        private val prepare: (List<Uri>) -> Unit,
         private val respond: (List<Uri>?) -> Unit,
     ) : SitePrompt(originHost) {
+        private val _stage = MutableStateFlow(FilePickStage.PICKING)
+
+        /** Main thread writes only. */
+        val stage: StateFlow<FilePickStage> = _stage.asStateFlow()
+
+        private val pickerClaimed = AtomicBoolean(false)
+
+        /** One launch per prompt, kept here because the composition may be recreated. True only for the first caller. */
+        fun claimPickerLaunch(): Boolean = pickerClaimed.compareAndSet(false, true)
+
+        /** The user's picks. Empty means nothing chosen. Ignored once finished or past the picking stage. */
         fun submit(uris: List<Uri>) {
-            if (uris.isEmpty()) dismiss() else finish { respond(uris) }
+            if (uris.isEmpty()) {
+                dismiss()
+                return
+            }
+            if (isFinished || _stage.value != FilePickStage.PICKING) return
+            _stage.value = FilePickStage.PREPARING
+            try {
+                prepare(uris)
+            } catch (e: Exception) {
+                prepareFailed()
+            }
+        }
+
+        /** The copied files, ready for Gecko. After the prompt ended this does nothing. */
+        fun filesReady(files: List<Uri>) {
+            if (files.isEmpty()) dismiss() else finish { respond(files) }
+        }
+
+        /** Copying failed: the UI shows an error and its OK calls [dismiss]. */
+        fun prepareFailed() {
+            if (!isFinished) _stage.value = FilePickStage.FAILED
         }
 
         override fun deliverDismissal() = respond(null)
     }
 }
+
+enum class FilePickStage { PICKING, PREPARING, FAILED }
 
 data class AuthCredentials(val username: String, val password: String)
 
@@ -192,12 +261,32 @@ fun flattenChoices(nodes: List<ChoiceNode>): List<ChoiceOption> {
 }
 
 /**
- * Mime types for the system document picker. Gecko may pass file extensions (".pdf") or blanks, which the picker
- * does not understand; anything without a slash is dropped, and an empty result means "any file".
+ * Mime types for the system document picker. Gecko may pass mime types, file extensions (".pdf") or blanks. A
+ * `type/subtype` token stays; a `.ext` token maps through [extensionToMime] (lowercased, no dot); blanks are ignored.
+ * If any other token cannot become a mime type the answer is "any file": dropping it would stop the user choosing the
+ * very file type the page accepts. An empty result is also "any file".
  */
-fun pickerMimeTypes(requested: List<String>): List<String> {
-    val usable = requested.map { it.trim() }.filter { it.contains('/') && !it.contains(' ') }.distinct()
-    return usable.ifEmpty { listOf("*/*") }
+fun pickerMimeTypes(requested: List<String>, extensionToMime: (String) -> String? = { null }): List<String> {
+    val any = listOf("*/*")
+    val out = LinkedHashSet<String>()
+    for (raw in requested) {
+        val token = raw.trim()
+        if (token.isEmpty()) continue
+        val mime =
+            if (token.startsWith('.')) {
+                token.substring(1).lowercase(Locale.ROOT).takeIf { it.isNotEmpty() }?.let(extensionToMime)?.trim()
+            } else {
+                token
+            }
+        if (mime == null || !isMimeType(mime)) return any
+        out += mime
+    }
+    return if (out.isEmpty()) any else out.toList()
+}
+
+private fun isMimeType(s: String): Boolean {
+    val slash = s.indexOf('/')
+    return slash > 0 && slash < s.length - 1 && s.indexOf('/', slash + 1) < 0 && s.none { it.isWhitespace() }
 }
 
 /**

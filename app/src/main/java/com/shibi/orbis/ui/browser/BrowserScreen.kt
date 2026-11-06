@@ -1,6 +1,7 @@
 package com.shibi.orbis.ui.browser
 
 import android.view.ViewGroup
+import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -50,6 +51,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -88,6 +90,11 @@ private fun isBlankAddress(url: String) = url.isEmpty() || url == "about:blank"
 /** Remembers which session the single content view currently shows, so the view update is idempotent. */
 private class AttachedSession {
     var session: BrowserSession? = null
+}
+
+/** The file prompt whose system picker this composition launched; plain memory, so a recreation starts empty. */
+private class LaunchedPick {
+    var prompt: SitePrompt.FilePick? = null
 }
 
 @Composable
@@ -172,24 +179,28 @@ private fun BrowserContent(
         }
     }
 
-    // File pick: the system document picker is the UI; the prompt is answered from its result.
-    var filePrompt by remember { mutableStateOf<SitePrompt.FilePick?>(null) }
+    // File pick: the system document picker is the UI; the prompt is answered from its result. The result goes to the
+    // prompt that launched the picker. After a recreation the holder is empty, so it falls back to the current one.
+    // Answering a prompt that already ended does nothing, and a newer prompt is never touched by an older result.
+    val currentFilePick by rememberUpdatedState(prompt as? SitePrompt.FilePick)
+    val launchedPick = remember { LaunchedPick() }
     val pickOne =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            filePrompt?.let { if (uri == null) it.dismiss() else it.submit(listOf(uri)) }
+            val target = launchedPick.prompt ?: currentFilePick
+            if (uri == null) target?.dismiss() else target?.submit(listOf(uri))
         }
     val pickMany =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-            filePrompt?.submit(uris)
+            (launchedPick.prompt ?: currentFilePick)?.submit(uris)
         }
     LaunchedEffect(prompt) {
-        val p = prompt
-        if (p is SitePrompt.FilePick) {
-            filePrompt = p
-            val types = pickerMimeTypes(p.mimeTypes).toTypedArray()
-            runCatching { if (p.multiple) pickMany.launch(types) else pickOne.launch(types) }
-                .onFailure { p.dismiss() }
-        }
+        val p = prompt as? SitePrompt.FilePick ?: return@LaunchedEffect
+        // One launch per prompt, even if the composition was recreated or the user came back to this tab.
+        if (p.isFinished || !p.claimPickerLaunch()) return@LaunchedEffect
+        launchedPick.prompt = p
+        val types = pickerMimeTypes(p.mimeTypes) { ext -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) }
+        runCatching { if (p.multiple) pickMany.launch(types.toTypedArray()) else pickOne.launch(types.toTypedArray()) }
+            .onFailure { p.dismiss() }
     }
 
     val attached = remember { AttachedSession() }

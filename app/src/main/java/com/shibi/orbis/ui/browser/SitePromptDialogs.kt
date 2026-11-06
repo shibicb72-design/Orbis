@@ -6,11 +6,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -29,13 +31,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shibi.orbis.R
+import com.shibi.orbis.engine.FilePickStage
 import com.shibi.orbis.engine.SitePrompt
 
 /**
  * The dialog for one site prompt. The title names the origin the browser itself committed ([SitePrompt.originHost]);
- * page-supplied text only ever appears in the body. A file pick has no dialog: the system picker is its UI
- * (see BrowserScreen), so it renders nothing here.
+ * page-supplied text only ever appears in the body. Date, time and colour prompts have their own pickers
+ * (FormPickerDialogs); a file pick uses the system picker (see BrowserScreen) and only shows its progress here.
  */
 @Composable
 fun SitePromptDialog(prompt: SitePrompt) {
@@ -143,7 +147,42 @@ fun SitePromptDialog(prompt: SitePrompt) {
                 dismissButton = { TextButton(onClick = prompt::cancel) { Text(stringResource(R.string.prompt_cancel)) } },
             ) { Text(stringResource(R.string.prompt_repost_message)) }
 
-        is SitePrompt.FilePick -> Unit
+        is SitePrompt.DateTime -> DateTimePromptDialog(prompt, title)
+
+        is SitePrompt.ColorPick -> ColorPromptDialog(prompt, title)
+
+        is SitePrompt.FilePick -> FilePickDialog(prompt, title)
+    }
+}
+
+/**
+ * A file pick shows nothing while the system picker is open (BrowserScreen launches it). After the user chose, the
+ * engine copies the files and the prompt shows that progress, or the failure.
+ */
+@Composable
+private fun FilePickDialog(prompt: SitePrompt.FilePick, title: String) {
+    val stage by prompt.stage.collectAsStateWithLifecycle()
+    when (stage) {
+        FilePickStage.PICKING -> Unit
+
+        FilePickStage.PREPARING ->
+            PromptDialog(
+                title = title,
+                onDismiss = prompt::dismiss,
+                confirmButton = { TextButton(onClick = prompt::dismiss) { Text(stringResource(R.string.prompt_cancel)) } },
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                    Text(stringResource(R.string.prompt_file_preparing), Modifier.padding(start = 16.dp))
+                }
+            }
+
+        FilePickStage.FAILED ->
+            PromptDialog(
+                title = title,
+                onDismiss = prompt::dismiss,
+                confirmButton = { TextButton(onClick = prompt::dismiss) { Text(stringResource(R.string.prompt_ok)) } },
+            ) { Text(stringResource(R.string.prompt_file_failed)) }
     }
 }
 
