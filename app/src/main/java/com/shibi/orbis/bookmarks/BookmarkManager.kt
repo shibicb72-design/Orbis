@@ -50,6 +50,7 @@ class BookmarkManager(
         class Remove(val url: String) : Change
         class Edit(val oldUrl: String, val title: String, val newUrl: String) : Change
         class Import(val parsed: List<ParsedBookmark>, val at: Long) : Change
+        object Clear : Change
     }
 
     // ---- load / persist ------------------------------------------------------------------------------------
@@ -163,6 +164,15 @@ class BookmarkManager(
         return ImportResult(added, parsed.skipped + (parsed.items.size - added))
     }
 
+    /**
+     * Removes every bookmark and writes the empty list at once. Made before the load has finished it is replayed on the
+     * stored list, so the stored bookmarks go too (and are written over as soon as the load is done).
+     */
+    fun clearAll() {
+        apply(Change.Clear)
+        committed(Change.Clear)
+    }
+
     // ---- the one place the list is edited -----------------------------------------------------------------
 
     /** Replays [change] on the current list (the result of the original call was already given). */
@@ -172,6 +182,10 @@ class BookmarkManager(
             is Change.Remove -> applyRemove(change)
             is Change.Edit -> applyEdit(change)
             is Change.Import -> applyImport(change)
+            Change.Clear -> {
+                items.clear()
+                urls.clear()
+            }
         }
     }
 

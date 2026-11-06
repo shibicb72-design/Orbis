@@ -711,6 +711,142 @@ class DownloadManagerTest {
         assertTrue(store.load().isEmpty())
     }
 
+    // ---- clearIndex ----
+
+    @Test
+    fun clearIndexForgetsSettledEntriesButDeletesNoFile() = runTest {
+        val m = manager()
+        val done = m.start(FakeDownload(contentDisposition = cd("keep.txt"), body = { ChunkStream(bytes("kept")) }))
+        val failed = m.start(FakeDownload(contentDisposition = cd("f.bin"), body = { null }))
+        val cancelled = m.start(FakeDownload(contentDisposition = cd("c.bin"), body = { ChunkStream(bytes("x")) }))
+        m.cancel(cancelled)
+        advanceUntilIdle()
+        assertEquals(DownloadStatus.COMPLETED, m.byId(done).status)
+        assertEquals(DownloadStatus.FAILED, m.byId(failed).status)
+        assertEquals(DownloadStatus.CANCELLED, m.byId(cancelled).status)
+
+        val removed = m.clearIndex()
+        advanceUntilIdle()
+
+        assertEquals(setOf(done, failed, cancelled), removed.toSet())
+        assertEquals(3, removed.size)
+        assertTrue(m.entries.value.isEmpty())
+        assertTrue(store.load().isEmpty())
+        assertEquals("kept", File(dir, "keep.txt").readText())
+    }
+
+    @Test
+    fun clearIndexOnAnEmptyListIsHarmless() = runTest {
+        val m = manager()
+        assertTrue(m.clearIndex().isEmpty())
+        advanceUntilIdle()
+        assertTrue(m.entries.value.isEmpty())
+    }
+
+    @Test
+    fun clearIndexLeavesARunningDownloadListedAndItCompletes() = runTest {
+        lateinit var m: DownloadManager
+        var removed: List<Long>? = null
+        val stream = ChunkStream(bytes("0123456789abcdef"), chunk = 4) { n -> if (n == 2) removed = m.clearIndex() }
+        m = manager()
+        val old = m.start(FakeDownload(contentDisposition = cd("old.txt"), body = { ChunkStream(bytes("old")) }))
+        advanceUntilIdle()
+        val dl = FakeDownload(contentDisposition = cd("r.bin"), contentLength = 16, body = { stream })
+        val id = m.start(dl)
+        advanceUntilIdle()
+
+        assertEquals(listOf(old), removed)
+        val e = m.only()
+        assertEquals(id, e.id)
+        assertEquals(DownloadStatus.COMPLETED, e.status)
+        assertEquals("0123456789abcdef", File(dir, "r.bin").readText())
+        assertEquals(1, dl.openCalls)
+        assertEquals(0, dl.discardCalls)
+        assertEquals(listOf(e), store.load())
+        assertEquals("old", File(dir, "old.txt").readText())
+    }
+
+    @Test
+    fun clearIndexNeverCancelsOrTouchesARunningDownload() = runTest {
+        val m = manager()
+        val dl = FakeDownload(contentDisposition = cd("run.bin"), body = { ChunkStream(bytes("data")) })
+        val id = m.start(dl)
+        // Started but the copy job has not run yet: still listed as running.
+        assertTrue(m.clearIndex().isEmpty())
+        assertEquals(DownloadStatus.IN_PROGRESS, m.byId(id).status)
+        advanceUntilIdle()
+        assertEquals(DownloadStatus.COMPLETED, m.byId(id).status)
+        assertEquals(0, dl.discardCalls)
+        assertEquals("data", File(dir, "run.bin").readText())
+    }
+
+    @Test
+    fun clearIndexBeforeRestoreStopsTheStoredEntriesFromReappearing() = runTest {
+        dir.mkdirs()
+        val finished = File(dir, "done.txt").also { it.writeText("done") }
+        val part = File(dir, "half.bin.part").also { it.writeText("partial") }
+        store.save(
+            listOf(
+                DownloadEntry(4, "done.txt", "text/plain", "example.com", 4, 4, DownloadStatus.COMPLETED, finished.absolutePath, 100),
+                DownloadEntry(5, "half.bin", "application/octet-stream", null, 100, 7, DownloadStatus.IN_PROGRESS, File(dir, "half.bin").absolutePath, 200),
+                DownloadEntry(6, "gone.bin", "application/octet-stream", null, 1, 0, DownloadStatus.FAILED, null, 300),
+            ),
+        )
+        val m = manager()
+        m.restore()
+        // The stored index has not been read yet.
+        assertTrue(m.clearIndex().isEmpty())
+        advanceUntilIdle()
+
+        assertTrue(m.entries.value.isEmpty())
+        assertTrue(store.load().isEmpty())
+        // Files stay, and a dead part file is still cleaned up as restore does today.
+        assertTrue(finished.exists())
+        assertFalse(part.exists())
+        // Ids still move past the stored ones.
+        val id = m.start(FakeDownload(contentDisposition = cd("n.txt"), body = { ChunkStream(bytes("x")) }))
+        assertTrue(id > 6)
+    }
+
+    @Test
+    fun clearIndexBeforeRestoreKeepsADownloadStartedMeanwhile() = runTest {
+        store.save(listOf(DownloadEntry(3, "old.txt", "text/plain", null, 1, 1, DownloadStatus.FAILED, null, 5)))
+        val m = manager()
+        m.restore()
+        val id = m.start(FakeDownload(contentDisposition = cd("new.txt"), body = { ChunkStream(bytes("x")) }))
+        assertTrue(m.clearIndex().isEmpty())
+        advanceUntilIdle()
+        assertEquals(listOf(id), m.entries.value.map { it.id })
+        assertEquals(DownloadStatus.COMPLETED, m.byId(id).status)
+        assertEquals(listOf(id), store.load().map { it.id })
+    }
+
+    @Test
+    fun aClearAfterRestoreOnlyRemovesWhatIsListed() = runTest {
+        store.save(listOf(DownloadEntry(3, "old.txt", "text/plain", null, 1, 1, DownloadStatus.FAILED, null, 5)))
+        val m = manager()
+        m.restore()
+        advanceUntilIdle()
+        assertEquals(listOf(3L), m.entries.value.map { it.id })
+        assertEquals(listOf(3L), m.clearIndex())
+        advanceUntilIdle()
+        assertTrue(m.entries.value.isEmpty())
+        assertTrue(store.load().isEmpty())
+    }
+
+    @Test
+    fun clearIndexLogsStatusOnly() = runTest {
+        val m = manager()
+        m.start(FakeDownload(url = "https://secret-host.example.net/topsecret.pdf", contentDisposition = cd("topsecret-name.pdf"), body = { ChunkStream(bytes("ok")) }))
+        advanceUntilIdle()
+        m.clearIndex()
+        advanceUntilIdle()
+        for (line in logs) {
+            assertFalse(line, line.contains("secret", ignoreCase = true))
+            assertFalse(line, line.contains("example"))
+        }
+    }
+
     private fun waitUntil(what: String, condition: () -> Boolean) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
         while (System.nanoTime() < deadline) {

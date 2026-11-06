@@ -41,6 +41,7 @@ import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.GeckoView
+import org.mozilla.geckoview.StorageController
 import org.mozilla.geckoview.WebExtension
 import org.mozilla.geckoview.WebExtensionController
 import org.mozilla.geckoview.WebRequestError
@@ -148,6 +149,34 @@ class GeckoEngineImpl(
         }
     }
 
+    override suspend fun clearProfileData(cookiesAndSiteData: Boolean, cache: Boolean): Boolean {
+        val flags = profileClearFlags(cookiesAndSiteData, cache)
+        if (flags == 0L) return true
+        val storage = runtime?.storageController
+        if (storage == null) {
+            debugLog.log("GeckoEngine", "profile data clear skipped: engine not running")
+            return false
+        }
+        return try {
+            // clearData has no private scope, which is why clearPrivateData above never uses it. Here it is used on
+            // purpose, and that reach into private storage is why the caller must have no private tab open.
+            suspendCancellableCoroutine { cont ->
+                storage.clearData(flags).accept(
+                    { if (cont.isActive) cont.resume(true) },
+                    { error ->
+                        debugLog.log("GeckoEngine", "profile data clear failed: ${error?.javaClass?.simpleName}")
+                        if (cont.isActive) cont.resume(false)
+                    },
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            debugLog.log("GeckoEngine", "profile data clear failed: ${e.javaClass.simpleName}")
+            false
+        }
+    }
+
     private fun newPrivateContextId() = "orbis-private-${UUID.randomUUID()}"
 
     /**
@@ -211,6 +240,21 @@ class GeckoEngineImpl(
 
     private fun requireRuntime(): GeckoRuntime =
         runtime ?: error("GeckoRuntime not warmed up")
+}
+
+/**
+ * The StorageController.ClearFlags for [GeckoEngineImpl.clearProfileData]: cookies, auth sessions and DOM storage for
+ * cookies and site data, all caches for the cache. Deliberately never ALL, SITE_DATA, PERMISSIONS or SITE_SETTINGS: the
+ * site permission answers and the content blocker's settings must survive.
+ */
+internal fun profileClearFlags(cookiesAndSiteData: Boolean, cache: Boolean): Long {
+    var flags = 0L
+    if (cookiesAndSiteData) {
+        flags = flags or StorageController.ClearFlags.COOKIES or StorageController.ClearFlags.AUTH_SESSIONS or
+            StorageController.ClearFlags.DOM_STORAGES
+    }
+    if (cache) flags = flags or StorageController.ClearFlags.ALL_CACHES
+    return flags
 }
 
 private typealias Response = GeckoSession.PromptDelegate.PromptResponse

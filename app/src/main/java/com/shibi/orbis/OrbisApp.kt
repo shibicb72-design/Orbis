@@ -7,9 +7,13 @@ import android.os.SystemClock
 import android.webkit.MimeTypeMap
 import com.shibi.orbis.bookmarks.BookmarkManager
 import com.shibi.orbis.bookmarks.FileBookmarkStore
+import com.shibi.orbis.clear.BrowsingDataClearer
+import com.shibi.orbis.clear.ClearController
+import com.shibi.orbis.clear.ClearTargets
 import com.shibi.orbis.debug.DebugLog
 import com.shibi.orbis.downloads.DownloadForegroundController
 import com.shibi.orbis.downloads.DownloadManager
+import com.shibi.orbis.downloads.DownloadNotifications
 import com.shibi.orbis.downloads.DownloadStore
 import com.shibi.orbis.engine.AndroidPermissionBroker
 import com.shibi.orbis.engine.BrowserEngine
@@ -115,6 +119,30 @@ class OrbisApp : Application() {
                 now = System::currentTimeMillis,
                 extensionForMime = { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) },
             )
+        // Everything here runs on the main thread (appScope is Main). Site permissions and uBO are not touched.
+        val clearTargets =
+            object : ClearTargets {
+                override fun clearHistory() = history.clearAll()
+
+                override fun closeNormalTabs() = tabs.closeAllNormal()
+
+                override fun clearDownloadsList() {
+                    // Result notifications name the file, so the cleared ones go with their entries.
+                    DownloadNotifications.cancelResults(this@OrbisApp, downloads.clearIndex())
+                }
+
+                override fun clearBookmarks() = bookmarks.clearAll()
+
+                override fun hasPrivateTabs() = tabs.hasPrivateTabs
+
+                override suspend fun clearEngine(cookiesAndSiteData: Boolean, cache: Boolean) =
+                    engine.clearProfileData(cookiesAndSiteData, cache)
+            }
+        val clear =
+            ClearController(
+                clearer = BrowsingDataClearer(clearTargets, log = { debugLog.log("Clear", it) }),
+                scope = appScope,
+            )
         container =
             AppContainer(
                 debugLog = debugLog,
@@ -125,6 +153,7 @@ class OrbisApp : Application() {
                 sitePermissions = sitePermissions,
                 bookmarks = bookmarks,
                 history = history,
+                clear = clear,
             )
         // Sessions only appear after the onboarding decision; this has long finished by then.
         sitePermissions.load()
@@ -163,6 +192,8 @@ class AppContainer(
     val sitePermissions: SitePermissionDecisions,
     val bookmarks: BookmarkManager,
     val history: HistoryManager,
+    /** Clear browsing data. Runs in the app scope, so a clear in flight outlives the screen that started it. */
+    val clear: ClearController,
 ) {
     /**
      * An http(s) URL another app asked us to open. Set by MainActivity, consumed (and cleared) by BrowserScreen, which

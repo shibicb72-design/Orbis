@@ -51,6 +51,9 @@ class DownloadManager(
     private val reservedKeys = HashSet<String>()
     private val saveLock = Any()
 
+    /** Set by [clearIndex]; makes [restore] drop the stored entries instead of merging them back in. */
+    private val indexCleared = AtomicBoolean(false)
+
     private class Active(val id: Long, val download: IncomingDownload, val baseName: String, val total: Long) {
         /** Set by whoever takes responsibility for the body (copy job) or for discarding it (cancel/scope death). */
         val claimed = AtomicBoolean(false)
@@ -78,8 +81,12 @@ class DownloadManager(
                     }
                 }
             fixed.maxOfOrNull { it.id }?.let { max -> nextId.updateAndGet { maxOf(it, max) } }
-            // Merge rather than replace: a download may already have started while the index was loading.
-            _entries.update { current -> sorted(current + fixed.filter { f -> current.none { it.id == f.id } }) }
+            // Merge rather than replace: a download may already have started while the index was loading. Everything
+            // stored is settled by now, so a list cleared in the meantime must not get it back. The flag is read inside
+            // the update: clearIndex sets it before it edits the list, so one of the two always sees the other.
+            _entries.update { current ->
+                if (indexCleared.get()) current else sorted(current + fixed.filter { f -> current.none { it.id == f.id } })
+            }
             saveNow()
             log("downloads restored")
         }
@@ -154,6 +161,24 @@ class DownloadManager(
             if (entry.status == DownloadStatus.COMPLETED) entry.filePath?.let { deleteOwned(File(it)) }
             saveNow()
         }
+    }
+
+    /**
+     * Empties the list but for downloads still running, which stay listed and carry on. No file is deleted and nothing
+     * is cancelled: only the index forgets the finished, failed and cancelled entries. Returns the ids removed.
+     * A clear made before [restore] has read the stored index also drops what it then reads.
+     */
+    fun clearIndex(): List<Long> {
+        indexCleared.set(true)
+        var removed = emptyList<Long>()
+        _entries.update { list ->
+            val (running, settled) = list.partition { it.status == DownloadStatus.IN_PROGRESS || active.containsKey(it.id) }
+            removed = settled.map { it.id }
+            running
+        }
+        scope.launch(io) { saveNow() }
+        log("download list cleared")
+        return removed
     }
 
     // ---- copy job ----

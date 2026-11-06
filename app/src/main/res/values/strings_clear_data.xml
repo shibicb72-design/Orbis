@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="clear_data_title">Clear browsing data</string>
+    <string name="clear_data_summary">History, cookies, cache, tabs and more</string>
+
+    <string name="clear_history">Browsing history</string>
+    <string name="clear_cookies">Cookies &amp; site data</string>
+    <string name="clear_cookies_summary">Signs you out of most sites. Pages that are open may keep showing until you reload them. A download in progress may stop.</string>
+    <string name="clear_cache">Cached images and files</string>
+    <string name="clear_downloads">Downloads list</string>
+    <string name="clear_downloads_summary">Only the list. Downloaded files stay on your device, and running downloads stay listed.</string>
+    <string name="clear_tabs">Open tabs</string>
+    <string name="clear_tabs_summary">Normal tabs only. Private tabs stay open.</string>
+    <string name="clear_bookmarks_section">Cannot be undone</string>
+    <string name="clear_bookmarks">Bookmarks</string>
+    <string name="clear_bookmarks_summary">Off unless you tick it. You will be asked again, and deleted bookmarks cannot be brought back.</string>
+
+    <string name="clear_private_notice">Cookies and cache cannot be cleared separately from private tabs in this browser engine. Close your private tabs first, or untick Cookies &amp; site data and Cached images and files.</string>
+    <string name="clear_close_private">Close private tabs</string>
+
+    <string name="clear_button">Clear data</string>
+    <string name="clear_running">Clearing…</string>
+
+    <string name="clear_confirm_title">Clear this data?</string>
+    <string name="clear_confirm_body">This will clear:\n%1$s</string>
+    <string name="clear_confirm_ok">Clear</string>
+    <string name="clear_cancel">Cancel</string>
+
+    <string name="clear_bookmarks_confirm_title">Delete all bookmarks?</string>
+    <string name="clear_bookmarks_confirm_none">You have no saved bookmarks. This cannot be undone.</string>
+    <plurals name="clear_bookmarks_confirm_body">
+        <item quantity="one">Your %1$d bookmark will be deleted from this device. This cannot be undone.</item>
+        <item quantity="other">All %1$d bookmarks will be deleted from this device. This cannot be undone.</item>
+    </plurals>
+    <string name="clear_bookmarks_confirm_ok">Delete bookmarks</string>
+
+    <string name="clear_result_done">Browsing data cleared.</string>
+    <string name="clear_result_blocked">Nothing was cleared, because private tabs are open. Close them and try again.</string>
+    <string name="clear_result_failed">Could not clear: %1$s.</string>
+    <string name="clear_result_unconfirmed">Could not be confirmed cleared: %1$s.</string>
+</resources>

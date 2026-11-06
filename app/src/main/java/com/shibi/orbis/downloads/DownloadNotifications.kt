@@ -90,6 +90,14 @@ object DownloadNotifications {
         runCatching { NotificationManagerCompat.from(context).notify(resultId(entry.id), notification) }
     }
 
+    /** Removes the result notifications of cleared downloads: they name the file. */
+    fun cancelResults(context: Context, downloadIds: List<Long>) {
+        runCatching {
+            val manager = NotificationManagerCompat.from(context)
+            downloadIds.forEach { manager.cancel(resultId(it)) }
+        }
+    }
+
     private fun resultId(downloadId: Long): Int = RESULT_ID_FLOOR + (downloadId.hashCode() and 0x3FFFFFFF)
 
     private fun publicVersion(context: Context, text: String, ongoing: Boolean): Notification =

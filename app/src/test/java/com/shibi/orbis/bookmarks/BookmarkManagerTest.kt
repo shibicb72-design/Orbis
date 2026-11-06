@@ -359,6 +359,64 @@ class BookmarkManagerTest {
         assertEquals("A2", m.entries.value[0].title)
     }
 
+    // ---- clear all ---------------------------------------------------------------------------------------------
+
+    @Test
+    fun clearAllEmptiesTheListFreesTheUrlsAndWritesAtOnce() {
+        val store = MemBookmarkStore(stored(3))
+        val m = manager(store)
+        m.clearAll()
+        assertTrue(m.entries.value.isEmpty())
+        assertFalse(m.isBookmarked("https://s1.example/"))
+        settle()
+        assertEquals(1, store.saves.size)
+        assertTrue(store.data.isEmpty())
+        // The same URL can be bookmarked again afterwards.
+        assertEquals(AddResult.ADDED, m.add("https://s1.example/", "again"))
+        settle()
+        assertEquals(listOf("https://s1.example/"), store.data.map { it.url })
+    }
+
+    @Test
+    fun clearAllOnAnEmptyListStillWritesTheEmptyList() {
+        val store = MemBookmarkStore()
+        val m = manager(store)
+        m.clearAll()
+        settle()
+        assertEquals(1, store.saves.size)
+        assertTrue(store.saves.single().isEmpty())
+    }
+
+    @Test
+    fun clearAllBeforeLoadWipesTheStoredListAndLaterEarlyChanges() {
+        val store = MemBookmarkStore(stored(3))
+        val m = manager(store, load = false)
+        m.load()
+        m.add("https://early.example/", "before the clear")
+        m.clearAll()
+        m.add("https://after.example/", "after the clear")
+        // Nothing may be written until the stored list has been read.
+        m.flush()
+        assertTrue(store.saves.isEmpty())
+        settle()
+        assertEquals(listOf("https://after.example/"), urls(m))
+        assertEquals(listOf("https://after.example/"), store.data.map { it.url })
+        assertEquals(1, store.saves.size)
+    }
+
+    @Test
+    fun clearAllBeforeLoadWithNothingElseLeavesAnEmptyStore() {
+        val store = MemBookmarkStore(stored(2))
+        val m = manager(store, load = false)
+        m.load()
+        m.clearAll()
+        assertTrue(m.entries.value.isEmpty())
+        settle()
+        assertTrue(m.entries.value.isEmpty())
+        assertTrue(store.data.isEmpty())
+        assertFalse(m.isBookmarked("https://s1.example/"))
+    }
+
     // ---- logging -----------------------------------------------------------------------------------------------
 
     @Test

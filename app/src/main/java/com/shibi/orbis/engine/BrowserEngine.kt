@@ -30,6 +30,14 @@ interface BrowserEngine {
      * last private session has closed. Never touches the normal profile. Main thread.
      */
     fun clearPrivateData()
+    /**
+     * Clears the engine's cookies and site data ([cookiesAndSiteData]) and/or its caches ([cache]). Never touches site
+     * permission answers or settings. Gecko has no normal-only scope for this: it reaches private storage too, so a
+     * caller must make sure no private tab is open. Clearing cookies and site data may also drop open network
+     * connections, such as a running download. Main thread. Returns true only when Gecko confirmed the clear; false if
+     * the engine is not running, refused, or failed. Selecting neither returns true without calling Gecko.
+     */
+    suspend fun clearProfileData(cookiesAndSiteData: Boolean, cache: Boolean): Boolean
     fun shutdown()
 }
 

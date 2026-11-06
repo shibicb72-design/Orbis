@@ -8,10 +8,12 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.shibi.orbis.AppContainer
+import com.shibi.orbis.clear.ClearState
 import com.shibi.orbis.ui.bookmarks.BookmarksScreen
 import com.shibi.orbis.ui.browser.BrowserScreen
 import com.shibi.orbis.ui.downloads.DownloadsScreen
 import com.shibi.orbis.ui.history.HistoryScreen
+import com.shibi.orbis.ui.settings.ClearBrowsingDataScreen
 import com.shibi.orbis.ui.settings.DebugLogScreen
 import com.shibi.orbis.ui.settings.SettingsScreen
 import com.shibi.orbis.ui.settings.SitePermissionsScreen
@@ -27,6 +29,7 @@ private object Routes {
     const val ErrorLog = "settings/error_log"
     const val Ubo = "settings/ubo"
     const val SitePermissions = "settings/site_permissions"
+    const val ClearData = "settings/clear_data"
 }
 
 @Composable
@@ -39,15 +42,19 @@ fun OrbisRoot(container: AppContainer) {
         return
     }
     // A link from another app: leave Settings/Downloads/etc. so the browser screen is shown and can take it.
+    // Both of these wait while Clear browsing data is running: leaving that screen early could let a private tab be
+    // opened while the engine is still clearing.
+    val clearState by container.clear.state.collectAsStateWithLifecycle()
+    val clearRunning = clearState is ClearState.Running
     val pendingExternalUrl by container.pendingExternalUrl.collectAsStateWithLifecycle()
-    LaunchedEffect(pendingExternalUrl) {
-        if (pendingExternalUrl != null) nav.popBackStack(Routes.Browser, inclusive = false)
+    LaunchedEffect(pendingExternalUrl, clearRunning) {
+        if (pendingExternalUrl != null && !clearRunning) nav.popBackStack(Routes.Browser, inclusive = false)
     }
     // A download notification was tapped: open the Downloads screen once. Reached only after onboarding, so an
     // earlier tap simply waits.
     val pendingShowDownloads by container.pendingShowDownloads.collectAsStateWithLifecycle()
-    LaunchedEffect(pendingShowDownloads) {
-        if (pendingShowDownloads) {
+    LaunchedEffect(pendingShowDownloads, clearRunning) {
+        if (pendingShowDownloads && !clearRunning) {
             container.pendingShowDownloads.value = false
             nav.popBackStack(Routes.Browser, inclusive = false)
             nav.navigate(Routes.Downloads) { launchSingleTop = true }
@@ -100,6 +107,15 @@ fun OrbisRoot(container: AppContainer) {
                 onOpenErrorLog = { nav.navigate(Routes.ErrorLog) },
                 onOpenUbo = { nav.navigate(Routes.Ubo) },
                 onOpenSitePermissions = { nav.navigate(Routes.SitePermissions) },
+                onOpenClearData = { nav.navigate(Routes.ClearData) },
+            )
+        }
+        composable(Routes.ClearData) {
+            ClearBrowsingDataScreen(
+                tabs = container.tabs,
+                bookmarks = container.bookmarks,
+                controller = container.clear,
+                onBack = { nav.popBackStack() },
             )
         }
         composable(Routes.SitePermissions) {

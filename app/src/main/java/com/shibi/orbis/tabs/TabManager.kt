@@ -156,6 +156,9 @@ class TabManager(
                 log("restored ${list.size} tabs")
             }
             _ready.value = true
+            // The tabs changed before the stored list arrived (for example they were all closed): the file still holds
+            // the old ones, so replace them now rather than at the next change.
+            if (!pristine) enqueueWrite()
         }
     }
 
@@ -361,20 +364,25 @@ class TabManager(
         return id
     }
 
-    fun close(id: Long) {
-        val index = indexOf(id)
-        if (index < 0) return
-        val tab = list[index]
-        observers.remove(id)?.cancel()
+    /** Ends [tab]'s session and drops what the UI still holds for it (a pending download, its link menu). */
+    private fun dispose(tab: Tab) {
+        observers.remove(tab.id)?.cancel()
         tab.session?.let {
             it.host = null
             it.close()
         }
-        _pendingDownload.value?.takeIf { it.sourceTabId == id }?.let {
+        _pendingDownload.value?.takeIf { it.sourceTabId == tab.id }?.let {
             it.download.discard()
             _pendingDownload.value = null
         }
-        if (_linkMenu.value?.tabId == id) _linkMenu.value = null
+        if (_linkMenu.value?.tabId == tab.id) _linkMenu.value = null
+    }
+
+    fun close(id: Long) {
+        val index = indexOf(id)
+        if (index < 0) return
+        val tab = list[index]
+        dispose(tab)
         list.removeAt(index)
         when {
             list.isEmpty() -> {
@@ -415,6 +423,31 @@ class TabManager(
             lastNormalSelectedId?.takeIf { indexOf(it) >= 0 }?.let { select(it) }
         }
         for (id in ids) close(id)
+    }
+
+    /** True while any private tab is open. */
+    val hasPrivateTabs: Boolean get() = list.any { it.isPrivate }
+
+    /**
+     * Closes every normal tab (Clear browsing data) and leaves exactly one fresh blank normal tab. Private tabs and their
+     * sessions are untouched, and the end-of-private-browsing callback never fires. A selected private tab stays
+     * selected, and the blank tab then has no session until it is selected; otherwise the blank tab is selected and
+     * opened. The stored tab list is rewritten at once, so no old address stays on disk.
+     */
+    fun closeAllNormal() {
+        val privateSelected = list.firstOrNull { it.id == selectedId }?.isPrivate == true
+        for (tab in list.filter { !it.isPrivate }) dispose(tab)
+        list.removeAll { !it.isPrivate }
+        val fresh = Tab(nextId++, null, "", "", false, null, null)
+        list += fresh
+        lastNormalSelectedId = fresh.id
+        if (!privateSelected) {
+            selectedId = fresh.id
+            ensureSession(fresh.id)?.session?.setActive(foreground)
+        }
+        changed()
+        // Not ready yet: the write is skipped, and restore() writes once the stored list has been read.
+        if (_ready.value) flush()
     }
 
     private fun endPrivateBrowsing() {
