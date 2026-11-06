@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="menu_add_bookmark">Add bookmark</string>
+    <string name="menu_remove_bookmark">Remove bookmark</string>
+    <string name="menu_bookmarks">Bookmarks</string>
+    <string name="menu_history">History</string>
+
+    <string name="bookmark_added">Bookmark added</string>
+    <string name="bookmark_removed">Bookmark removed</string>
+    <string name="bookmark_exists">Already bookmarked</string>
+    <string name="bookmark_full">Too many bookmarks. Delete some to add more.</string>
+    <string name="bookmark_invalid">Can\'t bookmark this page</string>
+
+    <string name="bookmarks_title">Bookmarks</string>
+    <string name="bookmarks_search_hint">Search bookmarks</string>
+    <string name="bookmarks_empty">No bookmarks yet. Open a page and choose Add bookmark from the menu.</string>
+    <string name="bookmarks_no_matches">No bookmarks match your search.</string>
+    <string name="bookmarks_menu">Bookmark options</string>
+    <string name="bookmarks_export">Export</string>
+    <string name="bookmarks_import">Import</string>
+    <string name="bookmarks_row_menu">Options for %1$s</string>
+    <string name="bookmarks_open_new_tab">Open in new tab</string>
+    <string name="bookmarks_edit">Edit</string>
+    <string name="bookmarks_delete">Delete</string>
+    <string name="bookmarks_edit_title">Edit bookmark</string>
+    <string name="bookmarks_field_title">Title</string>
+    <string name="bookmarks_field_address">Address</string>
+    <string name="bookmarks_save">Save</string>
+    <string name="bookmarks_cancel">Cancel</string>
+    <string name="bookmarks_error_invalid">Enter a valid http or https address.</string>
+    <string name="bookmarks_error_duplicate">Another bookmark already uses this address.</string>
+    <string name="bookmarks_error_missing">This bookmark no longer exists.</string>
+    <string name="bookmarks_imported">Imported %1$d, skipped %2$d</string>
+    <string name="bookmarks_import_failed">Couldn\'t import that file.</string>
+    <string name="bookmarks_import_too_big">That file is too big to import (the limit is 10 MB).</string>
+    <string name="bookmarks_exported">Bookmarks exported</string>
+    <string name="bookmarks_export_failed">Couldn\'t export bookmarks.</string>
+    <string name="search_clear">Clear search</string>
+
+    <string name="history_title">History</string>
+    <string name="history_search_hint">Search history</string>
+    <string name="history_empty">No history yet.</string>
+    <string name="history_no_matches">No history matches your search.</string>
+    <string name="history_clear_all">Clear all</string>
+    <string name="history_clear_title">Clear all history?</string>
+    <string name="history_clear_body">Every page in your history will be removed from this device.</string>
+    <string name="history_clear_confirm">Clear</string>
+    <string name="history_cancel">Cancel</string>
+    <string name="history_delete_description">Remove %1$s from history</string>
+</resources>

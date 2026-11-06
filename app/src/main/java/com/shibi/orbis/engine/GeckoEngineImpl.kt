@@ -12,6 +12,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.shibi.orbis.debug.DebugLog
 import com.shibi.orbis.downloads.DownloadIntents
+import com.shibi.orbis.history.VisitTracker
 import java.io.File
 import java.io.InputStream
 import java.util.concurrent.atomic.AtomicBoolean
@@ -214,6 +215,9 @@ private class GeckoBrowserSession(
 
     private val abuseGuard = DialogAbuseGuard(now = { SystemClock.elapsedRealtime() })
 
+    /** Turns navigation callbacks into history visits. */
+    private val visits = VisitTracker(now = SystemClock::elapsedRealtime)
+
     /** Identical pending camera/microphone asks share one dialog. */
     private data class MediaAsk(val origin: String, val embedder: String?, val kinds: Set<SitePermissionKind>)
 
@@ -243,6 +247,8 @@ private class GeckoBrowserSession(
 
     /** Opens the session (never called for a popup child: Gecko opens that one) and applies [init]. */
     fun start(init: SessionInit) {
+        // Reopening a restored tab is not a visit.
+        visits.suppress(init.fallbackUrl)
         session.open(runtime)
         val blob = init.restoredState
         var restored = false
@@ -277,6 +283,7 @@ private class GeckoBrowserSession(
                 // displayed, so showing its address would let a hostile page spoof the address bar.
                 if (url != null) _state.update { it.copy(url = url) }
                 applyActive()
+                visits.onLocationChange(url)?.let { host?.onVisit(this@GeckoBrowserSession, it.url, it.title) }
             }
 
             override fun onCanGoBack(session: GeckoSession, canGoBack: Boolean) {
@@ -326,6 +333,7 @@ private class GeckoBrowserSession(
                     "GeckoSession",
                     "load error code=0x${error.code.toString(16)} category=0x${error.category.toString(16)}",
                 )
+                visits.onLoadError()
                 _state.update {
                     it.copy(
                         // url is deliberately untouched: the old page is still displayed.
@@ -360,10 +368,12 @@ private class GeckoBrowserSession(
                         findResult = null,
                     )
                 }
+                visits.onPageStart()
             }
 
             override fun onPageStop(session: GeckoSession, success: Boolean) {
                 _state.update { it.copy(isLoading = false, progress = if (success) 100 else 0) }
+                visits.onPageStop(success)?.let { host?.onVisit(this@GeckoBrowserSession, it.url, it.title) }
             }
 
             override fun onProgressChange(session: GeckoSession, progress: Int) {
@@ -381,6 +391,7 @@ private class GeckoBrowserSession(
         object : GeckoSession.ContentDelegate {
             override fun onTitleChange(session: GeckoSession, title: String?) {
                 _state.update { it.copy(title = title) }
+                visits.onTitleChange(title)?.let { host?.onVisitTitle(this@GeckoBrowserSession, it.url, it.title) }
             }
 
             override fun onCloseRequest(session: GeckoSession) {

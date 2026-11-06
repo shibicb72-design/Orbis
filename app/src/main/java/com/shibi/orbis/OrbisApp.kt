@@ -5,6 +5,8 @@ import android.content.Context
 import android.os.Environment
 import android.os.SystemClock
 import android.webkit.MimeTypeMap
+import com.shibi.orbis.bookmarks.BookmarkManager
+import com.shibi.orbis.bookmarks.FileBookmarkStore
 import com.shibi.orbis.debug.DebugLog
 import com.shibi.orbis.downloads.DownloadForegroundController
 import com.shibi.orbis.downloads.DownloadManager
@@ -15,8 +17,12 @@ import com.shibi.orbis.engine.FileSitePermissionStore
 import com.shibi.orbis.engine.GeckoEngineImpl
 import com.shibi.orbis.engine.SharedPreferencesAskedPermissions
 import com.shibi.orbis.engine.SitePermissionDecisions
+import com.shibi.orbis.history.FileHistoryStore
+import com.shibi.orbis.history.HistoryManager
+import com.shibi.orbis.storage.AtomicTextFile
 import com.shibi.orbis.tabs.FileTabStore
 import com.shibi.orbis.tabs.TabManager
+import com.shibi.orbis.tabs.VisitSink
 import com.shibi.orbis.ubo.SharedPreferencesUboPrefs
 import com.shibi.orbis.ubo.UboOnboardingController
 import java.io.File
@@ -68,6 +74,22 @@ class OrbisApp : Application() {
                 log = { debugLog.log("Ubo", it) },
                 now = System::currentTimeMillis,
             )
+        val bookmarks =
+            BookmarkManager(
+                store = FileBookmarkStore(AtomicTextFile(File(filesDir, "bookmarks/bookmarks.json"))),
+                scope = appScope,
+                io = Dispatchers.IO,
+                log = { debugLog.log("Bookmarks", it) },
+                now = System::currentTimeMillis,
+            )
+        val history =
+            HistoryManager(
+                store = FileHistoryStore(AtomicTextFile(File(filesDir, "history/history.json"))),
+                scope = appScope,
+                io = Dispatchers.IO,
+                log = { debugLog.log("History", it) },
+                now = System::currentTimeMillis,
+            )
         // The tab manager creates NO session here: sessions appear only once the browser screen asks for them, which
         // is after the onboarding decision. restore() only reads the stored tab list.
         val tabs =
@@ -76,6 +98,11 @@ class OrbisApp : Application() {
                 store = FileTabStore(File(filesDir, "tabs/tabs.json")),
                 scope = appScope,
                 log = { debugLog.log("Tabs", it) },
+                visits = object : VisitSink {
+                    override fun onVisit(url: String, title: String) = history.recordVisit(url, title)
+
+                    override fun onTitle(url: String, title: String) = history.updateTitle(url, title)
+                },
             )
         val downloads =
             DownloadManager(
@@ -95,11 +122,16 @@ class OrbisApp : Application() {
                 tabs = tabs,
                 downloads = downloads,
                 sitePermissions = sitePermissions,
+                bookmarks = bookmarks,
+                history = history,
             )
         // Sessions only appear after the onboarding decision; this has long finished by then.
         sitePermissions.load()
         runCatching { engine.warmUp() }
             .onFailure { debugLog.log("OrbisApp", "engine warmUp failed: ${it.message}") }
+        // Both lists are read before any tab can load a page; changes made before they arrive are replayed on top.
+        bookmarks.load()
+        history.load()
         tabs.restore()
         downloads.restore()
         // After restore(): restored entries are never IN_PROGRESS, so this cannot start the service at launch.
@@ -128,6 +160,8 @@ class AppContainer(
     val downloads: DownloadManager,
     /** The user's camera, microphone and location answers; Settings lists and removes them. */
     val sitePermissions: SitePermissionDecisions,
+    val bookmarks: BookmarkManager,
+    val history: HistoryManager,
 ) {
     /**
      * An http(s) URL another app asked us to open. Set by MainActivity, consumed (and cleared) by BrowserScreen, which

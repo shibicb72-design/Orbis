@@ -84,6 +84,7 @@ class TabManagerTest {
     private fun manager(
         store: MemoryStore = MemoryStore(),
         max: Int = MAX_TABS,
+        visits: VisitSink = VisitSink.None,
     ): TabManager {
         val m = TabManager(
             factory = { init -> FakeSession(init).also { created += it } },
@@ -92,6 +93,7 @@ class TabManagerTest {
             log = { logs += it },
             io = dispatcher,
             maxTabs = max,
+            visits = visits,
         )
         m.restore()
         scheduler.advanceUntilIdle()
@@ -365,5 +367,128 @@ class TabManagerTest {
         m.setForeground(true)
         assertEquals(true, first.active)
         assertEquals(false, created[1].active)
+    }
+
+    @Test
+    fun loadInSelectedRefusesNonWebUrls() {
+        val m = manager()
+        m.openSelected()
+        m.loadInSelected("javascript:alert(1)")
+        m.loadInSelected("file:///sdcard/x.html")
+        m.loadInSelected("data:text/html,x")
+        m.loadInSelected("about:blank")
+        m.loadInSelected("")
+        assertEquals(1, created.size)
+        assertTrue(created[0].loads.isEmpty())
+    }
+
+    @Test
+    fun loadInSelectedCreatesTheSessionWhenAbsent() {
+        val m = manager()
+        assertTrue(created.isEmpty())
+        m.loadInSelected("https://bookmarked.example/")
+        assertEquals(1, created.size)
+        assertEquals(listOf("https://bookmarked.example/"), created[0].loads)
+        assertEquals(true, created[0].active)
+        assertSame(created[0], m.selected.value.session)
+        assertEquals(1, m.tabs.value.size)
+    }
+
+    @Test
+    fun loadInSelectedUsesTheSelectedTabOnly() {
+        val m = manager()
+        m.openSelected()
+        val first = m.selected.value.id
+        m.newTab("https://second.example/")
+        m.select(first)
+        m.loadInSelected("https://target.example/")
+        assertEquals(listOf("https://target.example/"), created[0].loads)
+        assertEquals(listOf("https://second.example/"), created[1].loads)
+        assertEquals(2, m.tabs.value.size)
+    }
+
+    @Test
+    fun loadInSelectedOnARestoredTabOpensItsSessionFirst() {
+        val store = MemoryStore(
+            TabsSnapshot(listOf(PersistedTab(5, "https://a.example/", "A", false, "STATE-A")), selectedId = 5),
+        )
+        val m = manager(store)
+        assertTrue(created.isEmpty())
+        m.loadInSelected("https://target.example/")
+        assertEquals(1, created.size)
+        assertEquals("STATE-A", created[0].init.restoredState)
+        assertEquals(listOf("https://target.example/"), created[0].loads)
+    }
+
+    @Test
+    fun loadInSelectedWhileBackgroundedLeavesTheSessionInactive() {
+        val m = manager()
+        m.openSelected()
+        m.setForeground(false)
+        m.loadInSelected("https://target.example/")
+        assertEquals(false, created[0].active)
+        assertEquals(listOf("https://target.example/"), created[0].loads)
+    }
+
+    private class RecordingSink : VisitSink {
+        val visits = mutableListOf<Pair<String, String>>()
+        val titles = mutableListOf<Pair<String, String>>()
+        override fun onVisit(url: String, title: String) { visits += url to title }
+        override fun onTitle(url: String, title: String) { titles += url to title }
+    }
+
+    @Test
+    fun visitsAreForwardedOnlyForSessionsTheManagerOwns() {
+        val sink = RecordingSink()
+        val m = manager(visits = sink)
+        m.openSelected()
+        m.onVisit(created[0], "https://a.example/", "A")
+        m.onVisitTitle(created[0], "https://a.example/", "A late")
+        assertEquals(listOf("https://a.example/" to "A"), sink.visits)
+        assertEquals(listOf("https://a.example/" to "A late"), sink.titles)
+
+        // A session nobody owns (never added, or a stray late callback) adds nothing.
+        val stranger = FakeSession(SessionInit())
+        m.onVisit(stranger, "https://stranger.example/", "S")
+        m.onVisitTitle(stranger, "https://stranger.example/", "S")
+        assertEquals(1, sink.visits.size)
+        assertEquals(1, sink.titles.size)
+    }
+
+    @Test
+    fun aClosedTabNoLongerForwardsVisits() {
+        val sink = RecordingSink()
+        val m = manager(visits = sink)
+        m.openSelected()
+        m.newTab()
+        val closing = created[1]
+        m.close(m.selected.value.id)
+        m.onVisit(closing, "https://late.example/", "L")
+        m.onVisitTitle(closing, "https://late.example/", "L")
+        assertTrue(sink.visits.isEmpty())
+        assertTrue(sink.titles.isEmpty())
+        // The remaining tab still reports.
+        m.onVisit(created[0], "https://a.example/", "A")
+        assertEquals(1, sink.visits.size)
+    }
+
+    @Test
+    fun popupSessionsAreForwardedOnceAdopted() {
+        val sink = RecordingSink()
+        val m = manager(visits = sink)
+        m.openSelected()
+        val child = FakeSession(SessionInit())
+        m.onPopupSession(child, created[0])
+        m.onVisit(child, "https://popup.example/", "P")
+        assertEquals(listOf("https://popup.example/" to "P"), sink.visits)
+    }
+
+    @Test
+    fun withoutASinkVisitsAreSimplyDropped() {
+        val m = manager()
+        m.openSelected()
+        m.onVisit(created[0], "https://a.example/", "A")
+        m.onVisitTitle(created[0], "https://a.example/", "A")
+        assertEquals(1, m.tabs.value.size)
     }
 }

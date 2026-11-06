@@ -108,4 +108,8 @@ interface SessionHost {
     fun onLinkContextMenu(url: String, session: BrowserSession)
     /** The session's saved-state blob changed (history, scroll position...). */
     fun onSessionStateChanged(session: BrowserSession)
+    /** A page was visited (a finished load, or a same-document navigation). [title] may still be empty. */
+    fun onVisit(session: BrowserSession, url: String, title: String)
+    /** The page that [onVisit] reported for [url] got or changed its title. Never creates a visit. */
+    fun onVisitTitle(session: BrowserSession, url: String, title: String)
 }

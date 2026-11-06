@@ -45,6 +45,8 @@ class MainActivity : ComponentActivity() {
         app.downloadForeground?.onAppBackground()
         // The process can be killed any time after this; make sure the tab list is on its way to disk.
         app.container.tabs.flush()
+        app.container.bookmarks.flush()
+        app.container.history.flush()
         super.onStop()
     }
 

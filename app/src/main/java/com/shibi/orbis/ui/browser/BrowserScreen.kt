@@ -78,12 +78,14 @@ import androidx.core.app.ActivityCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shibi.orbis.AppContainer
 import com.shibi.orbis.R
+import com.shibi.orbis.bookmarks.AddResult
 import com.shibi.orbis.engine.AndroidPermissionRequest
 import com.shibi.orbis.engine.BrowserSession
 import com.shibi.orbis.engine.FilePickLaunch
 import com.shibi.orbis.engine.FindResult
 import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.engine.SitePrompt
+import com.shibi.orbis.engine.isWebUrl
 import com.shibi.orbis.engine.normalizeAddressInput
 import com.shibi.orbis.engine.pickerMimeTypes
 import com.shibi.orbis.tabs.TabEvent
@@ -123,6 +125,8 @@ fun BrowserScreen(
     container: AppContainer,
     onOpenSettings: () -> Unit,
     onOpenDownloads: () -> Unit,
+    onOpenBookmarks: () -> Unit,
+    onOpenHistory: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val tabs = container.tabs
@@ -151,7 +155,7 @@ fun BrowserScreen(
         Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {}
         return
     }
-    BrowserContent(container, onOpenSettings, onOpenDownloads, modifier)
+    BrowserContent(container, onOpenSettings, onOpenDownloads, onOpenBookmarks, onOpenHistory, modifier)
 }
 
 @Composable
@@ -159,6 +163,8 @@ private fun BrowserContent(
     container: AppContainer,
     onOpenSettings: () -> Unit,
     onOpenDownloads: () -> Unit,
+    onOpenBookmarks: () -> Unit,
+    onOpenHistory: () -> Unit,
     modifier: Modifier,
 ) {
     val tabs = container.tabs
@@ -170,6 +176,9 @@ private fun BrowserContent(
     val linkMenu by tabs.linkMenu.collectAsStateWithLifecycle()
     val session = selectedTab.session
     val state by (session?.state ?: IDLE_STATE).collectAsStateWithLifecycle()
+    // The menu entry follows the committed address, never a pending one.
+    val bookmarkList by container.bookmarks.entries.collectAsStateWithLifecycle()
+    val bookmarked = remember(bookmarkList, state.url) { container.bookmarks.isBookmarked(state.url) }
     val prompt by (session?.prompts ?: NO_PROMPT).collectAsStateWithLifecycle()
     val focusManager = LocalFocusManager.current
     val requestNotificationPermission = rememberNotificationPermissionRequest()
@@ -365,6 +374,44 @@ private fun BrowserContent(
                             onClick = {
                                 menuOpen = false
                                 focusAddressFor = tabs.newTab()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(stringResource(if (bookmarked) R.string.menu_remove_bookmark else R.string.menu_add_bookmark))
+                            },
+                            enabled = isWebUrl(state.url),
+                            onClick = {
+                                menuOpen = false
+                                val url = state.url
+                                if (bookmarked) {
+                                    container.bookmarks.removeByUrl(url)
+                                    Toast.makeText(androidContext, R.string.bookmark_removed, Toast.LENGTH_SHORT).show()
+                                } else {
+                                    val title = state.title?.takeIf { it.isNotBlank() } ?: url
+                                    val message =
+                                        when (container.bookmarks.add(url, title)) {
+                                            AddResult.ADDED -> R.string.bookmark_added
+                                            AddResult.EXISTS -> R.string.bookmark_exists
+                                            AddResult.FULL -> R.string.bookmark_full
+                                            AddResult.INVALID -> R.string.bookmark_invalid
+                                        }
+                                    Toast.makeText(androidContext, message, Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.menu_bookmarks)) },
+                            onClick = {
+                                menuOpen = false
+                                onOpenBookmarks()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.menu_history)) },
+                            onClick = {
+                                menuOpen = false
+                                onOpenHistory()
                             },
                         )
                         DropdownMenuItem(

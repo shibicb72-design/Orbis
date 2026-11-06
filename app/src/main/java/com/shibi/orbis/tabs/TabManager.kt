@@ -68,6 +68,7 @@ class TabManager(
     private val io: CoroutineDispatcher = Dispatchers.IO,
     private val maxTabs: Int = MAX_TABS,
     private val persistDebounceMillis: Long = PERSIST_DEBOUNCE_MILLIS,
+    private val visits: VisitSink = VisitSink.None,
 ) : SessionHost {
     private val list = ArrayList<Tab>()
     private var selectedId: Long
@@ -312,6 +313,18 @@ class TabManager(
         createTab(url, openerId = null, external = true)
     }
 
+    /**
+     * Loads [url] in the selected tab (a bookmark or history row the user tapped). Web URLs only. A restored tab that
+     * has no session yet gets one first.
+     */
+    fun loadInSelected(url: String) {
+        if (!isWebUrl(url)) return
+        val session = ensureSession(selectedId)?.session ?: return
+        session.setActive(foreground)
+        session.loadUrl(url)
+        changed()
+    }
+
     private fun createTab(url: String?, openerId: Long?, external: Boolean): Long? {
         if (list.size >= maxTabs) {
             notifyLimit()
@@ -446,5 +459,14 @@ class TabManager(
 
     override fun onSessionStateChanged(session: BrowserSession) {
         if (indexOfSession(session) >= 0) schedulePersist()
+    }
+
+    // Only sessions this manager still owns: a closed tab's late callback must not add history.
+    override fun onVisit(session: BrowserSession, url: String, title: String) {
+        if (indexOfSession(session) >= 0) visits.onVisit(url, title)
+    }
+
+    override fun onVisitTitle(session: BrowserSession, url: String, title: String) {
+        if (indexOfSession(session) >= 0) visits.onTitle(url, title)
     }
 }
