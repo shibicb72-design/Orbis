@@ -339,7 +339,10 @@ private fun BrowserContent(
                             .focusRequester(focusRequester)
                             .onFocusChanged { focus ->
                                 if (focus.hasFocus && !addressFocused) {
-                                    typed = if (isBlankAddress(state.url)) "" else state.url
+                                    // Not the collected state: for a frame after a tab switch it still holds the previous
+                                    // tab's address, which must not carry over, least of all out of a private tab.
+                                    val url = selectedTab.session?.state?.value?.url.orEmpty()
+                                    typed = if (isBlankAddress(url)) "" else url
                                 }
                                 addressFocused = focus.hasFocus
                             },
