@@ -15,13 +15,19 @@ internal fun addressBarDisplayUrl(committedUrl: String): String = if (isBlankAdd
 
 /**
  * The bar's text. Focused it is the edit buffer; unfocused it is only the committed address of the SELECTED tab itself
- * (pass that tab's own url, never a value collected from the previously selected tab's session).
+ * ([selectedTabUrl]). [collectedUrl] is the url of the session state collected by the screen: for a frame after a tab
+ * switch it still belongs to the previously selected tab (possibly a private one), so it is deliberately never rendered.
  */
-internal fun addressBarText(focused: Boolean, typed: String, committedUrl: String): String =
-    if (focused) typed else addressBarDisplayUrl(committedUrl)
+@Suppress("UNUSED_PARAMETER")
+internal fun addressBarText(focused: Boolean, typed: String, collectedUrl: String, selectedTabUrl: String): String =
+    if (focused) typed else addressBarDisplayUrl(selectedTabUrl)
 
-/** The edit buffer when the bar gains focus: the committed address of the selected tab, or empty for a blank one. */
-internal fun addressBarTextOnFocus(committedUrl: String): String = addressBarDisplayUrl(committedUrl)
+/**
+ * The edit buffer when the bar gains focus: the live session's address, else the tab's own (the same fallback as
+ * TabManager.onSessionState), or empty for a blank one.
+ */
+internal fun addressBarTextOnFocus(sessionUrl: String, selectedTabUrl: String): String =
+    addressBarDisplayUrl(sessionUrl.ifEmpty { selectedTabUrl })
 
 /** Whether the edit buffer may go into saved instance state. A private tab's text stays in plain memory only. */
 internal fun addressBarTextIsSaveable(isPrivate: Boolean): Boolean = !isPrivate
@@ -37,11 +43,12 @@ internal fun addressBarImeOptions(current: Int, isPrivate: Boolean): Int =
  * Compose's KeyboardOptions/PlatformImeOptions (ui-text 1.11.4) only expose privateImeOptions, a keyboard-specific string,
  * and have no way to set EditorInfo.imeOptions flags. The supported hook for that is intercepting the input session, so
  * for a private tab every input connection created inside [content] gets [addressBarImeOptions] applied. A normal tab
- * composes [content] untouched.
+ * composes [content] untouched. Wrap every app-owned text field that a private tab can show (address bar, find bar, the
+ * page's prompt dialogs).
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-internal fun AddressBarImeScope(isPrivate: Boolean, content: @Composable () -> Unit) {
+internal fun PrivateImeScope(isPrivate: Boolean, content: @Composable () -> Unit) {
     if (!isPrivate) {
         content()
         return
@@ -54,7 +61,7 @@ internal fun AddressBarImeScope(isPrivate: Boolean, content: @Composable () -> U
     )
 }
 
-private class NoPersonalizedLearningRequest(private val inner: PlatformTextInputMethodRequest) : PlatformTextInputMethodRequest {
+internal class NoPersonalizedLearningRequest(private val inner: PlatformTextInputMethodRequest) : PlatformTextInputMethodRequest {
     override fun createInputConnection(outAttributes: EditorInfo): InputConnection {
         val connection = inner.createInputConnection(outAttributes)
         // After the inner request: it fills in imeOptions, so the flag has to be added on top of its result.

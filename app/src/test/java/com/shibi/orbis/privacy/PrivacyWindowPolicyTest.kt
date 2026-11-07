@@ -6,6 +6,18 @@ import org.junit.Test
 class PrivacyWindowPolicyTest {
     private val allowed = PrivacyWindowDecision(recentsScreenshotEnabled = true, flagSecure = false)
 
+    private class FakeOps : PrivacyWindowOps {
+        val calls = mutableListOf<String>()
+
+        override fun setRecentsScreenshot(enabled: Boolean) {
+            calls += "recents=$enabled"
+        }
+
+        override fun setFlagSecure(secure: Boolean) {
+            calls += "secure=$secure"
+        }
+    }
+
     @Test
     fun noPrivateTabLeavesWindowOpenOnEveryApi() {
         for (api in listOf(29, 30, 32, 33, 34, 36, 37)) {
@@ -37,12 +49,39 @@ class PrivacyWindowPolicyTest {
     }
 
     @Test
-    fun closingTheLastPrivateTabRestoresTheWindow() {
-        for (api in listOf(29, 32, 33, 36)) {
-            val whileOpen = PrivacyWindowPolicy.decide(api, anyPrivateTabOpen = true)
-            val afterClose = PrivacyWindowPolicy.decide(api, anyPrivateTabOpen = false)
-            assertEquals("api $api", false, whileOpen == allowed)
-            assertEquals("api $api", allowed, afterClose)
+    fun controllerOnApi34DrivesRecentsAcrossOpenAndClose() {
+        val ops = FakeOps()
+        val controller = PrivacyWindowController(ops)
+        controller.apply(34, anyPrivateTabOpen = false)
+        assertEquals(listOf("recents=true", "secure=false"), ops.calls)
+        ops.calls.clear()
+        controller.apply(34, anyPrivateTabOpen = true)
+        assertEquals(listOf("recents=false", "secure=false"), ops.calls)
+        ops.calls.clear()
+        controller.apply(34, anyPrivateTabOpen = false)
+        assertEquals(listOf("recents=true", "secure=false"), ops.calls)
+    }
+
+    @Test
+    fun controllerOnApi33IsTheFirstToUseTheRecentsSwitch() {
+        val ops = FakeOps()
+        PrivacyWindowController(ops).apply(33, anyPrivateTabOpen = true)
+        assertEquals(listOf("recents=false", "secure=false"), ops.calls)
+    }
+
+    @Test
+    fun controllerBelowApi33NeverTouchesRecentsAndSetsThenClearsFlagSecure() {
+        for (api in listOf(29, 32)) {
+            val ops = FakeOps()
+            val controller = PrivacyWindowController(ops)
+            controller.apply(api, anyPrivateTabOpen = false)
+            assertEquals("api $api", listOf("secure=false"), ops.calls)
+            ops.calls.clear()
+            controller.apply(api, anyPrivateTabOpen = true)
+            assertEquals("api $api", listOf("secure=true"), ops.calls)
+            ops.calls.clear()
+            controller.apply(api, anyPrivateTabOpen = false)
+            assertEquals("api $api", listOf("secure=false"), ops.calls)
         }
     }
 }

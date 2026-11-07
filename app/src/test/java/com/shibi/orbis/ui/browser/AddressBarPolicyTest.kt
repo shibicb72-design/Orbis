@@ -1,17 +1,17 @@
 package com.shibi.orbis.ui.browser
 
 import android.view.inputmethod.EditorInfo
-import com.shibi.orbis.tabs.Tab
+import android.view.inputmethod.InputConnection
+import androidx.compose.ui.platform.PlatformTextInputMethodRequest
+import java.lang.reflect.Proxy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AddressBarPolicyTest {
     private val privateUrl = "https://secret.example/private-page"
-
-    private fun tab(id: Long, url: String, isPrivate: Boolean) =
-        Tab(id, null, "", url, false, null, null, isPrivate)
 
     @Test
     fun blankAddressesShowNothing() {
@@ -21,35 +21,29 @@ class AddressBarPolicyTest {
     }
 
     @Test
-    fun focusedBarShowsTheEditBufferUnfocusedShowsTheCommittedAddress() {
-        assertEquals("typ", addressBarText(focused = true, typed = "typ", committedUrl = "https://a.example/"))
-        assertEquals("https://a.example/", addressBarText(focused = false, typed = "typ", committedUrl = "https://a.example/"))
-        assertEquals("", addressBarText(focused = false, typed = "typ", committedUrl = "about:blank"))
+    fun focusedBarShowsTheEditBuffer() {
+        assertEquals("typ", addressBarText(true, "typ", collectedUrl = privateUrl, selectedTabUrl = "https://a.example/"))
     }
 
     @Test
-    fun newNormalTabAfterPrivateTabNeverShowsThePrivateUrl() {
-        val previous = tab(1, privateUrl, isPrivate = true)
-        val fresh = tab(2, "", isPrivate = false)
-        // Unfocused render and the buffer taken on focus both come from the newly selected tab only.
-        assertEquals("", addressBarText(focused = false, typed = "", committedUrl = fresh.url))
-        assertEquals("", addressBarTextOnFocus(fresh.url))
-        assertFalse(addressBarText(false, "", fresh.url).contains(previous.url))
-        assertFalse(addressBarTextOnFocus(fresh.url).contains(previous.url))
+    fun unfocusedBarRendersTheSelectedTabNotTheStaleCollectedState() {
+        // A frame after switching from a private tab to a new normal tab: the collected session state still holds the
+        // private tab's address, the selected tab is blank.
+        assertEquals("", addressBarText(false, "", collectedUrl = privateUrl, selectedTabUrl = ""))
+        assertEquals("", addressBarText(false, "", collectedUrl = privateUrl, selectedTabUrl = "about:blank"))
+        // Normal then new private tab.
+        assertEquals("", addressBarText(false, "", collectedUrl = "https://a.example/", selectedTabUrl = ""))
+        // A loaded tab shows its own address even when the collected one is another tab's.
+        assertEquals("https://b.example/", addressBarText(false, "", collectedUrl = privateUrl, selectedTabUrl = "https://b.example/"))
     }
 
     @Test
-    fun newPrivateTabAfterNormalTabStartsEmpty() {
-        val previous = tab(1, "https://a.example/", isPrivate = false)
-        val fresh = tab(2, "", isPrivate = true)
-        assertEquals("", addressBarText(focused = false, typed = "", committedUrl = fresh.url))
-        assertEquals("", addressBarTextOnFocus(fresh.url))
-        assertFalse(addressBarTextOnFocus(fresh.url).contains(previous.url))
-    }
-
-    @Test
-    fun focusingALoadedTabEditsItsOwnAddress() {
-        assertEquals("https://a.example/", addressBarTextOnFocus("https://a.example/"))
+    fun focusBufferUsesTheSessionAddressElseTheTabsOwn() {
+        assertEquals("https://live.example/", addressBarTextOnFocus("https://live.example/", "https://stored.example/"))
+        // The TabManager.onSessionState fallback: a fresh session reports an empty url, the tab keeps the stored one.
+        assertEquals("https://stored.example/", addressBarTextOnFocus("", "https://stored.example/"))
+        assertEquals("", addressBarTextOnFocus("", ""))
+        assertEquals("", addressBarTextOnFocus("about:blank", ""))
     }
 
     @Test
@@ -59,20 +53,44 @@ class AddressBarPolicyTest {
     }
 
     @Test
-    fun privateTabAddsNoPersonalizedLearningToExistingImeOptions() {
+    fun imeOptionsFlagIsAddedForPrivateAndLeftAloneOtherwise() {
         val base = EditorInfo.IME_ACTION_GO or EditorInfo.IME_FLAG_NO_EXTRACT_UI
-        val flagged = addressBarImeOptions(base, isPrivate = true)
-        assertEquals(base or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING, flagged)
-        assertTrue(flagged and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING != 0)
-        assertEquals(EditorInfo.IME_ACTION_GO, flagged and EditorInfo.IME_MASK_ACTION)
-        // Idempotent.
-        assertEquals(flagged, addressBarImeOptions(flagged, isPrivate = true))
+        assertEquals(base or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING, addressBarImeOptions(base, isPrivate = true))
+        assertEquals(base, addressBarImeOptions(base, isPrivate = false))
+    }
+
+    private val connection: InputConnection =
+        Proxy.newProxyInstance(javaClass.classLoader, arrayOf(InputConnection::class.java)) { _, _, _ -> null } as InputConnection
+
+    /** Stands in for Compose's own request: it fills in imeOptions, replacing whatever was there. */
+    private inner class FakeInner(private val written: Int) : PlatformTextInputMethodRequest {
+        var calls = 0
+
+        override fun createInputConnection(outAttributes: EditorInfo): InputConnection {
+            calls++
+            outAttributes.imeOptions = written
+            return connection
+        }
     }
 
     @Test
-    fun normalTabImeOptionsAreUnchanged() {
-        val base = EditorInfo.IME_ACTION_GO or EditorInfo.IME_FLAG_NO_EXTRACT_UI
-        assertEquals(base, addressBarImeOptions(base, isPrivate = false))
-        assertEquals(0, addressBarImeOptions(0, isPrivate = false) and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING)
+    fun interceptorAddsTheFlagAfterTheInnerRequestAndKeepsItsValue() {
+        val written = EditorInfo.IME_ACTION_GO or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+        val inner = FakeInner(written)
+        val info = EditorInfo()
+        val result = NoPersonalizedLearningRequest(inner).createInputConnection(info)
+        assertEquals(1, inner.calls)
+        assertSame(connection, result)
+        // Fails if the flag were set before the inner call (the inner call overwrites imeOptions), or not set at all.
+        assertEquals(written or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING, info.imeOptions)
+        assertEquals(EditorInfo.IME_ACTION_GO, info.imeOptions and EditorInfo.IME_MASK_ACTION)
+        assertTrue(info.imeOptions and EditorInfo.IME_FLAG_NO_EXTRACT_UI != 0)
+    }
+
+    @Test
+    fun interceptorFlagSurvivesWhenInnerWritesNoOtherOptions() {
+        val info = EditorInfo()
+        NoPersonalizedLearningRequest(FakeInner(0)).createInputConnection(info)
+        assertEquals(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING, info.imeOptions)
     }
 }

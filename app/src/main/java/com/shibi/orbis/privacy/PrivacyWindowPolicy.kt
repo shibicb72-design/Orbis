@@ -8,6 +8,24 @@ data class PrivacyWindowDecision(
     val flagSecure: Boolean,
 )
 
+/** The window operations the controller drives; MainActivity implements them, tests fake them. */
+interface PrivacyWindowOps {
+    /** Activity.setRecentsScreenshotEnabled; called only on API 33+. */
+    fun setRecentsScreenshot(enabled: Boolean)
+
+    /** Adds ([secure] true) or clears FLAG_SECURE on the window. */
+    fun setFlagSecure(secure: Boolean)
+}
+
+/** Turns [PrivacyWindowPolicy] decisions into window operations. */
+class PrivacyWindowController(private val ops: PrivacyWindowOps) {
+    fun apply(apiLevel: Int, anyPrivateTabOpen: Boolean) {
+        val decision = PrivacyWindowPolicy.decide(apiLevel, anyPrivateTabOpen)
+        if (apiLevel >= PrivacyWindowPolicy.RECENTS_API) ops.setRecentsScreenshot(decision.recentsScreenshotEnabled)
+        ops.setFlagSecure(decision.flagSecure)
+    }
+}
+
 /**
  * Keeps private tabs out of the task switcher. The tab switcher lists private tabs next to normal ones, so the window is
  * protected while ANY private tab is open, not only while one is selected. On API 33+ the Recents screenshot is switched

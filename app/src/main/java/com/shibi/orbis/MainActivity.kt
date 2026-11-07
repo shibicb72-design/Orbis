@@ -10,7 +10,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
 import com.shibi.orbis.downloads.DownloadNotifications
 import com.shibi.orbis.engine.externalUrlFrom
-import com.shibi.orbis.privacy.PrivacyWindowPolicy
+import com.shibi.orbis.privacy.PrivacyWindowController
+import com.shibi.orbis.privacy.PrivacyWindowOps
 import com.shibi.orbis.ui.OrbisRoot
 import com.shibi.orbis.ui.theme.OrbisTheme
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -63,16 +64,25 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
 
+    private val privacyWindow =
+        PrivacyWindowController(
+            object : PrivacyWindowOps {
+                override fun setRecentsScreenshot(enabled: Boolean) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setRecentsScreenshotEnabled(enabled)
+                }
+
+                override fun setFlagSecure(secure: Boolean) {
+                    if (secure) {
+                        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    } else {
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    }
+                }
+            },
+        )
+
     private fun applyPrivacyWindow(anyPrivateTabOpen: Boolean) {
-        val decision = PrivacyWindowPolicy.decide(Build.VERSION.SDK_INT, anyPrivateTabOpen)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            setRecentsScreenshotEnabled(decision.recentsScreenshotEnabled)
-        }
-        if (decision.flagSecure) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        } else {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        }
+        privacyWindow.apply(Build.VERSION.SDK_INT, anyPrivateTabOpen)
     }
 
     /**

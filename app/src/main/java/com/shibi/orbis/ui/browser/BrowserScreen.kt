@@ -341,12 +341,12 @@ private fun BrowserContent(
                             runCatching { focusRequester.requestFocus() }
                         }
                     }
-                    AddressBarImeScope(selectedTab.isPrivate) {
+                    PrivateImeScope(selectedTab.isPrivate) {
                         OutlinedTextField(
                             // Unfocused, the bar shows only the committed location (blank tabs show nothing). From the
                             // selected tab itself: `state` is collected per session and for a frame after a tab switch
                             // still holds the previous tab's, which must not show, least of all a private tab's address.
-                            value = addressBarText(addressFocused, typed, selectedTab.url),
+                            value = addressBarText(addressFocused, typed, collectedUrl = state.url, selectedTabUrl = selectedTab.url),
                             onValueChange = { typed = it },
                             modifier = Modifier
                                 .weight(1f)
@@ -356,7 +356,7 @@ private fun BrowserContent(
                                         // Not the collected state: for a frame after a tab switch it still holds the previous
                                         // tab's address, which must not carry over, least of all out of a private tab.
                                         val url = selectedTab.session?.state?.value?.url.orEmpty()
-                                        typed = addressBarTextOnFocus(url)
+                                        typed = addressBarTextOnFocus(url, selectedTab.url)
                                     }
                                     addressFocused = focus.hasFocus
                                 },
@@ -546,20 +546,22 @@ private fun BrowserContent(
                 }
             }
             if (findOpen) {
-                FindBar(
-                    query = findQuery,
-                    result = state.findResult,
-                    onQueryChange = {
-                        findQuery = it
-                        session?.find(it, false)
-                    },
-                    onNext = { session?.find(findQuery, false) },
-                    onPrevious = { session?.find(findQuery, true) },
-                    onClose = {
-                        findOpen = false
-                        session?.clearFind()
-                    },
-                )
+                PrivateImeScope(selectedTab.isPrivate) {
+                    FindBar(
+                        query = findQuery,
+                        result = state.findResult,
+                        onQueryChange = {
+                            findQuery = it
+                            session?.find(it, false)
+                        },
+                        onNext = { session?.find(findQuery, false) },
+                        onPrevious = { session?.find(findQuery, true) },
+                        onClose = {
+                            findOpen = false
+                            session?.clearFind()
+                        },
+                    )
+                }
             }
             Box(Modifier.fillMaxWidth().height(4.dp)) {
                 if (state.isLoading) {
@@ -664,7 +666,8 @@ private fun BrowserContent(
     }
 
     // Only the selected tab's prompts are shown; a background tab's wait in its own queue until it is selected.
-    prompt?.let { SitePromptDialog(it) }
+    // Its text fields (script prompt, sign-in, seconds, colour) belong to the selected tab, so a private tab's get the scope.
+    prompt?.let { PrivateImeScope(selectedTab.isPrivate) { SitePromptDialog(it) } }
 
     if (settingsHint) {
         PermissionSettingsDialog(
