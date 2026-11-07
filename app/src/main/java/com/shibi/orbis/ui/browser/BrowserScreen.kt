@@ -348,7 +348,7 @@ private fun BrowserContent(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
                         keyboardActions = KeyboardActions(
                             onGo = {
-                                val target = normalizeAddressInput(typed)
+                                val target = normalizeAddressInput(typed, container.searchEngine.selected.value)
                                 if (target != null) {
                                     session?.loadUrl(target)
                                     focusManager.clearFocus()

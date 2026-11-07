@@ -44,6 +44,13 @@ android {
         debug {
             signingConfig = signingConfigs.getByName("debug")
         }
+        // Own application id, so destructive browser-data tests get their own app data and never touch com.shibi.orbis.
+        create("fixture") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".fixture"
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("debug")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

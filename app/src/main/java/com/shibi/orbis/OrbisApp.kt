@@ -19,7 +19,9 @@ import com.shibi.orbis.engine.AndroidPermissionBroker
 import com.shibi.orbis.engine.BrowserEngine
 import com.shibi.orbis.engine.FileSitePermissionStore
 import com.shibi.orbis.engine.GeckoEngineImpl
+import com.shibi.orbis.engine.SearchEngineSettings
 import com.shibi.orbis.engine.SharedPreferencesAskedPermissions
+import com.shibi.orbis.engine.SharedPreferencesSearchEnginePrefs
 import com.shibi.orbis.engine.SitePermissionDecisions
 import com.shibi.orbis.history.FileHistoryStore
 import com.shibi.orbis.history.HistoryManager
@@ -69,6 +71,12 @@ class OrbisApp : Application() {
         val uboPrefs =
             SharedPreferencesUboPrefs(
                 getSharedPreferences(SharedPreferencesUboPrefs.FILE_NAME, Context.MODE_PRIVATE),
+            )
+        val searchEngine =
+            SearchEngineSettings(
+                SharedPreferencesSearchEnginePrefs(
+                    getSharedPreferences(SharedPreferencesSearchEnginePrefs.FILE_NAME, Context.MODE_PRIVATE),
+                ),
             )
         val ubo =
             UboOnboardingController(
@@ -154,6 +162,7 @@ class OrbisApp : Application() {
                 bookmarks = bookmarks,
                 history = history,
                 clear = clear,
+                searchEngine = searchEngine,
             )
         // Sessions only appear after the onboarding decision; this has long finished by then.
         sitePermissions.load()
@@ -194,6 +203,8 @@ class AppContainer(
     val history: HistoryManager,
     /** Clear browsing data. Runs in the app scope, so a clear in flight outlives the screen that started it. */
     val clear: ClearController,
+    /** Which engine address-bar searches go to; one choice for normal and private tabs. */
+    val searchEngine: SearchEngineSettings,
 ) {
     /**
      * An http(s) URL another app asked us to open. Set by MainActivity, consumed (and cleared) by BrowserScreen, which

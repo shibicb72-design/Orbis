@@ -103,6 +103,8 @@ fun OrbisRoot(container: AppContainer) {
         composable(Routes.Settings) {
             SettingsScreen(
                 uboStateFlow = container.ubo.state,
+                searchEngineFlow = container.searchEngine.selected,
+                onSelectSearchEngine = container.searchEngine::select,
                 onBack = { nav.popBackStack() },
                 onOpenErrorLog = { nav.navigate(Routes.ErrorLog) },
                 onOpenUbo = { nav.navigate(Routes.Ubo) },
