@@ -1,6 +1,5 @@
 package com.shibi.orbis.ui.settings
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -8,6 +7,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -21,7 +21,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -32,6 +31,7 @@ import com.shibi.orbis.R
 import com.shibi.orbis.engine.SitePermissionDecisions
 import com.shibi.orbis.engine.SitePermissionEntry
 import com.shibi.orbis.engine.SitePermissionKind
+import com.shibi.orbis.ui.OrbisEmptyState
 
 /**
  * Every camera, microphone and location answer the browser is holding, so a remembered decision can be undone.
@@ -65,13 +65,7 @@ fun SitePermissionsScreen(
         },
     ) { padding ->
         if (entries.isEmpty()) {
-            Box(Modifier.padding(padding).fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-                Text(
-                    stringResource(R.string.perm_settings_empty),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onBackground,
-                )
-            }
+            OrbisEmptyState(stringResource(R.string.perm_settings_empty), Icons.Filled.Tune, Modifier.padding(padding))
         } else {
             Column(Modifier.padding(padding).fillMaxSize()) {
                 Text(

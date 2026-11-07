@@ -2,7 +2,6 @@ package com.shibi.orbis.ui.downloads
 
 import android.text.format.Formatter
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
@@ -50,6 +50,7 @@ import com.shibi.orbis.downloads.DownloadEntry
 import com.shibi.orbis.downloads.DownloadIntents
 import com.shibi.orbis.downloads.DownloadManager
 import com.shibi.orbis.downloads.DownloadStatus
+import com.shibi.orbis.ui.OrbisEmptyState
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -104,13 +105,7 @@ fun DownloadsScreen(manager: DownloadManager, onBack: () -> Unit, modifier: Modi
         },
     ) { padding ->
         if (entries.isEmpty()) {
-            Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    stringResource(R.string.downloads_empty),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onBackground,
-                )
-            }
+            OrbisEmptyState(stringResource(R.string.downloads_empty), Icons.Filled.Download, Modifier.padding(padding))
         } else {
             LazyColumn(
                 Modifier.padding(padding).fillMaxSize(),
@@ -171,7 +166,7 @@ private fun DownloadRow(
 ) {
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
-    // Primary (teal) is too faint against the dark surface for text/icons, so controls use onSurface.
+    // Keep row actions neutral so the file name and progress carry the hierarchy.
     val textButton = ButtonDefaults.textButtonColors(contentColor = colors.onSurface)
     val iconButton = IconButtonDefaults.iconButtonColors(contentColor = colors.onSurface)
     val secondary = colors.onSurface.copy(alpha = 0.8f)

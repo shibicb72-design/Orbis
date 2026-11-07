@@ -6,7 +6,7 @@ import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -16,17 +16,18 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -39,6 +40,7 @@ import com.shibi.orbis.AppContainer
 import com.shibi.orbis.R
 
 /** Settings-only monospace error/debug log. Never shown on main browser chrome. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DebugLogScreen(container: AppContainer, onBack: () -> Unit, modifier: Modifier = Modifier) {
     val vm: DebugLogViewModel = viewModel(factory = DebugLogViewModel.factory(container.debugLog))
@@ -50,22 +52,23 @@ fun DebugLogScreen(container: AppContainer, onBack: () -> Unit, modifier: Modifi
     LaunchedEffect(lines.size, version) {
         if (lines.isNotEmpty()) listState.scrollToItem(lines.lastIndex)
     }
-    Surface(
+    Scaffold(
         modifier = modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background,
+        containerColor = MaterialTheme.colorScheme.background,
         contentColor = MaterialTheme.colorScheme.onBackground,
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = stringResource(R.string.back),
-                    )
-                }
-                Text(stringResource(R.string.debug_title), style = MaterialTheme.typography.headlineMedium)
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.debug_title)) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        Column(Modifier.padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = {
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(ClipData.newPlainText("Orbis error log", vm.copyText()))
@@ -78,7 +81,7 @@ fun DebugLogScreen(container: AppContainer, onBack: () -> Unit, modifier: Modifi
             } else {
                 LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState) {
                     itemsIndexed(lines) { _, line ->
-                        Text(line, fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 14.sp)
+                        Text(line, fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 18.sp)
                     }
                 }
             }

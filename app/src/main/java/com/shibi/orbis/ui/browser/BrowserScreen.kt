@@ -13,7 +13,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,17 +36,20 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -69,10 +71,13 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
@@ -90,6 +95,7 @@ import com.shibi.orbis.engine.isWebUrl
 import com.shibi.orbis.engine.normalizeAddressInput
 import com.shibi.orbis.engine.pickerMimeTypes
 import com.shibi.orbis.tabs.TabEvent
+import com.shibi.orbis.ui.OrbisEmptyState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -313,6 +319,9 @@ private fun BrowserContent(
                 Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                IconButton(onClick = { session?.goBack() }, enabled = state.canGoBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                }
                 // Keyed by tab: typed text, focus and the edit mode never leak from one tab into another.
                 key(selectedTab.id) {
                     // Saved instance state is written outside the app's control; a private tab's typed text stays in
@@ -347,7 +356,29 @@ private fun BrowserContent(
                                 addressFocused = focus.hasFocus
                             },
                         singleLine = true,
-                        label = { Text(stringResource(R.string.address_bar_hint)) },
+                        label = {
+                            Text(stringResource(R.string.address_bar_hint), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        },
+                        shape = RoundedCornerShape(20.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surface,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                        trailingIcon = {
+                            if (state.isLoading) {
+                                IconButton(onClick = { session?.stop() }) {
+                                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.stop))
+                                }
+                            } else {
+                                IconButton(onClick = { session?.reload() }, enabled = session != null) {
+                                    Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.reload))
+                                }
+                            }
+                        },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
                         keyboardActions = KeyboardActions(
                             onGo = {
@@ -383,6 +414,18 @@ private fun BrowserContent(
                         Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.menu_more))
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        val forwardDescription = stringResource(R.string.forward)
+                        DropdownMenuItem(
+                            text = { Text(forwardDescription) },
+                            modifier = Modifier.semantics { contentDescription = forwardDescription },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null) },
+                            enabled = state.canGoForward,
+                            onClick = {
+                                menuOpen = false
+                                session?.goForward()
+                            },
+                        )
+                        HorizontalDivider()
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.menu_new_tab)) },
                             onClick = {
@@ -496,27 +539,6 @@ private fun BrowserContent(
                     }
                 }
             }
-            Row(
-                Modifier.padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                IconButton(onClick = { session?.goBack() }, enabled = state.canGoBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
-                }
-                IconButton(onClick = { session?.goForward() }, enabled = state.canGoForward) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = stringResource(R.string.forward))
-                }
-                if (state.isLoading) {
-                    IconButton(onClick = { session?.stop() }) {
-                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.stop))
-                    }
-                } else {
-                    IconButton(onClick = { session?.reload() }, enabled = session != null) {
-                        Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.reload))
-                    }
-                }
-            }
             if (findOpen) {
                 FindBar(
                     query = findQuery,
@@ -600,20 +622,12 @@ private fun BrowserContent(
                     modifier = Modifier.fillMaxSize(),
                 )
                 if (blankTab && !state.isLoading) {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.background,
-                        contentColor = MaterialTheme.colorScheme.onBackground,
-                    ) {
-                        Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-                            Text(
-                                stringResource(
-                                    if (selectedTab.isPrivate) R.string.browser_private_empty_state else R.string.browser_empty_state,
-                                ),
-                                style = MaterialTheme.typography.bodyLarge,
-                            )
-                        }
-                    }
+                    OrbisEmptyState(
+                        stringResource(
+                            if (selectedTab.isPrivate) R.string.browser_private_empty_state else R.string.browser_empty_state,
+                        ),
+                        if (selectedTab.isPrivate) Icons.Filled.VisibilityOff else Icons.Filled.Search,
+                    )
                 }
             }
         }
@@ -697,14 +711,13 @@ private fun FindBar(
 ) {
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
-    Row(
+    Column(
         Modifier.padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
         OutlinedTextField(
             value = query,
             onValueChange = onQueryChange,
-            modifier = Modifier.weight(1f).focusRequester(focusRequester),
+            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
             singleLine = true,
             label = { Text(stringResource(R.string.find_hint)) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -716,15 +729,21 @@ private fun FindBar(
                 !result.found || result.total == 0 -> stringResource(R.string.find_no_matches)
                 else -> stringResource(R.string.find_count, result.current, result.total)
             }
-        Text(summary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 4.dp))
-        IconButton(onClick = onPrevious) {
-            Icon(Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.find_previous))
-        }
-        IconButton(onClick = onNext) {
-            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.find_next))
-        }
-        IconButton(onClick = onClose) {
-            Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.find_close))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                summary,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
+            )
+            IconButton(onClick = onPrevious) {
+                Icon(Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.find_previous))
+            }
+            IconButton(onClick = onNext) {
+                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.find_next))
+            }
+            IconButton(onClick = onClose) {
+                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.find_close))
+            }
         }
     }
 }

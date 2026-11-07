@@ -1,8 +1,11 @@
 package com.shibi.orbis.ui.browser
 
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -25,12 +28,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.shibi.orbis.R
 import com.shibi.orbis.engine.hostOfUrl
 import com.shibi.orbis.tabs.TabUi
+import com.shibi.orbis.ui.theme.rememberMotionEnabled
 
 /**
  * Bottom sheet listing every tab: title and host, the selected one highlighted, a close button per row. Private tabs
@@ -47,21 +53,29 @@ fun TabSwitcher(
     onClosePrivateTabs: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    val motionEnabled = rememberMotionEnabled()
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+    ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(stringResource(R.string.tabs_title), style = MaterialTheme.typography.titleLarge)
+            Text(
+                stringResource(R.string.tabs_title),
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.semantics { heading() },
+            )
             TextButton(onClick = onNewTab) {
                 Icon(Icons.Filled.Add, contentDescription = null)
                 Text(stringResource(R.string.tabs_new), modifier = Modifier.padding(start = 4.dp))
             }
         }
-        Row(
+        FlowRow(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             TextButton(onClick = onNewPrivateTab) {
@@ -72,7 +86,11 @@ fun TabSwitcher(
                 TextButton(onClick = onClosePrivateTabs) { Text(stringResource(R.string.private_close_all)) }
             }
         }
-        LazyColumn(Modifier.weight(1f, fill = false)) {
+        LazyColumn(
+            Modifier.weight(1f, fill = false),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             items(tabs, key = { it.id }) { tab ->
                 val container =
                     when {
@@ -91,7 +109,16 @@ fun TabSwitcher(
                 Surface(
                     color = container,
                     contentColor = content,
-                    modifier = Modifier.fillMaxWidth().clickable { onSelect(tab.id) },
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier
+                        .animateItem(
+                            fadeInSpec = null,
+                            placementSpec = if (motionEnabled) tween(180) else null,
+                            fadeOutSpec = null,
+                        )
+                        .fillMaxWidth()
+                        .semantics { selected = tab.selected }
+                        .clickable { onSelect(tab.id) },
                 ) {
                     Row(
                         Modifier.padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),

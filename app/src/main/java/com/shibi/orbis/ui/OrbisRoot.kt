@@ -1,5 +1,10 @@
 package com.shibi.orbis.ui
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -19,6 +24,7 @@ import com.shibi.orbis.ui.settings.SettingsScreen
 import com.shibi.orbis.ui.settings.SitePermissionsScreen
 import com.shibi.orbis.ui.settings.UboOnboardingScreen
 import com.shibi.orbis.ui.settings.UboSettingsScreen
+import com.shibi.orbis.ui.theme.rememberMotionEnabled
 
 private object Routes {
     const val Browser = "browser"
@@ -35,6 +41,7 @@ private object Routes {
 @Composable
 fun OrbisRoot(container: AppContainer) {
     val nav = rememberNavController()
+    val motionEnabled = rememberMotionEnabled()
     val showOnboarding by container.ubo.showOnboarding.collectAsStateWithLifecycle()
     if (showOnboarding) {
         // The browser (and its first network load) is not composed until the user has decided.
@@ -60,7 +67,14 @@ fun OrbisRoot(container: AppContainer) {
             nav.navigate(Routes.Downloads) { launchSingleTop = true }
         }
     }
-    NavHost(navController = nav, startDestination = Routes.Browser) {
+    NavHost(
+        navController = nav,
+        startDestination = Routes.Browser,
+        enterTransition = { if (motionEnabled) fadeIn(tween(160)) else EnterTransition.None },
+        exitTransition = { if (motionEnabled) fadeOut(tween(100)) else ExitTransition.None },
+        popEnterTransition = { if (motionEnabled) fadeIn(tween(160)) else EnterTransition.None },
+        popExitTransition = { if (motionEnabled) fadeOut(tween(100)) else ExitTransition.None },
+    ) {
         composable(Routes.Browser) {
             BrowserScreen(
                 container = container,
