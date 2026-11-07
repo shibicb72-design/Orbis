@@ -1,14 +1,21 @@
 package com.shibi.orbis
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.lifecycleScope
 import com.shibi.orbis.downloads.DownloadNotifications
 import com.shibi.orbis.engine.externalUrlFrom
+import com.shibi.orbis.privacy.PrivacyWindowPolicy
 import com.shibi.orbis.ui.OrbisRoot
 import com.shibi.orbis.ui.theme.OrbisTheme
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val app get() = application as OrbisApp
@@ -16,6 +23,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Follows whether any private tab is open (the tab switcher lists them even with a normal tab selected) for the
+        // whole life of the activity, not only while started, so the window is already right when the system takes its
+        // Recents snapshot.
+        lifecycleScope.launch {
+            app.container.tabs.tabs.map { list -> list.any { it.isPrivate } }.distinctUntilChanged().collect(::applyPrivacyWindow)
+        }
         // A recreated activity (savedInstanceState != null) or one resumed from Recents still carries the intent
         // that started it; reading it again would reopen a link the user already dealt with.
         if (savedInstanceState == null && (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) {
@@ -48,6 +61,18 @@ class MainActivity : ComponentActivity() {
         app.container.bookmarks.flush()
         app.container.history.flush()
         super.onStop()
+    }
+
+    private fun applyPrivacyWindow(anyPrivateTabOpen: Boolean) {
+        val decision = PrivacyWindowPolicy.decide(Build.VERSION.SDK_INT, anyPrivateTabOpen)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            setRecentsScreenshotEnabled(decision.recentsScreenshotEnabled)
+        }
+        if (decision.flagSecure) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
     }
 
     /**

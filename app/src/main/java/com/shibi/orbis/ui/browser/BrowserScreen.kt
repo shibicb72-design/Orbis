@@ -103,8 +103,6 @@ import kotlinx.coroutines.flow.StateFlow
 private val IDLE_STATE: StateFlow<SessionState> = MutableStateFlow(SessionState())
 private val NO_PROMPT: StateFlow<SitePrompt?> = MutableStateFlow(null)
 
-private fun isBlankAddress(url: String) = url.isEmpty() || url == "about:blank"
-
 /** Remembers which session the single content view currently shows, so the view update is idempotent. */
 private class AttachedSession {
     var session: BrowserSession? = null
@@ -327,7 +325,11 @@ private fun BrowserContent(
                     // Saved instance state is written outside the app's control; a private tab's typed text stays in
                     // plain memory. The mode of a tab id never changes, so the branch is stable inside this key.
                     val typedState =
-                        if (selectedTab.isPrivate) remember { mutableStateOf("") } else rememberSaveable { mutableStateOf("") }
+                        if (addressBarTextIsSaveable(selectedTab.isPrivate)) {
+                            rememberSaveable { mutableStateOf("") }
+                        } else {
+                            remember { mutableStateOf("") }
+                        }
                     var typed by typedState
                     var addressFocused by remember { mutableStateOf(false) }
                     val focusRequester = remember { FocusRequester() }
@@ -339,57 +341,61 @@ private fun BrowserContent(
                             runCatching { focusRequester.requestFocus() }
                         }
                     }
-                    OutlinedTextField(
-                        // Unfocused, the bar shows only the committed location (blank tabs show nothing).
-                        value = if (addressFocused) typed else if (isBlankAddress(state.url)) "" else state.url,
-                        onValueChange = { typed = it },
-                        modifier = Modifier
-                            .weight(1f)
-                            .focusRequester(focusRequester)
-                            .onFocusChanged { focus ->
-                                if (focus.hasFocus && !addressFocused) {
-                                    // Not the collected state: for a frame after a tab switch it still holds the previous
-                                    // tab's address, which must not carry over, least of all out of a private tab.
-                                    val url = selectedTab.session?.state?.value?.url.orEmpty()
-                                    typed = if (isBlankAddress(url)) "" else url
-                                }
-                                addressFocused = focus.hasFocus
+                    AddressBarImeScope(selectedTab.isPrivate) {
+                        OutlinedTextField(
+                            // Unfocused, the bar shows only the committed location (blank tabs show nothing). From the
+                            // selected tab itself: `state` is collected per session and for a frame after a tab switch
+                            // still holds the previous tab's, which must not show, least of all a private tab's address.
+                            value = addressBarText(addressFocused, typed, selectedTab.url),
+                            onValueChange = { typed = it },
+                            modifier = Modifier
+                                .weight(1f)
+                                .focusRequester(focusRequester)
+                                .onFocusChanged { focus ->
+                                    if (focus.hasFocus && !addressFocused) {
+                                        // Not the collected state: for a frame after a tab switch it still holds the previous
+                                        // tab's address, which must not carry over, least of all out of a private tab.
+                                        val url = selectedTab.session?.state?.value?.url.orEmpty()
+                                        typed = addressBarTextOnFocus(url)
+                                    }
+                                    addressFocused = focus.hasFocus
+                                },
+                            singleLine = true,
+                            label = {
+                                Text(stringResource(R.string.address_bar_hint), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             },
-                        singleLine = true,
-                        label = {
-                            Text(stringResource(R.string.address_bar_hint), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        },
-                        shape = RoundedCornerShape(20.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = MaterialTheme.colorScheme.surface,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                        trailingIcon = {
-                            if (state.isLoading) {
-                                IconButton(onClick = { session?.stop() }) {
-                                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.stop))
-                                }
-                            } else {
-                                IconButton(onClick = { session?.reload() }, enabled = session != null) {
-                                    Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.reload))
-                                }
-                            }
-                        },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
-                        keyboardActions = KeyboardActions(
-                            onGo = {
-                                val target = normalizeAddressInput(typed, container.searchEngine.selected.value)
-                                if (target != null) {
-                                    session?.loadUrl(target)
-                                    focusManager.clearFocus()
+                            shape = RoundedCornerShape(20.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
+                            trailingIcon = {
+                                if (state.isLoading) {
+                                    IconButton(onClick = { session?.stop() }) {
+                                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.stop))
+                                    }
+                                } else {
+                                    IconButton(onClick = { session?.reload() }, enabled = session != null) {
+                                        Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.reload))
+                                    }
                                 }
                             },
-                        ),
-                    )
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
+                            keyboardActions = KeyboardActions(
+                                onGo = {
+                                    val target = normalizeAddressInput(typed, container.searchEngine.selected.value)
+                                    if (target != null) {
+                                        session?.loadUrl(target)
+                                        focusManager.clearFocus()
+                                    }
+                                },
+                            ),
+                        )
+                    }
                 }
                 val tabsDescription =
                     stringResource(if (selectedTab.isPrivate) R.string.tabs_button_private else R.string.tabs_button, tabList.size)
