@@ -36,7 +36,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ButtonDefaults
@@ -50,7 +49,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -67,7 +65,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -76,8 +73,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
@@ -324,100 +319,27 @@ private fun BrowserContent(
                 IconButton(onClick = { session?.goBack() }, enabled = state.canGoBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                 }
-                // Keyed by tab: typed text, focus and the edit mode never leak from one tab into another.
-                key(selectedTab.id) {
-                    // Saved instance state is written outside the app's control; a private tab's typed text stays in
-                    // plain memory. The mode of a tab id never changes, so the branch is stable inside this key.
-                    val typedState = rememberAddressBarTypedState(selectedTab.isPrivate)
-                    var typed by typedState
-                    var addressFocused by remember { mutableStateOf(false) }
-                    val tabId = selectedTab.id
-                    // What Go just submitted, until its page commits or the load is seen to end without one (error, Stop,
-                    // crash, finished, download; see PendingSubmit). Plain memory on purpose (a private tab's text must not
-                    // reach saved state); inside this key, so it never leaks into another tab. The session flow is the
-                    // selected tab's own, not the `state` collected above, which lags a frame behind a tab switch.
-                    val pending =
-                        rememberPendingSubmit(
-                            tabId = tabId,
-                            tabUrl = selectedTab.url,
-                            sessionState = selectedTab.session?.state,
-                            downloadOffer = pendingDownload,
-                        )
-                    // Event handlers below go through `pending` and read its text when they run, never a copy made here:
-                    // Go and the refocus it causes can both happen before the next recomposition (DR5-01).
-                    val focusRequester = remember { FocusRequester() }
-                    LaunchedEffect(Unit) {
-                        // A tab the user just created starts with the address bar focused (once).
-                        if (focusAddressFor == tabId) {
-                            focusAddressFor = null
-                            runCatching { focusRequester.requestFocus() }
-                        }
-                    }
-                    PrivateImeScope(selectedTab.isPrivate) {
-                        OutlinedTextField(
-                            // Unfocused, the bar shows only the committed location (blank tabs show nothing). From the
-                            // selected tab itself: `state` is collected per session and for a frame after a tab switch
-                            // still holds the previous tab's, which must not show, least of all a private tab's address.
-                            value = addressBarText(addressFocused, typed, collectedUrl = state.url, selectedTabUrl = selectedTab.url, pendingSubmit = pending.text),
-                            onValueChange = {
-                                typed = it
-                                onAddressBarEdited(pending)
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .focusRequester(focusRequester)
-                                .onFocusChanged { focus ->
-                                    // Not the collected state: for a frame after a tab switch it still holds the previous
-                                    // tab's address, which must not carry over, least of all out of a private tab.
-                                    val url = selectedTab.session?.state?.value?.url.orEmpty()
-                                    addressBarBufferOnFocusChange(focus.hasFocus, addressFocused, pending, url, selectedTab.url)
-                                        ?.let { typed = it }
-                                    addressFocused = focus.hasFocus
-                                },
-                            singleLine = true,
-                            label = {
-                                Text(stringResource(R.string.address_bar_hint), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            },
-                            shape = RoundedCornerShape(20.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            ),
-                            trailingIcon = {
-                                if (state.isLoading) {
-                                    IconButton(
-                                        onClick = { stopFromAddressBar({ session?.stop() }, pending) },
-                                    ) {
-                                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.stop))
-                                    }
-                                } else {
-                                    IconButton(onClick = { session?.reload() }, enabled = session != null) {
-                                        Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.reload))
-                                    }
-                                }
-                            },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
-                            keyboardActions = KeyboardActions(
-                                onGo = {
-                                    submitFromAddressBar(
-                                        typed = typed,
-                                        searchEngine = container.searchEngine.selected.value,
-                                        // Read before the request, from the tab's own session.
-                                        sessionState = session?.state?.value,
-                                        pending = pending,
-                                        loadUrl = { session?.loadUrl(it) },
-                                        hideKeyboard = { keyboardController?.hide() },
-                                        moveFocusToSink = { focusSink.requestFocus() },
-                                    )
-                                },
-                            ),
-                        )
-                    }
-                }
+                // The production address bar (BrowserAddressBar.kt): keyed by tab inside, so typed text, focus, edit mode and
+                // the pending submit never leak from one tab into another. It reads the selected tab's OWN url and session
+                // flow, never the `state` collected above, which lags a frame behind a tab switch.
+                BrowserAddressBar(
+                    tabId = selectedTab.id,
+                    isPrivate = selectedTab.isPrivate,
+                    tabUrl = selectedTab.url,
+                    sessionState = selectedTab.session?.state,
+                    downloadOffer = pendingDownload,
+                    isLoading = state.isLoading,
+                    canReload = session != null,
+                    searchEngine = { container.searchEngine.selected.value },
+                    focusOnStart = focusAddressFor == selectedTab.id,
+                    onFocusOnStartConsumed = { focusAddressFor = null },
+                    loadUrl = { session?.loadUrl(it) },
+                    stop = { session?.stop() },
+                    reload = { session?.reload() },
+                    hideKeyboard = { keyboardController?.hide() },
+                    moveFocusToSink = { focusSink.requestFocus() },
+                    modifier = Modifier.weight(1f),
+                )
                 val tabsDescription =
                     stringResource(if (selectedTab.isPrivate) R.string.tabs_button_private else R.string.tabs_button, tabList.size)
                 val tabsColor = if (selectedTab.isPrivate) MaterialTheme.colorScheme.tertiary else LocalContentColor.current

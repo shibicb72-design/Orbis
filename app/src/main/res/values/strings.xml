@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">Orbis</string>
     <string name="address_bar_hint">Search or enter address</string>
+    <string name="address_bar_loading">Loading</string>
     <string name="settings">Settings</string>
     <string name="back">Back</string>
     <string name="forward">Forward</string>

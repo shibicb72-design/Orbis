@@ -39,6 +39,33 @@ internal fun addressBarText(
     pendingSubmit: String? = null,
 ): String = if (focused) typed else pendingSubmit ?: addressBarDisplayUrl(selectedTabUrl)
 
+// ---- resting display (presentation only; the reducer above decides WHAT the text is) --------------------------------
+
+/**
+ * The text the resting (unfocused) bar draws as a single start-aligned, end-ellipsized line, or null while editing or
+ * when there is nothing to show (the placeholder shows instead). Always [barText] itself, unchanged: no host/path
+ * splitting, no registrable-domain guessing, no scheme hiding. A too-long address ends in an explicit ellipsis and the
+ * full string stays available to screen readers and in edit mode.
+ */
+internal fun addressBarRestingText(focused: Boolean, barText: String): String? = if (!focused && barText.isNotEmpty()) barText else null
+
+/**
+ * Whether a page committing in the selected tab (its url changed to [newTabUrl]) ends an untouched edit. A focused bar
+ * the user has not typed in (e.g. New tab, then a link from another app lands in that blank tab) would otherwise stay in
+ * edit mode with an empty buffer while the page shows a different site. Typed text is never thrown away: once the user
+ * edited, the bar stays as it is.
+ */
+internal fun addressBarLeavesEditOnCommit(focused: Boolean, editedSinceFocus: Boolean, newTabUrl: String): Boolean =
+    focused && !editedSinceFocus && !isBlankAddress(newTabUrl)
+
+/**
+ * Whether the resting bar names a target that is still on its way (a pending submit that has not failed): it is then
+ * announced as loading, so a pending address is never presented as the page the tab is showing. A failed submit keeps
+ * its text (see [pendingSubmitFailed]) but is not loading; the failure banner says what happened.
+ */
+internal fun addressBarShowsPendingTarget(focused: Boolean, pendingSubmit: String?, failed: Boolean = false): Boolean =
+    !focused && pendingSubmit != null && !failed
+
 /**
  * The address the user just submitted with Go, in display form, until the tab's own address changes (the new page has
  * not committed yet), the user edits again, or the load demonstrably ended without committing (see [PendingSubmit]).
@@ -146,6 +173,9 @@ internal fun pendingSubmitAfterDownload(pending: PendingSubmit?, sourceTabId: Lo
 internal class PendingSubmitState {
     private var value by mutableStateOf<PendingSubmit?>(null)
     val text: String? get() = value?.text
+
+    /** The pending submit's load failed; its text is kept (see [pendingSubmitFailed]). */
+    val failed: Boolean get() = value?.failed == true
 
     /** Go: [session] is the selected tab's own state, read before the load request. */
     fun submit(target: String, session: SessionState) {
