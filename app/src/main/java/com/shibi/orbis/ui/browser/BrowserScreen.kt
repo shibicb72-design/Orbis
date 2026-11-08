@@ -13,6 +13,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -68,7 +69,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
@@ -184,7 +185,10 @@ private fun BrowserContent(
     val bookmarkList by container.bookmarks.entries.collectAsStateWithLifecycle()
     val bookmarked = remember(bookmarkList, state.url) { container.bookmarks.isBookmarked(state.url) }
     val prompt by (session?.prompts ?: NO_PROMPT).collectAsStateWithLifecycle()
-    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    // Where focus goes after Go. focusManager.clearFocus() is not enough: after a key event (hardware Enter) the app is
+    // out of touch mode and the view system hands focus straight back to the first focusable, the address field.
+    val focusSink = remember { FocusRequester() }
     val requestNotificationPermission = rememberNotificationPermissionRequest()
 
     var showTabs by remember { mutableStateOf(false) }
@@ -310,7 +314,9 @@ private fun BrowserContent(
             Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.systemBars)
-                .imePadding(),
+                .imePadding()
+                .focusRequester(focusSink)
+                .focusable(),
         ) {
             Row(
                 Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -326,6 +332,10 @@ private fun BrowserContent(
                     val typedState = rememberAddressBarTypedState(selectedTab.isPrivate)
                     var typed by typedState
                     var addressFocused by remember { mutableStateOf(false) }
+                    // What Go just submitted, until its page commits. Plain memory on purpose (a private tab's text must
+                    // not reach saved state); inside this key, so it never leaks into another tab.
+                    var pendingSubmit by remember { mutableStateOf<String?>(null) }
+                    LaunchedEffect(selectedTab.url) { pendingSubmit = null }
                     val focusRequester = remember { FocusRequester() }
                     val tabId = selectedTab.id
                     LaunchedEffect(Unit) {
@@ -340,8 +350,11 @@ private fun BrowserContent(
                             // Unfocused, the bar shows only the committed location (blank tabs show nothing). From the
                             // selected tab itself: `state` is collected per session and for a frame after a tab switch
                             // still holds the previous tab's, which must not show, least of all a private tab's address.
-                            value = addressBarText(addressFocused, typed, collectedUrl = state.url, selectedTabUrl = selectedTab.url),
-                            onValueChange = { typed = it },
+                            value = addressBarText(addressFocused, typed, collectedUrl = state.url, selectedTabUrl = selectedTab.url, pendingSubmit = pendingSubmit),
+                            onValueChange = {
+                                typed = it
+                                pendingSubmit = null
+                            },
                             modifier = Modifier
                                 .weight(1f)
                                 .focusRequester(focusRequester)
@@ -350,7 +363,7 @@ private fun BrowserContent(
                                         // Not the collected state: for a frame after a tab switch it still holds the previous
                                         // tab's address, which must not carry over, least of all out of a private tab.
                                         val url = selectedTab.session?.state?.value?.url.orEmpty()
-                                        typed = addressBarTextOnFocus(url, selectedTab.url)
+                                        typed = addressBarTextOnFocus(url, selectedTab.url, pendingSubmit)
                                     }
                                     addressFocused = focus.hasFocus
                                 },
@@ -384,7 +397,9 @@ private fun BrowserContent(
                                     val target = normalizeAddressInput(typed, container.searchEngine.selected.value)
                                     if (target != null) {
                                         session?.loadUrl(target)
-                                        focusManager.clearFocus()
+                                        if (session != null) pendingSubmit = pendingSubmitFor(target)
+                                        keyboardController?.hide()
+                                        focusSink.requestFocus()
                                     }
                                 },
                             ),

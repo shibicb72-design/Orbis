@@ -47,6 +47,38 @@ class AddressBarPolicyTest {
     }
 
     @Test
+    fun pendingSubmitWinsOnFocusUntilItIsCleared() {
+        // OBS-ENTER-01: focus regained right after Go, before the page commits (session and tab urls still empty or old).
+        assertEquals("https://new.example/", addressBarTextOnFocus("", "", pendingSubmit = "https://new.example/"))
+        assertEquals("https://new.example/", addressBarTextOnFocus("https://old.example/", "https://old.example/", "https://new.example/"))
+        // Private and normal tabs use the same pure rule; the tab's mode only decides where the buffer lives.
+        assertEquals(privateUrl, addressBarTextOnFocus("", "", pendingSubmit = privateUrl))
+        // No pending submit: exactly the old behaviour.
+        assertEquals("https://old.example/", addressBarTextOnFocus("https://old.example/", "https://stored.example/", null))
+        assertEquals("https://stored.example/", addressBarTextOnFocus("", "https://stored.example/", null))
+        assertEquals("", addressBarTextOnFocus("", "", null))
+    }
+
+    @Test
+    fun unfocusedBarShowsThePendingSubmitUntilTheTabCommits() {
+        assertEquals("https://new.example/", addressBarText(false, "", collectedUrl = "", selectedTabUrl = "", pendingSubmit = "https://new.example/"))
+        assertEquals(
+            "https://new.example/",
+            addressBarText(false, "", collectedUrl = "https://old.example/", selectedTabUrl = "https://old.example/", pendingSubmit = "https://new.example/"),
+        )
+        // Cleared (the tab committed): the tab's own address, as before.
+        assertEquals("https://b.example/", addressBarText(false, "", collectedUrl = privateUrl, selectedTabUrl = "https://b.example/", pendingSubmit = null))
+        // Focused it is still the edit buffer.
+        assertEquals("typ", addressBarText(true, "typ", collectedUrl = "", selectedTabUrl = "", pendingSubmit = "https://new.example/"))
+    }
+
+    @Test
+    fun pendingSubmitIsTheDisplayFormOfTheTarget() {
+        assertEquals("https://a.example/x", pendingSubmitFor("https://a.example/x"))
+        assertEquals("", pendingSubmitFor("about:blank"))
+    }
+
+    @Test
     fun onlyNormalTabsMaySaveTheirTypedTextInInstanceState() {
         assertTrue(addressBarTextIsSaveable(isPrivate = false))
         assertFalse(addressBarTextIsSaveable(isPrivate = true))

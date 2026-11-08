@@ -23,15 +23,29 @@ internal fun addressBarDisplayUrl(committedUrl: String): String = if (isBlankAdd
  * switch it still belongs to the previously selected tab (possibly a private one), so it is deliberately never rendered.
  */
 @Suppress("UNUSED_PARAMETER")
-internal fun addressBarText(focused: Boolean, typed: String, collectedUrl: String, selectedTabUrl: String): String =
-    if (focused) typed else addressBarDisplayUrl(selectedTabUrl)
+internal fun addressBarText(
+    focused: Boolean,
+    typed: String,
+    collectedUrl: String,
+    selectedTabUrl: String,
+    pendingSubmit: String? = null,
+): String = if (focused) typed else pendingSubmit ?: addressBarDisplayUrl(selectedTabUrl)
 
 /**
- * The edit buffer when the bar gains focus: the live session's address, else the tab's own (the same fallback as
- * TabManager.onSessionState), or empty for a blank one.
+ * The address the user just submitted with Go, in display form, until the tab's own address changes (the new page has
+ * not committed yet) or the user edits again. Callers keep it in plain memory ([remember]), never saved state, and
+ * inside the per-tab key, so a private tab's text never leaves its own tab or reaches instance state.
  */
-internal fun addressBarTextOnFocus(sessionUrl: String, selectedTabUrl: String): String =
-    addressBarDisplayUrl(sessionUrl.ifEmpty { selectedTabUrl })
+internal fun pendingSubmitFor(target: String): String = addressBarDisplayUrl(target)
+
+/**
+ * The edit buffer when the bar gains focus: the address the user just submitted if its page has not committed yet
+ * ([pendingSubmit]; without it a focus that comes back right after Go, e.g. view-system refocus after a hardware Enter,
+ * would reset the buffer to the still-empty or old session address), else the live session's address, else the tab's own
+ * (the same fallback as TabManager.onSessionState), or empty for a blank one.
+ */
+internal fun addressBarTextOnFocus(sessionUrl: String, selectedTabUrl: String, pendingSubmit: String? = null): String =
+    pendingSubmit ?: addressBarDisplayUrl(sessionUrl.ifEmpty { selectedTabUrl })
 
 /** Whether the edit buffer may go into saved instance state. A private tab's text stays in plain memory only. */
 internal fun addressBarTextIsSaveable(isPrivate: Boolean): Boolean = !isPrivate
