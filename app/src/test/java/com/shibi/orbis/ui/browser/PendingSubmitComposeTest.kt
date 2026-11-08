@@ -197,12 +197,16 @@ class PendingSubmitComposeTest {
     }
 
     @Test
-    fun failedLoadFallsBackToTheOldAddress() {
+    fun failedLoadKeepsTheSubmittedAddress() {
+        // Like Chrome and Firefox: the failure banner shows and the bar keeps what the user submitted.
         start()
         go()
         emit(flowA) { it.afterPageStart() }
         emit(flowA) { it.afterLoadError(target) }
-        assertEquals(old, addressText())
+        assertEquals(target, addressText())
+        // The failed load's own trailing page stop does not flip it back.
+        emit(flowA) { it.afterPageStop(success = false) }
+        assertEquals(target, addressText())
     }
 
     @Test
@@ -370,7 +374,7 @@ class PendingSubmitComposeTest {
     // DR5-02: Go on the url whose failure is on screen. Start and error land before the collector runs, so the observed
     // state equals the submit-time state except for the counters.
     @Test
-    fun sameUrlRetryWhoseStartAndErrorAreConflatedFallsBackToTheOldAddress() {
+    fun sameUrlRetryWhoseStartAndErrorAreConflatedKeepsTheSubmittedAddress() {
         flowA.value = SessionState(url = old).afterPageStart().afterLoadError(target)
         start()
         go()
@@ -379,7 +383,7 @@ class PendingSubmitComposeTest {
             flowA.value = flowA.value.afterLoadError(target)
         }
         rule.waitForIdle()
-        assertEquals(old, addressText())
+        assertEquals(target, addressText())
     }
 
     // DR5-04: Go during an old load; the old stop and the new start land in one emission (isLoading never shows false);
@@ -414,14 +418,14 @@ class PendingSubmitComposeTest {
 
     // DR6-01: Go during an old load; the old load stops (ignored), then the new request fails with no onPageStart.
     @Test
-    fun loadErrorWithoutAStartWhileAnOldLoadWasRunningFallsBackToTheOldAddress() {
+    fun loadErrorWithoutAStartWhileAnOldLoadWasRunningKeepsTheSubmittedAddress() {
         flowA.value = flowA.value.afterPageStart()
         start()
         go()
         emit(flowA) { it.afterPageStop(success = false) }
         assertEquals("the old load's end is not the new request's", target, addressText())
         emit(flowA) { it.afterLoadError(target) }
-        assertEquals(old, addressText())
+        assertEquals(target, addressText())
     }
 
     @Test
@@ -434,7 +438,7 @@ class PendingSubmitComposeTest {
         emit(flowA) { it.afterPageStart() }
         assertEquals(target, addressText())
         emit(flowA) { it.afterLoadError(target) }
-        assertEquals(old, addressText())
+        assertEquals(target, addressText())
     }
 
     // ---- tabs ----------------------------------------------------------------------------------------------------

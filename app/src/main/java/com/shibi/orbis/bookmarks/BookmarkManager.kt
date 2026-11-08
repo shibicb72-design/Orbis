@@ -41,6 +41,13 @@ class BookmarkManager(
     private val writes = Channel<List<Bookmark>>(Channel.CONFLATED)
     private var writerStarted = false
 
+    /**
+     * Set by [clearAll]: once a write after it has succeeded, the store also deletes any set-aside unreadable copy (it
+     * still holds the old addresses). Written on the main thread, read by the writer.
+     */
+    @Volatile
+    private var discardSetAsideAfterWrite = false
+
     private val _entries = MutableStateFlow<List<Bookmark>>(emptyList())
     val entries: StateFlow<List<Bookmark>> = _entries.asStateFlow()
 
@@ -91,6 +98,10 @@ class BookmarkManager(
                 for (snap in writes) {
                     try {
                         store.save(snap)
+                        if (discardSetAsideAfterWrite) {
+                            discardSetAsideAfterWrite = false
+                            store.discardSetAside()
+                        }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -169,6 +180,7 @@ class BookmarkManager(
      * stored list, so the stored bookmarks go too (and are written over as soon as the load is done).
      */
     fun clearAll() {
+        discardSetAsideAfterWrite = true
         apply(Change.Clear)
         committed(Change.Clear)
     }

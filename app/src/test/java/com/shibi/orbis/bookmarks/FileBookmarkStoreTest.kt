@@ -2,6 +2,11 @@ package com.shibi.orbis.bookmarks
 
 import com.shibi.orbis.storage.AtomicTextFile
 import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -42,6 +47,41 @@ class FileBookmarkStoreTest {
         s.save(listOf(a))
         assertEquals(listOf(a), store().load())
         assertEquals("{this is not json", corrupt.readText())
+    }
+
+    // R1144-03: an explicit clear-all must not leave the old addresses behind in the set-aside copy.
+    @Test
+    fun clearAllThroughTheManagerDeletesTheSetAsideCopy() {
+        file.parentFile!!.mkdirs()
+        file.writeText("{this is not json https://old-secret.example/")
+        val corrupt = File(file.parentFile, "bookmarks.json.corrupt")
+        val scheduler = TestCoroutineScheduler()
+        val dispatcher = StandardTestDispatcher(scheduler)
+        val scope = CoroutineScope(SupervisorJob() + dispatcher)
+        try {
+            val m = BookmarkManager(store(), scope, log = {}, now = { 1L }, io = dispatcher)
+            m.load()
+            scheduler.advanceUntilIdle()
+            assertTrue("load set the unreadable file aside", corrupt.exists())
+            m.add("https://a.example/", "A")
+            m.remove(m.entries.value.single().id)
+            scheduler.advanceUntilIdle()
+            assertTrue("an ordinary delete keeps the copy for recovery", corrupt.exists())
+            m.clearAll()
+            scheduler.advanceUntilIdle()
+            assertFalse("clear all removed the copy with the old addresses", corrupt.exists())
+            assertEquals(emptyList<Bookmark>(), store().load())
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun discardSetAsideWithoutACopyIsHarmless() {
+        val s = store()
+        s.save(listOf(a))
+        s.discardSetAside()
+        assertEquals(listOf(a), store().load())
     }
 
     @Test

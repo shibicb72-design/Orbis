@@ -153,17 +153,65 @@ class AddressBarPolicyTest {
         assertEquals(target, addressBarTextOnFocus("https://old.example/", "https://old.example/", p.text))
     }
 
+    // Like Chrome and Firefox: a failed load keeps what the user submitted in the bar (everyday.navigation).
     @Test
-    fun failedLoadClearsThePendingText() {
+    fun failedLoadKeepsTheSubmittedAddress() {
         val failed = loading().afterLoadError(target)
         // Seen as one collapsed emission, and through start then error, the realistic order.
-        assertEquals(listOf<PendingSubmit?>(null), observe(submit(), failed))
-        assertNull(observe(submit(), loading(), failed).last())
+        assertEquals(target, observe(submit(), failed).single()?.text)
+        val r = observe(submit(), loading(), failed)
+        assertEquals(target, r.last()?.text)
+        assertTrue(r.last()!!.failed)
     }
 
     @Test
-    fun loadErrorThatArrivesWithoutAStartClearsWhenNothingWasLoading() {
-        assertNull(pendingSubmitAfterSession(submit(), idle.afterLoadError(target)))
+    fun loadErrorThatArrivesWithoutAStartKeepsTheSubmittedAddress() {
+        assertEquals(target, pendingSubmitAfterSession(submit(), idle.afterLoadError(target))?.text)
+    }
+
+    @Test
+    fun failedLoadsOwnTrailingPageStopDoesNotClearIt() {
+        // Gecko may report the error and then still call onPageStop for the same load.
+        val failed = loading().afterLoadError(target)
+        val r = observe(submit(), loading(), failed, failed.afterPageStop(success = false))
+        assertEquals(target, r.last()?.text)
+    }
+
+    @Test
+    fun retryAfterAFailureKeepsTheAddressWhileLoadingAndWhenItFailsAgain() {
+        val failed = loading().afterLoadError(target)
+        val retrying = failed.afterPageStart()
+        val r = observe(submit(), loading(), failed, retrying, retrying.afterLoadError(target))
+        assertTrue(r.all { it?.text == target })
+    }
+
+    @Test
+    fun retryThatEndsWithoutAnErrorOrACommitClearsIt() {
+        val failed = loading().afterLoadError(target)
+        val retrying = failed.afterPageStart()
+        assertNull(observe(submit(), failed, retrying, retrying.afterPageStop(success = true)).last())
+    }
+
+    @Test
+    fun crashOrCancelAfterAFailureStillClearsIt() {
+        val failed = loading().afterLoadError(target)
+        assertNull(observe(submit(), failed, failed.afterContentProcessGone()).last())
+        assertNull(observe(submit(), failed, failed.afterNavigationCancelled()).last())
+    }
+
+    @Test
+    fun stopAndEditAfterAFailureClearIt() {
+        val failed = loading().afterLoadError(target)
+        val holder = PendingSubmitState()
+        holder.submit(target, idle)
+        holder.onSession(failed)
+        assertEquals(target, holder.text)
+        stopFromAddressBar(stop = {}, pending = holder)
+        assertNull(holder.text)
+        holder.submit(target, idle)
+        holder.onSession(failed)
+        onAddressBarEdited(holder)
+        assertNull(holder.text)
     }
 
     @Test
@@ -242,7 +290,7 @@ class AddressBarPolicyTest {
     // DR5-02: Go on the same url while its old failure is on screen. Start and error both land before the collector runs,
     // so the observed state equals the submit snapshot in every field but the counters.
     @Test
-    fun sameUrlRetryWhoseStartAndErrorAreConflatedClears() {
+    fun sameUrlRetryWhoseStartAndErrorAreConflatedKeepsTheAddress() {
         val failedOnScreen = loading().afterLoadError(target)
         val p = submit(failedOnScreen)
         val collapsed = failedOnScreen.afterPageStart().afterLoadError(target)
@@ -251,7 +299,7 @@ class AddressBarPolicyTest {
             failedOnScreen.copy(loadStarts = 0, loadEnds = 0, loadErrors = 0),
             collapsed.copy(loadStarts = 0, loadEnds = 0, loadErrors = 0),
         )
-        assertNull(pendingSubmitAfterSession(p, collapsed))
+        assertEquals(target, pendingSubmitAfterSession(p, collapsed)?.text)
     }
 
     // DR5-04: Go during an old load; the old load's stop and the new load's start land in one emission, so isLoading
@@ -275,19 +323,21 @@ class AddressBarPolicyTest {
     }
 
     // DR6-01: Go during an old load; the old load stops (ignored), then the new request fails with no onPageStart at all.
-    // Nothing but loadErrors tells this apart from the old load's stop, so the target must clear on the error.
+    // Nothing but loadErrors tells this apart from the old load's stop; the error marks the submit failed, keeping it.
     @Test
-    fun loadErrorWithoutAStartClearsEvenWhenAnOldLoadWasRunningAtSubmit() {
+    fun loadErrorWithoutAStartMarksItFailedEvenWhenAnOldLoadWasRunningAtSubmit() {
         val old = loading()
         val p = submit(old)
         val oldStopped = old.afterPageStop(success = false)
         val r = observe(p, oldStopped, oldStopped.afterLoadError(target))
         assertNotNull("the old load's stop alone is not the new request's end", r[0])
-        assertNull(r[1])
+        assertFalse(r[0]!!.failed)
+        assertTrue(r[1]!!.failed)
+        assertEquals(target, r[1]?.text)
         // The same seen as one emission (stop and error conflated).
-        assertNull(pendingSubmitAfterSession(p, oldStopped.afterLoadError(target)))
+        assertTrue(pendingSubmitAfterSession(p, oldStopped.afterLoadError(target))!!.failed)
         // And with the old load's stop never reported at all.
-        assertNull(pendingSubmitAfterSession(p, old.afterLoadError(target)))
+        assertTrue(pendingSubmitAfterSession(p, old.afterLoadError(target))!!.failed)
     }
 
     @Test

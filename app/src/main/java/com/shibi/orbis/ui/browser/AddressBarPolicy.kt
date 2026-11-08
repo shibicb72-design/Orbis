@@ -52,9 +52,11 @@ internal fun pendingSubmitFor(target: String): String = addressBarDisplayUrl(tar
  * every step is a pure function of the previous value and one observation, so it is unit-testable without a session.
  *
  * The engine writes the session url only when a page COMMITS (GeckoEngineImpl.onLocationChange), and the commit is
- * handled elsewhere (the tab url changes). A load that never commits (error, Stop, crash, download, ...) leaves the OLD
+ * handled elsewhere (the tab url changes). A load that never commits (Stop, crash, download, cancel, ...) leaves the OLD
  * page displayed, so a pending text that is not cleared names a page that is not there: that is the defect (N1). Clearing
- * early is the safe direction: the bar then shows the tab's committed address, which is always true.
+ * early is the safe direction: the bar then shows the tab's committed address, which is always true. The one exception
+ * is a load ERROR: the failure banner is shown and the bar keeps the submitted address (as in Chrome and Firefox), so
+ * the user can fix a typo or retry it.
  */
 internal data class PendingSubmit(
     val text: String,
@@ -65,7 +67,24 @@ internal data class PendingSubmit(
     val navigationsCancelledAtSubmit: Int,
     /** An older load was running at submit: its end may arrive before the new load starts and must not clear the text. */
     val loadingAtSubmit: Boolean,
+    /**
+     * The submitted load failed (onLoadError). Like Chrome and Firefox, the bar then keeps what the user submitted, so it
+     * can be corrected or retried, and the counters above are re-snapshotted at the error. A plain page stop without a
+     * start after that is the failed load's own trailing stop and is ignored.
+     */
+    val failed: Boolean = false,
 )
+
+/** [pending] after its load failed: the text is kept and the counters are taken from [session], the state at the error. */
+internal fun pendingSubmitFailed(pending: PendingSubmit, session: SessionState): PendingSubmit =
+    pending.copy(
+        loadStartsAtSubmit = session.loadStarts,
+        loadEndsAtSubmit = session.loadEnds,
+        loadErrorsAtSubmit = session.loadErrors,
+        navigationsCancelledAtSubmit = session.navigationsCancelled,
+        loadingAtSubmit = false,
+        failed = true,
+    )
 
 /** Starts tracking a submit. [session] is the SELECTED tab's own session state read at submit time, before the load request. */
 internal fun pendingSubmitStart(target: String, session: SessionState): PendingSubmit =
@@ -83,14 +102,19 @@ internal fun pendingSubmitStart(target: String, session: SessionState): PendingS
  * deliberately not read here: a commit is the tab-url rule (the caller clears when the tab's url changes).
  *
  * Only the counters and isLoading are read, never the failure/crash flags: a flag can still be the old page's, and a
- * state flow conflates, so only monotonic counters tell "something happened since Go" reliably. Clears when
+ * state flow conflates, so only monotonic counters tell "something happened since Go" reliably.
+ *
+ * A load error since Go (onLoadError, with or without an onPageStart, conflated or not) KEEPS the text, the way Chrome
+ * and Firefox keep a failed address in the bar: see [pendingSubmitFailed]. It is checked before the start rule, so a
+ * start and error collapsed into one emission still count as a failure. An aborted or stopped old load reports a page
+ * stop, never a load error, so an error is always about a navigation the user asked for.
+ *
+ * Clears when
  *  - a navigation was cancelled (beforeunload refused, content process gone);
- *  - a load started after Go and the session is not loading now: isLoading is written by the very last start/end event,
- *    so an end came after that start, whether or not the flow showed us the loading state in between (a same-url retry
- *    or a fast failure collapses start+end into one emission). A start with the session still loading keeps it;
- *  - no load started after Go but a load error arrived (onLoadError without an onPageStart), whether or not an older
- *    load was running at submit: an aborted or stopped old load reports a page stop, never a load error;
- *  - no load started after Go but one ended, and none was running at submit (a stop or crash without a start).
+ *  - a load started after Go (or after the error) and the session is not loading now without a new error: isLoading is
+ *    written by the very last start/end event, so an end came after that start. A start still loading keeps it;
+ *  - no load started after Go but one ended, none was running at submit, and the submit has not failed (a stop or crash
+ *    without a start).
  * When a load WAS running at submit, plain ends before the new start are that old load's and are ignored, so the bar does
  * not flip back to the old address while the new page is still on its way. Any ambiguity left (an old load's late end
  * arriving after the new start, or the old load itself genuinely failing after Go) clears early, which is the safe side.
@@ -100,9 +124,9 @@ internal fun pendingSubmitAfterSession(pending: PendingSubmit?, session: Session
     // != rather than >, defensively: a session whose counters started over would differ from the snapshot too, and that is
     // a reason to clear. It cannot happen with the current TabManager (a tab's session object is not replaced in place).
     if (session.navigationsCancelled != pending.navigationsCancelledAtSubmit) return null
+    if (session.loadErrors != pending.loadErrorsAtSubmit) return pendingSubmitFailed(pending, session)
     if (session.loadStarts != pending.loadStartsAtSubmit) return if (session.isLoading) pending else null
-    if (session.loadErrors != pending.loadErrorsAtSubmit) return null
-    if (!pending.loadingAtSubmit && session.loadEnds != pending.loadEndsAtSubmit) return null
+    if (!pending.loadingAtSubmit && !pending.failed && session.loadEnds != pending.loadEndsAtSubmit) return null
     return pending
 }
 

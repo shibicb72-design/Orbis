@@ -9,6 +9,12 @@ interface BookmarkStore {
     fun load(): List<Bookmark>
 
     fun save(items: List<Bookmark>)
+
+    /**
+     * Deletes any copy of an unreadable file that [load] set aside earlier. Called only after the user explicitly cleared
+     * all bookmarks, because that copy still holds the old addresses. Ordinary deletes keep it for recovery.
+     */
+    fun discardSetAside() {}
 }
 
 /**
@@ -32,4 +38,6 @@ class FileBookmarkStore(private val file: AtomicTextFile) : BookmarkStore {
         if (blocked) throw IOException("unreadable bookmark file could not be set aside")
         file.write(BookmarkCodec.encode(items))
     }
+
+    override fun discardSetAside() = file.deleteAside()
 }

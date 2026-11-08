@@ -22,6 +22,7 @@ private class MemBookmarkStore(var data: List<Bookmark> = emptyList()) : Bookmar
     var failLoad = false
     var failSave = false
     var loads = 0
+    var discards = 0
 
     override fun load(): List<Bookmark> {
         loads++
@@ -33,6 +34,10 @@ private class MemBookmarkStore(var data: List<Bookmark> = emptyList()) : Bookmar
         if (failSave) throw IOException("boom")
         saves += items
         data = items
+    }
+
+    override fun discardSetAside() {
+        discards++
     }
 }
 
@@ -375,6 +380,39 @@ class BookmarkManagerTest {
         assertEquals(AddResult.ADDED, m.add("https://s1.example/", "again"))
         settle()
         assertEquals(listOf("https://s1.example/"), store.data.map { it.url })
+    }
+
+    @Test
+    fun onlyClearAllDiscardsTheSetAsideCopyAndOnlyAfterItsWriteSucceeded() {
+        val store = MemBookmarkStore(stored(2))
+        val m = manager(store)
+        m.remove(m.entries.value.first().id)
+        m.add("https://n.example/", "N")
+        settle()
+        assertEquals("ordinary changes keep the copy", 0, store.discards)
+        store.failSave = true
+        m.clearAll()
+        settle()
+        assertEquals("a failed write discards nothing", 0, store.discards)
+        store.failSave = false
+        m.flush()
+        settle()
+        assertEquals("the next successful write after the clear does", 1, store.discards)
+        m.add("https://later.example/", "L")
+        settle()
+        assertEquals("once only", 1, store.discards)
+    }
+
+    @Test
+    fun clearAllBeforeLoadDiscardsAfterTheReplayedWrite() {
+        val store = MemBookmarkStore(stored(2))
+        val m = manager(store, load = false)
+        m.load()
+        m.clearAll()
+        assertEquals(0, store.discards)
+        settle()
+        assertEquals(1, store.discards)
+        assertTrue(store.data.isEmpty())
     }
 
     @Test
