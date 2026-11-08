@@ -3,6 +3,10 @@ package com.shibi.orbis.ui.browser
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
@@ -31,6 +35,19 @@ internal fun addressBarTextOnFocus(sessionUrl: String, selectedTabUrl: String): 
 
 /** Whether the edit buffer may go into saved instance state. A private tab's text stays in plain memory only. */
 internal fun addressBarTextIsSaveable(isPrivate: Boolean): Boolean = !isPrivate
+
+/**
+ * The address bar's edit buffer. Saved instance state is written outside the app's control, so a private tab's typed text
+ * stays in plain memory ([remember]); a normal tab's survives recreation ([rememberSaveable]). The mode of a tab id never
+ * changes, so the branch is stable for as long as the caller keys this by tab.
+ */
+@Composable
+internal fun rememberAddressBarTypedState(isPrivate: Boolean): MutableState<String> =
+    if (addressBarTextIsSaveable(isPrivate)) {
+        rememberSaveable { mutableStateOf("") }
+    } else {
+        remember { mutableStateOf("") }
+    }
 
 /**
  * The IME options for the address field's EditorInfo: for a private tab, the "no personalized learning" request flag is

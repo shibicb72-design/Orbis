@@ -61,7 +61,6 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -324,12 +323,7 @@ private fun BrowserContent(
                 key(selectedTab.id) {
                     // Saved instance state is written outside the app's control; a private tab's typed text stays in
                     // plain memory. The mode of a tab id never changes, so the branch is stable inside this key.
-                    val typedState =
-                        if (addressBarTextIsSaveable(selectedTab.isPrivate)) {
-                            rememberSaveable { mutableStateOf("") }
-                        } else {
-                            remember { mutableStateOf("") }
-                        }
+                    val typedState = rememberAddressBarTypedState(selectedTab.isPrivate)
                     var typed by typedState
                     var addressFocused by remember { mutableStateOf(false) }
                     val focusRequester = remember { FocusRequester() }

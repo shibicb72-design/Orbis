@@ -10,6 +10,8 @@ coroutines = "1.11.0"
 junit = "4.13.2"
 # Real org.json for unit tests: the android.jar stubs throw "not mocked" on the JVM.
 orgJson = "20240303"
+# Real Compose on the JVM (test only): Robolectric runs the Compose UI test rule without a device.
+robolectric = "4.17"
 appcompat = "1.7.1"
 # Matching stable pair from maven.mozilla.org (2026-11-05):
 # browser-engine-gecko 159.0.1 -> geckoview-omni 159.0.20261102144711
@@ -34,6 +36,8 @@ androidx-navigation-compose = { group = "androidx.navigation", name = "navigatio
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 org-json = { group = "org.json", name = "json", version.ref = "orgJson" }
 mozilla-geckoview = { group = "org.mozilla.geckoview", name = "geckoview-omni", version.ref = "geckoview" }
 mozilla-browser-engine-gecko = { group = "org.mozilla.components", name = "browser-engine-gecko", version.ref = "mozillaAc" }
