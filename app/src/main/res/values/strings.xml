@@ -28,7 +28,6 @@
     <string name="tabs_new">New tab</string>
     <string name="tabs_new_private">New private tab</string>
     <string name="tabs_private_mark">Private tab</string>
-    <string name="tabs_close">Close tab</string>
     <string name="tabs_close_named">Close tab %1$s</string>
     <string name="tabs_close_private_named">Close private tab %1$s</string>
     <string name="tabs_selected_label">Current tab</string>

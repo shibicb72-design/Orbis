@@ -6,6 +6,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -22,12 +25,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -38,6 +44,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.flow.first
 import com.shibi.orbis.R
 import com.shibi.orbis.engine.hostOfUrl
 import com.shibi.orbis.tabs.TabUi
@@ -143,11 +150,27 @@ internal fun TabSwitcher(
             }
         }
         // Opens scrolled to the current tab: with many tabs it would otherwise sit below the fold of the half-open sheet.
-        val listState = rememberLazyListState(initialFirstVisibleItemIndex = tabs.indexOfFirst { it.selected }.coerceAtLeast(0))
+        val selectedIndex = tabs.indexOfFirst { it.selected }.coerceAtLeast(0)
+        val listState = rememberLazyListState(initialFirstVisibleItemIndex = selectedIndex)
+        // The first placement happens before the sheet has its final height; once it is open, bring the current tab fully
+        // into view if it is not (never moves a list the user can already see the current tab in).
+        LaunchedEffect(sheetState) {
+            snapshotFlow { sheetState.currentValue }.first { it == SheetValue.Expanded }
+            val info = listState.layoutInfo
+            val item = info.visibleItemsInfo.firstOrNull { it.index == selectedIndex }
+            val fullyVisible = item != null && item.offset >= 0 && item.offset + item.size <= info.viewportEndOffset - info.afterContentPadding
+            if (!fullyVisible) listState.scrollToItem(selectedIndex)
+        }
         LazyColumn(
             Modifier.weight(1f, fill = false),
             state = listState,
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            // The last row (often the current tab, scrolled to) must clear the gesture/navigation bar.
+            contentPadding = PaddingValues(
+                start = 12.dp,
+                end = 12.dp,
+                top = 8.dp,
+                bottom = 8.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+            ),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(tabs, key = { it.id }) { tab ->
