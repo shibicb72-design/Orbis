@@ -417,15 +417,7 @@ private class GeckoBrowserSession(
                     "load error code=0x${error.code.toString(16)} category=0x${error.category.toString(16)}",
                 )
                 visits.onLoadError()
-                _state.update {
-                    it.copy(
-                        // url is deliberately untouched: the old page is still displayed.
-                        failedUrl = uri?.takeIf { failed -> isWebUrl(failed) },
-                        loadFailed = true,
-                        isLoading = false,
-                        progress = 0,
-                    )
-                }
+                _state.update { it.afterLoadError(uri?.takeIf { failed -> isWebUrl(failed) }) }
                 // Null halts the load; the shell shows its own banner.
                 return null
             }
@@ -440,22 +432,13 @@ private class GeckoBrowserSession(
                 queue.dismissWhere { it is SitePrompt.SitePermission }
                 reconciler.onPageStart()
                 applyActive()
-                _state.update {
-                    // url is not written here (see onLocationChange).
-                    it.copy(
-                        isLoading = true,
-                        progress = 0,
-                        loadFailed = false,
-                        failedUrl = null,
-                        crashed = false,
-                        findResult = null,
-                    )
-                }
+                // url is not written here (see onLocationChange).
+                _state.update { it.afterPageStart() }
                 visits.onPageStart()
             }
 
             override fun onPageStop(session: GeckoSession, success: Boolean) {
-                _state.update { it.copy(isLoading = false, progress = if (success) 100 else 0) }
+                _state.update { it.afterPageStop(success) }
                 visits.onPageStop(success)?.let { host?.onVisit(this@GeckoBrowserSession, it.url, it.title) }
             }
 
@@ -519,16 +502,7 @@ private class GeckoBrowserSession(
         runCatching { session.open(runtime) }
             .onFailure { debugLog.log("GeckoSession", "reopen after $kind failed: ${it.message}") }
         applyActive()
-        _state.update {
-            it.copy(
-                crashed = true,
-                isLoading = false,
-                progress = 0,
-                canGoBack = false,
-                canGoForward = false,
-                findResult = null,
-            )
-        }
+        _state.update { it.afterContentProcessGone() }
     }
 
     // ---- prompts -------------------------------------------------------------------------------------------
@@ -750,6 +724,11 @@ private class GeckoBrowserSession(
             ): GeckoResult<Response> =
                 present(prompt) { result ->
                     SitePrompt.BeforeUnload(originHost()) { leave ->
+                        // Every way this prompt can end funnels through here (the UI, Gecko dismissing it, the queue's
+                        // dismissAll on crash/close). Anything but "leave" means the navigation that raised it will not
+                        // happen; no load event follows, so the address bar is told through the state. Gecko dismissing
+                        // it because the navigation went ahead anyway also lands here: a harmless early signal.
+                        if (leave != true) _state.update { it.afterNavigationCancelled() }
                         complete(
                             result,
                             when (leave) {

@@ -92,7 +92,6 @@ import com.shibi.orbis.engine.FindResult
 import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.engine.SitePrompt
 import com.shibi.orbis.engine.isWebUrl
-import com.shibi.orbis.engine.normalizeAddressInput
 import com.shibi.orbis.engine.pickerMimeTypes
 import com.shibi.orbis.tabs.TabEvent
 import com.shibi.orbis.ui.OrbisEmptyState
@@ -342,9 +341,10 @@ private fun BrowserContent(
                             tabId = tabId,
                             tabUrl = selectedTab.url,
                             sessionState = selectedTab.session?.state,
-                            downloadSourceTabId = pendingDownload?.sourceTabId,
+                            downloadOffer = pendingDownload,
                         )
-                    val pendingSubmit = pending.text
+                    // Event handlers below go through `pending` and read its text when they run, never a copy made here:
+                    // Go and the refocus it causes can both happen before the next recomposition (DR5-01).
                     val focusRequester = remember { FocusRequester() }
                     LaunchedEffect(Unit) {
                         // A tab the user just created starts with the address bar focused (once).
@@ -358,21 +358,20 @@ private fun BrowserContent(
                             // Unfocused, the bar shows only the committed location (blank tabs show nothing). From the
                             // selected tab itself: `state` is collected per session and for a frame after a tab switch
                             // still holds the previous tab's, which must not show, least of all a private tab's address.
-                            value = addressBarText(addressFocused, typed, collectedUrl = state.url, selectedTabUrl = selectedTab.url, pendingSubmit = pendingSubmit),
+                            value = addressBarText(addressFocused, typed, collectedUrl = state.url, selectedTabUrl = selectedTab.url, pendingSubmit = pending.text),
                             onValueChange = {
                                 typed = it
-                                pending.clear()
+                                onAddressBarEdited(pending)
                             },
                             modifier = Modifier
                                 .weight(1f)
                                 .focusRequester(focusRequester)
                                 .onFocusChanged { focus ->
-                                    if (focus.hasFocus && !addressFocused) {
-                                        // Not the collected state: for a frame after a tab switch it still holds the previous
-                                        // tab's address, which must not carry over, least of all out of a private tab.
-                                        val url = selectedTab.session?.state?.value?.url.orEmpty()
-                                        typed = addressBarTextOnFocus(url, selectedTab.url, pendingSubmit)
-                                    }
+                                    // Not the collected state: for a frame after a tab switch it still holds the previous
+                                    // tab's address, which must not carry over, least of all out of a private tab.
+                                    val url = selectedTab.session?.state?.value?.url.orEmpty()
+                                    addressBarBufferOnFocusChange(focus.hasFocus, addressFocused, pending, url, selectedTab.url)
+                                        ?.let { typed = it }
                                     addressFocused = focus.hasFocus
                                 },
                             singleLine = true,
@@ -391,10 +390,7 @@ private fun BrowserContent(
                             trailingIcon = {
                                 if (state.isLoading) {
                                     IconButton(
-                                        onClick = {
-                                            session?.stop()
-                                            pending.clear()
-                                        },
+                                        onClick = { stopFromAddressBar({ session?.stop() }, pending) },
                                     ) {
                                         Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.stop))
                                     }
@@ -407,14 +403,16 @@ private fun BrowserContent(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
                             keyboardActions = KeyboardActions(
                                 onGo = {
-                                    val target = normalizeAddressInput(typed, container.searchEngine.selected.value)
-                                    if (target != null) {
-                                        // The snapshot is read before the request, from the tab's own session.
-                                        if (session != null) pending.submit(target, session.state.value)
-                                        session?.loadUrl(target)
-                                        keyboardController?.hide()
-                                        focusSink.requestFocus()
-                                    }
+                                    submitFromAddressBar(
+                                        typed = typed,
+                                        searchEngine = container.searchEngine.selected.value,
+                                        // Read before the request, from the tab's own session.
+                                        sessionState = session?.state?.value,
+                                        pending = pending,
+                                        loadUrl = { session?.loadUrl(it) },
+                                        hideKeyboard = { keyboardController?.hide() },
+                                        moveFocusToSink = { focusSink.requestFocus() },
+                                    )
                                 },
                             ),
                         )

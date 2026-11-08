@@ -72,7 +72,56 @@ data class SessionState(
     val failedUrl: String? = null,
     val desktopMode: Boolean = false,
     val findResult: FindResult? = null,
+    /**
+     * Monotonic counters that make load boundaries observable even when the state flow conflates them (a collector only
+     * ever sees the latest value, so "started, then failed" can look like "nothing happened"). Never reset.
+     * [loadStarts]: top-level page loads started (onPageStart).
+     */
+    val loadStarts: Int = 0,
+    /** Loads ended by any route: page stop, load error, content process gone. */
+    val loadEnds: Int = 0,
+    /**
+     * Navigations that were asked for but cannot complete: a beforeunload prompt ended without leaving the page (stay,
+     * dismissed by Gecko, the queue, a crash), or the content process died.
+     */
+    val navigationsCancelled: Int = 0,
 )
+
+// The one definition of how engine events change the session state, so the counters are maintained in one place and
+// the address bar's tests drive the same transitions the engine applies. url is never written here (onLocationChange).
+
+internal fun SessionState.afterPageStart(): SessionState =
+    copy(
+        isLoading = true,
+        progress = 0,
+        loadFailed = false,
+        failedUrl = null,
+        crashed = false,
+        findResult = null,
+        loadStarts = loadStarts + 1,
+    )
+
+internal fun SessionState.afterPageStop(success: Boolean): SessionState =
+    copy(isLoading = false, progress = if (success) 100 else 0, loadEnds = loadEnds + 1)
+
+/** [failedUrl] is the http(s) address that failed, or null. url is deliberately untouched: the old page is still displayed. */
+internal fun SessionState.afterLoadError(failedUrl: String?): SessionState =
+    copy(failedUrl = failedUrl, loadFailed = true, isLoading = false, progress = 0, loadEnds = loadEnds + 1)
+
+internal fun SessionState.afterContentProcessGone(): SessionState =
+    copy(
+        crashed = true,
+        isLoading = false,
+        progress = 0,
+        canGoBack = false,
+        canGoForward = false,
+        findResult = null,
+        loadEnds = loadEnds + 1,
+        navigationsCancelled = navigationsCancelled + 1,
+    )
+
+/** A beforeunload prompt ended without the user leaving: the navigation that raised it will not happen. */
+internal fun SessionState.afterNavigationCancelled(): SessionState = copy(navigationsCancelled = navigationsCancelled + 1)
 
 interface BrowserSession {
     /** True for a private session. Fixed for the session's lifetime. */

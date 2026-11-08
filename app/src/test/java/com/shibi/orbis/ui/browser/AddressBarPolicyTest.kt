@@ -3,7 +3,13 @@ package com.shibi.orbis.ui.browser
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import androidx.compose.ui.platform.PlatformTextInputMethodRequest
+import com.shibi.orbis.engine.SearchEngine
 import com.shibi.orbis.engine.SessionState
+import com.shibi.orbis.engine.afterContentProcessGone
+import com.shibi.orbis.engine.afterLoadError
+import com.shibi.orbis.engine.afterNavigationCancelled
+import com.shibi.orbis.engine.afterPageStart
+import com.shibi.orbis.engine.afterPageStop
 import java.lang.reflect.Proxy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -81,11 +87,47 @@ class AddressBarPolicyTest {
         assertEquals("", pendingSubmitFor("about:blank"))
     }
 
+    // ---- the engine's counters: the transitions the reducer relies on ------------------------------------------------
+
+    @Test
+    fun engineTransitionsMaintainTheCounters() {
+        val s = SessionState(url = "https://old.example/")
+        val started = s.afterPageStart()
+        assertEquals(1, started.loadStarts)
+        assertEquals(0, started.loadEnds)
+        assertTrue(started.isLoading)
+        val stopped = started.afterPageStop(success = true)
+        assertEquals(1, stopped.loadStarts)
+        assertEquals(1, stopped.loadEnds)
+        assertFalse(stopped.isLoading)
+        assertEquals(100, stopped.progress)
+        val failed = stopped.afterPageStart().afterLoadError("https://x.example/")
+        assertEquals(2, failed.loadStarts)
+        assertEquals(2, failed.loadEnds)
+        assertTrue(failed.loadFailed)
+        assertEquals("https://x.example/", failed.failedUrl)
+        assertFalse(failed.isLoading)
+        assertEquals("the failure leaves the displayed url alone", "https://old.example/", failed.url)
+        val gone = failed.afterContentProcessGone()
+        assertEquals(3, gone.loadEnds)
+        assertEquals(1, gone.navigationsCancelled)
+        assertTrue(gone.crashed)
+        assertEquals(2, gone.afterNavigationCancelled().navigationsCancelled)
+        assertEquals("only the cancel counter moves", gone.loadEnds, gone.afterNavigationCancelled().loadEnds)
+        // A new page start resets the flags but never the counters.
+        val again = gone.afterPageStart()
+        assertFalse(again.crashed)
+        assertFalse(again.loadFailed)
+        assertEquals(3, again.loadStarts)
+        assertEquals(3, again.loadEnds)
+        assertEquals(1, again.navigationsCancelled)
+    }
+
     // ---- N1: a submitted address must not outlive a load that never commits ------------------------------------------
 
     private val target = "https://new.example/"
     private val idle = SessionState(url = "https://old.example/")
-    private fun loading() = idle.copy(isLoading = true, progress = 10)
+    private fun loading(base: SessionState = idle) = base.afterPageStart()
 
     /** Feeds [observations] in order; returns the pending value after each one (null = cleared). */
     private fun observe(start: PendingSubmit, vararg observations: SessionState): List<PendingSubmit?> {
@@ -109,28 +151,21 @@ class AddressBarPolicyTest {
 
     @Test
     fun failedLoadClearsThePendingText() {
-        val failed = idle.copy(loadFailed = true, failedUrl = target, isLoading = false)
+        val failed = loading().afterLoadError(target)
+        // Seen as one collapsed emission, and through start then error, the realistic order.
         assertEquals(listOf<PendingSubmit?>(null), observe(submit(), failed))
-        // Through start then error, the realistic order.
         assertNull(observe(submit(), loading(), failed).last())
     }
 
     @Test
-    fun failureAlreadyShownAtSubmitIsStaleUntilSeenClearedOrDifferent() {
-        val stale = idle.copy(loadFailed = true, failedUrl = "https://broken.example/")
-        val p = submit(stale)
-        // The engine resets loadFailed only at onPageStart; until then the stale flag must not clear the new submit.
-        assertEquals(p, pendingSubmitAfterSession(p, stale))
-        // Flag reset, then it fails again: cleared.
-        assertNull(observe(p, stale.copy(loadFailed = false, failedUrl = null, isLoading = true), stale).last())
-        // A failure for a different url is new even without seeing the reset.
-        assertNull(pendingSubmitAfterSession(p, stale.copy(failedUrl = target)))
+    fun loadErrorThatArrivesWithoutAStartClearsWhenNothingWasLoading() {
+        assertNull(pendingSubmitAfterSession(submit(), idle.afterLoadError(target)))
     }
 
     @Test
     fun stoppedLoadClearsThePendingText() {
         // Stop: session.stop(); Gecko ends the load, url untouched. Seen as loading, then not loading.
-        val r = observe(submit(), loading(), idle)
+        val r = observe(submit(), loading(), loading().afterPageStop(success = false))
         assertNotNull(r[0])
         assertNull(r[1])
     }
@@ -138,12 +173,14 @@ class AddressBarPolicyTest {
     @Test
     fun finishedLoadWithoutCommitClearsThePendingText() {
         // Same shape as a Stop or any end of load that never changed the url (blocked, download without an offer, ...).
-        assertNull(observe(submit(), loading(), loading().copy(progress = 80), idle.copy(progress = 100)).last())
+        val running = loading()
+        assertNull(observe(submit(), running, running.copy(progress = 80), running.afterPageStop(success = true)).last())
     }
 
     @Test
     fun loadStillRunningKeepsThePendingText() {
-        val r = observe(submit(), loading(), loading().copy(progress = 50), loading().copy(progress = 90))
+        val running = loading()
+        val r = observe(submit(), running, running.copy(progress = 50), running.copy(progress = 90))
         assertTrue(r.all { it != null })
         // Not started yet is not ended either.
         assertNotNull(pendingSubmitAfterSession(submit(), idle))
@@ -151,28 +188,94 @@ class AddressBarPolicyTest {
 
     @Test
     fun crashedContentProcessClearsThePendingText() {
-        val crashed = idle.copy(crashed = true, isLoading = false, canGoBack = false)
+        val crashed = idle.afterContentProcessGone()
         assertNull(pendingSubmitAfterSession(submit(), crashed))
-        assertNull(observe(submit(), loading(), crashed).last())
+        assertNull(observe(submit(), loading(), loading().afterContentProcessGone()).last())
+        // Even when a load was running at submit and no new start is ever seen (the request died with the process).
+        assertNull(pendingSubmitAfterSession(submit(loading()), loading().afterContentProcessGone()))
     }
 
     @Test
-    fun crashAlreadyShownAtSubmitIsStaleUntilSeenCleared() {
-        val staleCrash = idle.copy(crashed = true)
-        val p = submit(staleCrash)
-        assertEquals(p, pendingSubmitAfterSession(p, staleCrash))
-        assertNull(observe(p, staleCrash.copy(crashed = false, isLoading = true), staleCrash).last())
+    fun cancelledNavigationClearsThePendingText() {
+        // A beforeunload prompt ended without leaving: no load event follows, only the cancel counter.
+        assertNull(pendingSubmitAfterSession(submit(), idle.afterNavigationCancelled()))
+        assertNull(pendingSubmitAfterSession(submit(loading()), loading().afterNavigationCancelled()))
+    }
+
+    @Test
+    fun cancelCountedBeforeTheSubmitDoesNotClearIt() {
+        val earlier = idle.afterNavigationCancelled()
+        val p = submit(earlier)
+        assertEquals(p, pendingSubmitAfterSession(p, earlier))
+    }
+
+    @Test
+    fun flagsLeftFromBeforeGoDoNotMatter() {
+        // Old failure and old crash flags are still set right after Go (the engine resets them only at onPageStart).
+        val failedBefore = loading().afterLoadError("https://broken.example/")
+        val p = submit(failedBefore)
+        assertTrue(failedBefore.loadFailed)
+        assertEquals(p, pendingSubmitAfterSession(p, failedBefore))
+        val crashedBefore = idle.afterContentProcessGone()
+        val q = submit(crashedBefore)
+        assertEquals(q, pendingSubmitAfterSession(q, crashedBefore))
     }
 
     @Test
     fun oldLoadRunningAtSubmitMustEndBeforeTheNewLoadCounts() {
-        val p = submit(loading())
+        val old = loading()
+        val p = submit(old)
         // The interrupted old load ends first (onPageStop), the new one then starts and ends: only the last clears.
-        val r = observe(p, loading(), idle, loading(), idle)
+        val oldEnded = old.afterPageStop(success = false)
+        val newRunning = oldEnded.afterPageStart()
+        val r = observe(p, old, oldEnded, newRunning, newRunning.afterPageStop(success = false))
         assertNotNull(r[0])
         assertNotNull("the old load ending is not the new load ending", r[1])
         assertNotNull(r[2])
         assertNull(r[3])
+    }
+
+    // DR5-02: Go on the same url while its old failure is on screen. Start and error both land before the collector runs,
+    // so the observed state equals the submit snapshot in every field but the counters.
+    @Test
+    fun sameUrlRetryWhoseStartAndErrorAreConflatedClears() {
+        val failedOnScreen = loading().afterLoadError(target)
+        val p = submit(failedOnScreen)
+        val collapsed = failedOnScreen.afterPageStart().afterLoadError(target)
+        assertEquals(
+            "sanity: nothing but the counters differs, so a flag/isLoading reducer sees no change",
+            failedOnScreen.copy(loadStarts = 0, loadEnds = 0),
+            collapsed.copy(loadStarts = 0, loadEnds = 0),
+        )
+        assertNull(pendingSubmitAfterSession(p, collapsed))
+    }
+
+    // DR5-04: Go during an old load; the old load's stop and the new load's start land in one emission, so isLoading
+    // never shows false. After the new load ends without a commit the text must still clear.
+    @Test
+    fun oldStopAndNewStartConflatedThenNewEndClears() {
+        val old = loading()
+        val p = submit(old)
+        val collapsedStart = old.afterPageStop(success = false).afterPageStart()
+        val r = observe(p, collapsedStart, collapsedStart.afterPageStop(success = false))
+        assertNotNull("still loading: the new page is on its way", r[0])
+        assertNull(r[1])
+    }
+
+    @Test
+    fun oldStopNeverReportedThenNewEndClears() {
+        val old = loading()
+        val r = observe(submit(old), old.afterPageStart(), old.afterPageStart().afterPageStop(success = false))
+        assertNotNull(r[0])
+        assertNull(r[1])
+    }
+
+    @Test
+    fun oldLoadsLateEndAfterTheNewStartClearsEarly() {
+        // Documented, accepted: the bar goes back to the committed address, which is always true.
+        val old = loading()
+        val newRunning = old.afterPageStart()
+        assertNull(pendingSubmitAfterSession(submit(old), newRunning.afterPageStop(success = false)))
     }
 
     @Test
@@ -187,18 +290,82 @@ class AddressBarPolicyTest {
     @Test
     fun nothingPendingStaysNothingPending() {
         assertNull(pendingSubmitAfterSession(null, loading()))
-        assertNull(pendingSubmitAfterSession(null, idle.copy(loadFailed = true)))
+        assertNull(pendingSubmitAfterSession(null, idle.afterLoadError(target)))
     }
 
     @Test
     fun clearedPendingFallsBackToTheCommittedAddressOfTheTabItself() {
         // After any clear, the unfocused bar names the tab's committed (old) page, never the stale collected state.
-        val cleared = observe(submit(), loading(), idle).last()
+        val running = loading()
+        val cleared = observe(submit(), running, running.afterPageStop(success = false)).last()
         assertNull(cleared)
         assertEquals(
             "https://old.example/",
             addressBarText(false, "", collectedUrl = privateUrl, selectedTabUrl = "https://old.example/", pendingSubmit = cleared?.text),
         )
+    }
+
+    // ---- the bar's event bodies --------------------------------------------------------------------------------------
+
+    @Test
+    fun goTakesTheSnapshotBeforeTheRequestAndHandsFocusOnInOrder() {
+        val pending = PendingSubmitState()
+        val log = mutableListOf<String>()
+        val ok =
+            submitFromAddressBar(
+                typed = "  https://new.example/ ",
+                searchEngine = SearchEngine.DEFAULT,
+                sessionState = loading(),
+                pending = pending,
+                loadUrl = { log += "load:$it"; log += "pendingAtLoad:${pending.text}" },
+                hideKeyboard = { log += "hide" },
+                moveFocusToSink = { log += "sink" },
+            )
+        assertTrue(ok)
+        assertEquals(listOf("load:https://new.example/", "pendingAtLoad:https://new.example/", "hide", "sink"), log)
+        assertEquals("https://new.example/", pending.text)
+    }
+
+    @Test
+    fun goWithBlankInputDoesNothing() {
+        val pending = PendingSubmitState()
+        var touched = false
+        val ok =
+            submitFromAddressBar(
+                "   ", SearchEngine.DEFAULT, idle, pending,
+                loadUrl = { touched = true }, hideKeyboard = { touched = true }, moveFocusToSink = { touched = true },
+            )
+        assertFalse(ok)
+        assertFalse(touched)
+        assertNull(pending.text)
+    }
+
+    @Test
+    fun stopStopsAndForgetsThePendingText() {
+        val pending = PendingSubmitState().also { it.submit(target, idle) }
+        var stopped = false
+        stopFromAddressBar({ stopped = true }, pending)
+        assertTrue(stopped)
+        assertNull(pending.text)
+    }
+
+    @Test
+    fun editingForgetsThePendingText() {
+        val pending = PendingSubmitState().also { it.submit(target, idle) }
+        onAddressBarEdited(pending)
+        assertNull(pending.text)
+    }
+
+    @Test
+    fun focusGainTakesThePendingTextLiveFromTheHolder() {
+        val pending = PendingSubmitState()
+        // No pending: the session address. Then Go happens (no recomposition in a pure test) and the very next focus event sees it.
+        assertEquals("https://old.example/", addressBarBufferOnFocusChange(true, false, pending, "https://old.example/", "https://old.example/"))
+        pending.submit(target, idle)
+        assertEquals(target, addressBarBufferOnFocusChange(true, false, pending, "https://old.example/", "https://old.example/"))
+        // Not a gain: the buffer is left alone.
+        assertNull(addressBarBufferOnFocusChange(true, true, pending, "", ""))
+        assertNull(addressBarBufferOnFocusChange(false, true, pending, "", ""))
     }
 
     @Test

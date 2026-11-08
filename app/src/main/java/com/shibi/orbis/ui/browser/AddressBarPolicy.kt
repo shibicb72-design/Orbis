@@ -14,7 +14,10 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.PlatformTextInputMethodRequest
+import com.shibi.orbis.engine.SearchEngine
 import com.shibi.orbis.engine.SessionState
+import com.shibi.orbis.engine.normalizeAddressInput
+import com.shibi.orbis.tabs.PendingDownload
 import kotlinx.coroutines.flow.Flow
 
 internal fun isBlankAddress(url: String) = url.isEmpty() || url == "about:blank"
@@ -44,78 +47,57 @@ internal fun addressBarText(
  */
 internal fun pendingSubmitFor(target: String): String = addressBarDisplayUrl(target)
 
-/** Where a [PendingSubmit] is in watching the load it started. See [pendingSubmitAfterSession]. */
-internal enum class SubmitLoadWatch {
-    /** The session was already loading at submit: wait until that old load is seen to end. */
-    WAIT_OLD_LOAD_END,
-
-    /** Nothing seen yet: wait for the submitted load to start. */
-    WAIT_START,
-
-    /** The submitted load was seen running: its end without a commit clears the pending text. */
-    WAIT_END,
-}
-
 /**
- * What Go submitted, plus the submit-time snapshot of the session the clearing rules compare against. Immutable; every
- * step is a pure function of the previous value and one observation, so it is unit-testable without a session.
+ * What Go submitted, plus the submit-time snapshot of the session counters the clearing rules compare against. Immutable;
+ * every step is a pure function of the previous value and one observation, so it is unit-testable without a session.
  *
  * The engine writes the session url only when a page COMMITS (GeckoEngineImpl.onLocationChange), and the commit is
  * handled elsewhere (the tab url changes). A load that never commits (error, Stop, crash, download, ...) leaves the OLD
- * page displayed, so without the rules below the bar would keep naming a target above the old page. Clearing early is the
- * safe direction: the bar then shows the tab's committed address.
+ * page displayed, so a pending text that is not cleared names a page that is not there: that is the defect (N1). Clearing
+ * early is the safe direction: the bar then shows the tab's committed address, which is always true.
  */
 internal data class PendingSubmit(
     val text: String,
-    /** The session's failedUrl at submit: a failure for a different one is a new failure even if the flag was set before. */
-    val failedUrlAtSubmit: String?,
-    /** False while loadFailed was already true at submit and has not been seen false since (the old failure is not ours). */
-    val loadFailedArmed: Boolean,
-    /** Same for crashed. */
-    val crashedArmed: Boolean,
-    val watch: SubmitLoadWatch,
+    /** Session counters at submit (see SessionState): everything counted after these happened after the user pressed Go. */
+    val loadStartsAtSubmit: Int,
+    val loadEndsAtSubmit: Int,
+    val navigationsCancelledAtSubmit: Int,
+    /** An older load was running at submit: its end may arrive before the new load starts and must not clear the text. */
+    val loadingAtSubmit: Boolean,
 )
 
 /** Starts tracking a submit. [session] is the SELECTED tab's own session state read at submit time, before the load request. */
 internal fun pendingSubmitStart(target: String, session: SessionState): PendingSubmit =
     PendingSubmit(
         text = pendingSubmitFor(target),
-        failedUrlAtSubmit = session.failedUrl,
-        loadFailedArmed = !session.loadFailed,
-        crashedArmed = !session.crashed,
-        watch = if (session.isLoading) SubmitLoadWatch.WAIT_OLD_LOAD_END else SubmitLoadWatch.WAIT_START,
+        loadStartsAtSubmit = session.loadStarts,
+        loadEndsAtSubmit = session.loadEnds,
+        navigationsCancelledAtSubmit = session.navigationsCancelled,
+        loadingAtSubmit = session.isLoading,
     )
 
 /**
- * The pending text after one observation of the SELECTED tab's own session state; null means cleared. Clears when, after
- * the submit, the load failed, the content process crashed, or the load was seen running and then stopped running. The
- * url is deliberately not read here: a commit is the tab-url rule (the caller clears when the tab's url changes).
+ * The pending text after one observation of the SELECTED tab's own session state; null means cleared. The url is
+ * deliberately not read here: a commit is the tab-url rule (the caller clears when the tab's url changes).
  *
- * A failure or crash flag that was already set at submit is stale (the engine resets it only when the new page starts);
- * it only counts once seen cleared again, or, for a failure, when failedUrl differs from the one at submit. An old load
- * that was running at submit must first be seen to end before the new load's start and end count. Unreliable corners
- * (flags conflated away by the state flow) fall on the side of not clearing; they are reported, not guessed at.
+ * Only the counters and isLoading are read, never the failure/crash flags: a flag can still be the old page's, and a
+ * state flow conflates, so only monotonic counters tell "something happened since Go" reliably. Clears when
+ *  - a navigation was cancelled (beforeunload refused, content process gone);
+ *  - a load started after Go and the session is not loading now: isLoading is written by the very last start/end event,
+ *    so an end came after that start, whether or not the flow showed us the loading state in between (a same-url retry
+ *    or a fast failure collapses start+end into one emission). A start with the session still loading keeps it;
+ *  - no load started after Go but one ended, and none was running at submit (a load error that arrived without a start).
+ * When a load WAS running at submit, ends before the new start are that old load's and are ignored, so the bar does not
+ * flip back to the old address while the new page is still on its way. Any ambiguity left (an old load's late end
+ * arriving after the new start) clears early, which is the safe side.
  */
 internal fun pendingSubmitAfterSession(pending: PendingSubmit?, session: SessionState): PendingSubmit? {
     if (pending == null) return null
-    if (session.crashed && pending.crashedArmed) return null
-    if (session.loadFailed && (pending.loadFailedArmed || session.failedUrl != pending.failedUrlAtSubmit)) return null
-    val watch =
-        when (pending.watch) {
-            SubmitLoadWatch.WAIT_OLD_LOAD_END ->
-                if (session.isLoading) SubmitLoadWatch.WAIT_OLD_LOAD_END else SubmitLoadWatch.WAIT_START
-
-            SubmitLoadWatch.WAIT_START ->
-                if (session.isLoading) SubmitLoadWatch.WAIT_END else SubmitLoadWatch.WAIT_START
-
-            SubmitLoadWatch.WAIT_END ->
-                if (session.isLoading) SubmitLoadWatch.WAIT_END else return null
-        }
-    return pending.copy(
-        loadFailedArmed = pending.loadFailedArmed || !session.loadFailed,
-        crashedArmed = pending.crashedArmed || !session.crashed,
-        watch = watch,
-    )
+    // != rather than >: a replaced session starts its counters over, and that is a reason to clear too.
+    if (session.navigationsCancelled != pending.navigationsCancelledAtSubmit) return null
+    if (session.loadStarts != pending.loadStartsAtSubmit) return if (session.isLoading) pending else null
+    if (!pending.loadingAtSubmit && session.loadEnds != pending.loadEndsAtSubmit) return null
+    return pending
 }
 
 /**
@@ -127,7 +109,9 @@ internal fun pendingSubmitAfterDownload(pending: PendingSubmit?, sourceTabId: Lo
 
 /**
  * Compose holder of one tab's [PendingSubmit]. Plain memory only (never saved state), one per tab key. [text] is what
- * the address bar functions take as their `pendingSubmit` string.
+ * the address bar functions take as their `pendingSubmit` string. Event handlers must read it through this holder at the
+ * moment they run, never from a copy taken during composition: Go and the focus change it causes can both happen before
+ * the next recomposition.
  */
 internal class PendingSubmitState {
     private var value by mutableStateOf<PendingSubmit?>(null)
@@ -155,22 +139,72 @@ internal class PendingSubmitState {
 /**
  * One tab's pending-submit state with all its clearing rules wired. Call inside the per-tab key.
  * [sessionState] must be the selected tab's OWN session flow (`selectedTab.session?.state`), not a flow collected outside
- * the key: that one still holds the previously selected tab's value for a frame after a switch. [downloadSourceTabId] is
- * the tab a pending download offer came from, if any. The Stop tap and edits are the caller's [PendingSubmitState.clear].
+ * the key: that one still holds the previously selected tab's value for a frame after a switch. [downloadOffer] is the
+ * pending download offer (TabManager.pendingDownload), if any; the effect is keyed on the offer itself, so a second offer
+ * for the same tab re-runs it. The Stop tap and edits are the caller's [PendingSubmitState.clear].
  */
 @Composable
 internal fun rememberPendingSubmit(
     tabId: Long,
     tabUrl: String,
     sessionState: Flow<SessionState>?,
-    downloadSourceTabId: Long?,
+    downloadOffer: PendingDownload?,
 ): PendingSubmitState {
     val holder = remember { PendingSubmitState() }
     LaunchedEffect(tabUrl) { holder.clear() }
     LaunchedEffect(sessionState) { sessionState?.collect { holder.onSession(it) } }
-    LaunchedEffect(downloadSourceTabId) { downloadSourceTabId?.let { holder.onDownloadOffered(it, tabId) } }
+    LaunchedEffect(downloadOffer) { downloadOffer?.let { holder.onDownloadOffered(it.sourceTabId, tabId) } }
     return holder
 }
+
+// ---- the bar's event bodies, as BrowserScreen runs them (PendingSubmitComposeTest calls the same functions) ----------------
+
+/**
+ * Go. Normalizes [typed]; for blank input does nothing and returns false. Otherwise, in this order: the submit snapshot
+ * is taken from [sessionState] (the selected tab's own state, BEFORE the request, so nothing the load does can be
+ * mistaken for the submit-time state), the page is requested, the keyboard hides and focus moves to the sink. A null
+ * [sessionState] (no session yet) requests nothing and records no pending text.
+ */
+internal fun submitFromAddressBar(
+    typed: String,
+    searchEngine: SearchEngine,
+    sessionState: SessionState?,
+    pending: PendingSubmitState,
+    loadUrl: (String) -> Unit,
+    hideKeyboard: () -> Unit,
+    moveFocusToSink: () -> Unit,
+): Boolean {
+    val target = normalizeAddressInput(typed, searchEngine) ?: return false
+    if (sessionState != null) pending.submit(target, sessionState)
+    loadUrl(target)
+    hideKeyboard()
+    moveFocusToSink()
+    return true
+}
+
+/** The Stop button: stops the load and forgets the pending text. */
+internal fun stopFromAddressBar(stop: () -> Unit, pending: PendingSubmitState) {
+    stop()
+    pending.clear()
+}
+
+/** The user edited the field: what they type replaces whatever Go submitted. */
+internal fun onAddressBarEdited(pending: PendingSubmitState) {
+    pending.clear()
+}
+
+/**
+ * The bar's focus change. Returns the new edit buffer when focus was just gained, null when the buffer stays as it is.
+ * [pending] is read here, at the moment of the event, not from a value copied during composition: a hardware Enter
+ * submits and the view system hands focus back before the next recomposition.
+ */
+internal fun addressBarBufferOnFocusChange(
+    hasFocus: Boolean,
+    wasFocused: Boolean,
+    pending: PendingSubmitState,
+    sessionUrl: String,
+    selectedTabUrl: String,
+): String? = if (hasFocus && !wasFocused) addressBarTextOnFocus(sessionUrl, selectedTabUrl, pending.text) else null
 
 /**
  * The edit buffer when the bar gains focus: the address the user just submitted if its page has not committed yet
