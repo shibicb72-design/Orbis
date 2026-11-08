@@ -4,7 +4,11 @@ package com.shibi.orbis.privacy
 data class PrivacyWindowDecision(
     /** Whether the system may take a Recents (task switcher) screenshot. Only applied on API 33+. */
     val recentsScreenshotEnabled: Boolean,
-    /** Whether the window carries FLAG_SECURE. Only requested below API 33, where the Recents switch does not exist. */
+    /**
+     * Whether the window carries FLAG_SECURE. True whenever any private tab is open, on every API level: on an API 35
+     * emulator setRecentsScreenshotEnabled(false) alone still showed the live private tab in Recents. Side effect: user
+     * screenshots and screen recording of the app are blocked while a private tab is open.
+     */
     val flagSecure: Boolean,
 )
 
@@ -28,19 +32,17 @@ class PrivacyWindowController(private val ops: PrivacyWindowOps) {
 
 /**
  * Keeps private tabs out of the task switcher. The tab switcher lists private tabs next to normal ones, so the window is
- * protected while ANY private tab is open, not only while one is selected. On API 33+ the Recents screenshot is switched
- * off; below that the only tool is FLAG_SECURE, which also blocks user screenshots and screen recording of the window for
- * as long as any private tab is open. With no private tab open both are restored. Pure, so the decision is testable
- * without a device.
+ * protected while ANY private tab is open, not only while one is selected. While one is open, FLAG_SECURE is set on every
+ * API level (like Chrome Incognito and Firefox private browsing), and on API 33+ the Recents screenshot is also switched
+ * off. The Recents switch alone is not enough: on an API 35 emulator the Recents card still showed the live private tab.
+ * Trade-off: user screenshots and screen recording of the app are blocked for as long as any private tab is open. With no
+ * private tab open both are restored. Pure, so the decision is testable without a device.
  */
 object PrivacyWindowPolicy {
-    /** First API with Activity.setRecentsScreenshotEnabled (Android 13). */
+    /** First API with Activity.setRecentsScreenshotEnabled (Android 13); kept as a belt-and-braces call next to FLAG_SECURE. */
     const val RECENTS_API = 33
 
+    @Suppress("UNUSED_PARAMETER")
     fun decide(apiLevel: Int, anyPrivateTabOpen: Boolean): PrivacyWindowDecision =
-        when {
-            !anyPrivateTabOpen -> PrivacyWindowDecision(recentsScreenshotEnabled = true, flagSecure = false)
-            apiLevel >= RECENTS_API -> PrivacyWindowDecision(recentsScreenshotEnabled = false, flagSecure = false)
-            else -> PrivacyWindowDecision(recentsScreenshotEnabled = true, flagSecure = true)
-        }
+        PrivacyWindowDecision(recentsScreenshotEnabled = !anyPrivateTabOpen, flagSecure = anyPrivateTabOpen)
 }
