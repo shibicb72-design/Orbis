@@ -45,11 +45,13 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * N1: after Go the bar names the submitted target only while that load can still commit. [PendingBar] is the address
- * bar's wiring as BrowserScreen has it: the real [rememberPendingSubmit] inside a per-tab key, and the real event bodies
- * ([submitFromAddressBar], [stopFromAddressBar], [onAddressBarEdited], [addressBarBufferOnFocusChange]) that BrowserScreen
- * calls. What differs from BrowserScreen is only the surrounding screen: the session is a MutableStateFlow that the tests
- * drive with the engine's own state transitions (afterPageStart and friends).
+ * N1: after Go the bar names the submitted target only while that load can still commit. [PendingBar] is a hand-written
+ * MIRROR of the address bar's wiring in BrowserScreen, not BrowserScreen itself: it uses the real [rememberPendingSubmit]
+ * inside a per-tab key and the real event bodies ([submitFromAddressBar], [stopFromAddressBar], [onAddressBarEdited],
+ * [addressBarBufferOnFocusChange]), and its session is a MutableStateFlow driven with the engine's own state transitions
+ * (afterPageStart and friends). What is NOT covered: that BrowserScreen passes those functions the same arguments (the
+ * selected tab's own session flow, the tab url, the download offer) and wires them the same way. A change to that wiring
+ * in BrowserScreen would not turn this class red; it is checked by review and on a device.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = android.app.Application::class)
@@ -77,6 +79,10 @@ class PendingSubmitComposeTest {
     private val loads = mutableListOf<String>()
     private var hides = 0
     private var stops = 0
+
+    // Every onFocusChanged invocation of the bar, by the hasFocus it reported: lets a test prove the handler really ran.
+    private var focusGains = 0
+    private var focusLosses = 0
 
     @Composable
     private fun PendingBar() {
@@ -112,6 +118,7 @@ class PendingSubmitComposeTest {
                         .testTag("address")
                         .focusRequester(addressRequester)
                         .onFocusChanged { f ->
+                            if (f.hasFocus) focusGains++ else focusLosses++
                             addressBarBufferOnFocusChange(f.hasFocus, focused, pending, flow.value.url, tabUrl)?.let { typed = it }
                             focused = f.hasFocus
                         },
@@ -272,8 +279,9 @@ class PendingSubmitComposeTest {
     }
 
     @Test
-    fun beforeUnloadThatLeavesKeepsTheTargetUntilTheLoadEnds() {
-        // Leave: no cancel is counted; the new page starts as usual.
+    fun aLoadStartingAfterGoKeepsTheTargetWhileItRuns() {
+        // Includes the beforeunload "leave" outcome: no cancel is counted and the new page starts as usual, which the
+        // session cannot tell apart from any other start. (The prompt itself is not simulated here.)
         start()
         go()
         emit(flowA) { it.afterPageStart() }
@@ -342,11 +350,17 @@ class PendingSubmitComposeTest {
         rule.waitForIdle()
         rule.onNodeWithTag("address").performTextReplacement(target)
         rule.waitForIdle()
+        rule.onNodeWithTag("address").assertIsFocused()
+        val gainsBefore = focusGains
+        val lossesBefore = focusLosses
         rule.runOnUiThread {
             goNow()
             addressRequester.requestFocus()
         }
         rule.waitForIdle()
+        // Not vacuous: the handler ran for the loss (Go moved focus to the sink) and for the regain, inside that one task.
+        assertEquals("focus was lost once", lossesBefore + 1, focusLosses)
+        assertEquals("focus was regained once, running the handler", gainsBefore + 1, focusGains)
         rule.onNodeWithTag("address").assertIsFocused()
         assertEquals(target, addressText())
     }
@@ -395,6 +409,18 @@ class PendingSubmitComposeTest {
         emit(flowA) { it.afterPageStart() }
         assertEquals(target, addressText())
         emit(flowA) { it.afterPageStop(success = false) }
+        assertEquals(old, addressText())
+    }
+
+    // DR6-01: Go during an old load; the old load stops (ignored), then the new request fails with no onPageStart.
+    @Test
+    fun loadErrorWithoutAStartWhileAnOldLoadWasRunningFallsBackToTheOldAddress() {
+        flowA.value = flowA.value.afterPageStart()
+        start()
+        go()
+        emit(flowA) { it.afterPageStop(success = false) }
+        assertEquals("the old load's end is not the new request's", target, addressText())
+        emit(flowA) { it.afterLoadError(target) }
         assertEquals(old, addressText())
     }
 

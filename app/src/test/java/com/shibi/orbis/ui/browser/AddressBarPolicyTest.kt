@@ -99,17 +99,20 @@ class AddressBarPolicyTest {
         val stopped = started.afterPageStop(success = true)
         assertEquals(1, stopped.loadStarts)
         assertEquals(1, stopped.loadEnds)
+        assertEquals("a page stop (including an aborted load) is not a load error", 0, stopped.loadErrors)
         assertFalse(stopped.isLoading)
         assertEquals(100, stopped.progress)
         val failed = stopped.afterPageStart().afterLoadError("https://x.example/")
         assertEquals(2, failed.loadStarts)
         assertEquals(2, failed.loadEnds)
+        assertEquals(1, failed.loadErrors)
         assertTrue(failed.loadFailed)
         assertEquals("https://x.example/", failed.failedUrl)
         assertFalse(failed.isLoading)
         assertEquals("the failure leaves the displayed url alone", "https://old.example/", failed.url)
         val gone = failed.afterContentProcessGone()
         assertEquals(3, gone.loadEnds)
+        assertEquals("a crash is not a load error", 1, gone.loadErrors)
         assertEquals(1, gone.navigationsCancelled)
         assertTrue(gone.crashed)
         assertEquals(2, gone.afterNavigationCancelled().navigationsCancelled)
@@ -120,6 +123,7 @@ class AddressBarPolicyTest {
         assertFalse(again.loadFailed)
         assertEquals(3, again.loadStarts)
         assertEquals(3, again.loadEnds)
+        assertEquals(1, again.loadErrors)
         assertEquals(1, again.navigationsCancelled)
     }
 
@@ -244,8 +248,8 @@ class AddressBarPolicyTest {
         val collapsed = failedOnScreen.afterPageStart().afterLoadError(target)
         assertEquals(
             "sanity: nothing but the counters differs, so a flag/isLoading reducer sees no change",
-            failedOnScreen.copy(loadStarts = 0, loadEnds = 0),
-            collapsed.copy(loadStarts = 0, loadEnds = 0),
+            failedOnScreen.copy(loadStarts = 0, loadEnds = 0, loadErrors = 0),
+            collapsed.copy(loadStarts = 0, loadEnds = 0, loadErrors = 0),
         )
         assertNull(pendingSubmitAfterSession(p, collapsed))
     }
@@ -268,6 +272,37 @@ class AddressBarPolicyTest {
         val r = observe(submit(old), old.afterPageStart(), old.afterPageStart().afterPageStop(success = false))
         assertNotNull(r[0])
         assertNull(r[1])
+    }
+
+    // DR6-01: Go during an old load; the old load stops (ignored), then the new request fails with no onPageStart at all.
+    // Nothing but loadErrors tells this apart from the old load's stop, so the target must clear on the error.
+    @Test
+    fun loadErrorWithoutAStartClearsEvenWhenAnOldLoadWasRunningAtSubmit() {
+        val old = loading()
+        val p = submit(old)
+        val oldStopped = old.afterPageStop(success = false)
+        val r = observe(p, oldStopped, oldStopped.afterLoadError(target))
+        assertNotNull("the old load's stop alone is not the new request's end", r[0])
+        assertNull(r[1])
+        // The same seen as one emission (stop and error conflated).
+        assertNull(pendingSubmitAfterSession(p, oldStopped.afterLoadError(target)))
+        // And with the old load's stop never reported at all.
+        assertNull(pendingSubmitAfterSession(p, old.afterLoadError(target)))
+    }
+
+    @Test
+    fun abortedOldLoadAloneNeverClearsAGoDuringLoading() {
+        // A page stop with success=false is how an interrupted old load ends; it must not look like a load error.
+        val old = loading()
+        val p = submit(old)
+        assertEquals(p, pendingSubmitAfterSession(p, old.afterPageStop(success = false)))
+    }
+
+    @Test
+    fun loadErrorCountedBeforeGoDoesNotClearTheSubmitWhileLoading() {
+        val failedBefore = loading().afterLoadError("https://broken.example/")
+        val p = submit(failedBefore.afterPageStart())
+        assertEquals(p, pendingSubmitAfterSession(p, failedBefore.afterPageStart()))
     }
 
     @Test

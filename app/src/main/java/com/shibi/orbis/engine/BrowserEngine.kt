@@ -78,8 +78,18 @@ data class SessionState(
      * [loadStarts]: top-level page loads started (onPageStart).
      */
     val loadStarts: Int = 0,
-    /** Loads ended by any route: page stop, load error, content process gone. */
+    /**
+     * Load-end events by any route: page stop, load error, content process gone. It counts events, not loads: Gecko may
+     * report an error and then still call onPageStop for the same load, so one failed load can count twice. Consumers
+     * only compare it with an earlier snapshot ("did any end event arrive since"); never read it as a number of loads.
+     */
     val loadEnds: Int = 0,
+    /**
+     * Load errors (onLoadError) only, so "the load failed" stays visible when the error arrives without a start, or
+     * its start and error are conflated into one emission. A stop or abort of an old load is NOT an error and does not
+     * move it.
+     */
+    val loadErrors: Int = 0,
     /**
      * Navigations that were asked for but cannot complete: a beforeunload prompt ended without leaving the page (stay,
      * dismissed by Gecko, the queue, a crash), or the content process died.
@@ -106,7 +116,14 @@ internal fun SessionState.afterPageStop(success: Boolean): SessionState =
 
 /** [failedUrl] is the http(s) address that failed, or null. url is deliberately untouched: the old page is still displayed. */
 internal fun SessionState.afterLoadError(failedUrl: String?): SessionState =
-    copy(failedUrl = failedUrl, loadFailed = true, isLoading = false, progress = 0, loadEnds = loadEnds + 1)
+    copy(
+        failedUrl = failedUrl,
+        loadFailed = true,
+        isLoading = false,
+        progress = 0,
+        loadEnds = loadEnds + 1,
+        loadErrors = loadErrors + 1,
+    )
 
 internal fun SessionState.afterContentProcessGone(): SessionState =
     copy(

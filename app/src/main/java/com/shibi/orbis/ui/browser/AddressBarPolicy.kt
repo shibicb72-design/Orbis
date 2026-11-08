@@ -61,6 +61,7 @@ internal data class PendingSubmit(
     /** Session counters at submit (see SessionState): everything counted after these happened after the user pressed Go. */
     val loadStartsAtSubmit: Int,
     val loadEndsAtSubmit: Int,
+    val loadErrorsAtSubmit: Int,
     val navigationsCancelledAtSubmit: Int,
     /** An older load was running at submit: its end may arrive before the new load starts and must not clear the text. */
     val loadingAtSubmit: Boolean,
@@ -72,6 +73,7 @@ internal fun pendingSubmitStart(target: String, session: SessionState): PendingS
         text = pendingSubmitFor(target),
         loadStartsAtSubmit = session.loadStarts,
         loadEndsAtSubmit = session.loadEnds,
+        loadErrorsAtSubmit = session.loadErrors,
         navigationsCancelledAtSubmit = session.navigationsCancelled,
         loadingAtSubmit = session.isLoading,
     )
@@ -86,16 +88,20 @@ internal fun pendingSubmitStart(target: String, session: SessionState): PendingS
  *  - a load started after Go and the session is not loading now: isLoading is written by the very last start/end event,
  *    so an end came after that start, whether or not the flow showed us the loading state in between (a same-url retry
  *    or a fast failure collapses start+end into one emission). A start with the session still loading keeps it;
- *  - no load started after Go but one ended, and none was running at submit (a load error that arrived without a start).
- * When a load WAS running at submit, ends before the new start are that old load's and are ignored, so the bar does not
- * flip back to the old address while the new page is still on its way. Any ambiguity left (an old load's late end
- * arriving after the new start) clears early, which is the safe side.
+ *  - no load started after Go but a load error arrived (onLoadError without an onPageStart), whether or not an older
+ *    load was running at submit: an aborted or stopped old load reports a page stop, never a load error;
+ *  - no load started after Go but one ended, and none was running at submit (a stop or crash without a start).
+ * When a load WAS running at submit, plain ends before the new start are that old load's and are ignored, so the bar does
+ * not flip back to the old address while the new page is still on its way. Any ambiguity left (an old load's late end
+ * arriving after the new start, or the old load itself genuinely failing after Go) clears early, which is the safe side.
  */
 internal fun pendingSubmitAfterSession(pending: PendingSubmit?, session: SessionState): PendingSubmit? {
     if (pending == null) return null
-    // != rather than >: a replaced session starts its counters over, and that is a reason to clear too.
+    // != rather than >, defensively: a session whose counters started over would differ from the snapshot too, and that is
+    // a reason to clear. It cannot happen with the current TabManager (a tab's session object is not replaced in place).
     if (session.navigationsCancelled != pending.navigationsCancelledAtSubmit) return null
     if (session.loadStarts != pending.loadStartsAtSubmit) return if (session.isLoading) pending else null
+    if (session.loadErrors != pending.loadErrorsAtSubmit) return null
     if (!pending.loadingAtSubmit && session.loadEnds != pending.loadEndsAtSubmit) return null
     return pending
 }
