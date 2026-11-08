@@ -332,12 +332,20 @@ private fun BrowserContent(
                     val typedState = rememberAddressBarTypedState(selectedTab.isPrivate)
                     var typed by typedState
                     var addressFocused by remember { mutableStateOf(false) }
-                    // What Go just submitted, until its page commits. Plain memory on purpose (a private tab's text must
-                    // not reach saved state); inside this key, so it never leaks into another tab.
-                    var pendingSubmit by remember { mutableStateOf<String?>(null) }
-                    LaunchedEffect(selectedTab.url) { pendingSubmit = null }
-                    val focusRequester = remember { FocusRequester() }
                     val tabId = selectedTab.id
+                    // What Go just submitted, until its page commits or the load is seen to end without one (error, Stop,
+                    // crash, finished, download; see PendingSubmit). Plain memory on purpose (a private tab's text must not
+                    // reach saved state); inside this key, so it never leaks into another tab. The session flow is the
+                    // selected tab's own, not the `state` collected above, which lags a frame behind a tab switch.
+                    val pending =
+                        rememberPendingSubmit(
+                            tabId = tabId,
+                            tabUrl = selectedTab.url,
+                            sessionState = selectedTab.session?.state,
+                            downloadSourceTabId = pendingDownload?.sourceTabId,
+                        )
+                    val pendingSubmit = pending.text
+                    val focusRequester = remember { FocusRequester() }
                     LaunchedEffect(Unit) {
                         // A tab the user just created starts with the address bar focused (once).
                         if (focusAddressFor == tabId) {
@@ -353,7 +361,7 @@ private fun BrowserContent(
                             value = addressBarText(addressFocused, typed, collectedUrl = state.url, selectedTabUrl = selectedTab.url, pendingSubmit = pendingSubmit),
                             onValueChange = {
                                 typed = it
-                                pendingSubmit = null
+                                pending.clear()
                             },
                             modifier = Modifier
                                 .weight(1f)
@@ -382,7 +390,12 @@ private fun BrowserContent(
                             ),
                             trailingIcon = {
                                 if (state.isLoading) {
-                                    IconButton(onClick = { session?.stop() }) {
+                                    IconButton(
+                                        onClick = {
+                                            session?.stop()
+                                            pending.clear()
+                                        },
+                                    ) {
                                         Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.stop))
                                     }
                                 } else {
@@ -396,8 +409,9 @@ private fun BrowserContent(
                                 onGo = {
                                     val target = normalizeAddressInput(typed, container.searchEngine.selected.value)
                                     if (target != null) {
+                                        // The snapshot is read before the request, from the tab's own session.
+                                        if (session != null) pending.submit(target, session.state.value)
                                         session?.loadUrl(target)
-                                        if (session != null) pendingSubmit = pendingSubmitFor(target)
                                         keyboardController?.hide()
                                         focusSink.requestFocus()
                                     }

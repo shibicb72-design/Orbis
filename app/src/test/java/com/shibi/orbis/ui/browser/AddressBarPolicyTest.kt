@@ -3,9 +3,12 @@ package com.shibi.orbis.ui.browser
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import androidx.compose.ui.platform.PlatformTextInputMethodRequest
+import com.shibi.orbis.engine.SessionState
 import java.lang.reflect.Proxy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -76,6 +79,126 @@ class AddressBarPolicyTest {
     fun pendingSubmitIsTheDisplayFormOfTheTarget() {
         assertEquals("https://a.example/x", pendingSubmitFor("https://a.example/x"))
         assertEquals("", pendingSubmitFor("about:blank"))
+    }
+
+    // ---- N1: a submitted address must not outlive a load that never commits ------------------------------------------
+
+    private val target = "https://new.example/"
+    private val idle = SessionState(url = "https://old.example/")
+    private fun loading() = idle.copy(isLoading = true, progress = 10)
+
+    /** Feeds [observations] in order; returns the pending value after each one (null = cleared). */
+    private fun observe(start: PendingSubmit, vararg observations: SessionState): List<PendingSubmit?> {
+        var p: PendingSubmit? = start
+        return observations.map { obs ->
+            p = pendingSubmitAfterSession(p, obs)
+            p
+        }
+    }
+
+    private fun submit(base: SessionState = idle) = pendingSubmitStart(target, base)
+
+    @Test
+    fun submitShowsTheTargetAndTheSubmitTimeSnapshotDoesNotClearItself() {
+        val p = submit()
+        assertEquals(target, p.text)
+        // The state the submit saw, observed again, changes nothing (the collector may deliver it after the click).
+        assertEquals(p, pendingSubmitAfterSession(p, idle))
+        assertEquals(target, addressBarTextOnFocus("https://old.example/", "https://old.example/", p.text))
+    }
+
+    @Test
+    fun failedLoadClearsThePendingText() {
+        val failed = idle.copy(loadFailed = true, failedUrl = target, isLoading = false)
+        assertEquals(listOf<PendingSubmit?>(null), observe(submit(), failed))
+        // Through start then error, the realistic order.
+        assertNull(observe(submit(), loading(), failed).last())
+    }
+
+    @Test
+    fun failureAlreadyShownAtSubmitIsStaleUntilSeenClearedOrDifferent() {
+        val stale = idle.copy(loadFailed = true, failedUrl = "https://broken.example/")
+        val p = submit(stale)
+        // The engine resets loadFailed only at onPageStart; until then the stale flag must not clear the new submit.
+        assertEquals(p, pendingSubmitAfterSession(p, stale))
+        // Flag reset, then it fails again: cleared.
+        assertNull(observe(p, stale.copy(loadFailed = false, failedUrl = null, isLoading = true), stale).last())
+        // A failure for a different url is new even without seeing the reset.
+        assertNull(pendingSubmitAfterSession(p, stale.copy(failedUrl = target)))
+    }
+
+    @Test
+    fun stoppedLoadClearsThePendingText() {
+        // Stop: session.stop(); Gecko ends the load, url untouched. Seen as loading, then not loading.
+        val r = observe(submit(), loading(), idle)
+        assertNotNull(r[0])
+        assertNull(r[1])
+    }
+
+    @Test
+    fun finishedLoadWithoutCommitClearsThePendingText() {
+        // Same shape as a Stop or any end of load that never changed the url (blocked, download without an offer, ...).
+        assertNull(observe(submit(), loading(), loading().copy(progress = 80), idle.copy(progress = 100)).last())
+    }
+
+    @Test
+    fun loadStillRunningKeepsThePendingText() {
+        val r = observe(submit(), loading(), loading().copy(progress = 50), loading().copy(progress = 90))
+        assertTrue(r.all { it != null })
+        // Not started yet is not ended either.
+        assertNotNull(pendingSubmitAfterSession(submit(), idle))
+    }
+
+    @Test
+    fun crashedContentProcessClearsThePendingText() {
+        val crashed = idle.copy(crashed = true, isLoading = false, canGoBack = false)
+        assertNull(pendingSubmitAfterSession(submit(), crashed))
+        assertNull(observe(submit(), loading(), crashed).last())
+    }
+
+    @Test
+    fun crashAlreadyShownAtSubmitIsStaleUntilSeenCleared() {
+        val staleCrash = idle.copy(crashed = true)
+        val p = submit(staleCrash)
+        assertEquals(p, pendingSubmitAfterSession(p, staleCrash))
+        assertNull(observe(p, staleCrash.copy(crashed = false, isLoading = true), staleCrash).last())
+    }
+
+    @Test
+    fun oldLoadRunningAtSubmitMustEndBeforeTheNewLoadCounts() {
+        val p = submit(loading())
+        // The interrupted old load ends first (onPageStop), the new one then starts and ends: only the last clears.
+        val r = observe(p, loading(), idle, loading(), idle)
+        assertNotNull(r[0])
+        assertNotNull("the old load ending is not the new load ending", r[1])
+        assertNotNull(r[2])
+        assertNull(r[3])
+    }
+
+    @Test
+    fun downloadOfferedForThisTabClearsAndForAnotherTabDoesNot() {
+        val p = submit()
+        assertNull(pendingSubmitAfterDownload(p, sourceTabId = 7L, thisTabId = 7L))
+        // The pending text belongs to one tab: another tab's offer says nothing about this tab's load.
+        assertSame(p, pendingSubmitAfterDownload(p, sourceTabId = 8L, thisTabId = 7L))
+        assertNull(pendingSubmitAfterDownload(null, 7L, 7L))
+    }
+
+    @Test
+    fun nothingPendingStaysNothingPending() {
+        assertNull(pendingSubmitAfterSession(null, loading()))
+        assertNull(pendingSubmitAfterSession(null, idle.copy(loadFailed = true)))
+    }
+
+    @Test
+    fun clearedPendingFallsBackToTheCommittedAddressOfTheTabItself() {
+        // After any clear, the unfocused bar names the tab's committed (old) page, never the stale collected state.
+        val cleared = observe(submit(), loading(), idle).last()
+        assertNull(cleared)
+        assertEquals(
+            "https://old.example/",
+            addressBarText(false, "", collectedUrl = privateUrl, selectedTabUrl = "https://old.example/", pendingSubmit = cleared?.text),
+        )
     }
 
     @Test
