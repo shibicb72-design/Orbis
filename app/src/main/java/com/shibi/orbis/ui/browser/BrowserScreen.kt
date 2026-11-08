@@ -64,8 +64,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -186,6 +188,11 @@ private fun BrowserContent(
     val requestNotificationPermission = rememberNotificationPermissionRequest()
 
     var showTabs by remember { mutableStateOf(false) }
+    // Where focus goes once the tab sheet has ended (keyboard navigation only; see tabSheetReturnFocus). Opening the
+    // sheet again clears it, which cancels a return that has not happened yet.
+    var sheetReturnFocus by remember { mutableStateOf<ReturnFocus?>(null) }
+    val tabsButtonFocus = remember { FocusRequester() }
+    val inputModeManager = LocalInputModeManager.current
     var menuOpen by remember { mutableStateOf(false) }
     // The one tab whose address bar should take focus: set only when the user makes a tab with New tab. Cold start,
     // popups, external links and "closed the last tab" leave it null, so they never steal focus or open edit mode.
@@ -343,7 +350,13 @@ private fun BrowserContent(
                 val tabsDescription =
                     stringResource(if (selectedTab.isPrivate) R.string.tabs_button_private else R.string.tabs_button, tabList.size)
                 val tabsColor = if (selectedTab.isPrivate) MaterialTheme.colorScheme.tertiary else LocalContentColor.current
-                IconButton(onClick = { showTabs = true }) {
+                IconButton(
+                    onClick = {
+                        sheetReturnFocus = null
+                        showTabs = true
+                    },
+                    modifier = Modifier.focusRequester(tabsButtonFocus),
+                ) {
                     Box(
                         Modifier
                             .size(24.dp)
@@ -363,6 +376,7 @@ private fun BrowserContent(
                         Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.menu_more))
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        // Grouped: Page (this page) / Tabs / Library / Settings. Labels, enablement and callbacks are unchanged.
                         val forwardDescription = stringResource(R.string.forward)
                         DropdownMenuItem(
                             text = { Text(forwardDescription) },
@@ -372,21 +386,6 @@ private fun BrowserContent(
                             onClick = {
                                 menuOpen = false
                                 session?.goForward()
-                            },
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.menu_new_tab)) },
-                            onClick = {
-                                menuOpen = false
-                                focusAddressFor = tabs.newTab()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.menu_new_private_tab)) },
-                            onClick = {
-                                menuOpen = false
-                                focusAddressFor = tabs.newPrivateTab()
                             },
                         )
                         DropdownMenuItem(
@@ -414,6 +413,39 @@ private fun BrowserContent(
                             },
                         )
                         DropdownMenuItem(
+                            text = { Text(stringResource(R.string.menu_find)) },
+                            enabled = session != null,
+                            onClick = {
+                                menuOpen = false
+                                findOpen = true
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.menu_desktop_site)) },
+                            enabled = session != null,
+                            trailingIcon = { Checkbox(checked = state.desktopMode, onCheckedChange = null) },
+                            onClick = {
+                                menuOpen = false
+                                session?.setDesktopMode(!state.desktopMode)
+                            },
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.menu_new_tab)) },
+                            onClick = {
+                                menuOpen = false
+                                focusAddressFor = tabs.newTab()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.menu_new_private_tab)) },
+                            onClick = {
+                                menuOpen = false
+                                focusAddressFor = tabs.newPrivateTab()
+                            },
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
                             text = { Text(stringResource(R.string.menu_bookmarks)) },
                             onClick = {
                                 menuOpen = false
@@ -434,23 +466,7 @@ private fun BrowserContent(
                                 onOpenDownloads()
                             },
                         )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.menu_find)) },
-                            enabled = session != null,
-                            onClick = {
-                                menuOpen = false
-                                findOpen = true
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.menu_desktop_site)) },
-                            enabled = session != null,
-                            trailingIcon = { Checkbox(checked = state.desktopMode, onCheckedChange = null) },
-                            onClick = {
-                                menuOpen = false
-                                session?.setDesktopMode(!state.desktopMode)
-                            },
-                        )
+                        HorizontalDivider()
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.settings)) },
                             onClick = {
@@ -587,6 +603,7 @@ private fun BrowserContent(
     if (showTabs) {
         TabSwitcher(
             tabs = tabList,
+            onEnded = { sheetReturnFocus = tabSheetReturnFocus(it) },
             onSelect = {
                 tabs.select(it)
                 showTabs = false
@@ -606,6 +623,19 @@ private fun BrowserContent(
             },
             onDismiss = { showTabs = false },
         )
+    }
+
+    LaunchedEffect(sheetReturnFocus, showTabs) {
+        val target = sheetReturnFocus ?: return@LaunchedEffect
+        if (showTabs) return@LaunchedEffect
+        sheetReturnFocus = null
+        // Touch mode: nothing is focused on purpose (no stray focus ring). A new tab focuses its own bar itself.
+        if (inputModeManager.inputMode != InputMode.Keyboard) return@LaunchedEffect
+        when (target) {
+            ReturnFocus.TABS_BUTTON -> runCatching { tabsButtonFocus.requestFocus() }
+            ReturnFocus.PAGE -> runCatching { focusSink.requestFocus() }
+            ReturnFocus.NEW_TAB_ADDRESS -> Unit
+        }
     }
 
     // Only the selected tab's prompts are shown; a background tab's wait in its own queue until it is selected.
