@@ -45,6 +45,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.shibi.orbis.ui.secondaryReadingWidth
 import com.shibi.orbis.R
 import com.shibi.orbis.downloads.DownloadEntry
 import com.shibi.orbis.downloads.DownloadIntents
@@ -108,7 +109,7 @@ fun DownloadsScreen(manager: DownloadManager, onBack: () -> Unit, modifier: Modi
             OrbisEmptyState(stringResource(R.string.downloads_empty), Icons.Filled.Download, Modifier.padding(padding))
         } else {
             LazyColumn(
-                Modifier.padding(padding).fillMaxSize(),
+                Modifier.padding(padding).fillMaxSize().secondaryReadingWidth(),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {

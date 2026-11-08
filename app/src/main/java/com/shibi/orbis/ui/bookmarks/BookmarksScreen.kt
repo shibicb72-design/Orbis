@@ -51,6 +51,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.shibi.orbis.ui.secondaryReadingWidth
 import com.shibi.orbis.R
 import com.shibi.orbis.bookmarks.Bookmark
 import com.shibi.orbis.bookmarks.BookmarkHtml
@@ -171,7 +172,8 @@ fun BookmarksScreen(
                 .padding(padding)
                 .consumeWindowInsets(padding)
                 .imePadding()
-                .fillMaxSize(),
+                .fillMaxSize()
+                .secondaryReadingWidth(),
         ) {
             if (entries.isEmpty()) {
                 EmptyState(stringResource(R.string.bookmarks_empty))

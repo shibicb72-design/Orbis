@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -357,10 +358,12 @@ private fun BrowserContent(
                     },
                     modifier = Modifier.focusRequester(tabsButtonFocus),
                 ) {
+                    // At least 24dp, growing with large fonts instead of clipping the count against its border.
                     Box(
                         Modifier
-                            .size(24.dp)
+                            .defaultMinSize(minWidth = 24.dp, minHeight = 24.dp)
                             .border(2.dp, tabsColor, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 3.dp)
                             .semantics { contentDescription = tabsDescription },
                         contentAlignment = Alignment.Center,
                     ) {

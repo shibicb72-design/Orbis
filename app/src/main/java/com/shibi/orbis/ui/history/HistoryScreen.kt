@@ -39,6 +39,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.shibi.orbis.ui.secondaryReadingWidth
 import com.shibi.orbis.R
 import com.shibi.orbis.history.HistoryEntry
 import com.shibi.orbis.history.HistoryManager
@@ -88,7 +89,8 @@ fun HistoryScreen(
                 .padding(padding)
                 .consumeWindowInsets(padding)
                 .imePadding()
-                .fillMaxSize(),
+                .fillMaxSize()
+                .secondaryReadingWidth(),
         ) {
             if (entries.isEmpty()) {
                 EmptyState(stringResource(R.string.history_empty))

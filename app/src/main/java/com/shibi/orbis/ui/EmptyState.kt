@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -20,6 +22,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+
+/** Widest a secondary screen's reading content grows; wider windows center it. The browser viewport never uses this. */
+internal val SecondaryReadingWidth = 720.dp
+
+/**
+ * Secondary screens (bookmarks, history, downloads): content fills the width up to [SecondaryReadingWidth] and is
+ * centered beyond it, so rows, titles and their actions stay together on wide or landscape windows. Narrow windows are
+ * unchanged.
+ */
+fun Modifier.secondaryReadingWidth(): Modifier = this.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally).widthIn(max = SecondaryReadingWidth)
 
 /** A quiet, shared layout. The icon is decorative; the existing message supplies all meaning. */
 @Composable
