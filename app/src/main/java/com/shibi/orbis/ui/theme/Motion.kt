@@ -34,3 +34,16 @@ fun rememberMotionEnabled(): Boolean {
     }
     return motionEnabled
 }
+
+/** Recorded baselines (OrbisRoot, TabSwitcher); kept, not tuned: no measurement justified a change. */
+internal const val ROUTE_ENTER_MS = 160
+internal const val ROUTE_EXIT_MS = 100
+internal const val TAB_PLACEMENT_MS = 180
+
+/**
+ * Whether a root navigation between [fromRoute] and [toRoute] may fade. Never when motion is off (zero animator scale),
+ * and never across the browser boundary: the browser route hosts the engine surface, which is not faded, scaled or
+ * translated, so entering or leaving it is immediate. Fades stay on Compose-only secondary-to-secondary transitions.
+ */
+internal fun routeFades(motionEnabled: Boolean, fromRoute: String?, toRoute: String?, browserRoute: String): Boolean =
+    motionEnabled && fromRoute != browserRoute && toRoute != browserRoute

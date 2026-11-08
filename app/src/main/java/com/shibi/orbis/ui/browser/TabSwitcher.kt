@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import com.shibi.orbis.R
 import com.shibi.orbis.engine.hostOfUrl
 import com.shibi.orbis.tabs.TabUi
+import com.shibi.orbis.ui.theme.TAB_PLACEMENT_MS
 import com.shibi.orbis.ui.theme.rememberMotionEnabled
 
 /** How a tab sheet ended; decides where focus goes next (see [tabSheetReturnFocus]). */
@@ -171,7 +172,7 @@ internal fun TabSwitcher(
                     modifier = Modifier
                         .animateItem(
                             fadeInSpec = null,
-                            placementSpec = if (motionEnabled) tween(180) else null,
+                            placementSpec = if (motionEnabled) tween(TAB_PLACEMENT_MS) else null,
                             fadeOutSpec = null,
                         )
                         .fillMaxWidth()

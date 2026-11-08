@@ -24,7 +24,10 @@ import com.shibi.orbis.ui.settings.SettingsScreen
 import com.shibi.orbis.ui.settings.SitePermissionsScreen
 import com.shibi.orbis.ui.settings.UboOnboardingScreen
 import com.shibi.orbis.ui.settings.UboSettingsScreen
+import com.shibi.orbis.ui.theme.ROUTE_ENTER_MS
+import com.shibi.orbis.ui.theme.ROUTE_EXIT_MS
 import com.shibi.orbis.ui.theme.rememberMotionEnabled
+import com.shibi.orbis.ui.theme.routeFades
 
 private object Routes {
     const val Browser = "browser"
@@ -70,10 +73,36 @@ fun OrbisRoot(container: AppContainer) {
     NavHost(
         navController = nav,
         startDestination = Routes.Browser,
-        enterTransition = { if (motionEnabled) fadeIn(tween(160)) else EnterTransition.None },
-        exitTransition = { if (motionEnabled) fadeOut(tween(100)) else ExitTransition.None },
-        popEnterTransition = { if (motionEnabled) fadeIn(tween(160)) else EnterTransition.None },
-        popExitTransition = { if (motionEnabled) fadeOut(tween(100)) else ExitTransition.None },
+        // Immediate across the browser boundary (the engine surface is never faded); the existing fades only between
+        // secondary screens, and none at all with motion off. See routeFades.
+        enterTransition = {
+            if (routeFades(motionEnabled, initialState.destination.route, targetState.destination.route, Routes.Browser)) {
+                fadeIn(tween(ROUTE_ENTER_MS))
+            } else {
+                EnterTransition.None
+            }
+        },
+        exitTransition = {
+            if (routeFades(motionEnabled, initialState.destination.route, targetState.destination.route, Routes.Browser)) {
+                fadeOut(tween(ROUTE_EXIT_MS))
+            } else {
+                ExitTransition.None
+            }
+        },
+        popEnterTransition = {
+            if (routeFades(motionEnabled, initialState.destination.route, targetState.destination.route, Routes.Browser)) {
+                fadeIn(tween(ROUTE_ENTER_MS))
+            } else {
+                EnterTransition.None
+            }
+        },
+        popExitTransition = {
+            if (routeFades(motionEnabled, initialState.destination.route, targetState.destination.route, Routes.Browser)) {
+                fadeOut(tween(ROUTE_EXIT_MS))
+            } else {
+                ExitTransition.None
+            }
+        },
     ) {
         composable(Routes.Browser) {
             BrowserScreen(
