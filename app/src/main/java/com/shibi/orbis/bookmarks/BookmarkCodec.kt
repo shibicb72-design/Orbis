@@ -17,7 +17,8 @@ object BookmarkCodec {
                     .put("id", b.id)
                     .put("url", b.url)
                     .put("title", b.title)
-                    .put("created", b.createdAt),
+                    .put("created", b.createdAt)
+                    .apply { if (b.folder.isNotEmpty()) put("folder", b.folder) },
             )
         }
         return JSONObject().put("version", VERSION).put("bookmarks", array).toString()
@@ -50,6 +51,7 @@ object BookmarkCodec {
                 url = url,
                 title = cleanStoredTitle(string(o, "title")).ifEmpty { url },
                 createdAt = created.coerceAtLeast(0L),
+                folder = cleanFolderName(string(o, "folder")),
             )
         }
         return out

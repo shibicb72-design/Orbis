@@ -35,10 +35,18 @@ object BookmarkHtml {
         sb.append("<TITLE>Bookmarks</TITLE>\n")
         sb.append("<H1>Bookmarks</H1>\n")
         sb.append("<DL><p>\n")
-        for (b in list) {
-            sb.append("    <DT><A HREF=\"").append(escape(b.url))
+        fun item(b: Bookmark, indent: String) {
+            sb.append(indent).append("<DT><A HREF=\"").append(escape(b.url))
             sb.append("\" ADD_DATE=\"").append(maxOf(b.createdAt, 0L) / 1000L).append("\">")
             sb.append(escape(b.title)).append("</A>\n")
+        }
+        for (b in list) if (b.folder.isEmpty()) item(b, "    ")
+        // Each folder as a Netscape sub-list, which Chrome and Firefox import as a folder.
+        for (name in folderNames(list)) {
+            sb.append("    <DT><H3>").append(escape(name)).append("</H3>\n")
+            sb.append("    <DL><p>\n")
+            for (b in list) if (b.folder == name) item(b, "        ")
+            sb.append("    </DL><p>\n")
         }
         sb.append("</DL><p>\n")
         return sb.toString()

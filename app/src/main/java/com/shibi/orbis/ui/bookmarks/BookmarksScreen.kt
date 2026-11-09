@@ -1,6 +1,13 @@
 package com.shibi.orbis.ui.bookmarks
 
 import android.content.Context
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.foundation.layout.heightIn
+import com.shibi.orbis.bookmarks.folderNames
+import androidx.compose.runtime.LaunchedEffect
+import androidx.activity.compose.BackHandler
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.material.icons.filled.Folder
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -92,7 +99,18 @@ fun BookmarksScreen(
 ) {
     val entries by manager.entries.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
-    val shown = remember(entries, query) { filterBookmarks(entries, query) }
+    // The folder being looked at; null is the top level (folders first, then the bookmarks in no folder).
+    var openFolder by rememberSaveable { mutableStateOf<String?>(null) }
+    val folders = remember(entries) { folderNames(entries) }
+    LaunchedEffect(folders) { if (openFolder != null && openFolder !in folders) openFolder = null }
+    // A search looks through every folder.
+    val shown =
+        remember(entries, query, openFolder) {
+            val pool = if (query.isNotBlank()) entries else entries.filter { it.folder == (openFolder ?: "") }
+            filterBookmarks(pool, query)
+        }
+    var moving by remember { mutableStateOf<Bookmark?>(null) }
+    BackHandler(enabled = openFolder != null) { openFolder = null }
     var editing by remember { mutableStateOf<Bookmark?>(null) }
     var toolbarMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -131,9 +149,9 @@ fun BookmarksScreen(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.bookmarks_title)) },
+                title = { Text(openFolder ?: stringResource(R.string.bookmarks_title)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { if (openFolder != null) openFolder = null else onBack() }) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.back),
@@ -198,22 +216,47 @@ fun BookmarksScreen(
                 },
             )
             HorizontalDivider()
-            if (shown.isEmpty()) {
+            val showFolders = openFolder == null && query.isBlank()
+            if (shown.isEmpty() && !(showFolders && folders.isNotEmpty())) {
                 EmptyState(stringResource(R.string.bookmarks_no_matches))
             } else {
                 LazyColumn(Modifier.fillMaxSize()) {
+                    if (showFolders) {
+                        items(folders, key = { "folder:$it" }) { name ->
+                            val count = entries.count { it.folder == name }
+                            ListItem(
+                                modifier = Modifier.clickable { openFolder = name },
+                                leadingContent = { Icon(Icons.Filled.Folder, contentDescription = null) },
+                                headlineContent = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                supportingContent = { Text(pluralStringResource(R.plurals.bookmarks_folder_count, count, count)) },
+                            )
+                        }
+                    }
                     items(shown, key = { it.id }) { bookmark ->
                         BookmarkRow(
                             bookmark = bookmark,
                             onOpen = { onOpen(bookmark.url) },
                             onOpenInNewTab = { onOpenInNewTab(bookmark.url) },
                             onEdit = { editing = bookmark },
+                            onMove = { moving = bookmark },
                             onDelete = { manager.remove(bookmark.id) },
                         )
                     }
                 }
             }
         }
+    }
+
+    moving?.let { target ->
+        MoveToFolderDialog(
+            current = target.folder,
+            folders = folders,
+            onMove = { folder ->
+                manager.moveToFolder(target.id, folder)
+                moving = null
+            },
+            onDismiss = { moving = null },
+        )
     }
 
     editing?.let { target ->
@@ -247,6 +290,7 @@ private fun BookmarkRow(
     onOpen: () -> Unit,
     onOpenInNewTab: () -> Unit,
     onEdit: () -> Unit,
+    onMove: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -276,6 +320,13 @@ private fun BookmarkRow(
                         onClick = {
                             menuOpen = false
                             onEdit()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.bookmarks_move)) },
+                        onClick = {
+                            menuOpen = false
+                            onMove()
                         },
                     )
                     DropdownMenuItem(
@@ -375,3 +426,46 @@ private suspend fun readImport(context: Context, uri: Uri): ImportRead =
     } catch (e: Exception) {
         ImportRead.Failed
     }
+
+/** Files a bookmark: an existing folder, a new one, or none. */
+@Composable
+private fun MoveToFolderDialog(current: String, folders: List<String>, onMove: (String) -> Unit, onDismiss: () -> Unit) {
+    var newName by remember { mutableStateOf("") }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.bookmarks_move)) },
+        text = {
+            Column {
+                LazyColumn(Modifier.heightIn(max = 280.dp)) {
+                    item {
+                        ListItem(
+                            modifier = Modifier.clickable { onMove("") },
+                            headlineContent = { Text(stringResource(R.string.bookmarks_no_folder)) },
+                            trailingContent = { if (current.isEmpty()) Icon(Icons.Filled.Check, contentDescription = null) },
+                        )
+                    }
+                    items(folders.size) { i ->
+                        val name = folders[i]
+                        ListItem(
+                            modifier = Modifier.clickable { onMove(name) },
+                            leadingContent = { Icon(Icons.Filled.Folder, contentDescription = null) },
+                            headlineContent = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            trailingContent = { if (current == name) Icon(Icons.Filled.Check, contentDescription = null) },
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it.take(com.shibi.orbis.bookmarks.MAX_FOLDER_CHARS) },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.bookmarks_new_folder)) },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = newName.isNotBlank(), onClick = { onMove(newName) }) { Text(stringResource(R.string.bookmarks_create_and_move)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.prompt_cancel)) } },
+    )
+}

@@ -57,6 +57,7 @@ class BookmarkManager(
         class Remove(val url: String) : Change
         class Edit(val oldUrl: String, val title: String, val newUrl: String) : Change
         class Import(val parsed: List<ParsedBookmark>, val at: Long) : Change
+        class Move(val url: String, val folder: String) : Change
         object Clear : Change
     }
 
@@ -167,6 +168,14 @@ class BookmarkManager(
         return UpdateResult.UPDATED
     }
 
+    /** Files bookmark [id] in [folder] (cleaned; empty takes it out of any folder). */
+    fun moveToFolder(id: Long, folder: String) {
+        val url = items.firstOrNull { it.id == id }?.url ?: return
+        val change = Change.Move(url, cleanFolderName(folder))
+        apply(change)
+        committed(change)
+    }
+
     /** Adds what is new. URLs already saved (the stored one wins), repeats within [parsed] and overflow are skipped. */
     fun importAll(parsed: ParsedBookmarks): ImportResult {
         val change = Change.Import(parsed.items, now())
@@ -194,6 +203,10 @@ class BookmarkManager(
             is Change.Remove -> applyRemove(change)
             is Change.Edit -> applyEdit(change)
             is Change.Import -> applyImport(change)
+            is Change.Move -> {
+                val i = items.indexOfFirst { it.url == change.url }
+                if (i >= 0) items[i] = items[i].copy(folder = change.folder)
+            }
             Change.Clear -> {
                 items.clear()
                 urls.clear()

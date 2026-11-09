@@ -2,7 +2,6 @@ package com.shibi.orbis.downloads
 
 import android.content.ContentValues
 import android.content.Context
-import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import java.io.File
@@ -22,8 +21,7 @@ internal fun copyToPublicDownloads(context: Context, file: File, displayName: St
             put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
-    val collection =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) else return false
+    val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
     val uri = runCatching { resolver.insert(collection, values) }.getOrNull() ?: return false
     return try {
         resolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } } ?: throw IllegalStateException("no stream")

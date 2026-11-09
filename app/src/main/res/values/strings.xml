@@ -11,6 +11,14 @@
     <string name="start_pinned">pinned</string>
     <string name="menu_home">Home</string>
     <string name="menu_share">Share</string>
+    <string name="bookmarks_move">Move to folder</string>
+    <string name="bookmarks_no_folder">No folder</string>
+    <string name="bookmarks_new_folder">New folder</string>
+    <string name="bookmarks_create_and_move">Create and move</string>
+    <plurals name="bookmarks_folder_count">
+        <item quantity="one">%d bookmark</item>
+        <item quantity="other">%d bookmarks</item>
+    </plurals>
     <string name="copy_downloads_title">Save downloads to the Download folder</string>
     <string name="copy_downloads_summary">A copy of each finished download goes to the phone\'s Download folder, where the Files app and other apps find it. Not for private tabs.</string>
     <string name="downloads_pause">Pause</string>
