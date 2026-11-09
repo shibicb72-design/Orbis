@@ -116,6 +116,7 @@ class OrbisApp : Application() {
                 log = { debugLog.log("History", it) },
                 now = System::currentTimeMillis,
             )
+        var downloadsRef: DownloadManager? = null
         // The tab manager creates NO session here: sessions appear only once the browser screen asks for them, which
         // is after the onboarding decision. restore() only reads the stored tab list.
         val tabs =
@@ -129,7 +130,11 @@ class OrbisApp : Application() {
 
                     override fun onTitle(url: String, title: String) = history.updateTitle(url, title)
                 },
-                onPrivateBrowsingEnded = { engine.clearPrivateData() },
+                onPrivateBrowsingEnded = {
+                    engine.clearPrivateData()
+                    // Created just below; private browsing cannot end before then (no session exists yet).
+                    downloadsRef?.forgetPrivate()
+                },
             )
         val downloads =
             DownloadManager(
@@ -141,6 +146,7 @@ class OrbisApp : Application() {
                 now = System::currentTimeMillis,
                 extensionForMime = { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) },
             )
+        downloadsRef = downloads
         // Everything here runs on the main thread (appScope is Main). Site permissions and uBO are not touched.
         val clearTargets =
             object : ClearTargets {

@@ -780,7 +780,7 @@ private fun BrowserContent(
             pending = pending,
             onConfirm = {
                 // A private tab's download keeps no source host in the index; the file itself stays.
-                container.downloads.start(pending.download, recordSource = !pending.isPrivate)
+                container.downloads.start(pending.download, isPrivate = pending.isPrivate)
                 tabs.resolveDownload(pending)
                 // After start: the notification permission never delays or blocks the download.
                 requestNotificationPermission()

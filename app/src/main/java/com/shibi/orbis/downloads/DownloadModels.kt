@@ -18,4 +18,9 @@ data class DownloadEntry(
     /** Absolute path of the final file (reserved while running). Null once failed/cancelled or before reservation. */
     val filePath: String?,
     val startedAt: Long,
+    /**
+     * Started from a private tab: never written to the index file, has no source host, and leaves the list (the file
+     * stays) when private browsing ends.
+     */
+    val isPrivate: Boolean = false,
 )

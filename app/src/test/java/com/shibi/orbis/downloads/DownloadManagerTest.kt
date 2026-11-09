@@ -204,16 +204,46 @@ class DownloadManagerTest {
     }
 
     @Test
-    fun recordSourceFalseKeepsTheHostOutOfTheEntryAndTheIndex() = runTest {
+    fun aPrivateDownloadHasNoHostAndIsNeverWrittenToTheIndex() = runTest {
         val m = manager()
-        val id = m.start(FakeDownload(contentDisposition = cd("a.txt"), body = { ChunkStream(bytes("hello")) }), recordSource = false)
+        val id = m.start(FakeDownload(contentDisposition = cd("secret.txt"), body = { ChunkStream(bytes("hello")) }), isPrivate = true)
         advanceUntilIdle()
         val e = m.byId(id)
         assertNull(e.sourceHost)
+        assertTrue(e.isPrivate)
         assertEquals(DownloadStatus.COMPLETED, e.status)
-        assertEquals("hello", File(dir, "a.txt").readText())
-        assertNull(store.load().single().sourceHost)
+        assertEquals("hello", File(dir, "secret.txt").readText())
+        // Listed while private browsing lasts, but the index file names nothing from it.
+        assertTrue(store.load().isEmpty())
+        assertFalse(indexFile.readText().contains("secret"))
         assertFalse(indexFile.readText().contains("example.com"))
+    }
+
+    @Test
+    fun forgetPrivateDropsPrivateEntriesButKeepsTheirFilesAndNormalEntries() = runTest {
+        val m = manager()
+        val normal = m.start(FakeDownload(contentDisposition = cd("n.txt"), body = { ChunkStream(bytes("n")) }))
+        val priv = m.start(FakeDownload(contentDisposition = cd("p.txt"), body = { ChunkStream(bytes("p")) }), isPrivate = true)
+        advanceUntilIdle()
+        assertEquals(listOf(priv), m.forgetPrivate())
+        assertEquals(listOf(normal), m.entries.value.map { it.id })
+        assertEquals("p", File(dir, "p.txt").readText())
+        assertEquals(listOf("n.txt"), store.load().map { it.fileName })
+    }
+
+    @Test
+    fun aPrivateDownloadStillRunningLeavesTheListWhenItFinishes() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO).also { scopeJobs += it.coroutineContext[Job]!! }
+        val m = DownloadManager({ dir }, store, scope, Dispatchers.IO, { logs += it }, { System.currentTimeMillis() })
+        val stream = BlockingStream(bytes("slow"))
+        val priv = m.start(FakeDownload(contentDisposition = cd("slow.txt"), contentLength = 4, body = { stream }), isPrivate = true)
+        assertTrue(stream.readStarted.await(5, TimeUnit.SECONDS))
+        assertTrue("running downloads are not dropped yet", m.forgetPrivate().isEmpty())
+        assertEquals(listOf(priv), m.entries.value.map { it.id })
+        stream.release()
+        waitUntil("private download settled and left") { m.entries.value.isEmpty() }
+        assertEquals("slow", File(dir, "slow.txt").readText())
+        scope.cancel()
     }
 
     @Test

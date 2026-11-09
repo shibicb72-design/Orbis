@@ -81,6 +81,16 @@ class DownloadManager(
                     }
                 }
             fixed.maxOfOrNull { it.id }?.let { max -> nextId.updateAndGet { maxOf(it, max) } }
+            // A private download is not in the index, so a crash during one could leave a .part file nobody names:
+            // remove part files that no stored entry owns (only when nothing is running yet, to stay clear of new ones).
+            if (active.isEmpty()) {
+                val owned = loaded.mapNotNull { it.filePath?.let { p -> "$p.part" } }.toSet()
+                runCatching {
+                    dir().listFiles { f -> f.isFile && f.name.endsWith(".part") }?.forEach { f ->
+                        if (f.absolutePath !in owned) deleteOwned(f)
+                    }
+                }
+            }
             // Merge rather than replace: a download may already have started while the index was loading. Everything
             // stored is settled by now, so a list cleared in the meantime must not get it back. The flag is read inside
             // the update: clearIndex sets it before it edits the list, so one of the two always sees the other.
@@ -93,10 +103,10 @@ class DownloadManager(
     }
 
     /**
-     * Starts [download]. With [recordSource] false (a private tab's download) the entry carries no source host, so
-     * the index file names no site from a private session. The file and its listing are otherwise the same.
+     * Starts [download]. A private tab's download ([isPrivate]) carries no source host, is never written to the index
+     * file, and is dropped from the list by [forgetPrivate]; its file is kept like any other.
      */
-    fun start(download: IncomingDownload, recordSource: Boolean = true): Long {
+    fun start(download: IncomingDownload, isPrivate: Boolean = false): Long {
         val id = nextId.incrementAndGet()
         val name =
             try {
@@ -110,12 +120,13 @@ class DownloadManager(
                 id = id,
                 fileName = name,
                 mimeType = DownloadFileNames.cleanMime(download.contentType),
-                sourceHost = if (recordSource) DownloadFileNames.sourceHost(download.url) else null,
+                sourceHost = if (isPrivate) null else DownloadFileNames.sourceHost(download.url),
                 totalBytes = total,
                 receivedBytes = 0L,
                 status = DownloadStatus.IN_PROGRESS,
                 filePath = null,
                 startedAt = now(),
+                isPrivate = isPrivate,
             )
         val a = Active(id, download, name, total)
         active[id] = a
@@ -169,6 +180,7 @@ class DownloadManager(
      * A clear made before [restore] has read the stored index also drops what it then reads.
      */
     fun clearIndex(): List<Long> {
+        dropOnFinish.clear()
         indexCleared.set(true)
         var removed = emptyList<Long>()
         _entries.update { list ->
@@ -178,6 +190,25 @@ class DownloadManager(
         }
         scope.launch(io) { saveNow() }
         log("download list cleared")
+        return removed
+    }
+
+    /** Private ids still running when private browsing ended: they leave the list as soon as they settle. */
+    private val dropOnFinish: MutableSet<Long> = ConcurrentHashMap.newKeySet()
+
+    /**
+     * Private browsing ended: every private entry leaves the list (so no private file name stays visible). Files are
+     * kept. A private download still running finishes first and then leaves. Returns the ids removed now.
+     */
+    fun forgetPrivate(): List<Long> {
+        var removed = emptyList<Long>()
+        _entries.update { list ->
+            val (gone, keep) = list.partition { it.isPrivate && it.status != DownloadStatus.IN_PROGRESS && !active.containsKey(it.id) }
+            list.filter { it.isPrivate && (it.status == DownloadStatus.IN_PROGRESS || active.containsKey(it.id)) }.forEach { dropOnFinish += it.id }
+            removed = gone.map { it.id }
+            keep
+        }
+        if (removed.isNotEmpty()) log("private downloads left the list")
         return removed
     }
 
@@ -272,6 +303,8 @@ class DownloadManager(
         }
         // Deleted while it was finishing: do not leave an orphan behind.
         if (!stillListed && status == DownloadStatus.COMPLETED) r?.finalFile?.delete()
+        // Private browsing ended while it ran: it leaves the list now, its file stays.
+        if (dropOnFinish.remove(a.id)) _entries.update { list -> list.filterNot { it.id == a.id } }
         saveNow()
         log("download ${status.name.lowercase()}")
     }
@@ -346,7 +379,8 @@ class DownloadManager(
     private fun saveNow() {
         synchronized(saveLock) {
             try {
-                store.save(_entries.value)
+                // Private downloads are never written: the index file names nothing from a private session.
+                store.save(_entries.value.filterNot { it.isPrivate })
             } catch (e: Exception) {
                 log("download index save failed: ${e.javaClass.simpleName}")
             }
