@@ -1,6 +1,7 @@
 package com.shibi.orbis.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import com.shibi.orbis.settings.AppTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -83,8 +84,23 @@ private val DarkColors =
     )
 
 @Composable
-fun OrbisTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
+fun OrbisTheme(theme: AppTheme = AppTheme.SYSTEM, content: @Composable () -> Unit) {
+    val dark =
+        when (theme) {
+            AppTheme.SYSTEM -> isSystemInDarkTheme()
+            AppTheme.LIGHT -> false
+            AppTheme.DARK -> true
+        }
+    // Status and navigation bar icons follow the app theme, not the system's (they would vanish on a dark toolbar).
+    val view = androidx.compose.ui.platform.LocalView.current
+    if (!view.isInEditMode) {
+        androidx.compose.runtime.SideEffect {
+            val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
+            val bars = androidx.core.view.WindowCompat.getInsetsController(window, view)
+            bars.isAppearanceLightStatusBars = !dark
+            bars.isAppearanceLightNavigationBars = !dark
+        }
+    }
     MaterialTheme(
         colorScheme = if (dark) DarkColors else LightColors,
         content = content,

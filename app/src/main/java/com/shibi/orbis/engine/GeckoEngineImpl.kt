@@ -111,6 +111,46 @@ class GeckoEngineImpl(
             }
         }
 
+    @Volatile private var httpsOnlyNormal = false
+    @Volatile private var httpsOnlyPrivate = true
+    @Volatile private var websiteDark: Boolean? = null
+    @Volatile private var sitePolicy: SitePolicy? = null
+
+    override fun setSitePolicy(policy: SitePolicy) {
+        sitePolicy = policy
+    }
+
+    override fun setHttpsOnly(normalTabs: Boolean, privateTabs: Boolean) {
+        httpsOnlyNormal = normalTabs
+        httpsOnlyPrivate = privateTabs
+        runtime?.let(::applyPagePrefs)
+    }
+
+    override fun setWebsiteColorScheme(dark: Boolean?) {
+        websiteDark = dark
+        runtime?.let(::applyPagePrefs)
+    }
+
+    private fun applyPagePrefs(rt: GeckoRuntime) {
+        runCatching {
+            rt.settings.setAllowInsecureConnections(
+                when {
+                    httpsOnlyNormal -> GeckoRuntimeSettings.HTTPS_ONLY
+                    httpsOnlyPrivate -> GeckoRuntimeSettings.HTTPS_ONLY_PRIVATE
+                    else -> GeckoRuntimeSettings.ALLOW_ALL
+                },
+            )
+            rt.settings.setPreferredColorScheme(
+                when (websiteDark) {
+                    true -> GeckoRuntimeSettings.COLOR_SCHEME_DARK
+                    false -> GeckoRuntimeSettings.COLOR_SCHEME_LIGHT
+                    null -> GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
+                },
+            )
+        }.onFailure { debugLog.log("GeckoEngine", "page prefs failed: ${it.javaClass.simpleName}") }
+        debugLog.log("GeckoEngine", "page prefs httpsOnly=$httpsOnlyNormal/$httpsOnlyPrivate dark=$websiteDark")
+    }
+
     @Volatile private var textZoomPercent = 100
     @Volatile private var forceZoom = false
     private var defaultAutomaticFontSize = true
@@ -172,6 +212,7 @@ class GeckoEngineImpl(
             val created = GeckoRuntime.create(appContext, settings)
             defaultAutomaticFontSize = created.settings.automaticFontSizeAdjustment
             applyDisplayPrefs(created)
+            applyPagePrefs(created)
             // Normal-profile exceptions the user made earlier (stored by the engine).
             created.storageController.allPermissions.accept(
                 { list ->
@@ -300,6 +341,7 @@ class GeckoEngineImpl(
             trackingExceptions = trackingExceptions,
             logins = { logins },
             reader = reader,
+            sitePolicy = { sitePolicy },
             // A popup child inherits the opener's desktop/mobile choice and its privacy, and is never opened by us.
             newPopupChild = { opener ->
                 buildSession(SessionInit(desktopMode = opener.state.value.desktopMode, isPrivate = opener.isPrivate))
@@ -357,6 +399,7 @@ private class GeckoBrowserSession(
     private val trackingExceptions: TrackingExceptions,
     private val logins: () -> LoginBridge?,
     private val reader: ReaderExtensionHolder,
+    private val sitePolicy: () -> SitePolicy?,
     private val newPopupChild: (GeckoBrowserSession) -> GeckoBrowserSession,
 ) : BrowserSession {
     private val _state = MutableStateFlow(SessionState(desktopMode = initialDesktopMode))
@@ -421,6 +464,11 @@ private class GeckoBrowserSession(
         visits.suppress(init.fallbackUrl)
         session.open(runtime)
         attachReader()
+        // A restored page reloads without passing onLoadRequest: its site's choices are applied first.
+        init.fallbackUrl?.takeIf { isWebUrl(it) }?.let { url ->
+            applyTrackingProtection(!trackingExceptions.isExcepted(url, isPrivate))
+            applySitePolicy(url)
+        }
         val blob = init.restoredState
         var restored = false
         if (blob != null) {
@@ -459,7 +507,7 @@ private class GeckoBrowserSession(
                     trackingExceptions.set(url, isPrivate = false, excepted = true)
                 }
                 val off = if (isWebUrl(url.orEmpty())) trackingExceptions.isExcepted(url, isPrivate) else null
-                _state.update { it.copy(trackingProtectionOff = off) }
+                _state.update { it.copy(trackingProtectionOff = off, javaScriptOn = session.settings.allowJavascript) }
                 // Fallback for navigations that did not pass onLoadRequest (Back/Forward, restores).
                 applyTrackingProtection(off != true)
                 applyActive()
@@ -487,6 +535,7 @@ private class GeckoBrowserSession(
                 }
                 // Decide tracking protection for the site BEFORE its page loads (see TrackingExceptions).
                 applyTrackingProtection(!trackingExceptions.isExcepted(request.uri, isPrivate))
+                applySitePolicy(request.uri)
                 return null
             }
 
@@ -518,6 +567,7 @@ private class GeckoBrowserSession(
                 )
                 visits.onLoadError()
                 _state.update { it.afterLoadError(uri?.takeIf { failed -> isWebUrl(failed) }) }
+                if (error.code == WebRequestError.ERROR_HTTPS_ONLY) _state.update { it.copy(httpsOnlyBlocked = true) }
                 // Null halts the load; the shell shows its own banner.
                 return null
             }
@@ -1561,6 +1611,7 @@ private class GeckoBrowserSession(
             return
         }
         applyTrackingProtection(!trackingExceptions.isExcepted(url, isPrivate))
+        applySitePolicy(url)
         session.loadUri(url)
         // No URL or search term in the persisted log: it would record browsing history.
         debugLog.log("GeckoSession", "load requested")
@@ -1579,6 +1630,7 @@ private class GeckoBrowserSession(
             return
         }
         applyTrackingProtection(!trackingExceptions.isExcepted(url, isPrivate))
+        applySitePolicy(url)
         session.load(
             GeckoSession.Loader()
                 .uri(url)
@@ -1589,12 +1641,34 @@ private class GeckoBrowserSession(
 
     override fun setDesktopMode(enabled: Boolean) {
         if (closed || _state.value.desktopMode == enabled) return
+        applyDesktop(enabled)
+        // Settings only take effect for the next load.
+        if (session.isOpen && _state.value.url.isNotEmpty()) reload()
+    }
+
+    private fun applyDesktop(enabled: Boolean) {
+        if (_state.value.desktopMode == enabled) return
         session.settings.userAgentMode =
             if (enabled) GeckoSessionSettings.USER_AGENT_MODE_DESKTOP else GeckoSessionSettings.USER_AGENT_MODE_MOBILE
         session.settings.viewportMode =
             if (enabled) GeckoSessionSettings.VIEWPORT_MODE_DESKTOP else GeckoSessionSettings.VIEWPORT_MODE_MOBILE
         _state.update { it.copy(desktopMode = enabled) }
-        // Settings only take effect for the next load.
+    }
+
+    /** The site's desktop and JavaScript choices, set before its page loads (like tracking protection). */
+    private fun applySitePolicy(url: String) {
+        if (closed || !isWebUrl(url)) return
+        val policy = sitePolicy() ?: return
+        applyDesktop(policy.desktopFor(url, isPrivate))
+        val js = policy.javaScriptFor(url, isPrivate)
+        if (session.settings.allowJavascript != js) session.settings.allowJavascript = js
+        _state.update { it.copy(javaScriptOn = js) }
+    }
+
+    override fun setJavaScriptEnabled(enabled: Boolean) {
+        if (closed) return
+        if (session.settings.allowJavascript != enabled) session.settings.allowJavascript = enabled
+        _state.update { it.copy(javaScriptOn = enabled) }
         if (session.isOpen && _state.value.url.isNotEmpty()) reload()
     }
 
@@ -1621,7 +1695,7 @@ private class GeckoBrowserSession(
                 current.loadFailed -> current.failedUrl
                 else -> null
             }
-        _state.update { it.copy(crashed = false, loadFailed = false, failedUrl = null) }
+        _state.update { it.copy(crashed = false, loadFailed = false, failedUrl = null, httpsOnlyBlocked = false) }
         if (target != null) session.loadUri(target) else session.reload()
     }
 

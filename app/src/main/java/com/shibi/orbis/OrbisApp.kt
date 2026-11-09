@@ -1,6 +1,9 @@
 package com.shibi.orbis
 
 import android.app.Application
+import kotlinx.coroutines.flow.combine
+import com.shibi.orbis.settings.HttpsOnlyMode
+import com.shibi.orbis.settings.AppTheme
 import android.content.Context
 import android.os.Environment
 import android.os.SystemClock
@@ -100,6 +103,22 @@ class OrbisApp : Application() {
         // Text size and force zoom follow the saved preferences, now and whenever they change.
         appScope.launch { browserSettings.textZoomPercent.collect { engine.setTextZoom(it) } }
         appScope.launch { browserSettings.forceZoom.collect { engine.setForceZoom(it) } }
+        engine.setSitePolicy(browserSettings)
+        appScope.launch {
+            browserSettings.httpsOnly.collect {
+                engine.setHttpsOnly(normalTabs = it == HttpsOnlyMode.ALL, privateTabs = it != HttpsOnlyMode.OFF)
+            }
+        }
+        appScope.launch {
+            combine(browserSettings.appTheme, browserSettings.darkWebsites) { theme, darkSites ->
+                when {
+                    darkSites -> true
+                    theme == AppTheme.LIGHT -> false
+                    theme == AppTheme.DARK -> true
+                    else -> null
+                }
+            }.collect { engine.setWebsiteColorScheme(it) }
+        }
         val ubo =
             UboOnboardingController(
                 host = engine.extensions,
@@ -154,6 +173,7 @@ class OrbisApp : Application() {
                     engine.clearPrivateData()
                     // Created just below; private browsing cannot end before then (no session exists yet).
                     downloadsRef?.forgetPrivate()
+                    browserSettings.forgetPrivate()
                 },
             )
         val downloads =

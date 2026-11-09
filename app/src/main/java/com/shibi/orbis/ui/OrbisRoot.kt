@@ -172,6 +172,7 @@ fun OrbisRoot(container: AppContainer) {
                 onOpenSitePermissions = { nav.navigate(Routes.SitePermissions) },
                 onOpenClearData = { nav.navigate(Routes.ClearData) },
                 onOpenPasswords = { nav.navigate(Routes.Passwords) },
+                site = container.browserSettings,
             )
         }
         composable(Routes.ClearData) {

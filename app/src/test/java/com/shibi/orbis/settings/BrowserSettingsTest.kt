@@ -18,6 +18,71 @@ class BrowserSettingsTest {
         override var readerTextSize: Int = 18
         override var readerSerif: Boolean = true
         override var readerTheme: ReaderTheme = ReaderTheme.LIGHT
+        override var httpsOnly: HttpsOnlyMode = HttpsOnlyMode.PRIVATE
+        override var appTheme: AppTheme = AppTheme.SYSTEM
+        override var darkWebsites: Boolean = false
+        override var javaScript: Boolean = true
+        override var javaScriptOn: Set<String> = emptySet()
+        override var javaScriptOff: Set<String> = emptySet()
+        override var alwaysDesktop: Boolean = false
+        override var desktopOn: Set<String> = emptySet()
+        override var desktopOff: Set<String> = emptySet()
+    }
+
+    @Test
+    fun desktopChoiceIsRememberedPerSiteOverTheDefault() {
+        val prefs = MemPrefs()
+        val s = BrowserSettings(prefs)
+        assertFalse(s.desktopFor("https://a.example/x", isPrivate = false))
+        s.rememberDesktop("https://a.example/x", on = true, isPrivate = false)
+        assertTrue(s.desktopFor("https://A.example/other", isPrivate = false))
+        assertFalse(s.desktopFor("https://b.example/", isPrivate = false))
+        assertEquals(setOf("a.example"), prefs.desktopOn)
+        // Always desktop: every other site follows, the site switched off keeps its choice.
+        s.setAlwaysDesktop(true)
+        s.rememberDesktop("https://c.example/", on = false, isPrivate = false)
+        assertTrue(s.desktopFor("https://b.example/", isPrivate = false))
+        assertFalse(s.desktopFor("https://c.example/", isPrivate = false))
+        // Choosing the default again drops the entry.
+        s.rememberDesktop("https://c.example/", on = true, isPrivate = false)
+        assertEquals(emptySet<String>(), prefs.desktopOff)
+    }
+
+    @Test
+    fun privateSiteChoicesStayInMemoryAndEndWithPrivateBrowsing() {
+        val prefs = MemPrefs()
+        val s = BrowserSettings(prefs)
+        s.rememberJavaScript("https://a.example/", on = false, isPrivate = true)
+        assertFalse(s.javaScriptFor("https://a.example/", isPrivate = true))
+        assertTrue(s.javaScriptFor("https://a.example/", isPrivate = false))
+        assertEquals(emptySet<String>(), prefs.javaScriptOff)
+        s.forgetPrivate()
+        assertTrue(s.javaScriptFor("https://a.example/", isPrivate = true))
+        // A private tab still reads the normal choice.
+        s.rememberJavaScript("https://b.example/", on = false, isPrivate = false)
+        assertFalse(s.javaScriptFor("https://b.example/", isPrivate = true))
+    }
+
+    @Test
+    fun javaScriptDefaultAppliesToSitesWithoutAChoice() {
+        val s = BrowserSettings(MemPrefs())
+        s.rememberJavaScript("https://keep.example/", on = false, isPrivate = false)
+        s.setJavaScript(false)
+        assertFalse(s.javaScriptFor("https://any.example/", isPrivate = false))
+        s.rememberJavaScript("https://news.example/", on = true, isPrivate = false)
+        assertTrue(s.javaScriptFor("https://news.example/", isPrivate = false))
+        assertFalse(s.javaScriptFor("https://keep.example/", isPrivate = false))
+    }
+
+    @Test
+    fun httpsOnlyDefaultsToPrivateTabsAndThemeToSystem() {
+        val s = BrowserSettings(MemPrefs())
+        assertEquals(HttpsOnlyMode.PRIVATE, s.httpsOnly.value)
+        assertEquals(AppTheme.SYSTEM, s.appTheme.value)
+        s.setHttpsOnly(HttpsOnlyMode.ALL)
+        s.setAppTheme(AppTheme.DARK)
+        assertEquals(HttpsOnlyMode.ALL, s.httpsOnly.value)
+        assertEquals(AppTheme.DARK, s.appTheme.value)
     }
 
     @Test

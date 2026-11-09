@@ -577,12 +577,26 @@ private fun BrowserContent(
                                 },
                             )
                             DropdownMenuItem(
+                                text = { Text(stringResource(R.string.menu_javascript)) },
+                                enabled = session != null && isWebUrl(state.url),
+                                trailingIcon = { Checkbox(checked = state.javaScriptOn, onCheckedChange = null) },
+                                onClick = {
+                                    menuOpen = false
+                                    val s = session ?: return@DropdownMenuItem
+                                    container.browserSettings.rememberJavaScript(state.url, !state.javaScriptOn, s.isPrivate)
+                                    s.setJavaScriptEnabled(!state.javaScriptOn)
+                                },
+                            )
+                            DropdownMenuItem(
                                 text = { Text(stringResource(R.string.menu_desktop_site)) },
                                 enabled = session != null,
                                 trailingIcon = { Checkbox(checked = state.desktopMode, onCheckedChange = null) },
                                 onClick = {
                                     menuOpen = false
-                                    session?.setDesktopMode(!state.desktopMode)
+                                    val s = session ?: return@DropdownMenuItem
+                                    // Remembered for the site (see Settings > Always request desktop site).
+                                    if (isWebUrl(state.url)) container.browserSettings.rememberDesktop(state.url, !state.desktopMode, s.isPrivate)
+                                    s.setDesktopMode(!state.desktopMode)
                                 },
                             )
                             HorizontalDivider()
@@ -737,7 +751,13 @@ private fun BrowserContent(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                stringResource(if (state.crashed) R.string.browser_crashed else R.string.browser_load_failed),
+                                stringResource(
+                                    when {
+                                        state.crashed -> R.string.browser_crashed
+                                        state.httpsOnlyBlocked -> R.string.https_only_blocked
+                                        else -> R.string.browser_load_failed
+                                    },
+                                ),
                                 style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.weight(1f).padding(vertical = 8.dp),
                             )

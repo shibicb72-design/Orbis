@@ -2,6 +2,7 @@ package com.shibi.orbis.settings
 
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import com.shibi.orbis.engine.SitePolicy
 import com.shibi.orbis.engine.hostOfUrl
 import com.shibi.orbis.home.PinnedSite
 import com.shibi.orbis.home.TOP_SITES_LIMIT
@@ -40,9 +41,65 @@ interface BrowserPrefs {
     var readerTextSize: Int
     var readerSerif: Boolean
     var readerTheme: ReaderTheme
+
+    var httpsOnly: HttpsOnlyMode
+    var appTheme: AppTheme
+    /** Ask pages for their dark design whatever the app theme. */
+    var darkWebsites: Boolean
+    /** JavaScript default for every site, and the sites the user switched the other way. */
+    var javaScript: Boolean
+    var javaScriptOn: Set<String>
+    var javaScriptOff: Set<String>
+    /** Desktop site default, and the sites the user switched the other way. */
+    var alwaysDesktop: Boolean
+    var desktopOn: Set<String>
+    var desktopOff: Set<String>
 }
 
 enum class ReaderTheme { LIGHT, SEPIA, DARK }
+
+enum class HttpsOnlyMode { OFF, PRIVATE, ALL }
+
+enum class AppTheme { SYSTEM, LIGHT, DARK }
+
+/**
+ * A per-site on/off choice over a default: [on] and [off] hold only the sites that differ from it. Private choices
+ * live in memory only and are forgotten when private browsing ends.
+ */
+internal class SiteChoice(
+    private val default: () -> Boolean,
+    private var on: Set<String>,
+    private var off: Set<String>,
+    private val save: (on: Set<String>, off: Set<String>) -> Unit,
+) {
+    private val private = HashMap<String, Boolean>()
+
+    fun valueFor(url: String, isPrivate: Boolean): Boolean {
+        val host = hostOfUrl(url)?.lowercase() ?: return default()
+        if (isPrivate) private[host]?.let { return it }
+        return when (host) {
+            in on -> true
+            in off -> false
+            else -> default()
+        }
+    }
+
+    fun set(url: String, value: Boolean, isPrivate: Boolean) {
+        val host = hostOfUrl(url)?.lowercase() ?: return
+        if (isPrivate) {
+            private[host] = value
+            return
+        }
+        on = on - host
+        off = off - host
+        if (value != default()) {
+            if (value) on = on + host else off = off + host
+        }
+        save(on, off)
+    }
+
+    fun forgetPrivate() = private.clear()
+}
 
 class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : BrowserPrefs, NeverSavePrefs {
     override var offerSavePasswords: Boolean
@@ -67,6 +124,60 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         get() = ReaderTheme.entries.firstOrNull { it.name == prefs.getString(KEY_READER_THEME, null) } ?: ReaderTheme.LIGHT
         set(value) {
             prefs.edit { putString(KEY_READER_THEME, value.name) }
+        }
+
+    override var httpsOnly: HttpsOnlyMode
+        get() = HttpsOnlyMode.entries.firstOrNull { it.name == prefs.getString(KEY_HTTPS_ONLY, null) } ?: HttpsOnlyMode.PRIVATE
+        set(value) {
+            prefs.edit { putString(KEY_HTTPS_ONLY, value.name) }
+        }
+
+    override var appTheme: AppTheme
+        get() = AppTheme.entries.firstOrNull { it.name == prefs.getString(KEY_APP_THEME, null) } ?: AppTheme.SYSTEM
+        set(value) {
+            prefs.edit { putString(KEY_APP_THEME, value.name) }
+        }
+
+    override var darkWebsites: Boolean
+        get() = prefs.getBoolean(KEY_DARK_WEBSITES, false)
+        set(value) {
+            prefs.edit { putBoolean(KEY_DARK_WEBSITES, value) }
+        }
+
+    override var javaScript: Boolean
+        get() = prefs.getBoolean(KEY_JS, true)
+        set(value) {
+            prefs.edit { putBoolean(KEY_JS, value) }
+        }
+
+    override var javaScriptOn: Set<String>
+        get() = prefs.getStringSet(KEY_JS_ON, emptySet())?.toSet() ?: emptySet()
+        set(value) {
+            prefs.edit { putStringSet(KEY_JS_ON, value.toSet()) }
+        }
+
+    override var javaScriptOff: Set<String>
+        get() = prefs.getStringSet(KEY_JS_OFF, emptySet())?.toSet() ?: emptySet()
+        set(value) {
+            prefs.edit { putStringSet(KEY_JS_OFF, value.toSet()) }
+        }
+
+    override var alwaysDesktop: Boolean
+        get() = prefs.getBoolean(KEY_ALWAYS_DESKTOP, false)
+        set(value) {
+            prefs.edit { putBoolean(KEY_ALWAYS_DESKTOP, value) }
+        }
+
+    override var desktopOn: Set<String>
+        get() = prefs.getStringSet(KEY_DESKTOP_ON, emptySet())?.toSet() ?: emptySet()
+        set(value) {
+            prefs.edit { putStringSet(KEY_DESKTOP_ON, value.toSet()) }
+        }
+
+    override var desktopOff: Set<String>
+        get() = prefs.getStringSet(KEY_DESKTOP_OFF, emptySet())?.toSet() ?: emptySet()
+        set(value) {
+            prefs.edit { putStringSet(KEY_DESKTOP_OFF, value.toSet()) }
         }
 
     override var neverSave: Set<String>
@@ -128,6 +239,15 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         private const val KEY_READER_SERIF = "reader_serif"
         private const val KEY_READER_THEME = "reader_theme"
         private const val KEY_NEVER_SAVE = "never_save_logins"
+        private const val KEY_HTTPS_ONLY = "https_only"
+        private const val KEY_APP_THEME = "app_theme"
+        private const val KEY_DARK_WEBSITES = "dark_websites"
+        private const val KEY_JS = "javascript"
+        private const val KEY_JS_ON = "javascript_on_sites"
+        private const val KEY_JS_OFF = "javascript_off_sites"
+        private const val KEY_ALWAYS_DESKTOP = "always_desktop"
+        private const val KEY_DESKTOP_ON = "desktop_on_sites"
+        private const val KEY_DESKTOP_OFF = "desktop_off_sites"
         private const val KEY_PINNED = "pinned_sites"
         private const val KEY_HIDDEN = "hidden_sites"
         private const val KEY_FORCE_ZOOM = "force_zoom"
@@ -143,7 +263,75 @@ val TEXT_ZOOM_STEPS = listOf(50, 75, 90, 100, 110, 125, 150, 175, 200)
 fun clampTextZoom(percent: Int): Int = percent.coerceIn(TEXT_ZOOM_STEPS.first(), TEXT_ZOOM_STEPS.last())
 
 /** Observable browsing preferences. Main thread. */
-class BrowserSettings(private val prefs: BrowserPrefs) {
+class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
+    private val _httpsOnly = MutableStateFlow(prefs.httpsOnly)
+    val httpsOnly: StateFlow<HttpsOnlyMode> = _httpsOnly.asStateFlow()
+
+    fun setHttpsOnly(mode: HttpsOnlyMode) {
+        prefs.httpsOnly = mode
+        _httpsOnly.value = mode
+    }
+
+    private val _appTheme = MutableStateFlow(prefs.appTheme)
+    val appTheme: StateFlow<AppTheme> = _appTheme.asStateFlow()
+
+    fun setAppTheme(theme: AppTheme) {
+        prefs.appTheme = theme
+        _appTheme.value = theme
+    }
+
+    private val _darkWebsites = MutableStateFlow(prefs.darkWebsites)
+    val darkWebsites: StateFlow<Boolean> = _darkWebsites.asStateFlow()
+
+    fun setDarkWebsites(on: Boolean) {
+        prefs.darkWebsites = on
+        _darkWebsites.value = on
+    }
+
+    private val _javaScript = MutableStateFlow(prefs.javaScript)
+    val javaScript: StateFlow<Boolean> = _javaScript.asStateFlow()
+
+    /** The default for sites without a choice of their own; per-site choices keep their value. */
+    fun setJavaScript(on: Boolean) {
+        prefs.javaScript = on
+        _javaScript.value = on
+    }
+
+    private val _alwaysDesktop = MutableStateFlow(prefs.alwaysDesktop)
+    val alwaysDesktop: StateFlow<Boolean> = _alwaysDesktop.asStateFlow()
+
+    fun setAlwaysDesktop(on: Boolean) {
+        prefs.alwaysDesktop = on
+        _alwaysDesktop.value = on
+    }
+
+    private val jsChoice =
+        SiteChoice({ _javaScript.value }, prefs.javaScriptOn, prefs.javaScriptOff) { on, off ->
+            prefs.javaScriptOn = on
+            prefs.javaScriptOff = off
+        }
+    private val desktopChoice =
+        SiteChoice({ _alwaysDesktop.value }, prefs.desktopOn, prefs.desktopOff) { on, off ->
+            prefs.desktopOn = on
+            prefs.desktopOff = off
+        }
+
+    override fun desktopFor(url: String, isPrivate: Boolean): Boolean = desktopChoice.valueFor(url, isPrivate)
+
+    override fun javaScriptFor(url: String, isPrivate: Boolean): Boolean = jsChoice.valueFor(url, isPrivate)
+
+    /** Remembers the page menu's Desktop site choice for the page's site. */
+    fun rememberDesktop(url: String, on: Boolean, isPrivate: Boolean) = desktopChoice.set(url, on, isPrivate)
+
+    /** Remembers the page menu's JavaScript choice for the page's site. */
+    fun rememberJavaScript(url: String, on: Boolean, isPrivate: Boolean) = jsChoice.set(url, on, isPrivate)
+
+    /** Private browsing ended: its per-site choices go. */
+    fun forgetPrivate() {
+        jsChoice.forgetPrivate()
+        desktopChoice.forgetPrivate()
+    }
+
     private val _homepage = MutableStateFlow(prefs.homepage)
     val homepage: StateFlow<String?> = _homepage.asStateFlow()
 

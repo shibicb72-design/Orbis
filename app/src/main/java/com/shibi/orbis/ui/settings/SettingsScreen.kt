@@ -1,6 +1,9 @@
 package com.shibi.orbis.ui.settings
 
 import android.widget.Toast
+import com.shibi.orbis.settings.AppTheme
+import com.shibi.orbis.settings.BrowserSettings
+import com.shibi.orbis.settings.HttpsOnlyMode
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
@@ -134,8 +137,41 @@ fun SettingsScreen(
     onOpenSitePermissions: () -> Unit,
     onOpenClearData: () -> Unit,
     onOpenPasswords: () -> Unit = {},
+    /** Theme, desktop site, HTTPS-only and JavaScript rows; hidden when null (screen tests). */
+    site: BrowserSettings? = null,
     modifier: Modifier = Modifier,
 ) {
+    var themeDialogOpen by remember { mutableStateOf(false) }
+    var httpsDialogOpen by remember { mutableStateOf(false) }
+    if (site != null) {
+        val theme by site.appTheme.collectAsStateWithLifecycle()
+        val https by site.httpsOnly.collectAsStateWithLifecycle()
+        if (themeDialogOpen) {
+            ChoiceDialog(
+                title = R.string.theme_title,
+                options = AppTheme.entries.map { it to themeLabel(it) },
+                selected = theme,
+                onSelect = {
+                    site.setAppTheme(it)
+                    themeDialogOpen = false
+                },
+                onDismiss = { themeDialogOpen = false },
+            )
+        }
+        if (httpsDialogOpen) {
+            ChoiceDialog(
+                title = R.string.https_only_title,
+                options = HttpsOnlyMode.entries.map { it to httpsOnlyLabel(it) },
+                selected = https,
+                onSelect = {
+                    site.setHttpsOnly(it)
+                    httpsDialogOpen = false
+                },
+                onDismiss = { httpsDialogOpen = false },
+                note = R.string.https_only_note,
+            )
+        }
+    }
     val uboState by uboStateFlow.collectAsStateWithLifecycle()
     val searchEngine by searchEngineFlow.collectAsStateWithLifecycle()
     var searchDialogOpen by remember { mutableStateOf(false) }
@@ -247,6 +283,31 @@ fun SettingsScreen(
                         .toggleable(value = forceZoom, role = Role.Switch, onValueChange = onSetForceZoom),
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                if (site != null) {
+                    val theme by site.appTheme.collectAsStateWithLifecycle()
+                    val darkSites by site.darkWebsites.collectAsStateWithLifecycle()
+                    val alwaysDesktop by site.alwaysDesktop.collectAsStateWithLifecycle()
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.theme_title)) },
+                        supportingContent = { Text(stringResource(themeLabel(theme))) },
+                        modifier = Modifier.fillMaxWidth().clickable { themeDialogOpen = true },
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.dark_websites_title)) },
+                        supportingContent = { Text(stringResource(R.string.dark_websites_summary)) },
+                        trailingContent = { Switch(checked = darkSites, onCheckedChange = null) },
+                        modifier = Modifier.fillMaxWidth().toggleable(value = darkSites, role = Role.Switch, onValueChange = site::setDarkWebsites),
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.always_desktop_title)) },
+                        supportingContent = { Text(stringResource(R.string.always_desktop_summary)) },
+                        trailingContent = { Switch(checked = alwaysDesktop, onCheckedChange = null) },
+                        modifier = Modifier.fillMaxWidth().toggleable(value = alwaysDesktop, role = Role.Switch, onValueChange = site::setAlwaysDesktop),
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                }
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.homepage_title)) },
                     supportingContent = { Text(homepage ?: stringResource(R.string.homepage_start_page)) },
@@ -285,6 +346,23 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.fillMaxWidth().padding(16.dp),
                     )
+                }
+                if (site != null) {
+                    val https by site.httpsOnly.collectAsStateWithLifecycle()
+                    val js by site.javaScript.collectAsStateWithLifecycle()
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.https_only_title)) },
+                        supportingContent = { Text(stringResource(httpsOnlyLabel(https))) },
+                        modifier = Modifier.fillMaxWidth().clickable { httpsDialogOpen = true },
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.javascript_title)) },
+                        supportingContent = { Text(stringResource(R.string.javascript_summary)) },
+                        trailingContent = { Switch(checked = js, onCheckedChange = null) },
+                        modifier = Modifier.fillMaxWidth().toggleable(value = js, role = Role.Switch, onValueChange = site::setJavaScript),
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.passwords_title)) },
@@ -326,6 +404,59 @@ fun SettingsScreen(
             }
         }
     }
+}
+
+@StringRes
+private fun themeLabel(t: AppTheme): Int =
+    when (t) {
+        AppTheme.SYSTEM -> R.string.theme_system
+        AppTheme.LIGHT -> R.string.theme_light
+        AppTheme.DARK -> R.string.theme_dark
+    }
+
+@StringRes
+private fun httpsOnlyLabel(m: HttpsOnlyMode): Int =
+    when (m) {
+        HttpsOnlyMode.OFF -> R.string.https_only_off
+        HttpsOnlyMode.PRIVATE -> R.string.https_only_private
+        HttpsOnlyMode.ALL -> R.string.https_only_all
+    }
+
+/** A single-choice dialog of radio rows. */
+@Composable
+private fun <T> ChoiceDialog(
+    @StringRes title: Int,
+    options: List<Pair<T, Int>>,
+    selected: T,
+    onSelect: (T) -> Unit,
+    onDismiss: () -> Unit,
+    @StringRes note: Int? = null,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(title)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()).selectableGroup()) {
+                options.forEach { (value, label) ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .selectable(selected = value == selected, role = Role.RadioButton, onClick = { onSelect(value) })
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = value == selected, onClick = null)
+                        Text(stringResource(label), modifier = Modifier.padding(start = 16.dp))
+                    }
+                }
+                if (note != null) {
+                    Text(stringResource(note), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.prompt_cancel)) } },
+    )
 }
 
 @Composable

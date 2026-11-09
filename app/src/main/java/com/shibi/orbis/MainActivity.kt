@@ -1,6 +1,8 @@
 package com.shibi.orbis
 
 import android.content.Intent
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.app.PictureInPictureParams
 import android.graphics.Rect
 import android.os.Build
@@ -53,7 +55,8 @@ class MainActivity : ComponentActivity() {
             takeViewIntent(intent)
         }
         setContent {
-            OrbisTheme {
+            val theme by app.container.browserSettings.appTheme.collectAsStateWithLifecycle()
+            OrbisTheme(theme) {
                 OrbisRoot(container = app.container)
             }
         }

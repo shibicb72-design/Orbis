@@ -56,6 +56,12 @@ interface BrowserEngine {
     fun setTextZoom(percent: Int) {}
     /** Lets every page be pinch-zoomed, even one that disables zooming. Applies now and later. */
     fun setForceZoom(enabled: Boolean) {}
+    /** HTTPS-only mode: http pages are upgraded, and refused when the site has no https version. */
+    fun setHttpsOnly(normalTabs: Boolean, privateTabs: Boolean) {}
+    /** The color scheme pages are asked for (prefers-color-scheme): true dark, false light, null the system's. */
+    fun setWebsiteColorScheme(dark: Boolean?) {}
+    /** Per-site desktop and JavaScript choices, read before each top-level load. */
+    fun setSitePolicy(policy: SitePolicy) {}
     /**
      * Main thread only. The ONE factory for sessions (new, restored and popup children alike), so ETP Strict
      * (useTrackingProtection) is applied to every one of them.
@@ -117,6 +123,10 @@ data class SessionState(
      * Null when the page has no web site (blank, about:). Read from the engine's own permission record.
      */
     val trackingProtectionOff: Boolean? = null,
+    /** JavaScript runs on the current page (Settings > JavaScript and the page menu's per-site choice). */
+    val javaScriptOn: Boolean = true,
+    /** The last load failed because HTTPS-only mode found no secure version of the site. */
+    val httpsOnlyBlocked: Boolean = false,
     /** What the on-device translator knows about the page; null until it reported. */
     val translation: TranslationInfo? = null,
     /** The page looks like an article (Readability's check): reader view is offered. Reset at each page start. */
@@ -159,6 +169,7 @@ internal fun SessionState.afterPageStart(): SessionState =
         progress = 0,
         loadFailed = false,
         failedUrl = null,
+        httpsOnlyBlocked = false,
         crashed = false,
         findResult = null,
         loadStarts = loadStarts + 1,
@@ -236,6 +247,8 @@ interface BrowserSession {
     fun translatePage(onDone: (Boolean) -> Unit) = onDone(false)
     /** Shows the page as it was before translating. */
     fun showOriginal() {}
+    /** Turns JavaScript on or off for this tab's page and reloads it. */
+    fun setJavaScriptEnabled(enabled: Boolean) {}
     /** Media controls for the page's active media (notification, lock screen, PiP). Test doubles may no-op. */
     fun mediaPlay() {}
     fun mediaPause() {}
@@ -263,6 +276,12 @@ interface BrowserSession {
 }
 
 /** Everything a session needs from the tab layer. All calls arrive on the main thread. */
+/** The user's per-site choices. Private tabs read the normal choices but their own changes are kept apart. */
+interface SitePolicy {
+    fun desktopFor(url: String, isPrivate: Boolean): Boolean
+    fun javaScriptFor(url: String, isPrivate: Boolean): Boolean
+}
+
 /** The translator's view of a page. Language tags are BCP 47 ("en", "fr", "zh-Hans"); empty when unknown. */
 data class TranslationInfo(
     val pageLanguage: String,
