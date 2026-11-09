@@ -247,6 +247,8 @@ interface BrowserSession {
     fun translatePage(onDone: (Boolean) -> Unit) = onDone(false)
     /** Shows the page as it was before translating. */
     fun showOriginal() {}
+    /** Opens the system print dialog for the page (which also saves as PDF). Needs the page shown in a view. */
+    fun printPage() {}
     /** Turns JavaScript on or off for this tab's page and reloads it. */
     fun setJavaScriptEnabled(enabled: Boolean) {}
     /** Media controls for the page's active media (notification, lock screen, PiP). Test doubles may no-op. */

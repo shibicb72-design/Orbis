@@ -14,6 +14,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.shibi.orbis.home.topSites
+import androidx.compose.material.icons.filled.AddToHomeScreen
+import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.automirrored.filled.Article
 import com.shibi.orbis.engine.ReaderArticle
@@ -529,6 +531,27 @@ private fun BrowserContent(
                                 onClick = {
                                     menuOpen = false
                                     shareLink(androidContext, state.url, state.title)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.menu_print)) },
+                                leadingIcon = { Icon(Icons.Filled.Print, contentDescription = null) },
+                                enabled = session != null && isWebUrl(state.url) && !state.isLoading,
+                                onClick = {
+                                    menuOpen = false
+                                    session?.printPage()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.menu_add_home)) },
+                                leadingIcon = { Icon(Icons.Filled.AddToHomeScreen, contentDescription = null) },
+                                // Not from a private tab: the shortcut would keep the address on the home screen.
+                                enabled = isWebUrl(state.url) && session?.isPrivate == false,
+                                onClick = {
+                                    menuOpen = false
+                                    if (!requestHomeShortcut(androidContext, state.url, state.title.orEmpty())) {
+                                        Toast.makeText(androidContext, R.string.add_home_unavailable, Toast.LENGTH_SHORT).show()
+                                    }
                                 },
                             )
                             DropdownMenuItem(

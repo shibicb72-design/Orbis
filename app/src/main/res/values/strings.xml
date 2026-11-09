@@ -11,6 +11,9 @@
     <string name="start_pinned">pinned</string>
     <string name="menu_home">Home</string>
     <string name="menu_share">Share</string>
+    <string name="menu_print">Print or save as PDF</string>
+    <string name="menu_add_home">Add to Home screen</string>
+    <string name="add_home_unavailable">Your home screen app does not accept shortcuts.</string>
     <string name="menu_javascript">JavaScript</string>
     <string name="https_only_blocked">This site has no secure (HTTPS) version, so HTTPS-only mode blocked it. You can change this in Settings.</string>
     <string name="theme_title">Theme</string>

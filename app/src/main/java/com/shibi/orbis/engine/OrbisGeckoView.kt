@@ -1,7 +1,9 @@
 package com.shibi.orbis.engine
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.view.MotionEvent
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.PanZoomController
@@ -34,6 +36,13 @@ fun pullTriggersRefresh(distancePx: Float, thresholdPx: Float): Boolean = distan
  * A second finger cancels the pull (pinch zoom).
  */
 class OrbisGeckoView(context: Context) : GeckoView(context), PullToRefreshSource {
+    init {
+        // GeckoView's print support opens Android's print dialog from the activity; without this it does nothing.
+        setActivityContextDelegate {
+            generateSequence(getContext()) { (it as? ContextWrapper)?.baseContext }.firstOrNull { it is Activity }
+        }
+    }
+
     override var onPull: ((Float) -> Unit)? = null
     override var onPullEnd: ((Float) -> Unit)? = null
 

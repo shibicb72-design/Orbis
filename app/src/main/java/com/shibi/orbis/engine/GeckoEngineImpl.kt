@@ -1665,6 +1665,12 @@ private class GeckoBrowserSession(
         _state.update { it.copy(javaScriptOn = js) }
     }
 
+    override fun printPage() {
+        if (closed || !session.isOpen) return
+        // GeckoView's own print delegate (set when the view attaches the session) opens Android's print dialog.
+        runCatching { session.printPageContent() }.onFailure { debugLog.log("GeckoSession", "print failed: ${it.javaClass.simpleName}") }
+    }
+
     override fun setJavaScriptEnabled(enabled: Boolean) {
         if (closed) return
         if (session.settings.allowJavascript != enabled) session.settings.allowJavascript = enabled
