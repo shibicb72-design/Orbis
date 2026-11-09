@@ -1,6 +1,8 @@
 package com.shibi.orbis
 
 import android.content.Intent
+import android.app.PictureInPictureParams
+import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
@@ -13,6 +15,8 @@ import com.shibi.orbis.engine.externalUrlFrom
 import com.shibi.orbis.privacy.PrivacyWindowController
 import com.shibi.orbis.privacy.PrivacyWindowOps
 import com.shibi.orbis.ui.OrbisRoot
+import com.shibi.orbis.media.pipAspectRatio
+import com.shibi.orbis.media.pipShapeOf
 import com.shibi.orbis.ui.BackKeyWindowCallback
 import com.shibi.orbis.ui.theme.OrbisTheme
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -32,6 +36,16 @@ class MainActivity : ComponentActivity() {
         // Recents snapshot.
         lifecycleScope.launch {
             app.container.tabs.tabs.map { list -> list.any { it.isPrivate } }.distinctUntilChanged().collect(::applyPrivacyWindow)
+        }
+        // Picture-in-picture: a fullscreen video that is playing shrinks into a window when the user leaves (Home).
+        lifecycleScope.launch {
+            app.container.media.current
+                .map { pipShapeOf(it, app.container.tabs.selected.value.session?.state?.value?.fullScreen == true) }
+                .distinctUntilChanged()
+                .collect { shape ->
+                    pipShape = shape
+                    applyPipParams()
+                }
         }
         // A recreated activity (savedInstanceState != null) or one resumed from Recents still carries the intent
         // that started it; reading it again would reopen a link the user already dealt with.
@@ -54,6 +68,33 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         app.container.tabs.setForeground(true)
         app.downloadForeground?.onAppForeground()
+    }
+
+    /** Width:height of the video that may go picture-in-picture now, or null. */
+    private var pipShape: Pair<Long, Long>? = null
+
+    private fun pipParams(): PictureInPictureParams? {
+        val (w, h) = pipShape ?: return null
+        // The page fills the window in fullscreen, so the whole window is where the video comes from.
+        val source = window.decorView.let { Rect(0, 0, it.width, it.height) }
+        return PictureInPictureParams.Builder().setAspectRatio(pipAspectRatio(w, h)).setSourceRectHint(source).apply {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) setAutoEnterEnabled(true)
+        }.build()
+    }
+
+    private fun applyPipParams() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Android 12+: entering is automatic while a shape is set; clearing it turns auto-enter off.
+            runCatching {
+                setPictureInPictureParams(pipParams() ?: PictureInPictureParams.Builder().setAutoEnterEnabled(false).build())
+            }
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Before Android 12 the app enters picture-in-picture itself when the user presses Home.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) pipParams()?.let { runCatching { enterPictureInPictureMode(it) } }
     }
 
     override fun onStop() {

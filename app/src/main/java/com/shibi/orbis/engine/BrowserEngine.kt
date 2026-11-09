@@ -117,6 +117,8 @@ data class SessionState(
      * Null when the page has no web site (blank, about:). Read from the engine's own permission record.
      */
     val trackingProtectionOff: Boolean? = null,
+    /** The page's media (audio or video): null when it has none active. */
+    val media: MediaState? = null,
     /** A video went fullscreen and is wider than tall: the screen turns to landscape, like Chrome and Firefox. */
     val fullScreenVideoLandscape: Boolean = false,
     /**
@@ -182,6 +184,7 @@ internal fun SessionState.afterContentProcessGone(): SessionState =
         findResult = null,
         fullScreen = false,
         fullScreenVideoLandscape = false,
+        media = null,
         loadEnds = loadEnds + 1,
         navigationsCancelled = navigationsCancelled + 1,
     )
@@ -217,6 +220,10 @@ interface BrowserSession {
     fun goForward(): Boolean
     fun reload()
     fun stop()
+    /** Media controls for the page's active media (notification, lock screen, PiP). Test doubles may no-op. */
+    fun mediaPlay() {}
+    fun mediaPause() {}
+    fun mediaStop() {}
     /** Leaves page fullscreen (Back, a tab switch); the engine then reports fullScreen = false. Test doubles may no-op. */
     fun exitFullScreen() {}
     /**
@@ -240,6 +247,18 @@ interface BrowserSession {
 }
 
 /** Everything a session needs from the tab layer. All calls arrive on the main thread. */
+/** A page's active media. [title]/[artist] come from the page (Media Session metadata) and may be empty. */
+data class MediaState(
+    val playing: Boolean,
+    val title: String = "",
+    val artist: String = "",
+    /** The media element has video (picture-in-picture makes sense). */
+    val hasVideo: Boolean = false,
+    /** Video size when known (for the picture-in-picture shape); 0 when unknown. */
+    val videoWidth: Long = 0,
+    val videoHeight: Long = 0,
+)
+
 interface SessionHost {
     /**
      * True if one more tab may be opened. Returns false (and tells the user once) at the tab cap.

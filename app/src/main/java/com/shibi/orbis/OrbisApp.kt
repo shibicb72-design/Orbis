@@ -20,6 +20,8 @@ import com.shibi.orbis.engine.BrowserEngine
 import com.shibi.orbis.engine.FileSitePermissionStore
 import com.shibi.orbis.engine.GeckoEngineImpl
 import com.shibi.orbis.engine.SearchEngineSettings
+import com.shibi.orbis.media.MediaCenter
+import com.shibi.orbis.media.MediaPlaybackService
 import com.shibi.orbis.passwords.FileLoginStore
 import com.shibi.orbis.passwords.KeystoreLoginCrypto
 import com.shibi.orbis.passwords.LoginBridgeImpl
@@ -44,6 +46,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.MutableStateFlow
 
 class OrbisApp : Application() {
@@ -202,6 +206,13 @@ class OrbisApp : Application() {
                 browserSettings = browserSettings,
                 logins = logins,
             )
+        // A tab that starts playing brings up the media notification (and keeps playback alive in the background).
+        appScope.launch {
+            container.media.current
+                .map { it?.media?.playing == true }
+                .distinctUntilChanged()
+                .collect { playing -> if (playing) MediaPlaybackService.start(this@OrbisApp) }
+        }
         // Sessions only appear after the onboarding decision; this has long finished by then.
         sitePermissions.load()
         runCatching { engine.warmUp() }
@@ -245,6 +256,8 @@ class AppContainer(
     val searchEngine: SearchEngineSettings,
     val browserSettings: BrowserSettings,
     val logins: LoginManager,
+    /** Page media across tabs (notification, background playback, picture-in-picture). */
+    val media: MediaCenter = MediaCenter(tabs, kotlinx.coroutines.MainScope()),
     /** Live search suggestions; only asked for normal tabs with the setting on (see BrowserScreen). */
     val searchSuggest: SearchSuggestSource = HttpSearchSuggestSource(),
 ) {

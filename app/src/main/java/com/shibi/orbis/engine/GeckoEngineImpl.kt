@@ -551,9 +551,64 @@ private class GeckoBrowserSession(
                 meta: MediaSession.ElementMetadata?,
             ) {
                 val landscape = enabled && meta != null && meta.width > meta.height
-                _state.update { it.copy(fullScreenVideoLandscape = landscape) }
+                _state.update { s ->
+                    val m = s.media
+                    s.copy(
+                        fullScreenVideoLandscape = landscape,
+                        media =
+                            if (m != null && meta != null && meta.videoTrackCount > 0) {
+                                m.copy(hasVideo = true, videoWidth = meta.width, videoHeight = meta.height)
+                            } else {
+                                m
+                            },
+                    )
+                }
+            }
+
+            override fun onActivated(session: GeckoSession, mediaSession: MediaSession) {
+                activeMedia = mediaSession
+                _state.update { it.copy(media = it.media ?: MediaState(playing = false)) }
+            }
+
+            override fun onDeactivated(session: GeckoSession, mediaSession: MediaSession) {
+                if (activeMedia === mediaSession) activeMedia = null
+                _state.update { it.copy(media = null) }
+            }
+
+            override fun onMetadata(session: GeckoSession, mediaSession: MediaSession, meta: MediaSession.Metadata) {
+                _state.update { s ->
+                    s.copy(media = (s.media ?: MediaState(playing = false)).copy(title = meta.title.orEmpty(), artist = meta.artist.orEmpty()))
+                }
+            }
+
+            override fun onPlay(session: GeckoSession, mediaSession: MediaSession) {
+                activeMedia = mediaSession
+                _state.update { it.copy(media = (it.media ?: MediaState(playing = true)).copy(playing = true)) }
+            }
+
+            override fun onPause(session: GeckoSession, mediaSession: MediaSession) {
+                _state.update { it.copy(media = it.media?.copy(playing = false)) }
+            }
+
+            override fun onStop(session: GeckoSession, mediaSession: MediaSession) {
+                _state.update { it.copy(media = it.media?.copy(playing = false)) }
             }
         }
+
+    /** The page's active Gecko media session, for the play/pause/stop controls. */
+    private var activeMedia: MediaSession? = null
+
+    override fun mediaPlay() {
+        if (!closed) activeMedia?.play()
+    }
+
+    override fun mediaPause() {
+        if (!closed) activeMedia?.pause()
+    }
+
+    override fun mediaStop() {
+        if (!closed) activeMedia?.stop()
+    }
 
     private fun contentDelegate() =
         object : GeckoSession.ContentDelegate {

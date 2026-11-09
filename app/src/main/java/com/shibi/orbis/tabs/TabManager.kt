@@ -303,8 +303,15 @@ class TabManager(
      */
     fun setForeground(value: Boolean) {
         foreground = value
-        list.firstOrNull { it.id == selectedId }?.session?.setActive(value)
+        val session = list.firstOrNull { it.id == selectedId }?.session
+        // Background playback: a tab playing media stays active when the app goes to the background, so the audio (or a
+        // picture-in-picture video) keeps going. Paused or silent pages are put to sleep as before.
+        if (!value && session?.state?.value?.media?.playing == true) return
+        session?.setActive(value)
     }
+
+    /** The open session of tab [id], or null when it has none yet (restored, not visited). */
+    fun sessionOf(id: Long): BrowserSession? = list.firstOrNull { it.id == id }?.session
 
     fun select(id: Long) {
         if (indexOf(id) < 0) return

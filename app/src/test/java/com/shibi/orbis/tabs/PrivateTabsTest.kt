@@ -364,6 +364,23 @@ class PrivateTabsTest {
     }
 
     @Test
+    fun aTabPlayingMediaStaysActiveInTheBackgroundAndASilentOneSleeps() {
+        val m = manager()
+        m.openSelected()
+        m.setForeground(true)
+        val s = created[0]
+        assertEquals(true, s.active)
+        s._state.value = s._state.value.copy(media = com.shibi.orbis.engine.MediaState(playing = true))
+        m.setForeground(false)
+        assertEquals("playing: kept active", true, s.active)
+        s._state.value = s._state.value.copy(media = com.shibi.orbis.engine.MediaState(playing = false))
+        m.setForeground(true)
+        m.setForeground(false)
+        assertEquals("paused: put to sleep", false, s.active)
+        assertEquals(s, m.sessionOf(m.selected.value.id))
+    }
+
+    @Test
     fun imageMenuOffersImageActionsInTheModeOfItsTab() {
         val m = manager()
         m.openSelected()
