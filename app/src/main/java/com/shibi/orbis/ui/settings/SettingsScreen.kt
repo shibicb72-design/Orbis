@@ -136,10 +136,10 @@ fun SettingsScreen(
     onOpenUbo: () -> Unit,
     onOpenSitePermissions: () -> Unit,
     onOpenClearData: () -> Unit,
+    modifier: Modifier = Modifier,
     onOpenPasswords: () -> Unit = {},
     /** Theme, desktop site, HTTPS-only and JavaScript rows; hidden when null (screen tests). */
     site: BrowserSettings? = null,
-    modifier: Modifier = Modifier,
 ) {
     var themeDialogOpen by remember { mutableStateOf(false) }
     var httpsDialogOpen by remember { mutableStateOf(false) }
@@ -287,6 +287,7 @@ fun SettingsScreen(
                     val theme by site.appTheme.collectAsStateWithLifecycle()
                     val darkSites by site.darkWebsites.collectAsStateWithLifecycle()
                     val alwaysDesktop by site.alwaysDesktop.collectAsStateWithLifecycle()
+                    val openInApps by site.openLinksInApps.collectAsStateWithLifecycle()
                     SettingsItem(
                         headlineContent = { Text(stringResource(R.string.theme_title)) },
                         supportingContent = { Text(stringResource(themeLabel(theme))) },
@@ -305,6 +306,13 @@ fun SettingsScreen(
                         supportingContent = { Text(stringResource(R.string.always_desktop_summary)) },
                         trailingContent = { Switch(checked = alwaysDesktop, onCheckedChange = null) },
                         modifier = Modifier.fillMaxWidth().toggleable(value = alwaysDesktop, role = Role.Switch, onValueChange = site::setAlwaysDesktop),
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.open_in_apps_title)) },
+                        supportingContent = { Text(stringResource(R.string.open_in_apps_summary)) },
+                        trailingContent = { Switch(checked = openInApps, onCheckedChange = null) },
+                        modifier = Modifier.fillMaxWidth().toggleable(value = openInApps, role = Role.Switch, onValueChange = site::setOpenLinksInApps),
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }

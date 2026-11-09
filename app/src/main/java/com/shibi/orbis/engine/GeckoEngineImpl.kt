@@ -533,6 +533,19 @@ private class GeckoBrowserSession(
                         request.hasUserGesture && isWebUrl(request.uri) && host?.canOpenTab() == true
                     return GeckoResult.fromValue(if (allow) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
                 }
+                // Links for other apps (tel:, mailto:, intent:, an app's own scheme): never loaded here.
+                if (isExternalScheme(request.uri)) return externalSchemeRequest(request)
+                // A web link an installed app opens: ask first (link taps only, not typed addresses or same-site links).
+                if (request.hasUserGesture && !request.isDirectNavigation && isWebUrl(request.uri) &&
+                    sitePolicy()?.offerAppsForLinks() != false &&
+                    hostOfUrl(request.uri) != hostOfUrl(_state.value.url)
+                ) {
+                    externalApps.forWebLink(request.uri)?.let { target ->
+                        applyTrackingProtection(!trackingExceptions.isExcepted(request.uri, isPrivate))
+                        applySitePolicy(request.uri)
+                        return askOpenInApp(target, webLink = true)
+                    }
+                }
                 // Decide tracking protection for the site BEFORE its page loads (see TrackingExceptions).
                 applyTrackingProtection(!trackingExceptions.isExcepted(request.uri, isPrivate))
                 applySitePolicy(request.uri)
@@ -656,6 +669,53 @@ private class GeckoBrowserSession(
                 _state.update { it.copy(media = it.media?.copy(playing = false)) }
             }
         }
+
+    // ---- links for other apps ----
+
+    private val externalApps = ExternalApps(appContext)
+
+    private fun externalSchemeRequest(request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny> {
+        val deny = GeckoResult.fromValue(AllowOrDeny.DENY)
+        // A page cannot start an app on its own: a tap (or a redirect that followed one) is needed.
+        if (!request.hasUserGesture && !request.isRedirect) {
+            debugLog.log("GeckoSession", "external app link without a tap: blocked")
+            return deny
+        }
+        val target = externalApps.forExternalScheme(request.uri) ?: return deny
+        if (!target.resolvable) {
+            // No app for it: an intent: link's own web fallback, else a short note.
+            val fallback = target.fallbackUrl
+            if (fallback != null) loadUrl(fallback) else toast(com.shibi.orbis.R.string.open_app_none)
+            return deny
+        }
+        return askOpenInApp(target, webLink = false)
+    }
+
+    private fun askOpenInApp(target: AppTarget, webLink: Boolean): GeckoResult<AllowOrDeny> {
+        val result = GeckoResult<AllowOrDeny>()
+        // Staying loads a web link here; anything else has nothing to load.
+        val stay = if (webLink) AllowOrDeny.ALLOW else AllowOrDeny.DENY
+        if (closed) return GeckoResult.fromValue(stay)
+        queue.add(
+            SitePrompt.OpenInApp(originHost(), target.label, webLink, isPrivate) { open ->
+                if (open == true) {
+                    if (externalApps.launch(target)) {
+                        result.complete(AllowOrDeny.DENY)
+                    } else {
+                        if (!webLink) toast(com.shibi.orbis.R.string.open_app_none)
+                        result.complete(stay)
+                    }
+                } else {
+                    result.complete(stay)
+                }
+            },
+        )
+        return result
+    }
+
+    private fun toast(res: Int) {
+        runCatching { android.widget.Toast.makeText(appContext, res, android.widget.Toast.LENGTH_SHORT).show() }
+    }
 
     // ---- translation ----
 

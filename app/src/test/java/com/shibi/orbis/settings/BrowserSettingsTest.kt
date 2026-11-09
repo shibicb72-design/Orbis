@@ -27,6 +27,7 @@ class BrowserSettingsTest {
         override var alwaysDesktop: Boolean = false
         override var desktopOn: Set<String> = emptySet()
         override var desktopOff: Set<String> = emptySet()
+        override var openLinksInApps: Boolean = true
     }
 
     @Test

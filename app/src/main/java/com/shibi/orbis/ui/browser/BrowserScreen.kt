@@ -216,8 +216,8 @@ fun BrowserScreen(
     onOpenDownloads: () -> Unit,
     onOpenBookmarks: () -> Unit,
     onOpenHistory: () -> Unit,
-    onOpenQrScanner: () -> Unit = {},
     modifier: Modifier = Modifier,
+    onOpenQrScanner: () -> Unit = {},
 ) {
     val tabs = container.tabs
     val context = LocalContext.current

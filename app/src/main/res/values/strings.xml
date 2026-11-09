@@ -11,6 +11,15 @@
     <string name="start_pinned">pinned</string>
     <string name="menu_home">Home</string>
     <string name="menu_share">Share</string>
+    <string name="open_app_title">Open in %1$s?</string>
+    <string name="open_app_title_any">Open in another app?</string>
+    <string name="open_app_body">A link on %1$s wants to leave Orbis and open in an app.</string>
+    <string name="open_app_body_private">A link on %1$s wants to open in an app. The app is not part of private browsing.</string>
+    <string name="open_app_open">Open</string>
+    <string name="open_app_stay">Stay in Orbis</string>
+    <string name="open_app_none">No app on this phone can open this link.</string>
+    <string name="open_in_apps_title">Open links in apps</string>
+    <string name="open_in_apps_summary">Ask before a link opens in an installed app that handles it.</string>
     <string name="menu_scan_qr">Scan QR code</string>
     <string name="qr_title">Scan QR code</string>
     <string name="qr_hint">Point the camera at a QR code. Scanning happens on this phone.</string>

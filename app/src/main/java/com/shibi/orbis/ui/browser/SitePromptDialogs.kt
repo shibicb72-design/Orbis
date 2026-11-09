@@ -141,6 +141,27 @@ fun SitePromptDialog(prompt: SitePrompt) {
                 dismissButton = { TextButton(onClick = prompt::stay) { Text(stringResource(R.string.prompt_stay)) } },
             ) { Text(stringResource(R.string.prompt_leave_message)) }
 
+        is SitePrompt.OpenInApp ->
+            PromptDialog(
+                title =
+                    if (prompt.appLabel != null) {
+                        stringResource(R.string.open_app_title, prompt.appLabel)
+                    } else {
+                        stringResource(R.string.open_app_title_any)
+                    },
+                onDismiss = prompt::dismiss,
+                confirmButton = { TextButton(onClick = prompt::open) { Text(stringResource(R.string.open_app_open)) } },
+                dismissButton = {
+                    TextButton(onClick = prompt::stay) {
+                        Text(stringResource(if (prompt.webLink) R.string.open_app_stay else R.string.prompt_cancel))
+                    }
+                },
+            ) {
+                Text(
+                    stringResource(if (prompt.fromPrivateTab) R.string.open_app_body_private else R.string.open_app_body, prompt.originHost),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
         is SitePrompt.SaveLogin ->
             PromptDialog(
                 title = stringResource(if (prompt.isUpdate) R.string.login_update_title else R.string.login_save_title, prompt.originHost),

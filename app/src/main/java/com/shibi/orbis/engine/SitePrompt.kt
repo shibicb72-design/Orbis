@@ -76,6 +76,24 @@ sealed class SitePrompt(val originHost: String) {
         override fun deliverDismissal() = respond(null)
     }
 
+    /**
+     * A link wants to open in another app. [appLabel] is null when Android would let the user pick. [webLink] is true
+     * for a web address an app claims (staying loads it here); false for tel:, mailto:, intent: and the like.
+     */
+    class OpenInApp(
+        originHost: String,
+        val appLabel: String?,
+        val webLink: Boolean,
+        val fromPrivateTab: Boolean,
+        private val respond: (Boolean?) -> Unit,
+    ) : SitePrompt(originHost) {
+        fun open() = finish { respond(true) }
+
+        fun stay() = finish { respond(false) }
+
+        override fun deliverDismissal() = respond(null)
+    }
+
     /** Several saved logins fit this form: the user picks one. [usernames] in Gecko's order. */
     class SelectLogin(
         originHost: String,

@@ -282,6 +282,8 @@ interface BrowserSession {
 interface SitePolicy {
     fun desktopFor(url: String, isPrivate: Boolean): Boolean
     fun javaScriptFor(url: String, isPrivate: Boolean): Boolean
+    /** Offer to open web links in the app that handles them (Settings > Open links in apps). */
+    fun offerAppsForLinks(): Boolean = true
 }
 
 /** The translator's view of a page. Language tags are BCP 47 ("en", "fr", "zh-Hans"); empty when unknown. */

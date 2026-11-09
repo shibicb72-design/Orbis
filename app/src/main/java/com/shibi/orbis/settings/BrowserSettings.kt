@@ -54,6 +54,9 @@ interface BrowserPrefs {
     var alwaysDesktop: Boolean
     var desktopOn: Set<String>
     var desktopOff: Set<String>
+
+    /** Ask to open web links in the installed app that handles them. */
+    var openLinksInApps: Boolean
 }
 
 enum class ReaderTheme { LIGHT, SEPIA, DARK }
@@ -180,6 +183,12 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
             prefs.edit { putStringSet(KEY_DESKTOP_OFF, value.toSet()) }
         }
 
+    override var openLinksInApps: Boolean
+        get() = prefs.getBoolean(KEY_OPEN_IN_APPS, true)
+        set(value) {
+            prefs.edit { putBoolean(KEY_OPEN_IN_APPS, value) }
+        }
+
     override var neverSave: Set<String>
         get() = prefs.getStringSet(KEY_NEVER_SAVE, emptySet())?.toSet() ?: emptySet()
         set(value) {
@@ -240,6 +249,7 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         private const val KEY_READER_THEME = "reader_theme"
         private const val KEY_NEVER_SAVE = "never_save_logins"
         private const val KEY_HTTPS_ONLY = "https_only"
+        private const val KEY_OPEN_IN_APPS = "open_links_in_apps"
         private const val KEY_APP_THEME = "app_theme"
         private const val KEY_DARK_WEBSITES = "dark_websites"
         private const val KEY_JS = "javascript"
@@ -317,6 +327,16 @@ class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
         }
 
     override fun desktopFor(url: String, isPrivate: Boolean): Boolean = desktopChoice.valueFor(url, isPrivate)
+
+    private val _openLinksInApps = MutableStateFlow(prefs.openLinksInApps)
+    val openLinksInApps: StateFlow<Boolean> = _openLinksInApps.asStateFlow()
+
+    fun setOpenLinksInApps(on: Boolean) {
+        prefs.openLinksInApps = on
+        _openLinksInApps.value = on
+    }
+
+    override fun offerAppsForLinks(): Boolean = _openLinksInApps.value
 
     override fun javaScriptFor(url: String, isPrivate: Boolean): Boolean = jsChoice.valueFor(url, isPrivate)
 
