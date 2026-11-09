@@ -20,6 +20,11 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Settings > Passwords asks for the screen lock / fingerprint through Android's own prompt. -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- browser-engine-gecko pulls in support-utils, which merges QUERY_ALL_PACKAGES.
+         Play treats that as a sensitive permission. Visibility is declared in <queries> below. -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:node="remove" />
 
     <!-- The camera and location permissions above must not filter out devices without the hardware. -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
@@ -38,12 +43,12 @@
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />
-            <data android:scheme="https" />
+            <data android:scheme="https" android:host="*" />
         </intent>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />
-            <data android:scheme="http" />
+            <data android:scheme="http" android:host="*" />
         </intent>
         <intent>
             <action android:name="android.intent.action.VIEW" />
@@ -74,6 +79,13 @@
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="market" />
+        </intent>
+        <!-- An app's own scheme (zoommtg:) and any other browsable view handler.
+             In <queries>, "*" is a wildcard, and host is required to see filters that name one. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="*" android:host="*" />
         </intent>
     </queries>
 
