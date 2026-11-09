@@ -24,6 +24,7 @@
          Play treats that as a sensitive permission. Visibility is declared in <queries> below. -->
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission"
         tools:node="remove" />
 
     <!-- The camera and location permissions above must not filter out devices without the hardware. -->
