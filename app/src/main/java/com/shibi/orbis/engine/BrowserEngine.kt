@@ -117,6 +117,8 @@ data class SessionState(
      * Null when the page has no web site (blank, about:). Read from the engine's own permission record.
      */
     val trackingProtectionOff: Boolean? = null,
+    /** The page looks like an article (Readability's check): reader view is offered. Reset at each page start. */
+    val readerable: Boolean = false,
     /** The page's media (audio or video): null when it has none active. */
     val media: MediaState? = null,
     /** A video went fullscreen and is wider than tall: the screen turns to landscape, like Chrome and Firefox. */
@@ -220,6 +222,11 @@ interface BrowserSession {
     fun goForward(): Boolean
     fun reload()
     fun stop()
+    /**
+     * Parses the current page for reader view; [onResult] gets null when it cannot (not an article, no page, the
+     * reader is not ready). Runs on the main thread. Test doubles may answer null.
+     */
+    fun requestReaderArticle(onResult: (ReaderArticle?) -> Unit) = onResult(null)
     /** Media controls for the page's active media (notification, lock screen, PiP). Test doubles may no-op. */
     fun mediaPlay() {}
     fun mediaPause() {}

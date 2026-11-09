@@ -35,13 +35,38 @@ interface BrowserPrefs {
 
     /** Offer "Save password?" after a sign-in (never in private tabs). */
     var offerSavePasswords: Boolean
+
+    /** Reader view text size (sp), font and theme. */
+    var readerTextSize: Int
+    var readerSerif: Boolean
+    var readerTheme: ReaderTheme
 }
+
+enum class ReaderTheme { LIGHT, SEPIA, DARK }
 
 class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : BrowserPrefs, NeverSavePrefs {
     override var offerSavePasswords: Boolean
         get() = prefs.getBoolean(KEY_OFFER_SAVE, true)
         set(value) {
             prefs.edit { putBoolean(KEY_OFFER_SAVE, value) }
+        }
+
+    override var readerTextSize: Int
+        get() = prefs.getInt(KEY_READER_SIZE, 18).coerceIn(12, 32)
+        set(value) {
+            prefs.edit { putInt(KEY_READER_SIZE, value.coerceIn(12, 32)) }
+        }
+
+    override var readerSerif: Boolean
+        get() = prefs.getBoolean(KEY_READER_SERIF, true)
+        set(value) {
+            prefs.edit { putBoolean(KEY_READER_SERIF, value) }
+        }
+
+    override var readerTheme: ReaderTheme
+        get() = ReaderTheme.entries.firstOrNull { it.name == prefs.getString(KEY_READER_THEME, null) } ?: ReaderTheme.LIGHT
+        set(value) {
+            prefs.edit { putString(KEY_READER_THEME, value.name) }
         }
 
     override var neverSave: Set<String>
@@ -99,6 +124,9 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
     companion object {
         const val FILE_NAME = "browser_prefs"
         private const val KEY_OFFER_SAVE = "offer_save_passwords"
+        private const val KEY_READER_SIZE = "reader_text_size"
+        private const val KEY_READER_SERIF = "reader_serif"
+        private const val KEY_READER_THEME = "reader_theme"
         private const val KEY_NEVER_SAVE = "never_save_logins"
         private const val KEY_PINNED = "pinned_sites"
         private const val KEY_HIDDEN = "hidden_sites"
@@ -152,6 +180,29 @@ class BrowserSettings(private val prefs: BrowserPrefs) {
     fun setOfferSavePasswords(on: Boolean) {
         prefs.offerSavePasswords = on
         _offerSavePasswords.value = on
+    }
+
+    private val _readerTextSize = MutableStateFlow(prefs.readerTextSize)
+    val readerTextSize: StateFlow<Int> = _readerTextSize.asStateFlow()
+    private val _readerSerif = MutableStateFlow(prefs.readerSerif)
+    val readerSerif: StateFlow<Boolean> = _readerSerif.asStateFlow()
+    private val _readerTheme = MutableStateFlow(prefs.readerTheme)
+    val readerTheme: StateFlow<ReaderTheme> = _readerTheme.asStateFlow()
+
+    fun setReaderTextSize(sp: Int) {
+        val v = sp.coerceIn(12, 32)
+        prefs.readerTextSize = v
+        _readerTextSize.value = v
+    }
+
+    fun setReaderSerif(on: Boolean) {
+        prefs.readerSerif = on
+        _readerSerif.value = on
+    }
+
+    fun setReaderTheme(t: ReaderTheme) {
+        prefs.readerTheme = t
+        _readerTheme.value = t
     }
 
     private val _pinnedSites = MutableStateFlow(prefs.pinnedSites)

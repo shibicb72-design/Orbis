@@ -42,6 +42,7 @@ import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.StorageController
+import org.json.JSONObject
 import org.mozilla.geckoview.GeckoWebExecutor
 import org.mozilla.geckoview.MediaSession
 import org.mozilla.geckoview.WebExtension
@@ -64,6 +65,9 @@ class GeckoEngineImpl(
     private var runtime: GeckoRuntime? = null
 
     private val reconciler = GeolocationReconciler({ runtime }, debugLog)
+
+    /** The built-in reader view extension (see ReaderExtensionHolder). */
+    private val reader = ReaderExtensionHolder { debugLog.log("GeckoEngine", it) }
 
     /** Sites with tracking protection turned off by the user (see TrackingExceptions). */
     private val trackingExceptions = TrackingExceptions()
@@ -182,6 +186,7 @@ class GeckoEngineImpl(
                 { debugLog.log("GeckoEngine", "tracking exceptions load failed") },
             )
             created.autocompleteStorageDelegate = loginStorageDelegate()
+            reader.install(created)
             // Without a prompt delegate, WebExtensionController.install() hangs forever.
             created.webExtensionController.setPromptDelegate(extensionHost.promptDelegate)
             runtime = created
@@ -293,6 +298,7 @@ class GeckoEngineImpl(
             reconciler = reconciler,
             trackingExceptions = trackingExceptions,
             logins = { logins },
+            reader = reader,
             // A popup child inherits the opener's desktop/mobile choice and its privacy, and is never opened by us.
             newPopupChild = { opener ->
                 buildSession(SessionInit(desktopMode = opener.state.value.desktopMode, isPrivate = opener.isPrivate))
@@ -349,6 +355,7 @@ private class GeckoBrowserSession(
     private val reconciler: GeolocationReconciler,
     private val trackingExceptions: TrackingExceptions,
     private val logins: () -> LoginBridge?,
+    private val reader: ReaderExtensionHolder,
     private val newPopupChild: (GeckoBrowserSession) -> GeckoBrowserSession,
 ) : BrowserSession {
     private val _state = MutableStateFlow(SessionState(desktopMode = initialDesktopMode))
@@ -411,6 +418,7 @@ private class GeckoBrowserSession(
         // Reopening a restored tab is not a visit.
         visits.suppress(init.fallbackUrl)
         session.open(runtime)
+        attachReader()
         val blob = init.restoredState
         var restored = false
         if (blob != null) {
@@ -491,6 +499,7 @@ private class GeckoBrowserSession(
                 // The child is deliberately NOT opened: Gecko opens the session it is handed, and opening it
                 // here too throws. The tab layer keeps the strong reference and attaches it to the view.
                 val child = newPopupChild(this@GeckoBrowserSession)
+                runCatching { child.attachReader() }
                 owner.onPopupSession(child, this@GeckoBrowserSession)
                 debugLog.log("GeckoSession", "popup session created")
                 return GeckoResult.fromValue(child.geckoSession)
@@ -523,6 +532,7 @@ private class GeckoBrowserSession(
                 applyActive()
                 // url is not written here (see onLocationChange).
                 _state.update { it.afterPageStart() }
+                _state.update { it.copy(readerable = false) }
                 visits.onPageStart()
             }
 
@@ -594,6 +604,68 @@ private class GeckoBrowserSession(
                 _state.update { it.copy(media = it.media?.copy(playing = false)) }
             }
         }
+
+    // ---- reader view ----
+
+    private var readerPort: WebExtension.Port? = null
+    private val readerWaiting = ArrayList<(ReaderArticle?) -> Unit>()
+
+    fun attachReader() {
+        reader.whenReady { ext ->
+            if (closed) return@whenReady
+            runCatching { attachReaderTo(ext) }.onFailure { debugLog.log("GeckoSession", "reader attach failed") }
+        }
+    }
+
+    private fun attachReaderTo(ext: WebExtension) {
+        run {
+            session.webExtensionController.setMessageDelegate(
+                ext,
+                object : WebExtension.MessageDelegate {
+                    override fun onConnect(port: WebExtension.Port) {
+                        // One port per page load (the content script connects when the page is ready).
+                        readerPort = port
+                        port.setDelegate(
+                            object : WebExtension.PortDelegate {
+                                override fun onPortMessage(message: Any, port: WebExtension.Port) {
+                                    val parsed = (message as? JSONObject)?.let { parseReaderMessage(it) } ?: return
+                                    when (parsed) {
+                                        is ReaderMessage.Readerable ->
+                                            if (parsed.url == _state.value.url || _state.value.url.isEmpty()) {
+                                                _state.update { it.copy(readerable = parsed.value) }
+                                            }
+                                        is ReaderMessage.Article -> {
+                                            val waiting = readerWaiting.toList()
+                                            readerWaiting.clear()
+                                            waiting.forEach { it(parsed.article) }
+                                        }
+                                    }
+                                }
+
+                                override fun onDisconnect(port: WebExtension.Port) {
+                                    if (readerPort === port) readerPort = null
+                                }
+                            },
+                        )
+                    }
+                },
+                ReaderExtensionHolder.NATIVE_APP,
+            )
+        }
+    }
+
+    override fun requestReaderArticle(onResult: (ReaderArticle?) -> Unit) {
+        val port = readerPort
+        if (closed || port == null || !_state.value.readerable) {
+            onResult(null)
+            return
+        }
+        readerWaiting += onResult
+        runCatching { port.postMessage(JSONObject().put("type", "parse")) }.onFailure {
+            readerWaiting.remove(onResult)
+            onResult(null)
+        }
+    }
 
     /** The page's active Gecko media session, for the play/pause/stop controls. */
     private var activeMedia: MediaSession? = null

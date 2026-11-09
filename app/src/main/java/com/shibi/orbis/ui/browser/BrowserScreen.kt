@@ -14,6 +14,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.shibi.orbis.home.topSites
+import androidx.compose.material.icons.automirrored.filled.Article
+import com.shibi.orbis.engine.ReaderArticle
 import com.shibi.orbis.engine.pullTriggersRefresh
 import com.shibi.orbis.engine.PullToRefreshSource
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -284,6 +286,9 @@ private fun BrowserContent(
     // The one tab whose address bar should take focus: set only when the user makes a tab with New tab. Cold start,
     // popups, external links and "closed the last tab" leave it null, so they never steal focus or open edit mode.
     var focusAddressFor by remember { mutableStateOf<Long?>(null) }
+    // Reader view of the selected tab's page; closed when the tab or its page changes.
+    var readerArticle by remember(session) { mutableStateOf<ReaderArticle?>(null) }
+    LaunchedEffect(state.url) { if (readerArticle != null && readerArticle?.url != state.url) readerArticle = null }
     // Find state belongs to one session: it resets when the selected tab changes.
     var findOpen by remember(session) { mutableStateOf(false) }
     var findQuery by remember(session) { mutableStateOf("") }
@@ -312,6 +317,8 @@ private fun BrowserContent(
             hasLiveOpener -> tabs.close(selectedTab.id)
         }
     }
+    // Registered after the history Back, so it wins: Back closes reader view first.
+    BackHandler(enabled = readerArticle != null) { readerArticle = null }
     // Registered last, so it wins: Back first leaves page fullscreen.
     BackHandler(enabled = fullScreen) { session?.exitFullScreen() }
 
@@ -521,6 +528,17 @@ private fun BrowserContent(
                                 onClick = {
                                     menuOpen = false
                                     shareLink(androidContext, state.url, state.title)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.menu_reader)) },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Article, contentDescription = null) },
+                                enabled = state.readerable && session != null,
+                                onClick = {
+                                    menuOpen = false
+                                    session?.requestReaderArticle { article ->
+                                        if (article != null) readerArticle = article else Toast.makeText(androidContext, R.string.reader_unavailable, Toast.LENGTH_SHORT).show()
+                                    }
                                 },
                             )
                             DropdownMenuItem(
@@ -757,6 +775,25 @@ private fun BrowserContent(
                     },
                     modifier = Modifier.fillMaxSize(),
                 )
+                readerArticle?.let { article ->
+                    val readerSize by container.browserSettings.readerTextSize.collectAsStateWithLifecycle()
+                    val readerSerif by container.browserSettings.readerSerif.collectAsStateWithLifecycle()
+                    val readerTheme by container.browserSettings.readerTheme.collectAsStateWithLifecycle()
+                    ReaderView(
+                        article = article,
+                        textSizeSp = readerSize,
+                        serif = readerSerif,
+                        theme = readerTheme,
+                        onTextSize = container.browserSettings::setReaderTextSize,
+                        onSerif = container.browserSettings::setReaderSerif,
+                        onTheme = container.browserSettings::setReaderTheme,
+                        onOpenLink = { url ->
+                            readerArticle = null
+                            session?.loadUrl(url)
+                        },
+                        onClose = { readerArticle = null },
+                    )
+                }
                 if (pullPx > 0f) {
                     PullToRefreshIndicator(
                         fraction = (pullPx / pullThresholdPx).coerceIn(0f, 1f),

@@ -1,0 +1,15 @@
+{
+  "manifest_version": 2,
+  "name": "Orbis Reader",
+  "version": "1.0",
+  "description": "Reader view for Orbis. Uses Mozilla Readability (Apache-2.0, see LICENSE.md).",
+  "browser_specific_settings": { "gecko": { "id": "reader@orbis.shibi.com" } },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["Readability-readerable.js", "Readability.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": ["nativeMessaging", "nativeMessagingFromContent", "geckoViewAddons"]
+}

@@ -11,6 +11,17 @@
     <string name="start_pinned">pinned</string>
     <string name="menu_home">Home</string>
     <string name="menu_share">Share</string>
+    <string name="menu_reader">Reader view</string>
+    <string name="reader_title">Reader view</string>
+    <string name="reader_close">Close reader view</string>
+    <string name="reader_appearance">Text and colors</string>
+    <string name="reader_smaller">Smaller</string>
+    <string name="reader_larger">Larger</string>
+    <string name="reader_serif">Serif</string>
+    <string name="reader_theme_light">Light</string>
+    <string name="reader_theme_sepia">Sepia</string>
+    <string name="reader_theme_dark">Dark</string>
+    <string name="reader_unavailable">This page cannot be shown in reader view.</string>
     <string name="media_channel">Media playback</string>
     <string name="media_playing">Playing in Orbis</string>
     <string name="media_private">Playing in a private tab</string>

@@ -15,6 +15,9 @@ class BrowserSettingsTest {
         override var pinnedSites: List<com.shibi.orbis.home.PinnedSite> = emptyList()
         override var hiddenSites: Set<String> = emptySet()
         override var offerSavePasswords: Boolean = true
+        override var readerTextSize: Int = 18
+        override var readerSerif: Boolean = true
+        override var readerTheme: ReaderTheme = ReaderTheme.LIGHT
     }
 
     @Test
