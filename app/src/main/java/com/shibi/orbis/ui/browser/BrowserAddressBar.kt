@@ -1,6 +1,7 @@
 package com.shibi.orbis.ui.browser
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -251,13 +252,27 @@ internal fun BrowserAddressBar(
                             .clearAndSetSemantics { testTag = ADDRESS_RESTING_TAG },
                         contentAlignment = Alignment.CenterStart,
                     ) {
-                        Text(
-                            resting,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = LocalTextStyle.current.copy(textDirection = TextDirection.Ltr),
-                            color = textColor,
-                        )
+                        // Anti-spoofing: a web address rests as its host only, cut from the START, so the end of the
+                        // domain (the part that decides whose site it is) always shows. "accounts.google.com.evil.example"
+                        // used to rest as "http://accounts.googl…". Plain http keeps its "http://" prefix in view.
+                        val display = addressRestingDisplay(resting)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (display.insecurePrefix != null) {
+                                Text(
+                                    display.insecurePrefix,
+                                    maxLines = 1,
+                                    style = LocalTextStyle.current.copy(textDirection = TextDirection.Ltr),
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                            Text(
+                                display.text,
+                                maxLines = 1,
+                                overflow = if (display.isHost) TextOverflow.StartEllipsis else TextOverflow.Ellipsis,
+                                style = LocalTextStyle.current.copy(textDirection = TextDirection.Ltr),
+                                color = textColor,
+                            )
+                        }
                     }
                 }
             }
