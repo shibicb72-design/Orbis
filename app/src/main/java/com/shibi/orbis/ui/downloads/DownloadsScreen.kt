@@ -117,6 +117,8 @@ fun DownloadsScreen(manager: DownloadManager, onBack: () -> Unit, modifier: Modi
                     DownloadRow(
                         entry = entry,
                         onCancel = { manager.cancel(entry.id) },
+                        onPause = if (manager.canPause) ({ manager.pause(entry.id) }) else null,
+                        onResume = { manager.resume(entry.id) },
                         onOpen = { report(DownloadIntents.open(context, entry, chooserOpen)) },
                         onShare = { report(DownloadIntents.share(context, entry, chooserShare)) },
                         onDelete = {
@@ -161,6 +163,8 @@ fun DownloadsScreen(manager: DownloadManager, onBack: () -> Unit, modifier: Modi
 private fun DownloadRow(
     entry: DownloadEntry,
     onCancel: () -> Unit,
+    onPause: (() -> Unit)?,
+    onResume: () -> Unit,
     onOpen: () -> Unit,
     onShare: () -> Unit,
     onDelete: () -> Unit,
@@ -217,6 +221,35 @@ private fun DownloadRow(
                             color = secondary,
                             modifier = Modifier.weight(1f),
                         )
+                        if (onPause != null) {
+                            TextButton(onClick = onPause, colors = textButton) {
+                                Text(stringResource(R.string.downloads_pause))
+                            }
+                        }
+                        TextButton(onClick = onCancel, colors = textButton) {
+                            Text(stringResource(R.string.downloads_cancel))
+                        }
+                    }
+                }
+                DownloadStatus.PAUSED -> {
+                    if (entry.totalBytes > 0) {
+                        LinearProgressIndicator(
+                            progress = { (entry.receivedBytes.toFloat() / entry.totalBytes).coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = colors.primary,
+                            trackColor = colors.onSurface.copy(alpha = 0.2f),
+                        )
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            stringResource(R.string.downloads_status_paused) + " - " + progressText(context, entry),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = secondary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = onResume, colors = textButton) {
+                            Text(stringResource(R.string.downloads_resume))
+                        }
                         TextButton(onClick = onCancel, colors = textButton) {
                             Text(stringResource(R.string.downloads_cancel))
                         }

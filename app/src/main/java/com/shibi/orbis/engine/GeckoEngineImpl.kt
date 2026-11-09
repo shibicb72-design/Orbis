@@ -271,6 +271,38 @@ class GeckoEngineImpl(
         }
     }
 
+    override suspend fun fetchFrom(url: String, fromByte: Long, isPrivate: Boolean): IncomingDownload? {
+        if (!isWebUrl(url)) return null
+        val rt = runtime ?: return null
+        val request = WebRequest.Builder(url).header("Range", "bytes=$fromByte-").build()
+        val flags = if (isPrivate) GeckoWebExecutor.FETCH_FLAGS_PRIVATE else GeckoWebExecutor.FETCH_FLAGS_NONE
+        return try {
+            // GeckoWebExecutor must be used from the main thread; the caller is a download job on an IO thread.
+            withContext(Dispatchers.Main.immediate) {
+            suspendCancellableCoroutine { cont ->
+                GeckoWebExecutor(rt).fetch(request, flags).accept(
+                    { response ->
+                        if (response == null || response.statusCode !in 200..299) {
+                            runCatching { response?.body?.close() }
+                            if (cont.isActive) cont.resume(null)
+                            return@accept
+                        }
+                        val range = response.headers.entries.firstOrNull { it.key.equals("content-range", true) }?.value
+                        val start = if (response.statusCode == 206) rangeStart(range) ?: 0L else 0L
+                        if (cont.isActive) cont.resume(GeckoIncomingDownload(response, start)) else runCatching { response.body?.close() }
+                    },
+                    { if (cont.isActive) cont.resume(null) },
+                )
+            }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            debugLog.log("GeckoEngine", "resume fetch failed: ${e.javaClass.simpleName}")
+            null
+        }
+    }
+
     override suspend fun clearSiteData(url: String): Boolean {
         val host = hostOfUrl(url)?.lowercase() ?: return false
         val storage = runtime?.storageController ?: return false
@@ -1948,7 +1980,7 @@ private class GeckoBrowserSession(
  * A WebResponse the engine will not render. The body is claimed by exactly one of openBody / discard; after that the
  * other is a no-op, so the stream is never opened twice nor left unclosed.
  */
-private class GeckoIncomingDownload(private val response: WebResponse) : IncomingDownload {
+private class GeckoIncomingDownload(private val response: WebResponse, override val startOffset: Long = 0L) : IncomingDownload {
     private val claimed = AtomicBoolean(false)
 
     private fun header(name: String): String? =
@@ -2263,3 +2295,7 @@ private fun Autocomplete.LoginEntry.toEngine(): EngineLogin =
 /** The activity behind [context] (a view's context may wrap it), or null. */
 internal fun activityOf(context: android.content.Context): android.app.Activity? =
     generateSequence(context) { (it as? android.content.ContextWrapper)?.baseContext }.firstOrNull { it is android.app.Activity } as? android.app.Activity
+
+/** The first byte of a Content-Range header ("bytes 100-999/1000" gives 100), or null. */
+internal fun rangeStart(contentRange: String?): Long? =
+    contentRange?.trim()?.removePrefix("bytes")?.trim()?.substringBefore('-')?.trim()?.toLongOrNull()?.takeIf { it >= 0 }

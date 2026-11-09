@@ -885,4 +885,88 @@ class DownloadManagerTest {
         }
         throw AssertionError("timed out waiting for: $what")
     }
+
+    // ---- pause and resume ----
+
+    private class RangedDownload(
+        override val url: String,
+        override val contentLength: Long,
+        override val startOffset: Long,
+        private val stream: InputStream,
+    ) : IncomingDownload {
+        override val contentDisposition: String? = null
+        override val contentType: String? = null
+        override fun openBody(): InputStream = stream
+        override fun discard() {}
+    }
+
+    private fun TestScope.pausableManager(fetch: suspend (String, Long, Boolean) -> IncomingDownload?): DownloadManager {
+        val io = StandardTestDispatcher(testScheduler)
+        val job = SupervisorJob().also { scopeJobs += it }
+        return DownloadManager({ dir }, store, CoroutineScope(io + job), io, { logs += it }, { tick += tickStep; tick }, { null }, fetch)
+    }
+
+    @Test
+    fun pausedDownloadKeepsItsBytesAndResumesFromThere() = runTest {
+        val data = ByteArray(40) { it.toByte() }
+        var requested: Pair<String, Long>? = null
+        lateinit var m: DownloadManager
+        var id = 0L
+        m = pausableManager { url, from, _ ->
+            requested = url to from
+            RangedDownload(url, data.size - from, from, ChunkStream(data.copyOfRange(from.toInt(), data.size)))
+        }
+        val first = ChunkStream(data, chunk = 4, onRead = { n -> if (n == 3) m.pause(id) })
+        id = m.start(FakeDownload(contentDisposition = cd("p.bin"), contentLength = 40, body = { first }))
+        advanceUntilIdle()
+        val paused = m.byId(id)
+        assertEquals(DownloadStatus.PAUSED, paused.status)
+        assertTrue(File(dir, "p.bin.part").exists())
+        val kept = paused.receivedBytes
+        assertTrue(kept in 1..39)
+
+        m.resume(id)
+        advanceUntilIdle()
+        assertEquals("https://example.com/files/a.bin" to kept, requested)
+        val done = m.byId(id)
+        assertEquals(DownloadStatus.COMPLETED, done.status)
+        assertTrue(data.contentEquals(File(dir, "p.bin").readBytes()))
+        assertFalse(File(dir, "p.bin.part").exists())
+    }
+
+    @Test
+    fun aServerThatIgnoresTheRangeStartsTheFileOver() = runTest {
+        val data = ByteArray(24) { (it * 3).toByte() }
+        lateinit var m: DownloadManager
+        var id = 0L
+        m = pausableManager { url, _, _ -> RangedDownload(url, data.size.toLong(), 0L, ChunkStream(data)) }
+        val first = ChunkStream(data, chunk = 4, onRead = { n -> if (n == 2) m.pause(id) })
+        id = m.start(FakeDownload(contentDisposition = cd("q.bin"), contentLength = 24, body = { first }))
+        advanceUntilIdle()
+        m.resume(id)
+        advanceUntilIdle()
+        assertEquals(DownloadStatus.COMPLETED, m.byId(id).status)
+        assertTrue(data.contentEquals(File(dir, "q.bin").readBytes()))
+    }
+
+    @Test
+    fun cancellingAPausedDownloadDropsItsPartFile() = runTest {
+        val data = ByteArray(24)
+        lateinit var m: DownloadManager
+        var id = 0L
+        m = pausableManager { _, _, _ -> null }
+        val first = ChunkStream(data, chunk = 4, onRead = { n -> if (n == 2) m.pause(id) })
+        id = m.start(FakeDownload(contentDisposition = cd("c.bin"), contentLength = 24, body = { first }))
+        advanceUntilIdle()
+        m.cancel(id)
+        advanceUntilIdle()
+        assertEquals(DownloadStatus.CANCELLED, m.byId(id).status)
+        assertFalse(File(dir, "c.bin.part").exists())
+    }
+
+    @Test
+    fun withoutAFetcherThereIsNoPause() = runTest {
+        val m = manager()
+        assertFalse(m.canPause)
+    }
 }

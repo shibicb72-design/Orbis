@@ -39,6 +39,8 @@ class DownloadManager(
     private val log: (String) -> Unit,
     private val now: () -> Long,
     private val extensionForMime: (String) -> String? = { null },
+    /** Fetches the rest of a paused download (see BrowserEngine.fetchFrom); null turns pause and resume off. */
+    private val fetchFrom: (suspend (url: String, fromByte: Long, isPrivate: Boolean) -> IncomingDownload?)? = null,
 ) {
     private val _entries = MutableStateFlow<List<DownloadEntry>>(emptyList())
 
@@ -54,7 +56,17 @@ class DownloadManager(
     /** Set by [clearIndex]; makes [restore] drop the stored entries instead of merging them back in. */
     private val indexCleared = AtomicBoolean(false)
 
-    private class Active(val id: Long, val download: IncomingDownload, val baseName: String, val total: Long) {
+    private class Active(
+        val id: Long,
+        val download: IncomingDownload,
+        val baseName: String,
+        val total: Long,
+        val isPrivate: Boolean = false,
+        /** Set for a resumed download: its file and how much of it is already written. */
+        val resumeFrom: Paused? = null,
+    ) {
+        @Volatile var paused = false
+
         /** Set by whoever takes responsibility for the body (copy job) or for discarding it (cancel/scope death). */
         val claimed = AtomicBoolean(false)
 
@@ -67,13 +79,22 @@ class DownloadManager(
 
     private class Reservation(val name: String, val finalFile: File, val partFile: File, val keys: List<String>)
 
+    /** A paused download: its address (memory only), its part file and the bytes in it. */
+    private class Paused(val url: String, val reservation: Reservation, val received: Long, val total: Long, val isPrivate: Boolean)
+
+    private val pausedDownloads = ConcurrentHashMap<Long, Paused>()
+
+    /** Pause and resume are offered (the engine can fetch from an offset). */
+    val canPause: Boolean get() = fetchFrom != null
+
     /** Anything still IN_PROGRESS from a previous process is dead: mark FAILED and delete its part file. */
     fun restore() {
         scope.launch(io) {
             val loaded = try { store.load() } catch (e: Exception) { emptyList() }
             val fixed =
                 loaded.map { e ->
-                    if (e.status == DownloadStatus.IN_PROGRESS) {
+                    // A paused download cannot continue after a restart: its address was never stored.
+                    if (e.status == DownloadStatus.IN_PROGRESS || e.status == DownloadStatus.PAUSED) {
                         e.filePath?.let { deletePartFor(it) }
                         e.copy(status = DownloadStatus.FAILED, filePath = null)
                     } else {
@@ -128,7 +149,7 @@ class DownloadManager(
                 startedAt = now(),
                 isPrivate = isPrivate,
             )
-        val a = Active(id, download, name, total)
+        val a = Active(id, download, name, total, isPrivate)
         active[id] = a
         _entries.update { sorted(listOf(entry) + it) }
         scope.launch(io) { saveNow() }
@@ -145,7 +166,53 @@ class DownloadManager(
         return id
     }
 
+    /** Stops a running download but keeps what it received; [resume] continues it. */
+    fun pause(id: Long) {
+        if (fetchFrom == null) return
+        val a = active[id] ?: return
+        if (a.paused || a.cancelled) return
+        a.paused = true
+        a.job?.cancel()
+        a.stream?.let { s -> Thread { closeQuietly(s) }.apply { isDaemon = true }.start() }
+    }
+
+    /** Continues a paused download from where it stopped (from the start when the server cannot). */
+    fun resume(id: Long) {
+        val fetch = fetchFrom ?: return
+        val p = pausedDownloads.remove(id) ?: return
+        _entries.update { list -> list.map { if (it.id == id) it.copy(status = DownloadStatus.IN_PROGRESS) else it } }
+        scope.launch(io) {
+            val body = runCatching { fetch(p.url, p.received, p.isPrivate) }.getOrNull()
+            if (body == null) {
+                p.reservation.partFile.delete()
+                release(p.reservation)
+                _entries.update { list -> list.map { if (it.id == id) it.copy(status = DownloadStatus.FAILED, filePath = null) else it } }
+                saveNow()
+                log("download resume failed")
+                return@launch
+            }
+            val a = Active(id, body, p.reservation.name, p.total, p.isPrivate, resumeFrom = p)
+            active[id] = a
+            val job = scope.launch(io) { execute(a) }
+            a.job = job
+            job.invokeOnCompletion { cause ->
+                if (cause != null && a.claimed.compareAndSet(false, true)) {
+                    runCatching { a.download.discard() }
+                    finish(a, DownloadStatus.CANCELLED, null, 0L)
+                }
+            }
+            log("download resumed")
+        }
+    }
+
     fun cancel(id: Long) {
+        pausedDownloads.remove(id)?.let { p ->
+            p.reservation.partFile.delete()
+            release(p.reservation)
+            _entries.update { list -> list.map { if (it.id == id) it.copy(status = DownloadStatus.CANCELLED, filePath = null) else it } }
+            scope.launch(io) { saveNow() }
+            return
+        }
         val a = active[id] ?: return
         a.cancelled = true
         if (a.claimed.compareAndSet(false, true)) {
@@ -221,16 +288,23 @@ class DownloadManager(
         var bodyOpened = false
         var status = DownloadStatus.FAILED
         var received = 0L
+        var append = false
         try {
             val d = dir()
             if (!d.isDirectory && !d.mkdirs() && !d.isDirectory) throw IOException("downloads directory unavailable")
+            val resumed = a.resumeFrom
             if (a.total > 0) {
                 val usable = d.usableSpace
-                if (usable in 1 until a.total) throw IOException("insufficient space")
+                if (usable in 1 until a.total - (resumed?.received ?: 0L)) throw IOException("insufficient space")
             }
-            val r = reserve(d, a.baseName)
+            val r = resumed?.reservation ?: reserve(d, a.baseName)
             reservation = r
-            publishTarget(a.id, r)
+            if (resumed == null) publishTarget(a.id, r)
+            // Continue the part file only when the server sent exactly the missing bytes; otherwise start over.
+            if (resumed != null && resumed.received > 0 && a.download.startOffset == resumed.received) {
+                append = true
+                received = resumed.received
+            }
             checkActive(a)
 
             bodyOpened = true
@@ -238,7 +312,7 @@ class DownloadManager(
             stream = input
             a.stream = input
             if (!DownloadFileNames.isInside(d, r.partFile)) throw IOException("path escapes downloads directory")
-            FileOutputStream(r.partFile).use { out ->
+            FileOutputStream(r.partFile, append).use { out ->
                 val buf = ByteArray(BUFFER_SIZE)
                 var lastEmit = now()
                 while (true) {
@@ -262,18 +336,29 @@ class DownloadManager(
             moveIntoPlace(r.partFile, r.finalFile)
             status = DownloadStatus.COMPLETED
         } catch (e: CancellationException) {
-            status = DownloadStatus.CANCELLED
+            status = if (a.paused) DownloadStatus.PAUSED else DownloadStatus.CANCELLED
             throw e
         } catch (e: Exception) {
-            // Closing the stream to cancel surfaces as an IOException here: that is a cancel, not a failure.
-            status = if (a.cancelled || !currentCoroutineContext().isActive) DownloadStatus.CANCELLED else DownloadStatus.FAILED
+            // Closing the stream to cancel (or pause) surfaces as an IOException here: not a failure.
+            status =
+                when {
+                    a.paused -> DownloadStatus.PAUSED
+                    a.cancelled || !currentCoroutineContext().isActive -> DownloadStatus.CANCELLED
+                    else -> DownloadStatus.FAILED
+                }
             if (status == DownloadStatus.FAILED) log("download failed: ${e.javaClass.simpleName}")
         } finally {
             closeQuietly(stream)
             a.stream = null
             if (!bodyOpened) runCatching { a.download.discard() }
-            if (status != DownloadStatus.COMPLETED) reservation?.partFile?.delete()
-            reservation?.let { release(it) }
+            val r = reservation
+            if (status == DownloadStatus.PAUSED && r != null) {
+                // Kept: the part file and its reserved name wait for resume.
+                pausedDownloads[a.id] = Paused(a.download.url, r, received, a.total, a.isPrivate)
+            } else {
+                if (status != DownloadStatus.COMPLETED) r?.partFile?.delete()
+                r?.let { release(it) }
+            }
             finish(a, status, reservation, received)
         }
     }
@@ -294,8 +379,8 @@ class DownloadManager(
                     e.copy(
                         status = status,
                         fileName = if (status == DownloadStatus.COMPLETED) r?.name ?: e.fileName else e.fileName,
-                        filePath = if (status == DownloadStatus.COMPLETED) r?.finalFile?.absolutePath else null,
-                        receivedBytes = if (status == DownloadStatus.COMPLETED) received else e.receivedBytes,
+                        filePath = if (status == DownloadStatus.COMPLETED || status == DownloadStatus.PAUSED) r?.finalFile?.absolutePath else null,
+                        receivedBytes = if (status == DownloadStatus.COMPLETED || status == DownloadStatus.PAUSED) received else e.receivedBytes,
                         totalBytes = if (status == DownloadStatus.COMPLETED && e.totalBytes < 0) received else e.totalBytes,
                     )
                 }

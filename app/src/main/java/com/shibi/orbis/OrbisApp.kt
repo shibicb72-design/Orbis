@@ -190,6 +190,7 @@ class OrbisApp : Application() {
                 log = { debugLog.log("Downloads", it) },
                 now = System::currentTimeMillis,
                 extensionForMime = { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) },
+                fetchFrom = { url, from, isPrivate -> engine.fetchFrom(url, from, isPrivate) },
             )
         downloadsRef = downloads
         // Everything here runs on the main thread (appScope is Main). Site permissions and uBO are not touched.

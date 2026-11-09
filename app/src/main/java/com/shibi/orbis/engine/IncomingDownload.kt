@@ -13,6 +13,12 @@ interface IncomingDownload {
     /** -1 when unknown. */
     val contentLength: Long
 
+    /**
+     * Where in the file this body starts: 0 normally; the requested offset when the server honoured a range request
+     * (a resumed download). [contentLength] is then the length of the rest.
+     */
+    val startOffset: Long get() = 0L
+
     /** Null when the engine has no body. The caller closes the stream. Read it off the main thread. */
     fun openBody(): InputStream?
 

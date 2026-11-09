@@ -11,6 +11,9 @@
     <string name="start_pinned">pinned</string>
     <string name="menu_home">Home</string>
     <string name="menu_share">Share</string>
+    <string name="downloads_pause">Pause</string>
+    <string name="downloads_resume">Resume</string>
+    <string name="downloads_status_paused">Paused</string>
     <string name="about_title">About Orbis</string>
     <string name="about_version">Orbis %1$s</string>
     <string name="update_tap_to_check">Tap to check for updates</string>

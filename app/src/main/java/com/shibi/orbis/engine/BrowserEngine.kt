@@ -84,6 +84,11 @@ interface BrowserEngine {
      */
     suspend fun clearSiteData(url: String): Boolean = false
     /**
+     * Fetches [url] again from byte [fromByte] (a paused download being resumed), in the private context when
+     * [isPrivate]. Null when the request failed. The server may ignore the range: then [IncomingDownload.startOffset] is 0.
+     */
+    suspend fun fetchFrom(url: String, fromByte: Long, isPrivate: Boolean): IncomingDownload? = null
+    /**
      * Clears the engine's cookies and site data ([cookiesAndSiteData]) and/or its caches ([cache]). Never touches site
      * permission answers or settings. Gecko has no normal-only scope for this: it reaches private storage too, so a
      * caller must make sure no private tab is open. Clearing cookies and site data may also drop open network

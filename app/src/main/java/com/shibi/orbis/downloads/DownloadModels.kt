@@ -1,6 +1,7 @@
 package com.shibi.orbis.downloads
 
-enum class DownloadStatus { IN_PROGRESS, COMPLETED, FAILED, CANCELLED }
+/** PAUSED keeps the part file and continues from it on resume (this run only: the address is never stored). */
+enum class DownloadStatus { IN_PROGRESS, COMPLETED, FAILED, CANCELLED, PAUSED }
 
 /**
  * One row of the downloads list. Deliberately holds no URL: only the host the file came from, so the persisted
