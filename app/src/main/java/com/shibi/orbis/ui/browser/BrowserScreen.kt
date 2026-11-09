@@ -14,6 +14,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.shibi.orbis.home.topSites
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.AddToHomeScreen
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Translate
@@ -215,6 +216,7 @@ fun BrowserScreen(
     onOpenDownloads: () -> Unit,
     onOpenBookmarks: () -> Unit,
     onOpenHistory: () -> Unit,
+    onOpenQrScanner: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val tabs = container.tabs
@@ -243,7 +245,7 @@ fun BrowserScreen(
         Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {}
         return
     }
-    BrowserContent(container, onOpenSettings, onOpenDownloads, onOpenBookmarks, onOpenHistory, modifier)
+    BrowserContent(container, onOpenSettings, onOpenDownloads, onOpenBookmarks, onOpenHistory, onOpenQrScanner, modifier)
 }
 
 @Composable
@@ -253,6 +255,7 @@ private fun BrowserContent(
     onOpenDownloads: () -> Unit,
     onOpenBookmarks: () -> Unit,
     onOpenHistory: () -> Unit,
+    onOpenQrScanner: () -> Unit,
     modifier: Modifier,
 ) {
     val tabs = container.tabs
@@ -635,6 +638,14 @@ private fun BrowserContent(
                                 onClick = {
                                     menuOpen = false
                                     focusAddressFor = tabs.newPrivateTab()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.menu_scan_qr)) },
+                                leadingIcon = { Icon(Icons.Filled.QrCodeScanner, contentDescription = null) },
+                                onClick = {
+                                    menuOpen = false
+                                    onOpenQrScanner()
                                 },
                             )
                             HorizontalDivider()

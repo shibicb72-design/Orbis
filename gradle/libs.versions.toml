@@ -17,6 +17,9 @@ appcompat = "1.7.1"
 # browser-engine-gecko 159.0.1 -> geckoview-omni 159.0.20261102144711
 mozillaAc = "159.0.1"
 geckoview = "159.0.20261102144711"
+# QR scanner: CameraX (Google Maven) and ZXing core (Maven Central), latest stable on 2026-11-08.
+camerax = "1.6.2"
+zxing = "3.5.4"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -41,6 +44,10 @@ robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "
 org-json = { group = "org.json", name = "json", version.ref = "orgJson" }
 mozilla-geckoview = { group = "org.mozilla.geckoview", name = "geckoview-omni", version.ref = "geckoview" }
 mozilla-browser-engine-gecko = { group = "org.mozilla.components", name = "browser-engine-gecko", version.ref = "mozillaAc" }
+androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
+androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
+androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 mozilla-concept-engine = { group = "org.mozilla.components", name = "concept-engine", version.ref = "mozillaAc" }
 
 [plugins]

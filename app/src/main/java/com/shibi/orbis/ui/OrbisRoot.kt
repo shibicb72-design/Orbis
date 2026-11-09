@@ -41,6 +41,7 @@ private object Routes {
     const val SitePermissions = "settings/site_permissions"
     const val ClearData = "settings/clear_data"
     const val Passwords = "settings/passwords"
+    const val QrScan = "qr_scan"
 }
 
 @Composable
@@ -113,6 +114,22 @@ fun OrbisRoot(container: AppContainer) {
                 onOpenDownloads = { nav.navigate(Routes.Downloads) },
                 onOpenBookmarks = { nav.navigate(Routes.Bookmarks) },
                 onOpenHistory = { nav.navigate(Routes.History) },
+                onOpenQrScanner = { nav.navigate(Routes.QrScan) },
+            )
+        }
+        composable(Routes.QrScan) {
+            com.shibi.orbis.ui.qr.QrScanScreen(
+                onOpenUrl = { url ->
+                    container.tabs.loadInSelected(url)
+                    nav.popBackStack()
+                },
+                onSearch = { text ->
+                    com.shibi.orbis.engine.normalizeAddressInput(text, container.searchEngine.selected.value)?.let {
+                        container.tabs.loadInSelected(it)
+                    }
+                    nav.popBackStack()
+                },
+                onBack = { nav.popBackStack() },
             )
         }
         composable(Routes.Bookmarks) {
