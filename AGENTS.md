@@ -23,6 +23,8 @@ Open-source Android browser (Path B: GeckoView + Mozilla Android Components). Pr
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/gradle-brief.ps1 assembleDebug testDebugUnitTest
 ```
 Prints `BUILD OK` or the first failure lines. Full log `%TEMP%\gradle-last.log` (Grep it, never read it whole).
+- Dependency verification is on (`gradle/verification-metadata.xml`, SHA-256). After adding or bumping a dependency or plugin, regenerate it and review the diff: `gradlew.bat --write-verification-metadata sha256 assembleDebug assembleFixture assembleRelease testDebugUnitTest lintDebug`.
+- CI actions are pinned to commit SHAs (`# vX.Y.Z` comment); bump both together. The wrapper has a `distributionSha256Sum`; update it with the Gradle version.
 
 ## Design rules
 - HARD: no dark-on-dark or light-on-light text. Every surface sets its content colour from its own container; check light and dark themes.

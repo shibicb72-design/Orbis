@@ -52,7 +52,10 @@ android {
             matchingFallbacks += listOf("debug")
         }
         release {
-            isMinifyEnabled = false
+            // R8 shrinking and obfuscation for anything built for release; GeckoView, AC and AndroidX ship their own
+            // consumer keep rules. Debug and fixture builds stay unminified.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
