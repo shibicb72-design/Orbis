@@ -291,6 +291,7 @@ fun SettingsScreen(
                     val theme by site.appTheme.collectAsStateWithLifecycle()
                     val darkSites by site.darkWebsites.collectAsStateWithLifecycle()
                     val alwaysDesktop by site.alwaysDesktop.collectAsStateWithLifecycle()
+                    val forceDark by site.forceDark.collectAsStateWithLifecycle()
                     val openInApps by site.openLinksInApps.collectAsStateWithLifecycle()
                     val toolbarBottom by site.toolbarBottom.collectAsStateWithLifecycle()
                     val copyDownloads by site.copyToDownloadFolder.collectAsStateWithLifecycle()
@@ -319,6 +320,13 @@ fun SettingsScreen(
                         supportingContent = { Text(stringResource(R.string.dark_websites_summary)) },
                         trailingContent = { Switch(checked = darkSites, onCheckedChange = null) },
                         modifier = Modifier.fillMaxWidth().toggleable(value = darkSites, role = Role.Switch, onValueChange = site::setDarkWebsites),
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.force_dark_title)) },
+                        supportingContent = { Text(stringResource(R.string.force_dark_summary)) },
+                        trailingContent = { Switch(checked = forceDark, onCheckedChange = null) },
+                        modifier = Modifier.fillMaxWidth().toggleable(value = forceDark, role = Role.Switch, onValueChange = site::setForceDark),
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     SettingsItem(

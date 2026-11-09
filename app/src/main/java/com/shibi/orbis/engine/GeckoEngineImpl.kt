@@ -118,6 +118,41 @@ class GeckoEngineImpl(
     @Volatile private var websiteDark: Boolean? = null
     @Volatile private var sitePolicy: SitePolicy? = null
 
+    @Volatile private var forceDarkWanted = false
+    @Volatile private var darkenExtension: WebExtension? = null
+
+    override fun setForceDark(on: Boolean) {
+        forceDarkWanted = on
+        runtime?.let(::applyForceDark)
+    }
+
+    /** Installs the built-in darken extension once, then keeps it enabled exactly while [forceDarkWanted]. */
+    private fun applyForceDark(rt: GeckoRuntime) {
+        val controller = rt.webExtensionController
+        val ext = darkenExtension
+        if (ext == null) {
+            if (!forceDarkWanted) return
+            controller.ensureBuiltIn(DARKEN_ASSET_URL, DARKEN_ID).accept(
+                { installed ->
+                    if (installed == null) return@accept
+                    darkenExtension = installed
+                    controller.setAllowedInPrivateBrowsing(installed, true).accept({ applyForceDark(rt) }, { applyForceDark(rt) })
+                },
+                { debugLog.log("GeckoEngine", "darken extension install failed: ${it?.javaClass?.simpleName}") },
+            )
+            return
+        }
+        val enabled = ext.metaData.enabled
+        val next =
+            when {
+                forceDarkWanted && !enabled -> controller.enable(ext, WebExtensionController.EnableSource.APP)
+                !forceDarkWanted && enabled -> controller.disable(ext, WebExtensionController.EnableSource.APP)
+                else -> null
+            }
+        next?.accept({ updated -> if (updated != null) darkenExtension = updated }, { debugLog.log("GeckoEngine", "darken toggle failed") })
+        debugLog.log("GeckoEngine", "force dark=$forceDarkWanted")
+    }
+
     override fun setSitePolicy(policy: SitePolicy) {
         sitePolicy = policy
     }
@@ -215,6 +250,14 @@ class GeckoEngineImpl(
             defaultAutomaticFontSize = created.settings.automaticFontSizeAdjustment
             applyDisplayPrefs(created)
             applyPagePrefs(created)
+            // The darken extension may already be installed from an earlier run: find it, then match the setting.
+            created.webExtensionController.list().accept(
+                { list ->
+                    darkenExtension = list.orEmpty().firstOrNull { it.id == DARKEN_ID }
+                    applyForceDark(created)
+                },
+                { applyForceDark(created) },
+            )
             // Normal-profile exceptions the user made earlier (stored by the engine).
             created.storageController.allPermissions.accept(
                 { list ->
@@ -2299,3 +2342,7 @@ internal fun activityOf(context: android.content.Context): android.app.Activity?
 /** The first byte of a Content-Range header ("bytes 100-999/1000" gives 100), or null. */
 internal fun rangeStart(contentRange: String?): Long? =
     contentRange?.trim()?.removePrefix("bytes")?.trim()?.substringBefore('-')?.trim()?.toLongOrNull()?.takeIf { it >= 0 }
+
+/** The built-in Force dark extension (assets/extensions/darken). */
+internal const val DARKEN_ID = "darken@orbis.shibi.com"
+internal const val DARKEN_ASSET_URL = "resource://android/assets/extensions/darken/"

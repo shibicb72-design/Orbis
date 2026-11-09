@@ -1,0 +1,14 @@
+{
+  "manifest_version": 2,
+  "name": "Orbis Force Dark",
+  "version": "1.0",
+  "description": "Darkens light web pages for Orbis (Settings > Force dark on all websites). Pages that are already dark are left alone.",
+  "browser_specific_settings": { "gecko": { "id": "darken@orbis.shibi.com" } },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["darken.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

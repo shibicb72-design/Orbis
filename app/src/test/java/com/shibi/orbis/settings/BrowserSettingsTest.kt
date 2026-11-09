@@ -30,6 +30,7 @@ class BrowserSettingsTest {
         override var openLinksInApps: Boolean = true
         override var toolbarBottom: Boolean = false
         override var copyToDownloadFolder: Boolean = true
+        override var forceDark: Boolean = false
     }
 
     @Test

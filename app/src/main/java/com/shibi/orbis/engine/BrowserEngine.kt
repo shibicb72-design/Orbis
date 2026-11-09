@@ -64,6 +64,8 @@ interface BrowserEngine {
     fun setHttpsOnly(normalTabs: Boolean, privateTabs: Boolean) {}
     /** The color scheme pages are asked for (prefers-color-scheme): true dark, false light, null the system's. */
     fun setWebsiteColorScheme(dark: Boolean?) {}
+    /** Darkens light pages that have no dark design (a built-in extension; images and videos keep their colours). */
+    fun setForceDark(on: Boolean) {}
     /** Per-site desktop and JavaScript choices, read before each top-level load. */
     fun setSitePolicy(policy: SitePolicy) {}
     /**

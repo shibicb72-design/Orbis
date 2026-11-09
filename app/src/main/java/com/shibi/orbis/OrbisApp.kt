@@ -104,6 +104,7 @@ class OrbisApp : Application() {
         appScope.launch { browserSettings.textZoomPercent.collect { engine.setTextZoom(it) } }
         appScope.launch { browserSettings.forceZoom.collect { engine.setForceZoom(it) } }
         engine.setSitePolicy(browserSettings)
+        appScope.launch { browserSettings.forceDark.collect { engine.setForceDark(it) } }
         appScope.launch {
             browserSettings.httpsOnly.collect {
                 engine.setHttpsOnly(normalTabs = it == HttpsOnlyMode.ALL, privateTabs = it != HttpsOnlyMode.OFF)

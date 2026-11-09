@@ -63,6 +63,9 @@ interface BrowserPrefs {
 
     /** Finished downloads (not from private tabs) are also copied to the phone's Download folder. */
     var copyToDownloadFolder: Boolean
+
+    /** Darken light websites that have no dark design of their own. */
+    var forceDark: Boolean
 }
 
 enum class ReaderTheme { LIGHT, SEPIA, DARK }
@@ -189,6 +192,12 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
             prefs.edit { putStringSet(KEY_DESKTOP_OFF, value.toSet()) }
         }
 
+    override var forceDark: Boolean
+        get() = prefs.getBoolean(KEY_FORCE_DARK, false)
+        set(value) {
+            prefs.edit { putBoolean(KEY_FORCE_DARK, value) }
+        }
+
     override var copyToDownloadFolder: Boolean
         get() = prefs.getBoolean(KEY_COPY_DOWNLOADS, true)
         set(value) {
@@ -270,6 +279,7 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         private const val KEY_OPEN_IN_APPS = "open_links_in_apps"
         private const val KEY_TOOLBAR_BOTTOM = "toolbar_bottom"
         private const val KEY_COPY_DOWNLOADS = "copy_to_download_folder"
+        private const val KEY_FORCE_DARK = "force_dark"
         private const val KEY_APP_THEME = "app_theme"
         private const val KEY_DARK_WEBSITES = "dark_websites"
         private const val KEY_JS = "javascript"
@@ -357,6 +367,14 @@ class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
     }
 
     override fun offerAppsForLinks(): Boolean = _openLinksInApps.value
+
+    private val _forceDark = MutableStateFlow(prefs.forceDark)
+    val forceDark: StateFlow<Boolean> = _forceDark.asStateFlow()
+
+    fun setForceDark(on: Boolean) {
+        prefs.forceDark = on
+        _forceDark.value = on
+    }
 
     private val _copyToDownloadFolder = MutableStateFlow(prefs.copyToDownloadFolder)
     val copyToDownloadFolder: StateFlow<Boolean> = _copyToDownloadFolder.asStateFlow()
