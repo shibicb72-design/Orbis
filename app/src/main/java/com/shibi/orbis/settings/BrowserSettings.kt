@@ -2,6 +2,11 @@ package com.shibi.orbis.settings
 
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import com.shibi.orbis.engine.hostOfUrl
+import com.shibi.orbis.home.PinnedSite
+import com.shibi.orbis.home.TOP_SITES_LIMIT
+import org.json.JSONArray
+import org.json.JSONObject
 import com.shibi.orbis.engine.isWebUrl
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,6 +25,12 @@ interface BrowserPrefs {
 
     /** Allow pinch zoom on every page, even one that disables it. */
     var forceZoom: Boolean
+
+    /** Start page tiles the user pinned, in order. */
+    var pinnedSites: List<PinnedSite>
+
+    /** Sites (hosts) the user removed from Top sites. */
+    var hiddenSites: Set<String>
 }
 
 class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : BrowserPrefs {
@@ -47,8 +58,32 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
             prefs.edit { putBoolean(KEY_FORCE_ZOOM, value) }
         }
 
+    override var pinnedSites: List<PinnedSite>
+        get() =
+            runCatching {
+                val a = JSONArray(prefs.getString(KEY_PINNED, "[]"))
+                (0 until a.length()).mapNotNull { i ->
+                    val o = a.optJSONObject(i) ?: return@mapNotNull null
+                    val url = o.optString("url")
+                    if (isWebUrl(url)) PinnedSite(url, o.optString("title")) else null
+                }
+            }.getOrDefault(emptyList())
+        set(value) {
+            val a = JSONArray()
+            value.forEach { a.put(JSONObject().put("url", it.url).put("title", it.title)) }
+            prefs.edit { putString(KEY_PINNED, a.toString()) }
+        }
+
+    override var hiddenSites: Set<String>
+        get() = prefs.getStringSet(KEY_HIDDEN, emptySet())?.toSet() ?: emptySet()
+        set(value) {
+            prefs.edit { putStringSet(KEY_HIDDEN, value.toSet()) }
+        }
+
     companion object {
         const val FILE_NAME = "browser_prefs"
+        private const val KEY_PINNED = "pinned_sites"
+        private const val KEY_HIDDEN = "hidden_sites"
         private const val KEY_FORCE_ZOOM = "force_zoom"
         private const val KEY_HOMEPAGE = "homepage"
         private const val KEY_SUGGESTIONS = "search_suggestions"
@@ -91,6 +126,42 @@ class BrowserSettings(private val prefs: BrowserPrefs) {
     fun setForceZoom(on: Boolean) {
         prefs.forceZoom = on
         _forceZoom.value = on
+    }
+
+    private val _pinnedSites = MutableStateFlow(prefs.pinnedSites)
+    val pinnedSites: StateFlow<List<PinnedSite>> = _pinnedSites.asStateFlow()
+
+    private val _hiddenSites = MutableStateFlow(prefs.hiddenSites)
+    val hiddenSites: StateFlow<Set<String>> = _hiddenSites.asStateFlow()
+
+    /** Pins a start page tile (at the end). A pinned site is never hidden. Max [TOP_SITES_LIMIT] pins. */
+    fun pinSite(url: String, title: String) {
+        if (!isWebUrl(url)) return
+        val host = hostOfUrl(url) ?: return
+        val now = _pinnedSites.value.filterNot { hostOfUrl(it.url) == host } + PinnedSite(url, title)
+        val pins = now.takeLast(TOP_SITES_LIMIT)
+        prefs.pinnedSites = pins
+        _pinnedSites.value = pins
+        if (host in _hiddenSites.value) setHidden(_hiddenSites.value - host)
+    }
+
+    fun unpinSite(url: String) {
+        val host = hostOfUrl(url)
+        val pins = _pinnedSites.value.filterNot { it.url == url || (host != null && hostOfUrl(it.url) == host) }
+        prefs.pinnedSites = pins
+        _pinnedSites.value = pins
+    }
+
+    /** Removes a site from Top sites (and unpins it). It comes back only if pinned again. */
+    fun removeSite(url: String) {
+        val host = hostOfUrl(url) ?: return
+        unpinSite(url)
+        setHidden(_hiddenSites.value + host)
+    }
+
+    private fun setHidden(hosts: Set<String>) {
+        prefs.hiddenSites = hosts
+        _hiddenSites.value = hosts
     }
 
     fun setTextZoomPercent(percent: Int) {

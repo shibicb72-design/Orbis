@@ -12,6 +12,8 @@ class BrowserSettingsTest {
         override var searchSuggestions: Boolean = true
         override var textZoomPercent: Int = DEFAULT_TEXT_ZOOM
         override var forceZoom: Boolean = false
+        override var pinnedSites: List<com.shibi.orbis.home.PinnedSite> = emptyList()
+        override var hiddenSites: Set<String> = emptySet()
     }
 
     @Test
@@ -52,6 +54,25 @@ class BrowserSettingsTest {
         s.setForceZoom(true)
         assertTrue(prefs.forceZoom)
         assertTrue(s.forceZoom.value)
+    }
+
+    @Test
+    fun pinUnpinAndRemoveSitesPersist() {
+        val prefs = MemPrefs()
+        val s = BrowserSettings(prefs)
+        s.pinSite("https://a.test/x", "A")
+        s.pinSite("https://b.test/", "B")
+        s.pinSite("https://a.test/y", "A again")
+        assertEquals("re-pinning a site moves it to the end", listOf("https://b.test/", "https://a.test/y"), prefs.pinnedSites.map { it.url })
+        s.removeSite("https://b.test/")
+        assertEquals(listOf("https://a.test/y"), s.pinnedSites.value.map { it.url })
+        assertEquals(setOf("b.test"), prefs.hiddenSites)
+        s.pinSite("https://b.test/", "B")
+        assertTrue("pinning un-hides", s.hiddenSites.value.isEmpty())
+        s.unpinSite("https://a.test/y")
+        assertEquals(listOf("https://b.test/"), s.pinnedSites.value.map { it.url })
+        s.pinSite("javascript:alert(1)", "x")
+        assertEquals(1, s.pinnedSites.value.size)
     }
 
     @Test

@@ -1,7 +1,9 @@
 package com.shibi.orbis.ui.home
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -55,6 +57,41 @@ class StartPageComposeTest {
     }
 
     @Test
+    fun aTilesActionsPinAndRemoveIt() {
+        val pinned = mutableListOf<String>()
+        val removed = mutableListOf<String>()
+        val site = TopSite("https://news.test/b", "News", "news.test")
+        rule.setContent {
+            MaterialTheme {
+                StartPage(
+                    listOf(site), emptyList(), onSearch = {}, onOpen = {}, onAllBookmarks = {},
+                    onPin = { pinned += it.url }, onRemove = { removed += it.url },
+                )
+            }
+        }
+        val node = rule.onNodeWithContentDescription("News, news.test")
+        node.customAction("Pin")
+        node.customAction("Remove")
+        assertEquals(listOf("https://news.test/b"), pinned)
+        assertEquals(listOf("https://news.test/b"), removed)
+    }
+
+    @Test
+    fun aPinnedTileSaysSoAndOffersUnpin() {
+        val unpinned = mutableListOf<String>()
+        rule.setContent {
+            MaterialTheme {
+                StartPage(
+                    listOf(TopSite("https://p.test/", "P", "p.test", pinned = true)), emptyList(), onSearch = {}, onOpen = {}, onAllBookmarks = {},
+                    onUnpin = { unpinned += it.url },
+                )
+            }
+        }
+        rule.onNodeWithContentDescription("P, p.test, pinned").customAction("Unpin")
+        assertEquals(listOf("https://p.test/"), unpinned)
+    }
+
+    @Test
     fun theSearchBoxHandsFocusToTheAddressBar() {
         start(emptyList(), emptyList())
         rule.onNodeWithTag(START_SEARCH_TAG).performClick()
@@ -74,5 +111,10 @@ class StartPageComposeTest {
         start(emptyList(), (1L..12L).map { Bookmark(it, "https://b$it.test/", "B$it", it) })
         rule.onNodeWithContentDescription("B8, b8.test").assertExists()
         assertEquals(0, rule.onAllNodesWithText("B9").fetchSemanticsNodes().size)
+    }
+
+    private fun SemanticsNodeInteraction.customAction(label: String) {
+        val action = fetchSemanticsNode().config[SemanticsActions.CustomActions].first { it.label == label }
+        rule.runOnIdle { action.action() }
     }
 }

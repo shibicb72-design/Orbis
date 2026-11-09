@@ -5,6 +5,10 @@
     <string name="address_bar_loading">Loading</string>
     <string name="start_top_sites">Top sites</string>
     <string name="start_all_bookmarks">All bookmarks</string>
+    <string name="start_pin">Pin</string>
+    <string name="start_unpin">Unpin</string>
+    <string name="start_remove">Remove</string>
+    <string name="start_pinned">pinned</string>
     <string name="menu_home">Home</string>
     <string name="menu_share">Share</string>
     <string name="text_size_title">Text size</string>

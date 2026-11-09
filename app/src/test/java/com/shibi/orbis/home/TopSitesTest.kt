@@ -37,6 +37,15 @@ class TopSitesTest {
     }
 
     @Test
+    fun pinnedComeFirstAndHiddenSitesAreLeftOut() {
+        val history = listOf(e("https://a.test/", 9), e("https://b.test/", 5), e("https://c.test/", 1))
+        val sites = topSites(history, pinned = listOf(PinnedSite("https://c.test/", "C"), PinnedSite("https://z.test/", "")), hiddenHosts = setOf("a.test"))
+        assertEquals(listOf("c.test", "z.test", "b.test"), sites.map { it.host })
+        assertEquals(listOf(true, true, false), sites.map { it.pinned })
+        assertEquals("z.test", sites[1].title)
+    }
+
+    @Test
     fun emptyHistoryMeansNoTiles() {
         assertTrue(topSites(emptyList()).isEmpty())
     }

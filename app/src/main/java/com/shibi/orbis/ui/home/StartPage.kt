@@ -1,6 +1,8 @@
 package com.shibi.orbis.ui.home
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,18 +19,27 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -62,6 +73,9 @@ fun StartPage(
     onOpen: (String) -> Unit,
     onAllBookmarks: () -> Unit,
     modifier: Modifier = Modifier,
+    onPin: (TopSite) -> Unit = {},
+    onUnpin: (TopSite) -> Unit = {},
+    onRemove: (TopSite) -> Unit = {},
 ) {
     Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background, contentColor = MaterialTheme.colorScheme.onBackground) {
         Column(
@@ -100,7 +114,15 @@ fun StartPage(
             if (topSites.isNotEmpty()) {
                 Section(stringResource(R.string.start_top_sites)) {
                     TileGrid {
-                        topSites.forEach { site -> Tile(site.title, site.host) { onOpen(site.url) } }
+                        topSites.forEach { site ->
+                            SiteTile(
+                                site,
+                                onOpen = { onOpen(site.url) },
+                                onPin = { onPin(site) },
+                                onUnpin = { onUnpin(site) },
+                                onRemove = { onRemove(site) },
+                            )
+                        }
                     }
                 }
             }
@@ -109,7 +131,7 @@ fun StartPage(
                     TileGrid {
                         bookmarks.take(START_BOOKMARKS_LIMIT).forEach { b ->
                             val host = hostOfUrl(b.url) ?: b.url
-                            Tile(b.title.ifBlank { host }, host) { onOpen(b.url) }
+                            Tile(b.title.ifBlank { host }, host, onClick = { onOpen(b.url) })
                         }
                     }
                     TextButton(onClick = onAllBookmarks) { Text(stringResource(R.string.start_all_bookmarks)) }
@@ -137,16 +159,64 @@ private fun TileGrid(content: @Composable () -> Unit) {
     ) { content() }
 }
 
-/** A letter avatar (no favicon fetch) and a one-line label; reads as "title, host" to screen readers. */
+/** A Top sites tile: tap opens it; long-press (or the screen reader's actions) pins, unpins or removes it. */
 @Composable
-private fun Tile(title: String, host: String, onClick: () -> Unit) {
+private fun SiteTile(site: TopSite, onOpen: () -> Unit, onPin: () -> Unit, onUnpin: () -> Unit, onRemove: () -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    val pinLabel = stringResource(if (site.pinned) R.string.start_unpin else R.string.start_pin)
+    val removeLabel = stringResource(R.string.start_remove)
+    val togglePin = if (site.pinned) onUnpin else onPin
+    Box {
+        Tile(
+            site.title,
+            site.host,
+            onClick = onOpen,
+            onLongClick = { menu = true },
+            pinned = site.pinned,
+            actions = listOf(
+                CustomAccessibilityAction(pinLabel) {
+                    togglePin()
+                    true
+                },
+                CustomAccessibilityAction(removeLabel) {
+                    onRemove()
+                    true
+                },
+            ),
+        )
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(text = { Text(pinLabel) }, onClick = {
+                menu = false
+                togglePin()
+            })
+            DropdownMenuItem(text = { Text(removeLabel) }, onClick = {
+                menu = false
+                onRemove()
+            })
+        }
+    }
+}
+
+/** A letter avatar (no favicon fetch) and a one-line label; reads as "title, host" to screen readers. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun Tile(
+    title: String,
+    host: String,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    pinned: Boolean = false,
+    actions: List<CustomAccessibilityAction> = emptyList(),
+) {
+    val pinnedSuffix = if (pinned) ", " + stringResource(R.string.start_pinned) else ""
     Column(
         Modifier
             .width(76.dp)
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .clearAndSetSemantics {
-                contentDescription = if (title == host) host else "$title, $host"
+                contentDescription = (if (title == host) host else "$title, $host") + pinnedSuffix
                 role = Role.Button
+                if (actions.isNotEmpty()) customActions = actions
             }
             .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -159,6 +229,9 @@ private fun Tile(title: String, host: String, onClick: () -> Unit) {
         ) {
             Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
                 Text(tileLetter(host), style = MaterialTheme.typography.titleLarge)
+                if (pinned) {
+                    Icon(Icons.Filled.PushPin, contentDescription = null, modifier = Modifier.size(14.dp).align(Alignment.TopEnd))
+                }
             }
         }
         Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)

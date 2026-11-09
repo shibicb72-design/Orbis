@@ -683,13 +683,20 @@ private fun BrowserContent(
                         // A private tab keeps its notice; the start page (history-based Top sites) is never shown here.
                         OrbisEmptyState(stringResource(R.string.browser_private_empty_state), Icons.Filled.VisibilityOff)
                     } else {
-                        val sites = remember(historyEntries) { topSites(historyEntries) }
+                        val pinned by container.browserSettings.pinnedSites.collectAsStateWithLifecycle()
+                        val hidden by container.browserSettings.hiddenSites.collectAsStateWithLifecycle()
+                        val sites = remember(historyEntries, pinned, hidden) {
+                            topSites(historyEntries, pinned = pinned, hiddenHosts = hidden)
+                        }
                         StartPage(
                             topSites = sites,
                             bookmarks = bookmarkList,
                             onSearch = { addressFocusRequests++ },
                             onOpen = { tabs.loadInSelected(it) },
                             onAllBookmarks = onOpenBookmarks,
+                            onPin = { container.browserSettings.pinSite(it.url, it.title) },
+                            onUnpin = { container.browserSettings.unpinSite(it.url) },
+                            onRemove = { container.browserSettings.removeSite(it.url) },
                         )
                     }
                 }
