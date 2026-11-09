@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="downloads_title">Downloads</string>
+    <string name="downloads_back">Zurück</string>
+    <string name="downloads_empty">Noch keine Downloads.</string>
+    <string name="downloads_cancel">Abbrechen</string>
+    <string name="downloads_open">Öffnen</string>
+    <string name="downloads_share">Teilen</string>
+    <string name="downloads_delete">Löschen</string>
+    <string name="downloads_open_chooser">Öffnen mit</string>
+    <string name="downloads_share_chooser">Teilen mit</string>
+    <string name="downloads_from_host">Von %1$s</string>
+    <string name="downloads_progress_known">%1$s von %2$s</string>
+    <string name="downloads_progress_unknown">%1$s heruntergeladen</string>
+    <string name="downloads_status_failed">Download fehlgeschlagen</string>
+    <string name="downloads_status_cancelled">Download abgebrochen</string>
+    <string name="downloads_file_missing">Diese Datei ist nicht mehr verfügbar.</string>
+    <string name="downloads_no_app">Keine App kann diese Datei öffnen.</string>
+    <string name="downloads_action_failed">Die Datei konnte nicht geöffnet werden.</string>
+    <string name="downloads_delete_confirm_title">Diesen Download löschen?</string>
+    <string name="downloads_delete_confirm_body">Die Datei wird von deinem Gerät entfernt.</string>
+    <string name="downloads_notif_channel_name">Downloads</string>
+    <string name="downloads_notif_channel_description">Fortschritt und Ergebnisse von Datei-Downloads</string>
+    <string name="downloads_notif_running">Wird heruntergeladen</string>
+    <string name="downloads_notif_starting">Download wird gestartet</string>
+    <plurals name="downloads_notif_many_title">
+        <item quantity="one">%d Download</item>
+        <item quantity="other">%d Downloads</item>
+    </plurals>
+    <string name="downloads_cancel_all">Alle abbrechen</string>
+    <string name="downloads_notif_public_title">Orbis</string>
+    <string name="downloads_notif_public_text">Dateien werden heruntergeladen</string>
+    <string name="downloads_notif_done">Download abgeschlossen</string>
+    <string name="downloads_notif_done_public">Ein Download wurde abgeschlossen</string>
+</resources>

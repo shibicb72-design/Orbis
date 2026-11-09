@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_browsing">Navigation</string>
+    <string name="settings_section_privacy">Confidentialité et contrôles des sites</string>
+    <string name="settings_section_support">Diagnostic</string>
+</resources>

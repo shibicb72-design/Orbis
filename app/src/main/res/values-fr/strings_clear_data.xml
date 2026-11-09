@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="clear_data_title">Effacer les données de navigation</string>
+    <string name="clear_data_summary">Historique, cookies, cache, onglets et plus</string>
+
+    <string name="clear_history">Historique de navigation</string>
+    <string name="clear_cookies">Cookies et données de site</string>
+    <string name="clear_cookies_summary">Vous déconnecte de la plupart des sites. Les pages ouvertes peuvent rester affichées jusqu\'à ce que vous les actualisiez. Un téléchargement en cours peut s\'arrêter.</string>
+    <string name="clear_cache">Images et fichiers en cache</string>
+    <string name="clear_downloads">Liste des téléchargements</string>
+    <string name="clear_downloads_summary">Seulement la liste. Les fichiers téléchargés restent sur votre appareil, et les téléchargements en cours restent dans la liste.</string>
+    <string name="clear_tabs">Onglets ouverts</string>
+    <string name="clear_tabs_summary">Onglets normaux uniquement. Les onglets privés restent ouverts.</string>
+    <string name="clear_bookmarks_section">Action irréversible</string>
+    <string name="clear_bookmarks">Favoris</string>
+    <string name="clear_bookmarks_summary">Désactivé sauf si vous le cochez. Une confirmation vous sera demandée, et les favoris supprimés ne pourront pas être récupérés.</string>
+    <string name="clear_passwords">Mots de passe enregistrés</string>
+    <string name="clear_passwords_summary">Désactivé sauf si vous le cochez. Tous les mots de passe enregistrés sont supprimés de cet appareil et ne pourront pas être récupérés.</string>
+
+    <string name="clear_private_notice">Avec ce moteur de navigation, les cookies et le cache ne peuvent pas être effacés séparément de ceux des onglets privés. Fermez d\'abord vos onglets privés, ou décochez Cookies et données de site et Images et fichiers en cache.</string>
+    <string name="clear_close_private">Fermer les onglets privés</string>
+
+    <string name="clear_button">Effacer les données</string>
+    <string name="clear_running">Effacement…</string>
+
+    <string name="clear_confirm_title">Effacer ces données ?</string>
+    <string name="clear_confirm_body">Seront effacés :\n%1$s</string>
+    <string name="clear_confirm_ok">Effacer</string>
+    <string name="clear_cancel">Annuler</string>
+
+    <string name="clear_bookmarks_confirm_title">Supprimer tous les favoris ?</string>
+    <string name="clear_bookmarks_confirm_none">Vous n\'avez aucun favori enregistré. Cette action est irréversible.</string>
+    <plurals name="clear_bookmarks_confirm_body">
+        <item quantity="one">Votre favori (%1$d) sera supprimé de cet appareil. Cette action est irréversible.</item>
+        <item quantity="many">Vos %1$d favoris seront tous supprimés de cet appareil. Cette action est irréversible.</item>
+        <item quantity="other">Vos %1$d favoris seront tous supprimés de cet appareil. Cette action est irréversible.</item>
+    </plurals>
+    <string name="clear_bookmarks_confirm_ok">Supprimer les favoris</string>
+
+    <string name="clear_result_done">Données de navigation effacées.</string>
+    <string name="clear_result_blocked">Rien n\'a été effacé, car des onglets privés sont ouverts. Fermez-les et réessayez.</string>
+    <string name="clear_result_failed">Impossible d\'effacer : %1$s.</string>
+    <string name="clear_result_unconfirmed">Effacement non confirmé : %1$s.</string>
+</resources>

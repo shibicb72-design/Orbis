@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_browsing">Surfen</string>
+    <string name="settings_section_privacy">Datenschutz und Website-Steuerung</string>
+    <string name="settings_section_support">Diagnose</string>
+</resources>

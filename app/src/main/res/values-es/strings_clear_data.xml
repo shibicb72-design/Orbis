@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="clear_data_title">Borrar datos de navegación</string>
+    <string name="clear_data_summary">Historial, cookies, caché, pestañas y más</string>
+
+    <string name="clear_history">Historial de navegación</string>
+    <string name="clear_cookies">Cookies y datos de sitios</string>
+    <string name="clear_cookies_summary">Cierra tu sesión en la mayoría de los sitios. Las páginas abiertas pueden seguir mostrándose hasta que las recargues. Una descarga en curso puede detenerse.</string>
+    <string name="clear_cache">Imágenes y archivos en caché</string>
+    <string name="clear_downloads">Lista de descargas</string>
+    <string name="clear_downloads_summary">Solo la lista. Los archivos descargados se quedan en tu dispositivo, y las descargas en curso siguen en la lista.</string>
+    <string name="clear_tabs">Pestañas abiertas</string>
+    <string name="clear_tabs_summary">Solo las pestañas normales. Las pestañas privadas siguen abiertas.</string>
+    <string name="clear_bookmarks_section">No se puede deshacer</string>
+    <string name="clear_bookmarks">Marcadores</string>
+    <string name="clear_bookmarks_summary">Desactivado salvo que lo marques. Se te volverá a preguntar, y los marcadores eliminados no se pueden recuperar.</string>
+    <string name="clear_passwords">Contraseñas guardadas</string>
+    <string name="clear_passwords_summary">Desactivado salvo que lo marques. Todas las contraseñas guardadas se eliminan de este dispositivo y no se pueden recuperar.</string>
+
+    <string name="clear_private_notice">Con este motor de navegador, las cookies y la caché no se pueden borrar sin afectar a las pestañas privadas. Primero cierra tus pestañas privadas, o desmarca Cookies y datos de sitios e Imágenes y archivos en caché.</string>
+    <string name="clear_close_private">Cerrar pestañas privadas</string>
+
+    <string name="clear_button">Borrar datos</string>
+    <string name="clear_running">Borrando…</string>
+
+    <string name="clear_confirm_title">¿Borrar estos datos?</string>
+    <string name="clear_confirm_body">Se borrará lo siguiente:\n%1$s</string>
+    <string name="clear_confirm_ok">Borrar</string>
+    <string name="clear_cancel">Cancelar</string>
+
+    <string name="clear_bookmarks_confirm_title">¿Eliminar todos los marcadores?</string>
+    <string name="clear_bookmarks_confirm_none">No tienes marcadores guardados. Esta acción no se puede deshacer.</string>
+    <plurals name="clear_bookmarks_confirm_body">
+        <item quantity="one">Se eliminará de este dispositivo tu %1$d marcador. Esta acción no se puede deshacer.</item>
+        <item quantity="many">Se eliminarán de este dispositivo los %1$d marcadores. Esta acción no se puede deshacer.</item>
+        <item quantity="other">Se eliminarán de este dispositivo los %1$d marcadores. Esta acción no se puede deshacer.</item>
+    </plurals>
+    <string name="clear_bookmarks_confirm_ok">Eliminar marcadores</string>
+
+    <string name="clear_result_done">Se borraron los datos de navegación.</string>
+    <string name="clear_result_blocked">No se borró nada porque hay pestañas privadas abiertas. Ciérralas y vuelve a intentarlo.</string>
+    <string name="clear_result_failed">No se pudo borrar: %1$s.</string>
+    <string name="clear_result_unconfirmed">No se pudo confirmar que se borró: %1$s.</string>
+</resources>

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="menu_add_bookmark">Agregar marcador</string>
+    <string name="menu_remove_bookmark">Quitar marcador</string>
+    <string name="menu_bookmarks">Marcadores</string>
+    <string name="menu_history">Historial</string>
+
+    <string name="bookmark_added">Marcador agregado</string>
+    <string name="bookmark_removed">Marcador quitado</string>
+    <string name="bookmark_exists">Ya está en marcadores</string>
+    <string name="bookmark_full">Hay demasiados marcadores. Elimina algunos para agregar más.</string>
+    <string name="bookmark_invalid">No se puede agregar esta página a marcadores</string>
+
+    <string name="bookmarks_title">Marcadores</string>
+    <string name="bookmarks_search_hint">Buscar marcadores</string>
+    <string name="bookmarks_empty">Aún no hay marcadores. Abre una página y elige Agregar marcador en el menú.</string>
+    <string name="bookmarks_no_matches">Ningún marcador coincide con tu búsqueda.</string>
+    <string name="bookmarks_menu">Opciones de marcadores</string>
+    <string name="bookmarks_export">Exportar</string>
+    <string name="bookmarks_import">Importar</string>
+    <string name="bookmarks_row_menu">Opciones de %1$s</string>
+    <string name="bookmarks_open_new_tab">Abrir en una pestaña nueva</string>
+    <string name="bookmarks_edit">Editar</string>
+    <string name="bookmarks_delete">Eliminar</string>
+    <string name="bookmarks_edit_title">Editar marcador</string>
+    <string name="bookmarks_field_title">Título</string>
+    <string name="bookmarks_field_address">Dirección</string>
+    <string name="bookmarks_save">Guardar</string>
+    <string name="bookmarks_cancel">Cancelar</string>
+    <string name="bookmarks_error_invalid">Escribe una dirección http o https válida.</string>
+    <string name="bookmarks_error_duplicate">Otro marcador ya usa esta dirección.</string>
+    <string name="bookmarks_error_missing">Este marcador ya no existe.</string>
+    <string name="bookmarks_imported">Importados: %1$d; omitidos: %2$d</string>
+    <string name="bookmarks_import_failed">No se pudo importar ese archivo.</string>
+    <string name="bookmarks_import_too_big">Ese archivo es demasiado grande para importarlo (el límite es de 10 MB).</string>
+    <string name="bookmarks_exported">Marcadores exportados</string>
+    <string name="bookmarks_export_failed">No se pudieron exportar los marcadores.</string>
+    <string name="search_clear">Borrar búsqueda</string>
+
+    <string name="history_title">Historial</string>
+    <string name="history_search_hint">Buscar en el historial</string>
+    <string name="history_empty">Aún no hay historial.</string>
+    <string name="history_no_matches">Nada del historial coincide con tu búsqueda.</string>
+    <string name="history_clear_all">Borrar todo</string>
+    <string name="history_clear_title">¿Borrar todo el historial?</string>
+    <string name="history_clear_body">Se quitarán de este dispositivo todas las páginas de tu historial.</string>
+    <string name="history_clear_confirm">Borrar</string>
+    <string name="history_cancel">Cancelar</string>
+    <string name="history_delete_description">Quitar %1$s del historial</string>
+</resources>

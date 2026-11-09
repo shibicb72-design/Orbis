@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="clear_data_title">Browserdaten löschen</string>
+    <string name="clear_data_summary">Verlauf, Cookies, Cache, Tabs und mehr</string>
+
+    <string name="clear_history">Browserverlauf</string>
+    <string name="clear_cookies">Cookies &amp; Website-Daten</string>
+    <string name="clear_cookies_summary">Meldet dich von den meisten Websites ab. Geöffnete Seiten werden eventuell weiter angezeigt, bis du sie neu lädst. Ein laufender Download kann abbrechen.</string>
+    <string name="clear_cache">Bilder und Dateien im Cache</string>
+    <string name="clear_downloads">Download-Liste</string>
+    <string name="clear_downloads_summary">Nur die Liste. Heruntergeladene Dateien bleiben auf deinem Gerät, und laufende Downloads bleiben in der Liste.</string>
+    <string name="clear_tabs">Geöffnete Tabs</string>
+    <string name="clear_tabs_summary">Nur normale Tabs. Private Tabs bleiben geöffnet.</string>
+    <string name="clear_bookmarks_section">Kann nicht rückgängig gemacht werden</string>
+    <string name="clear_bookmarks">Lesezeichen</string>
+    <string name="clear_bookmarks_summary">Aus, solange du es nicht ankreuzt. Du wirst noch einmal gefragt, und gelöschte Lesezeichen können nicht wiederhergestellt werden.</string>
+    <string name="clear_passwords">Gespeicherte Passwörter</string>
+    <string name="clear_passwords_summary">Aus, solange du es nicht ankreuzt. Alle gespeicherten Passwörter werden von diesem Gerät gelöscht und können nicht wiederhergestellt werden.</string>
+
+    <string name="clear_private_notice">Cookies und Cache können in dieser Browser-Engine nicht getrennt von privaten Tabs gelöscht werden. Schließe zuerst deine privaten Tabs oder entferne die Haken bei „Cookies &amp; Website-Daten“ und „Bilder und Dateien im Cache“.</string>
+    <string name="clear_close_private">Private Tabs schließen</string>
+
+    <string name="clear_button">Daten löschen</string>
+    <string name="clear_running">Wird gelöscht…</string>
+
+    <string name="clear_confirm_title">Diese Daten löschen?</string>
+    <string name="clear_confirm_body">Folgendes wird gelöscht:\n%1$s</string>
+    <string name="clear_confirm_ok">Löschen</string>
+    <string name="clear_cancel">Abbrechen</string>
+
+    <string name="clear_bookmarks_confirm_title">Alle Lesezeichen löschen?</string>
+    <string name="clear_bookmarks_confirm_none">Du hast keine gespeicherten Lesezeichen. Dies kann nicht rückgängig gemacht werden.</string>
+    <plurals name="clear_bookmarks_confirm_body">
+        <item quantity="one">Dein %1$d Lesezeichen wird von diesem Gerät gelöscht. Dies kann nicht rückgängig gemacht werden.</item>
+        <item quantity="other">Alle %1$d Lesezeichen werden von diesem Gerät gelöscht. Dies kann nicht rückgängig gemacht werden.</item>
+    </plurals>
+    <string name="clear_bookmarks_confirm_ok">Lesezeichen löschen</string>
+
+    <string name="clear_result_done">Browserdaten gelöscht.</string>
+    <string name="clear_result_blocked">Es wurde nichts gelöscht, da private Tabs geöffnet sind. Schließe sie und versuche es erneut.</string>
+    <string name="clear_result_failed">Konnte nicht gelöscht werden: %1$s.</string>
+    <string name="clear_result_unconfirmed">Löschen konnte nicht bestätigt werden: %1$s.</string>
+</resources>

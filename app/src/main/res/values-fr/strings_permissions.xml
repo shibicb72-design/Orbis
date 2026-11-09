@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="perm_prompt_title">Autoriser %1$s à :</string>
+    <string name="perm_prompt_embedded">Intégré dans %1$s</string>
+    <string name="perm_prompt_camera">Utiliser votre caméra</string>
+    <string name="perm_prompt_microphone">Utiliser votre micro</string>
+    <string name="perm_prompt_location">Connaître votre position</string>
+    <string name="perm_prompt_remember">Mémoriser pour ce site</string>
+    <string name="perm_prompt_allow">Autoriser</string>
+    <string name="perm_prompt_deny">Refuser</string>
+
+    <string name="perm_blocked_title">Autorisation bloquée</string>
+    <string name="perm_blocked_body">Android ne demande plus cette autorisation. Vous pouvez l\'activer dans les paramètres système de cette application.</string>
+    <string name="perm_open_settings">Ouvrir les paramètres</string>
+    <string name="perm_not_now">Pas maintenant</string>
+
+    <string name="perm_settings_title">Autorisations des sites</string>
+    <string name="perm_settings_summary">Réponses pour la caméra, le micro et la position</string>
+    <string name="perm_settings_empty">Aucune autorisation de site enregistrée pour l\'instant.</string>
+    <string name="perm_settings_note">Les réponses marquées \"cette session\" sont oubliées au bout d\'une heure ou au redémarrage d\'Orbis.</string>
+    <string name="perm_kind_camera">Caméra</string>
+    <string name="perm_kind_microphone">Micro</string>
+    <string name="perm_kind_location">Position</string>
+    <string name="perm_state_allowed">Autorisé</string>
+    <string name="perm_state_denied">Bloqué</string>
+    <string name="perm_state_session">cette session</string>
+    <string name="perm_embedded_on">intégré sur %1$s</string>
+    <string name="perm_remove">Supprimer</string>
+    <string name="perm_remove_description">Supprimer %1$s pour %2$s</string>
+</resources>

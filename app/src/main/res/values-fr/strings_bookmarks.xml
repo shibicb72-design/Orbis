@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="menu_add_bookmark">Ajouter aux favoris</string>
+    <string name="menu_remove_bookmark">Retirer des favoris</string>
+    <string name="menu_bookmarks">Favoris</string>
+    <string name="menu_history">Historique</string>
+
+    <string name="bookmark_added">Favori ajouté</string>
+    <string name="bookmark_removed">Favori supprimé</string>
+    <string name="bookmark_exists">Déjà dans les favoris</string>
+    <string name="bookmark_full">Trop de favoris. Supprimez-en pour en ajouter d\'autres.</string>
+    <string name="bookmark_invalid">Impossible d\'ajouter cette page aux favoris</string>
+
+    <string name="bookmarks_title">Favoris</string>
+    <string name="bookmarks_search_hint">Rechercher dans les favoris</string>
+    <string name="bookmarks_empty">Aucun favori pour l\'instant. Ouvrez une page et choisissez Ajouter aux favoris dans le menu.</string>
+    <string name="bookmarks_no_matches">Aucun favori ne correspond à votre recherche.</string>
+    <string name="bookmarks_menu">Options des favoris</string>
+    <string name="bookmarks_export">Exporter</string>
+    <string name="bookmarks_import">Importer</string>
+    <string name="bookmarks_row_menu">Options pour %1$s</string>
+    <string name="bookmarks_open_new_tab">Ouvrir dans un nouvel onglet</string>
+    <string name="bookmarks_edit">Modifier</string>
+    <string name="bookmarks_delete">Supprimer</string>
+    <string name="bookmarks_edit_title">Modifier le favori</string>
+    <string name="bookmarks_field_title">Titre</string>
+    <string name="bookmarks_field_address">Adresse</string>
+    <string name="bookmarks_save">Enregistrer</string>
+    <string name="bookmarks_cancel">Annuler</string>
+    <string name="bookmarks_error_invalid">Saisissez une adresse http ou https valide.</string>
+    <string name="bookmarks_error_duplicate">Un autre favori utilise déjà cette adresse.</string>
+    <string name="bookmarks_error_missing">Ce favori n\'existe plus.</string>
+    <string name="bookmarks_imported">%1$d importé(s), %2$d ignoré(s)</string>
+    <string name="bookmarks_import_failed">Impossible d\'importer ce fichier.</string>
+    <string name="bookmarks_import_too_big">Ce fichier est trop volumineux pour être importé (la limite est de 10 Mo).</string>
+    <string name="bookmarks_exported">Favoris exportés</string>
+    <string name="bookmarks_export_failed">Impossible d\'exporter les favoris.</string>
+    <string name="search_clear">Effacer la recherche</string>
+
+    <string name="history_title">Historique</string>
+    <string name="history_search_hint">Rechercher dans l\'historique</string>
+    <string name="history_empty">Aucun historique pour l\'instant.</string>
+    <string name="history_no_matches">Aucun élément de l\'historique ne correspond à votre recherche.</string>
+    <string name="history_clear_all">Tout effacer</string>
+    <string name="history_clear_title">Effacer tout l\'historique ?</string>
+    <string name="history_clear_body">Toutes les pages de votre historique seront supprimées de cet appareil.</string>
+    <string name="history_clear_confirm">Effacer</string>
+    <string name="history_cancel">Annuler</string>
+    <string name="history_delete_description">Supprimer %1$s de l\'historique</string>
+</resources>

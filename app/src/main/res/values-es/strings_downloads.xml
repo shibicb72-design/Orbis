@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="downloads_title">Descargas</string>
+    <string name="downloads_back">Atrás</string>
+    <string name="downloads_empty">Aún no hay descargas.</string>
+    <string name="downloads_cancel">Cancelar</string>
+    <string name="downloads_open">Abrir</string>
+    <string name="downloads_share">Compartir</string>
+    <string name="downloads_delete">Eliminar</string>
+    <string name="downloads_open_chooser">Abrir con</string>
+    <string name="downloads_share_chooser">Compartir con</string>
+    <string name="downloads_from_host">De %1$s</string>
+    <string name="downloads_progress_known">%1$s de %2$s</string>
+    <string name="downloads_progress_unknown">%1$s descargados</string>
+    <string name="downloads_status_failed">Error en la descarga</string>
+    <string name="downloads_status_cancelled">Descarga cancelada</string>
+    <string name="downloads_file_missing">Este archivo ya no está disponible.</string>
+    <string name="downloads_no_app">Ninguna app puede abrir este archivo.</string>
+    <string name="downloads_action_failed">No se pudo abrir el archivo.</string>
+    <string name="downloads_delete_confirm_title">¿Eliminar esta descarga?</string>
+    <string name="downloads_delete_confirm_body">El archivo se quitará de tu dispositivo.</string>
+    <string name="downloads_notif_channel_name">Descargas</string>
+    <string name="downloads_notif_channel_description">Progreso y resultados de las descargas de archivos</string>
+    <string name="downloads_notif_running">Descargando</string>
+    <string name="downloads_notif_starting">Iniciando descarga</string>
+    <plurals name="downloads_notif_many_title">
+        <item quantity="one">%d descarga</item>
+        <item quantity="many">%d descargas</item>
+        <item quantity="other">%d descargas</item>
+    </plurals>
+    <string name="downloads_cancel_all">Cancelar todo</string>
+    <string name="downloads_notif_public_title">Orbis</string>
+    <string name="downloads_notif_public_text">Descargando archivos</string>
+    <string name="downloads_notif_done">Descarga completa</string>
+    <string name="downloads_notif_done_public">Finalizó una descarga</string>
+</resources>

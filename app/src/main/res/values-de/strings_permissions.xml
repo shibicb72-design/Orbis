@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="perm_prompt_title">%1$s erlauben:</string>
+    <string name="perm_prompt_embedded">Eingebettet in %1$s</string>
+    <string name="perm_prompt_camera">Deine Kamera verwenden</string>
+    <string name="perm_prompt_microphone">Dein Mikrofon verwenden</string>
+    <string name="perm_prompt_location">Deinen Standort abrufen</string>
+    <string name="perm_prompt_remember">Für diese Website merken</string>
+    <string name="perm_prompt_allow">Erlauben</string>
+    <string name="perm_prompt_deny">Ablehnen</string>
+
+    <string name="perm_blocked_title">Berechtigung ist blockiert</string>
+    <string name="perm_blocked_body">Android fragt nicht mehr nach dieser Berechtigung. Du kannst sie in den Systemeinstellungen dieser App aktivieren.</string>
+    <string name="perm_open_settings">Einstellungen öffnen</string>
+    <string name="perm_not_now">Nicht jetzt</string>
+
+    <string name="perm_settings_title">Website-Berechtigungen</string>
+    <string name="perm_settings_summary">Antworten zu Kamera, Mikrofon und Standort</string>
+    <string name="perm_settings_empty">Noch keine Website-Berechtigungen gespeichert.</string>
+    <string name="perm_settings_note">Antworten mit dem Vermerk \"diese Sitzung\" werden nach einer Stunde oder beim Neustart von Orbis vergessen.</string>
+    <string name="perm_kind_camera">Kamera</string>
+    <string name="perm_kind_microphone">Mikrofon</string>
+    <string name="perm_kind_location">Standort</string>
+    <string name="perm_state_allowed">Erlaubt</string>
+    <string name="perm_state_denied">Blockiert</string>
+    <string name="perm_state_session">diese Sitzung</string>
+    <string name="perm_embedded_on">eingebettet auf %1$s</string>
+    <string name="perm_remove">Entfernen</string>
+    <string name="perm_remove_description">%1$s für %2$s entfernen</string>
+</resources>

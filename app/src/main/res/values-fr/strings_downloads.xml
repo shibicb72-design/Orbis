@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="downloads_title">Téléchargements</string>
+    <string name="downloads_back">Retour</string>
+    <string name="downloads_empty">Aucun téléchargement pour l\'instant.</string>
+    <string name="downloads_cancel">Annuler</string>
+    <string name="downloads_open">Ouvrir</string>
+    <string name="downloads_share">Partager</string>
+    <string name="downloads_delete">Supprimer</string>
+    <string name="downloads_open_chooser">Ouvrir avec</string>
+    <string name="downloads_share_chooser">Partager avec</string>
+    <string name="downloads_from_host">Depuis %1$s</string>
+    <string name="downloads_progress_known">%1$s sur %2$s</string>
+    <string name="downloads_progress_unknown">%1$s téléchargés</string>
+    <string name="downloads_status_failed">Échec du téléchargement</string>
+    <string name="downloads_status_cancelled">Téléchargement annulé</string>
+    <string name="downloads_file_missing">Ce fichier n\'est plus disponible.</string>
+    <string name="downloads_no_app">Aucune application ne peut ouvrir ce fichier.</string>
+    <string name="downloads_action_failed">Impossible d\'ouvrir le fichier.</string>
+    <string name="downloads_delete_confirm_title">Supprimer ce téléchargement ?</string>
+    <string name="downloads_delete_confirm_body">Le fichier sera supprimé de votre appareil.</string>
+    <string name="downloads_notif_channel_name">Téléchargements</string>
+    <string name="downloads_notif_channel_description">Progression et résultat des téléchargements de fichiers</string>
+    <string name="downloads_notif_running">Téléchargement en cours</string>
+    <string name="downloads_notif_starting">Démarrage du téléchargement</string>
+    <plurals name="downloads_notif_many_title">
+        <item quantity="one">%d téléchargement</item>
+        <item quantity="many">%d téléchargements</item>
+        <item quantity="other">%d téléchargements</item>
+    </plurals>
+    <string name="downloads_cancel_all">Tout annuler</string>
+    <string name="downloads_notif_public_title">Orbis</string>
+    <string name="downloads_notif_public_text">Téléchargement de fichiers</string>
+    <string name="downloads_notif_done">Téléchargement terminé</string>
+    <string name="downloads_notif_done_public">Un téléchargement est terminé</string>
+</resources>
