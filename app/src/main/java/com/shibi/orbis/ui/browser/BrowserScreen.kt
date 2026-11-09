@@ -1,6 +1,14 @@
 package com.shibi.orbis.ui.browser
 
 import android.app.Activity
+import com.shibi.orbis.engine.hostOfUrl
+import com.shibi.orbis.engine.SitePermissionKey
+import com.shibi.orbis.engine.SitePermissionKind
+import com.shibi.orbis.engine.siteOriginOf
+import com.shibi.orbis.ui.passwords.copySensitive
+import com.shibi.orbis.passwords.generatePassword
+import androidx.compose.material.icons.filled.Password
+import androidx.compose.material.icons.filled.Tune
 import com.shibi.orbis.engine.normalizeAddressInput
 import androidx.compose.material.icons.filled.VerticalSplit
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
@@ -279,6 +287,8 @@ private fun BrowserContent(
     val tabList by tabs.tabs.collectAsStateWithLifecycle()
     val recentlyClosed by tabs.recentlyClosed.collectAsStateWithLifecycle()
     var showRecentlyClosed by remember { mutableStateOf(false) }
+    var showSiteSettings by remember { mutableStateOf(false) }
+    var generatedPassword by remember { mutableStateOf<String?>(null) }
     val toolbarBottom by container.browserSettings.toolbarBottom.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbars = remember { SnackbarHostState() }
@@ -654,24 +664,20 @@ private fun BrowserContent(
                                 },
                             )
                             DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_tracking_protection)) },
-                                enabled = state.trackingProtectionOff != null,
-                                trailingIcon = { Checkbox(checked = state.trackingProtectionOff != true, onCheckedChange = null) },
+                                text = { Text(stringResource(R.string.menu_site_settings)) },
+                                leadingIcon = { Icon(Icons.Filled.Tune, contentDescription = null) },
+                                enabled = session != null && isWebUrl(state.url),
                                 onClick = {
                                     menuOpen = false
-                                    // Checked means protected; unchecking makes an exception for this site.
-                                    session?.setTrackingProtectionOff(state.trackingProtectionOff != true)
+                                    showSiteSettings = true
                                 },
                             )
                             DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_javascript)) },
-                                enabled = session != null && isWebUrl(state.url),
-                                trailingIcon = { Checkbox(checked = state.javaScriptOn, onCheckedChange = null) },
+                                text = { Text(stringResource(R.string.menu_generate_password)) },
+                                leadingIcon = { Icon(Icons.Filled.Password, contentDescription = null) },
                                 onClick = {
                                     menuOpen = false
-                                    val s = session ?: return@DropdownMenuItem
-                                    container.browserSettings.rememberJavaScript(state.url, !state.javaScriptOn, s.isPrivate)
-                                    s.setJavaScriptEnabled(!state.javaScriptOn)
+                                    generatedPassword = generatePassword()
                                 },
                             )
                             DropdownMenuItem(
@@ -997,6 +1003,69 @@ private fun BrowserContent(
             }
             if (!fullScreen && toolbarBottom) chrome()
         }
+    }
+
+    if (showSiteSettings && session != null && isWebUrl(state.url)) {
+        val s0 = session
+        val origin = siteOriginOf(state.url)
+        val entries by container.sitePermissions.entries.collectAsStateWithLifecycle()
+        val perms =
+            SitePermissionKind.entries.associateWith { kind ->
+                permissionChoiceOf(entries.firstOrNull { it.key.kind == kind && it.key.origin == origin && it.key.embedder == null }?.allow)
+            }
+        SiteSettingsSheet(
+            host = hostOfUrl(state.url).orEmpty(),
+            secure = state.url.startsWith("https://"),
+            isPrivate = s0.isPrivate,
+            trackingOn = state.trackingProtectionOff != true,
+            javaScriptOn = state.javaScriptOn,
+            desktop = state.desktopMode,
+            permissions = perms,
+            onTracking = { on -> s0.setTrackingProtectionOff(!on) },
+            onJavaScript = { on ->
+                container.browserSettings.rememberJavaScript(state.url, on, s0.isPrivate)
+                s0.setJavaScriptEnabled(on)
+            },
+            onDesktop = { on ->
+                container.browserSettings.rememberDesktop(state.url, on, s0.isPrivate)
+                s0.setDesktopMode(on)
+            },
+            onPermission = { kind, choice ->
+                if (origin != null) {
+                    val key = SitePermissionKey(kind, origin)
+                    when (choice) {
+                        PermissionChoice.ALLOW -> container.sitePermissions.record(key, allow = true, remember = true)
+                        PermissionChoice.BLOCK -> container.sitePermissions.record(key, allow = false, remember = true)
+                        PermissionChoice.ASK -> {
+                            container.sitePermissions.remove(key)
+                            container.engine.reconcileSitePermissions()
+                        }
+                    }
+                }
+            },
+            onClearData = {
+                val url = state.url
+                scope.launch {
+                    val ok = container.engine.clearSiteData(url)
+                    Toast.makeText(androidContext, if (ok) R.string.site_cleared else R.string.site_clear_failed, Toast.LENGTH_SHORT).show()
+                    if (ok) s0.reload()
+                }
+                showSiteSettings = false
+            },
+            onDismiss = { showSiteSettings = false },
+        )
+    }
+
+    generatedPassword?.let { pw ->
+        GeneratedPasswordDialog(
+            password = pw,
+            onCopy = {
+                copySensitive(androidContext, pw, sensitive = true)
+                generatedPassword = null
+            },
+            onAnother = { generatedPassword = generatePassword() },
+            onDismiss = { generatedPassword = null },
+        )
     }
 
     if (showRecentlyClosed) {

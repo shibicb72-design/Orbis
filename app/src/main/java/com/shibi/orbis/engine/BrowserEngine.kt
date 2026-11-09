@@ -79,6 +79,11 @@ interface BrowserEngine {
      */
     fun clearPrivateData()
     /**
+     * Clears one site's cookies, site storage, sign-in sessions and cache in the normal profile (Site settings).
+     * Permissions and the content blocker's settings stay. False when the engine is not running or it failed.
+     */
+    suspend fun clearSiteData(url: String): Boolean = false
+    /**
      * Clears the engine's cookies and site data ([cookiesAndSiteData]) and/or its caches ([cache]). Never touches site
      * permission answers or settings. Gecko has no normal-only scope for this: it reaches private storage too, so a
      * caller must make sure no private tab is open. Clearing cookies and site data may also drop open network

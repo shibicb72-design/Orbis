@@ -271,6 +271,39 @@ class GeckoEngineImpl(
         }
     }
 
+    override suspend fun clearSiteData(url: String): Boolean {
+        val host = hostOfUrl(url)?.lowercase() ?: return false
+        val storage = runtime?.storageController ?: return false
+        val flags = profileClearFlags(cookiesAndSiteData = true, cache = true)
+        // The host itself, then its site (a.example.com and example.com share cookies); without a public suffix list
+        // the site is the host without "www.". Neither ever reaches private data (separate context).
+        val targets = listOf(host, host.removePrefix("www.")).distinct()
+        return try {
+            var ok = true
+            for (t in targets) {
+                ok = ok and suspendCancellableCoroutine { cont ->
+                    storage.clearDataFromHost(t, flags).accept(
+                        { if (cont.isActive) cont.resume(true) },
+                        { if (cont.isActive) cont.resume(false) },
+                    )
+                }
+                ok = ok and suspendCancellableCoroutine { cont ->
+                    storage.clearDataFromBaseDomain(t, flags).accept(
+                        { if (cont.isActive) cont.resume(true) },
+                        { if (cont.isActive) cont.resume(false) },
+                    )
+                }
+            }
+            debugLog.log("GeckoEngine", "site data cleared ok=$ok")
+            ok
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            debugLog.log("GeckoEngine", "site data clear failed: ${e.javaClass.simpleName}")
+            false
+        }
+    }
+
     override suspend fun clearProfileData(cookiesAndSiteData: Boolean, cache: Boolean): Boolean {
         val flags = profileClearFlags(cookiesAndSiteData, cache)
         if (flags == 0L) return true

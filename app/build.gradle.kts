@@ -17,8 +17,8 @@ android {
         applicationId = "com.shibi.orbis"
         minSdk = 29
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.4.3"
+        versionCode = 8
+        versionName = "0.4.4"
     }
 
     splits {

@@ -323,7 +323,7 @@ private fun LoginRow(login: SavedLogin, onDelete: () -> Unit) {
 private const val SENSITIVE_CLIP_KEY = "android.content.extra.IS_SENSITIVE"
 
 /** Copies to the clipboard; a password is marked sensitive so the system does not preview it (Android 13+). */
-private fun copySensitive(context: Context, text: String, sensitive: Boolean) {
+internal fun copySensitive(context: Context, text: String, sensitive: Boolean) {
     val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
     val clip = ClipData.newPlainText("orbis", text)
     if (sensitive) {

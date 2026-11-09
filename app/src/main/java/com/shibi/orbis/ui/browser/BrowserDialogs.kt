@@ -190,3 +190,32 @@ internal fun RecentlyClosedDialog(
         dismissButton = { TextButton(onClick = onClear) { Text(stringResource(R.string.tabs_recently_closed_clear)) } },
     )
 }
+
+/**
+ * A strong password made on the phone. Copy puts it on the clipboard (marked sensitive) to paste into the sign-up
+ * form; Orbis then offers to save it when the form is sent. It is not stored anywhere before that.
+ */
+@Composable
+internal fun GeneratedPasswordDialog(password: String, onCopy: () -> Unit, onAnother: () -> Unit, onDismiss: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.genpw_title)) },
+        text = {
+            androidx.compose.foundation.layout.Column {
+                androidx.compose.foundation.text.selection.SelectionContainer {
+                    Text(
+                        password,
+                        style = androidx.compose.material3.MaterialTheme.typography.titleMedium.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                    )
+                }
+                Text(
+                    stringResource(R.string.genpw_note),
+                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onCopy) { Text(stringResource(R.string.genpw_copy)) } },
+        dismissButton = { TextButton(onClick = onAnother) { Text(stringResource(R.string.genpw_another)) } },
+    )
+}
