@@ -79,7 +79,7 @@ import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalDensity
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.WindowInsetsCompat
@@ -393,7 +393,10 @@ private fun BrowserContent(
                 // Very large text on a narrow window: the address gets a row of its own and Back, Tabs and the menu move
                 // to a second row (toolbarWraps). The address bar keeps its place in composition either way, so a layout
                 // change never drops what the user is typing.
-                val twoRow = toolbarWraps(LocalDensity.current.fontScale, LocalConfiguration.current.screenWidthDp)
+                val density = LocalDensity.current
+                // The window's own width (split screen and the Fold's halves included), not the whole display.
+                val windowWidthDp = with(density) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
+                val twoRow = toolbarWraps(density.fontScale, windowWidthDp)
                 val backButton: @Composable () -> Unit = {
                     IconButton(onClick = { session?.goBack() }, enabled = state.canGoBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
