@@ -120,7 +120,13 @@ class MediaPlaybackService : Service() {
                 .setContentText(text)
                 .setContentIntent(open)
                 .setOngoing(tab.media.playing)
-                .setVisibility(if (tab.isPrivate) Notification.VISIBILITY_PRIVATE else Notification.VISIBILITY_PUBLIC)
+                // Private on the lock screen for every tab, like the download notifications: a page title can be as
+                // revealing as an address. The lock screen gets a generic line instead.
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .setPublicVersion(
+                    Notification.Builder(this, CHANNEL_ID).setSmallIcon(android.R.drawable.ic_media_play)
+                        .setContentTitle(getString(R.string.media_playing)).build(),
+                )
                 .addAction(toggle)
                 .addAction(stop)
                 .setStyle(Notification.MediaStyle().setMediaSession(s.sessionToken).setShowActionsInCompactView(0, 1))

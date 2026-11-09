@@ -23,8 +23,8 @@ interface PrivacyWindowOps {
 
 /** Turns [PrivacyWindowPolicy] decisions into window operations. */
 class PrivacyWindowController(private val ops: PrivacyWindowOps) {
-    fun apply(apiLevel: Int, anyPrivateTabOpen: Boolean) {
-        val decision = PrivacyWindowPolicy.decide(apiLevel, anyPrivateTabOpen)
+    fun apply(apiLevel: Int, anyPrivateTabOpen: Boolean, sensitiveScreenOpen: Boolean = false) {
+        val decision = PrivacyWindowPolicy.decide(apiLevel, anyPrivateTabOpen, sensitiveScreenOpen)
         if (apiLevel >= PrivacyWindowPolicy.RECENTS_API) ops.setRecentsScreenshot(decision.recentsScreenshotEnabled)
         ops.setFlagSecure(decision.flagSecure)
     }
@@ -42,7 +42,13 @@ object PrivacyWindowPolicy {
     /** First API with Activity.setRecentsScreenshotEnabled (Android 13); kept as a belt-and-braces call next to FLAG_SECURE. */
     const val RECENTS_API = 33
 
+    /**
+     * [sensitiveScreenOpen]: a screen that shows secrets (Settings > Passwords) is on screen. It gets the same protection
+     * as a private tab, so a revealed password never lands in the Recents card or a screenshot.
+     */
     @Suppress("UNUSED_PARAMETER")
-    fun decide(apiLevel: Int, anyPrivateTabOpen: Boolean): PrivacyWindowDecision =
-        PrivacyWindowDecision(recentsScreenshotEnabled = !anyPrivateTabOpen, flagSecure = anyPrivateTabOpen)
+    fun decide(apiLevel: Int, anyPrivateTabOpen: Boolean, sensitiveScreenOpen: Boolean = false): PrivacyWindowDecision {
+        val protect = anyPrivateTabOpen || sensitiveScreenOpen
+        return PrivacyWindowDecision(recentsScreenshotEnabled = !protect, flagSecure = protect)
+    }
 }

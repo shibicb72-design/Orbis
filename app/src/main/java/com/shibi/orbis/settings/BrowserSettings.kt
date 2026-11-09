@@ -130,7 +130,7 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         }
 
     override var httpsOnly: HttpsOnlyMode
-        get() = HttpsOnlyMode.entries.firstOrNull { it.name == prefs.getString(KEY_HTTPS_ONLY, null) } ?: HttpsOnlyMode.PRIVATE
+        get() = HttpsOnlyMode.entries.firstOrNull { it.name == prefs.getString(KEY_HTTPS_ONLY, null) } ?: HttpsOnlyMode.ALL
         set(value) {
             prefs.edit { putString(KEY_HTTPS_ONLY, value.name) }
         }

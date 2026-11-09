@@ -203,4 +203,20 @@ class PasswordsTest {
         assertFalse("an emptied store drops the set-aside copy", File(file.parentFile, "logins.enc.corrupt").exists())
         assertNotEquals("not base64 or not ours", file.readText())
     }
+
+    @Test
+    fun clearAllDeletesEveryLoginAndPersistsTheEmptyList() {
+        val store = MemLoginStore(listOf(SavedLogin("g1", "https://a.test", username = "u", password = "p")))
+        val m = manager(store)
+        assertEquals(1, m.logins.value.size)
+        m.clearAll()
+        scheduler.advanceUntilIdle()
+        assertTrue(m.logins.value.isEmpty())
+        assertTrue(store.data.isEmpty())
+    }
+
+    @Test(expected = IllegalStateException::class)
+    fun clearAllIsRefusedBeforeLoad() {
+        LoginManager(MemLoginStore(), MemNever(), scope, log = {}, now = { clock }, io = dispatcher).clearAll()
+    }
 }

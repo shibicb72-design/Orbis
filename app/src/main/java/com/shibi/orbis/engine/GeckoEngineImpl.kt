@@ -533,6 +533,7 @@ private class GeckoBrowserSession(
                         request.hasUserGesture && isWebUrl(request.uri) && host?.canOpenTab() == true
                     return GeckoResult.fromValue(if (allow) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
                 }
+                if (request.hasUserGesture && !request.isRedirect) lastGestureNavigationAt = SystemClock.elapsedRealtime()
                 // Links for other apps (tel:, mailto:, intent:, an app's own scheme): never loaded here.
                 if (isExternalScheme(request.uri)) return externalSchemeRequest(request)
                 // A web link an installed app opens: ask first (link taps only, not typed addresses or same-site links).
@@ -674,11 +675,23 @@ private class GeckoBrowserSession(
 
     private val externalApps = ExternalApps(appContext)
 
+    /** elapsedRealtime of the last top-level navigation the user tapped; null before the first. Main thread. */
+    private var lastGestureNavigationAt: Long? = null
+
+    /** An "Open in app" question is on screen or queued for this tab. Main thread. */
+    private var openInAppPending = false
+
     private fun externalSchemeRequest(request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny> {
         val deny = GeckoResult.fromValue(AllowOrDeny.DENY)
-        // A page cannot start an app on its own: a tap (or a redirect that followed one) is needed.
-        if (!request.hasUserGesture && !request.isRedirect) {
+        // A page cannot start an app on its own: a tap, or a redirect of a navigation tapped moments ago, is needed.
+        val sinceTap = lastGestureNavigationAt?.let { SystemClock.elapsedRealtime() - it }
+        if (!externalLaunchAllowed(request.hasUserGesture, request.isRedirect, sinceTap)) {
             debugLog.log("GeckoSession", "external app link without a tap: blocked")
+            return deny
+        }
+        // One question at a time: further requests while one is open are refused, so a page cannot queue a stream of them.
+        if (openInAppPending) {
+            debugLog.log("GeckoSession", "external app link while one is pending: blocked")
             return deny
         }
         val target = externalApps.forExternalScheme(request.uri) ?: return deny
@@ -696,8 +709,11 @@ private class GeckoBrowserSession(
         // Staying loads a web link here; anything else has nothing to load.
         val stay = if (webLink) AllowOrDeny.ALLOW else AllowOrDeny.DENY
         if (closed) return GeckoResult.fromValue(stay)
+        if (openInAppPending) return GeckoResult.fromValue(stay)
+        openInAppPending = true
         queue.add(
             SitePrompt.OpenInApp(originHost(), target.label, webLink, isPrivate) { open ->
+                openInAppPending = false
                 if (open == true) {
                     if (externalApps.launch(target)) {
                         result.complete(AllowOrDeny.DENY)
@@ -1796,7 +1812,9 @@ private class GeckoBrowserSession(
 
     override fun saveUrl(url: String) {
         if (closed || !isWebUrl(url)) return
-        val referrer = _state.value.url.takeIf { isWebUrl(it) }
+        // Origin only (scheme://host[:port]/), like the strict-origin-when-cross-origin policy pages get: the page's
+        // path and query never go to the site the link points at.
+        val referrer = trackingOrigin(_state.value.url.takeIf { isWebUrl(it) })?.let { "$it/" }
         val request = WebRequest.Builder(url).apply { if (referrer != null) referrer(referrer) }.build()
         val flags = if (isPrivate) GeckoWebExecutor.FETCH_FLAGS_PRIVATE else GeckoWebExecutor.FETCH_FLAGS_NONE
         GeckoWebExecutor(runtime).fetch(request, flags).accept(
@@ -2012,7 +2030,7 @@ private class GeckoExtensionHost(
                         throw ExtensionInstallException(error, "install failed, code ${e.code}")
                     } catch (e: Exception) {
                         debugLog.log("Extensions", "install failed: ${e.javaClass.simpleName}")
-                        throw ExtensionInstallException(ExtensionInstallError.UNKNOWN, e.message)
+                        throw ExtensionInstallException(ExtensionInstallError.UNKNOWN, "install failed: ${e.javaClass.simpleName}")
                     }
                 val installed =
                     result
@@ -2043,7 +2061,7 @@ private class GeckoExtensionHost(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            debugLog.log("Extensions", "cleanup uninstall of ${extension.id} failed: ${e.message}")
+            debugLog.log("Extensions", "cleanup uninstall of ${extension.id} failed: ${e.javaClass.simpleName}")
         }
     }
 

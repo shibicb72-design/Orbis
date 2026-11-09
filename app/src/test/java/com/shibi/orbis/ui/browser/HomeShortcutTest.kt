@@ -1,6 +1,7 @@
 package com.shibi.orbis.ui.browser
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -14,6 +15,16 @@ class HomeShortcutTest {
         assertEquals("E", shortcutLetter("https://www.example.org/a"))
         assertEquals("9", shortcutLetter("http://9gag.com/"))
         assertEquals("#", shortcutLetter("about:blank"))
+    }
+
+    @Test
+    fun idsDoNotCollideLikeHashCode() {
+        val a = "http://10.0.2.2:8765/bankAa"
+        val b = "http://10.0.2.2:8765/bankBB"
+        assertEquals(a.hashCode(), b.hashCode()) // the old id scheme collided
+        assertNotEquals(shortcutId(a), shortcutId(b))
+        assertEquals(shortcutId(a), shortcutId(a))
+        assertEquals(6 + 32, shortcutId(a).length)
     }
 
     @Test

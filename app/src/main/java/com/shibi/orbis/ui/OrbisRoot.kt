@@ -6,7 +6,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.flow.update
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
@@ -163,6 +165,11 @@ fun OrbisRoot(container: AppContainer) {
             )
         }
         composable(Routes.Passwords) {
+            // Shows secrets: the window is protected (FLAG_SECURE, no Recents snapshot) while this screen is up.
+            DisposableEffect(Unit) {
+                container.sensitiveScreens.update { it + 1 }
+                onDispose { container.sensitiveScreens.update { it - 1 } }
+            }
             PasswordsScreen(
                 manager = container.logins,
                 offerSaveFlow = container.browserSettings.offerSavePasswords,

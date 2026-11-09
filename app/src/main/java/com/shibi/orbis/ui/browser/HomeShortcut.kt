@@ -14,6 +14,7 @@ import androidx.core.net.toUri
 import com.shibi.orbis.MainActivity
 import com.shibi.orbis.engine.hostOfUrl
 import com.shibi.orbis.engine.isWebUrl
+import java.security.MessageDigest
 
 /** The letter on a home screen shortcut: the site's first letter without "www.", or "#" when there is none. */
 internal fun shortcutLetter(url: String): String {
@@ -26,6 +27,16 @@ internal fun shortcutLabel(url: String, title: String): String =
     title.trim().ifEmpty { hostOfUrl(url)?.removePrefix("www.").orEmpty() }.ifEmpty { url }.take(60)
 
 /**
+ * Shortcut id for [url]: 128 bits of its SHA-256. The old 32-bit String.hashCode let two pages share an id ("…/bankAa" and
+ * "…/bankBB" do), so the second page could never be pinned (seen on an API 35 emulator), and on a launcher that updates
+ * pinned shortcuts in place a crafted page could take over an existing one.
+ */
+internal fun shortcutId(url: String): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest(url.toByteArray(Charsets.UTF_8))
+    return "site2-" + digest.take(16).joinToString("") { "%02x".format(it) }
+}
+
+/**
  * Asks the launcher to pin a shortcut that opens [url] in Orbis. Returns false when the launcher cannot pin shortcuts
  * or the address is not a web page. The launcher shows its own confirmation.
  */
@@ -33,7 +44,7 @@ internal fun requestHomeShortcut(context: Context, url: String, title: String): 
     if (!isWebUrl(url) || !ShortcutManagerCompat.isRequestPinShortcutSupported(context)) return false
     val intent = Intent(Intent.ACTION_VIEW, url.toUri()).setClass(context, MainActivity::class.java)
     val info =
-        ShortcutInfoCompat.Builder(context, "site-" + url.hashCode().toUInt().toString(16))
+        ShortcutInfoCompat.Builder(context, shortcutId(url))
             .setShortLabel(shortcutLabel(url, title))
             .setIcon(IconCompat.createWithAdaptiveBitmap(letterIcon(shortcutLetter(url))))
             .setIntent(intent)

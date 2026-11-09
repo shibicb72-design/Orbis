@@ -38,6 +38,18 @@ class PrivacyWindowPolicyTest {
     }
 
     @Test
+    fun sensitiveScreenIsProtectedWithoutAnyPrivateTab() {
+        val protectedWindow = PrivacyWindowDecision(recentsScreenshotEnabled = false, flagSecure = true)
+        for (api in listOf(29, 33, 35, 37)) {
+            assertEquals("api $api", protectedWindow, PrivacyWindowPolicy.decide(api, anyPrivateTabOpen = false, sensitiveScreenOpen = true))
+            assertEquals("api $api", protectedWindow, PrivacyWindowPolicy.decide(api, anyPrivateTabOpen = true, sensitiveScreenOpen = true))
+        }
+        val ops = FakeOps()
+        PrivacyWindowController(ops).apply(35, anyPrivateTabOpen = false, sensitiveScreenOpen = true)
+        assertEquals(listOf("recents=false", "secure=true"), ops.calls)
+    }
+
+    @Test
     fun noPrivateTabClearsFlagSecureAndEnablesRecentsOnEveryApi() {
         for (api in listOf(29, 30, 32, 33, 34, 35, 36, 37)) {
             assertEquals(
