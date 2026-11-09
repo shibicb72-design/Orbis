@@ -201,6 +201,8 @@ class OrbisApp : Application() {
 
                 override fun clearBookmarks() = bookmarks.clearAll()
 
+                override fun clearPasswords() = logins.clearAll()
+
                 override fun hasPrivateTabs() = tabs.hasPrivateTabs
 
                 override suspend fun clearEngine(cookiesAndSiteData: Boolean, cache: Boolean) =
@@ -289,4 +291,10 @@ class AppContainer(
 
     /** A download notification was tapped. Consumed by OrbisRoot, which navigates once, and only after onboarding. */
     val pendingShowDownloads = MutableStateFlow(false)
+
+    /**
+     * How many screens that show secrets (Settings > Passwords) are on screen. Above zero, MainActivity protects the
+     * window (FLAG_SECURE, no Recents snapshot) as it does for private tabs.
+     */
+    val sensitiveScreens = MutableStateFlow(0)
 }

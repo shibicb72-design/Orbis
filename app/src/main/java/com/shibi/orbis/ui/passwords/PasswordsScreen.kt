@@ -44,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,6 +60,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shibi.orbis.R
 import com.shibi.orbis.passwords.LoginManager
@@ -84,7 +88,8 @@ internal fun filterLogins(logins: List<SavedLogin>, query: String): List<SavedLo
 
 /**
  * Settings > Passwords. The list, passwords and export are behind the screen lock (fingerprint or PIN/pattern/password
- * through Android's own prompt); unlocking lasts while this screen is open. Without a screen lock nothing is shown.
+ * through Android's own prompt); unlocking lasts until the app leaves the screen (ON_STOP). Without a screen lock
+ * nothing is shown. The caller protects the window (FLAG_SECURE) while this screen is up.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -104,6 +109,13 @@ fun PasswordsScreen(
     val never by manager.neverSave.collectAsStateWithLifecycle()
     val offerSave by offerSaveFlow.collectAsStateWithLifecycle()
     var unlocked by remember { mutableStateOf(startUnlocked) }
+    // Leaving the app (Home, Recents, another app) locks the list again: a phone handed over later must ask first.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) unlocked = false }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     var query by remember { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
     var confirmExport by remember { mutableStateOf(false) }

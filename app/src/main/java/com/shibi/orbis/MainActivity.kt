@@ -21,6 +21,7 @@ import com.shibi.orbis.media.pipAspectRatio
 import com.shibi.orbis.media.pipShapeOf
 import com.shibi.orbis.ui.BackKeyWindowCallback
 import com.shibi.orbis.ui.theme.OrbisTheme
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -37,7 +38,12 @@ class MainActivity : ComponentActivity() {
         // whole life of the activity, not only while started, so the window is already right when the system takes its
         // Recents snapshot.
         lifecycleScope.launch {
-            app.container.tabs.tabs.map { list -> list.any { it.isPrivate } }.distinctUntilChanged().collect(::applyPrivacyWindow)
+            combine(
+                app.container.tabs.tabs.map { list -> list.any { it.isPrivate } },
+                app.container.sensitiveScreens.map { it > 0 },
+            ) { anyPrivate, sensitive -> anyPrivate to sensitive }
+                .distinctUntilChanged()
+                .collect { (anyPrivate, sensitive) -> applyPrivacyWindow(anyPrivate, sensitive) }
         }
         // Picture-in-picture: a fullscreen video that is playing shrinks into a window when the user leaves (Home).
         lifecycleScope.launch {
@@ -128,8 +134,8 @@ class MainActivity : ComponentActivity() {
             },
         )
 
-    private fun applyPrivacyWindow(anyPrivateTabOpen: Boolean) {
-        privacyWindow.apply(Build.VERSION.SDK_INT, anyPrivateTabOpen)
+    private fun applyPrivacyWindow(anyPrivateTabOpen: Boolean, sensitiveScreenOpen: Boolean) {
+        privacyWindow.apply(Build.VERSION.SDK_INT, anyPrivateTabOpen, sensitiveScreenOpen)
     }
 
     /**
