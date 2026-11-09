@@ -43,6 +43,7 @@ import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.StorageController
 import org.mozilla.geckoview.GeckoWebExecutor
+import org.mozilla.geckoview.MediaSession
 import org.mozilla.geckoview.WebExtension
 import org.mozilla.geckoview.WebRequest
 import org.mozilla.geckoview.WebExtensionController
@@ -360,6 +361,7 @@ private class GeckoBrowserSession(
         session.contentDelegate = contentDelegate()
         session.promptDelegate = promptDelegate()
         session.permissionDelegate = permissionDelegate()
+        session.mediaSessionDelegate = mediaSessionDelegate()
     }
 
     /** Opens the session (never called for a popup child: Gecko opens that one) and applies [init]. */
@@ -487,6 +489,19 @@ private class GeckoBrowserSession(
             }
         }
 
+    private fun mediaSessionDelegate() =
+        object : MediaSession.Delegate {
+            override fun onFullscreen(
+                session: GeckoSession,
+                mediaSession: MediaSession,
+                enabled: Boolean,
+                meta: MediaSession.ElementMetadata?,
+            ) {
+                val landscape = enabled && meta != null && meta.width > meta.height
+                _state.update { it.copy(fullScreenVideoLandscape = landscape) }
+            }
+        }
+
     private fun contentDelegate() =
         object : GeckoSession.ContentDelegate {
             override fun onTitleChange(session: GeckoSession, title: String?) {
@@ -499,7 +514,7 @@ private class GeckoBrowserSession(
             }
 
             override fun onFullScreen(session: GeckoSession, fullScreen: Boolean) {
-                _state.update { it.copy(fullScreen = fullScreen) }
+                _state.update { it.copy(fullScreen = fullScreen, fullScreenVideoLandscape = fullScreen && it.fullScreenVideoLandscape) }
                 debugLog.log("GeckoSession", "fullscreen $fullScreen")
             }
 

@@ -47,5 +47,6 @@ class FullScreenComposeTest {
     @Test
     fun aContentProcessCrashEndsFullScreen() {
         assertFalse(SessionState(fullScreen = true).afterContentProcessGone().fullScreen)
+        assertFalse(SessionState(fullScreen = true, fullScreenVideoLandscape = true).afterContentProcessGone().fullScreenVideoLandscape)
     }
 }

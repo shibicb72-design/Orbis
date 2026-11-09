@@ -2,6 +2,7 @@ package com.shibi.orbis.ui.browser
 
 import android.app.Activity
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
@@ -130,8 +131,17 @@ private class LaunchedAndroidRequest {
 
 /** Hides the system bars (swipe shows them briefly) and keeps the screen on while [fullScreen]; restores both after. */
 @Composable
-internal fun FullScreenWindowEffect(fullScreen: Boolean) {
+internal fun FullScreenWindowEffect(fullScreen: Boolean, landscape: Boolean = false) {
     val view = LocalView.current
+    // A wide fullscreen video turns the screen to landscape (either way round) and gives it back afterwards.
+    DisposableEffect(landscape, view) {
+        val activity = view.context.findActivity()
+        val before = activity?.requestedOrientation
+        if (landscape && activity != null) activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        onDispose {
+            if (landscape && activity != null && before != null) activity.requestedOrientation = before
+        }
+    }
     DisposableEffect(fullScreen, view) {
         val window = view.context.findActivity()?.window
         if (fullScreen && window != null) {
@@ -253,7 +263,7 @@ private fun BrowserContent(
     }
     // The selected tab's own page fullscreen; system bars hide and the screen stays on while it lasts.
     val fullScreen = state.fullScreen && session != null
-    FullScreenWindowEffect(fullScreen)
+    FullScreenWindowEffect(fullScreen, landscape = fullScreen && state.fullScreenVideoLandscape)
 
     val blankTab = isBlankAddress(selectedTab.url) && isBlankAddress(state.url)
     val hasLiveOpener = selectedTab.openerTabId?.let { id -> tabList.any { it.id == id } } == true

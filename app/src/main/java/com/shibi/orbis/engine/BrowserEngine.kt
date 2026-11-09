@@ -81,6 +81,8 @@ data class SessionState(
     val findResult: FindResult? = null,
     /** The page asked for fullscreen (e.g. a video's fullscreen button) and the engine granted it. */
     val fullScreen: Boolean = false,
+    /** A video went fullscreen and is wider than tall: the screen turns to landscape, like Chrome and Firefox. */
+    val fullScreenVideoLandscape: Boolean = false,
     /**
      * Monotonic counters that make load boundaries observable even when the state flow conflates them (a collector only
      * ever sees the latest value, so "started, then failed" can look like "nothing happened"). Never reset.
@@ -143,6 +145,7 @@ internal fun SessionState.afterContentProcessGone(): SessionState =
         canGoForward = false,
         findResult = null,
         fullScreen = false,
+        fullScreenVideoLandscape = false,
         loadEnds = loadEnds + 1,
         navigationsCancelled = navigationsCancelled + 1,
     )
