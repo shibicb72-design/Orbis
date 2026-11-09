@@ -78,6 +78,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowCompat
@@ -162,6 +165,9 @@ internal fun FullScreenWindowEffect(fullScreen: Boolean, landscape: Boolean = fa
 
 /** Wait this long after the last keystroke before asking the search engine. */
 private const val SUGGEST_DEBOUNCE_MS = 150L
+
+/** Whether the toolbar wraps to two rows: large text (font scale 1.3+) on a window narrower than 600dp. */
+internal fun toolbarWraps(fontScale: Float, screenWidthDp: Int): Boolean = fontScale >= 1.3f && screenWidthDp < 600
 
 private tailrec fun Context.findActivity(): Activity? =
     when (this) {
@@ -384,36 +390,16 @@ private fun BrowserContent(
         ) {
             // Page fullscreen (a video): only the page is shown; the chrome comes back when it ends.
             if (!fullScreen) {
-                Row(
-                    Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                // Very large text on a narrow window: the address gets a row of its own and Back, Tabs and the menu move
+                // to a second row (toolbarWraps). The address bar keeps its place in composition either way, so a layout
+                // change never drops what the user is typing.
+                val twoRow = toolbarWraps(LocalDensity.current.fontScale, LocalConfiguration.current.screenWidthDp)
+                val backButton: @Composable () -> Unit = {
                     IconButton(onClick = { session?.goBack() }, enabled = state.canGoBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
-                    // The production address bar (BrowserAddressBar.kt): keyed by tab inside, so typed text, focus, edit mode and
-                    // the pending submit never leak from one tab into another. It reads the selected tab's OWN url and session
-                    // flow, never the `state` collected above, which lags a frame behind a tab switch.
-                    BrowserAddressBar(
-                        tabId = selectedTab.id,
-                        isPrivate = selectedTab.isPrivate,
-                        tabUrl = selectedTab.url,
-                        sessionState = selectedTab.session?.state,
-                        downloadOffer = pendingDownload,
-                        isLoading = state.isLoading,
-                        canReload = session != null,
-                        searchEngine = { container.searchEngine.selected.value },
-                        focusOnStart = focusAddressFor == selectedTab.id,
-                        onFocusOnStartConsumed = { focusAddressFor = null },
-                        loadUrl = { session?.loadUrl(it) },
-                        stop = { session?.stop() },
-                        reload = { session?.reload() },
-                        hideKeyboard = { keyboardController?.hide() },
-                        moveFocusToSink = { focusSink.requestFocus() },
-                        modifier = Modifier.weight(1f),
-                        focusRequests = addressFocusRequests,
-                        bridge = addressBridge,
-                    )
+                }
+                val tabsAndMenu: @Composable () -> Unit = {
                     val tabsDescription =
                         stringResource(if (selectedTab.isPrivate) R.string.tabs_button_private else R.string.tabs_button, tabList.size)
                     val tabsColor = if (selectedTab.isPrivate) MaterialTheme.colorScheme.tertiary else LocalContentColor.current
@@ -574,6 +560,46 @@ private fun BrowserContent(
                                 },
                             )
                         }
+                    }
+                }
+                Row(
+                    Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (!twoRow) backButton()
+                    // The production address bar (BrowserAddressBar.kt): keyed by tab inside, so typed text, focus, edit mode and
+                    // the pending submit never leak from one tab into another. It reads the selected tab's OWN url and session
+                    // flow, never the `state` collected above, which lags a frame behind a tab switch.
+                    BrowserAddressBar(
+                        tabId = selectedTab.id,
+                        isPrivate = selectedTab.isPrivate,
+                        tabUrl = selectedTab.url,
+                        sessionState = selectedTab.session?.state,
+                        downloadOffer = pendingDownload,
+                        isLoading = state.isLoading,
+                        canReload = session != null,
+                        searchEngine = { container.searchEngine.selected.value },
+                        focusOnStart = focusAddressFor == selectedTab.id,
+                        onFocusOnStartConsumed = { focusAddressFor = null },
+                        loadUrl = { session?.loadUrl(it) },
+                        stop = { session?.stop() },
+                        reload = { session?.reload() },
+                        hideKeyboard = { keyboardController?.hide() },
+                        moveFocusToSink = { focusSink.requestFocus() },
+                        modifier = Modifier.weight(1f),
+                        focusRequests = addressFocusRequests,
+                        bridge = addressBridge,
+                    )
+                    if (!twoRow) tabsAndMenu()
+                }
+                if (twoRow) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        backButton()
+                        Spacer(Modifier.weight(1f))
+                        tabsAndMenu()
                     }
                 }
                 if (selectedTab.isPrivate) {
