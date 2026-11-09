@@ -65,7 +65,7 @@ class UboOnboardingController(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    log("uBO setEnabled($enabled) failed: ${e.message}")
+                    log("uBO setEnabled($enabled) failed: ${e.javaClass.simpleName}")
                     refresh()
                 }
             }
@@ -85,7 +85,7 @@ class UboOnboardingController(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    log("uBO remove failed: ${e.message}")
+                    log("uBO remove failed: ${e.javaClass.simpleName}")
                     refresh()
                 }
             }
@@ -115,7 +115,7 @@ class UboOnboardingController(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                log("uBO lookup failed: ${e.message}")
+                log("uBO lookup failed: ${e.javaClass.simpleName}")
                 _state.value = UboState.NotInstalled
                 return
             }
@@ -183,7 +183,7 @@ class UboOnboardingController(
             throw e
         } catch (e: Exception) {
             // Never downgrades the Installed state.
-            log("uBO update check failed: ${e.message}")
+            log("uBO update check failed: ${e.javaClass.simpleName}")
         }
     }
 
@@ -194,7 +194,7 @@ class UboOnboardingController(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            log("uBO state refresh failed: ${e.message}")
+            log("uBO state refresh failed: ${e.javaClass.simpleName}")
         }
     }
 

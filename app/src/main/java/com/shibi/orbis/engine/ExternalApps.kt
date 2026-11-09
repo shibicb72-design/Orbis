@@ -25,6 +25,25 @@ internal fun isExternalScheme(uri: String): Boolean {
     return s !in ENGINE_SCHEMES
 }
 
+/** How long after a tapped navigation its redirects may still end in another app (tracking links, store links). */
+internal const val EXTERNAL_REDIRECT_GRACE_MS = 5_000L
+
+/**
+ * Whether a page may ask to open another app. A tap is required: either this request carries the gesture, or it is a
+ * redirect of a navigation the user tapped within [EXTERNAL_REDIRECT_GRACE_MS]. A redirect alone is not enough, or a
+ * page could script `location = "/302-to-tel:"` and raise the question with no tap at all.
+ * [msSinceGestureNavigation] is null when this session has never seen a tapped navigation.
+ */
+internal fun externalLaunchAllowed(hasUserGesture: Boolean, isRedirect: Boolean, msSinceGestureNavigation: Long?): Boolean =
+    hasUserGesture ||
+        (isRedirect && msSinceGestureNavigation != null && msSinceGestureNavigation in 0..EXTERNAL_REDIRECT_GRACE_MS)
+
+/** Data schemes an intent: link may never hand to another app: local files and content providers. */
+private val BLOCKED_INTENT_DATA_SCHEMES = setOf("file", "content")
+
+/** True when an intent: link's data points at a local file or a content provider. */
+internal fun intentDataBlocked(dataScheme: String?): Boolean = dataScheme?.lowercase() in BLOCKED_INTENT_DATA_SCHEMES
+
 /** An app that can open a link. [label] is null when the system would ask the user to pick one. */
 internal data class AppTarget(val intent: Intent, val label: String?, val fallbackUrl: String?, val resolvable: Boolean)
 
@@ -48,6 +67,8 @@ internal class ExternalApps(private val context: Context) {
             intent.replaceExtras(null as android.os.Bundle?)
             // A page cannot send an intent back into Orbis itself.
             if (intent.`package` == context.packageName) return null
+            // Nor point another app at a local file or a content provider (Chrome refuses the same).
+            if (intentDataBlocked(intent.data?.scheme)) return null
         } else {
             intent = Intent(Intent.ACTION_VIEW, uri.toUri())
         }

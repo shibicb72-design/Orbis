@@ -20,6 +20,23 @@ class ExternalSchemeTest {
     }
 
     @Test
+    fun externalLaunchNeedsATap() {
+        assertTrue(externalLaunchAllowed(hasUserGesture = true, isRedirect = false, msSinceGestureNavigation = null))
+        // A redirect shortly after a tapped link (tracking or store links) still works.
+        assertTrue(externalLaunchAllowed(hasUserGesture = false, isRedirect = true, msSinceGestureNavigation = 800))
+        // Seen on the emulator: script -> 302 -> tel: with no tap raised the question. It must not.
+        assertFalse(externalLaunchAllowed(hasUserGesture = false, isRedirect = true, msSinceGestureNavigation = null))
+        assertFalse(externalLaunchAllowed(hasUserGesture = false, isRedirect = true, msSinceGestureNavigation = EXTERNAL_REDIRECT_GRACE_MS + 1))
+        assertFalse(externalLaunchAllowed(hasUserGesture = false, isRedirect = false, msSinceGestureNavigation = 10))
+    }
+
+    @Test
+    fun intentLinksCannotPointAtFilesOrProviders() {
+        listOf("file", "content", "FILE", "Content").forEach { assertTrue(it, intentDataBlocked(it)) }
+        listOf(null, "https", "tel", "geo", "market").forEach { assertFalse(it.toString(), intentDataBlocked(it)) }
+    }
+
+    @Test
     fun schemeParsing() {
         assertEquals("tel", schemeOf("TEL:+1"))
         assertNull(schemeOf("no scheme here"))
