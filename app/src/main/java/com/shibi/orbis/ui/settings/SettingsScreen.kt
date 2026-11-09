@@ -288,6 +288,14 @@ fun SettingsScreen(
                     val darkSites by site.darkWebsites.collectAsStateWithLifecycle()
                     val alwaysDesktop by site.alwaysDesktop.collectAsStateWithLifecycle()
                     val openInApps by site.openLinksInApps.collectAsStateWithLifecycle()
+                    val toolbarBottom by site.toolbarBottom.collectAsStateWithLifecycle()
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.toolbar_bottom_title)) },
+                        supportingContent = { Text(stringResource(R.string.toolbar_bottom_summary)) },
+                        trailingContent = { Switch(checked = toolbarBottom, onCheckedChange = null) },
+                        modifier = Modifier.fillMaxWidth().toggleable(value = toolbarBottom, role = Role.Switch, onValueChange = site::setToolbarBottom),
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     SettingsItem(
                         headlineContent = { Text(stringResource(R.string.theme_title)) },
                         supportingContent = { Text(stringResource(themeLabel(theme))) },

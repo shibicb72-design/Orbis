@@ -1,6 +1,9 @@
 package com.shibi.orbis.ui.browser
 
 import android.app.Activity
+import com.shibi.orbis.engine.normalizeAddressInput
+import androidx.compose.material.icons.filled.VerticalSplit
+import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import com.shibi.orbis.engine.PageCapture
@@ -276,6 +279,7 @@ private fun BrowserContent(
     val tabList by tabs.tabs.collectAsStateWithLifecycle()
     val recentlyClosed by tabs.recentlyClosed.collectAsStateWithLifecycle()
     var showRecentlyClosed by remember { mutableStateOf(false) }
+    val toolbarBottom by container.browserSettings.toolbarBottom.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbars = remember { SnackbarHostState() }
     val closedMessage = stringResource(R.string.tabs_closed_snackbar)
@@ -318,6 +322,7 @@ private fun BrowserContent(
     var addressFocusRequests by remember { mutableIntStateOf(0) }
     // The typed text and a submit hook from the address bar, for the suggestion dropdown.
     val addressBridge = remember { AddressBarBridge() }
+    val addressDrop = rememberLinkDropTarget { text -> addressBridge.submit(text) }
     // Where focus goes once the tab sheet has ended (keyboard navigation only; see tabSheetReturnFocus). Opening the
     // sheet again clears it, which cancels a return that has not happened yet.
     var sheetReturnFocus by remember { mutableStateOf<ReturnFocus?>(null) }
@@ -469,8 +474,9 @@ private fun BrowserContent(
                 .focusRequester(focusSink)
                 .focusable(),
         ) {
-            // Page fullscreen (a video): only the page is shown; the chrome comes back when it ends.
-            if (!fullScreen) {
+            // The toolbar block (address bar, buttons, banners, progress): above the page, or below it when the user
+            // chose a bottom toolbar. Page fullscreen (a video) hides it; it comes back when that ends.
+            val chrome: @Composable () -> Unit = {
                 // Very large text on a narrow window: the address gets a row of its own and Back, Tabs and the menu move
                 // to a second row (toolbarWraps). The address bar keeps its place in composition either way, so a layout
                 // change never drops what the user is typing.
@@ -598,6 +604,20 @@ private fun BrowserContent(
                                     }
                                 },
                             )
+                            val menuWidthDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
+                            val inMultiWindow = (androidContext as? android.app.Activity)?.isInMultiWindowMode == true
+                            if (showsTabStrip(menuWidthDp) || inMultiWindow) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.menu_split_screen)) },
+                                    leadingIcon = { Icon(Icons.Filled.VerticalSplit, contentDescription = null) },
+                                    // Not a private page: the second window is a normal (non-private) one.
+                                    enabled = isWebUrl(state.url) && session?.isPrivate == false,
+                                    onClick = {
+                                        menuOpen = false
+                                        openInSplitScreen(androidContext, state.url)
+                                    },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.menu_reader)) },
                                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.Article, contentDescription = null) },
@@ -746,7 +766,8 @@ private fun BrowserContent(
                         reload = { session?.reload() },
                         hideKeyboard = { keyboardController?.hide() },
                         moveFocusToSink = { focusSink.requestFocus() },
-                        modifier = Modifier.weight(1f),
+                        // A link or text dropped on the bar opens (or is searched) in this tab, as if typed and Go pressed.
+                        modifier = Modifier.weight(1f).dragAndDropTarget(::carriesLinkOrText, addressDrop),
                         focusRequests = addressFocusRequests,
                         bridge = addressBridge,
                         onSwipe = { step -> swipeTargetTab(tabList, selectedTab.id, step)?.let(tabs::select) },
@@ -849,6 +870,19 @@ private fun BrowserContent(
                     }
                 }
             }
+            val stripWidthDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
+            if (!fullScreen && showsTabStrip(stripWidthDp)) {
+                TabStrip(
+                    tabs = tabList,
+                    onSelect = tabs::select,
+                    onClose = { tabs.close(it) },
+                    onNewTab = { focusAddressFor = tabs.newTab() },
+                    onDropOpen = { text ->
+                        normalizeAddressInput(text, container.searchEngine.selected.value)?.let { tabs.newTab(it) }
+                    },
+                )
+            }
+            if (!fullScreen && !toolbarBottom) chrome()
             Box(
                 Modifier
                     .weight(1f)
@@ -956,10 +990,12 @@ private fun BrowserContent(
                     SuggestionList(
                         suggestions = mergeSuggestions(query, local, if (remoteAllowed) remote else emptyList()),
                         onPick = { addressBridge.submit(it.submitText) },
-                        modifier = Modifier.align(Alignment.TopStart),
+                        // Next to the address bar: at the bottom of the page area when the toolbar is at the bottom.
+                        modifier = Modifier.align(if (toolbarBottom) Alignment.BottomStart else Alignment.TopStart),
                     )
                 }
             }
+            if (!fullScreen && toolbarBottom) chrome()
         }
     }
 

@@ -57,6 +57,9 @@ interface BrowserPrefs {
 
     /** Ask to open web links in the installed app that handles them. */
     var openLinksInApps: Boolean
+
+    /** The address bar and its buttons at the bottom of the screen (easier to reach one-handed). */
+    var toolbarBottom: Boolean
 }
 
 enum class ReaderTheme { LIGHT, SEPIA, DARK }
@@ -183,6 +186,12 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
             prefs.edit { putStringSet(KEY_DESKTOP_OFF, value.toSet()) }
         }
 
+    override var toolbarBottom: Boolean
+        get() = prefs.getBoolean(KEY_TOOLBAR_BOTTOM, false)
+        set(value) {
+            prefs.edit { putBoolean(KEY_TOOLBAR_BOTTOM, value) }
+        }
+
     override var openLinksInApps: Boolean
         get() = prefs.getBoolean(KEY_OPEN_IN_APPS, true)
         set(value) {
@@ -250,6 +259,7 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         private const val KEY_NEVER_SAVE = "never_save_logins"
         private const val KEY_HTTPS_ONLY = "https_only"
         private const val KEY_OPEN_IN_APPS = "open_links_in_apps"
+        private const val KEY_TOOLBAR_BOTTOM = "toolbar_bottom"
         private const val KEY_APP_THEME = "app_theme"
         private const val KEY_DARK_WEBSITES = "dark_websites"
         private const val KEY_JS = "javascript"
@@ -337,6 +347,14 @@ class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
     }
 
     override fun offerAppsForLinks(): Boolean = _openLinksInApps.value
+
+    private val _toolbarBottom = MutableStateFlow(prefs.toolbarBottom)
+    val toolbarBottom: StateFlow<Boolean> = _toolbarBottom.asStateFlow()
+
+    fun setToolbarBottom(on: Boolean) {
+        prefs.toolbarBottom = on
+        _toolbarBottom.value = on
+    }
 
     override fun javaScriptFor(url: String, isPrivate: Boolean): Boolean = jsChoice.valueFor(url, isPrivate)
 
