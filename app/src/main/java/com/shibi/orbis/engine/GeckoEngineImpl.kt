@@ -1703,6 +1703,12 @@ private class GeckoBrowserSession(
         debugLog.log("GeckoSession", "load requested")
     }
 
+    override fun loadExtensionPage(url: String) {
+        // Only an installed extension's own page (its settings), opened from Orbis's UI; never a page's request.
+        if (closed || !url.startsWith("moz-extension://")) return
+        session.loadUri(url)
+    }
+
     override fun showStartPage() {
         if (closed) return
         session.loadUri("about:blank")
@@ -2011,6 +2017,7 @@ private class GeckoExtensionHost(
             version = metaData.version,
             enabled = metaData.enabled,
             disabledByUser = (metaData.disabledFlags and WebExtension.DisabledFlags.USER) != 0,
+            optionsPageUrl = metaData.optionsPageUrl,
         )
 
     override suspend fun find(id: String): InstalledExtension? =

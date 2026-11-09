@@ -27,6 +27,8 @@ data class InstalledExtension(
     val enabled: Boolean,
     /** True when the user (not the browser, blocklist or signature check) disabled it. */
     val disabledByUser: Boolean,
+    /** The extension's own settings page (moz-extension://...), or null when it has none. */
+    val optionsPageUrl: String? = null,
 )
 
 enum class ExtensionInstallError {

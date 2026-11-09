@@ -34,11 +34,19 @@ sealed interface UboState {
         val version: String,
         val enabled: Boolean,
         val disabledByUser: Boolean,
+        /** uBlock Origin's settings page (moz-extension://...), when known. */
+        val optionsPageUrl: String? = null,
     ) : UboState
     data class Failed(val reason: UboFailure) : UboState
 }
 
-internal fun InstalledExtension.toUboState() = UboState.Installed(version, enabled, disabledByUser)
+internal fun InstalledExtension.toUboState() = UboState.Installed(version, enabled, disabledByUser, optionsPageUrl)
+
+/** uBlock Origin's filter list page (where the cookie notice lists are switched on), from its settings page address. */
+fun uboFilterListsUrl(optionsPageUrl: String?): String? {
+    val base = optionsPageUrl?.takeIf { it.startsWith("moz-extension://") }?.substringBefore('#') ?: return null
+    return "$base#3p-filters.html"
+}
 
 internal fun ExtensionInstallError.toUboFailure(): UboFailure =
     when (this) {

@@ -11,6 +11,9 @@
     <string name="start_pinned">pinned</string>
     <string name="menu_home">Home</string>
     <string name="menu_share">Share</string>
+    <string name="ubo_cookie_title">Block cookie banners</string>
+    <string name="ubo_cookie_steps">uBlock Origin can remove cookie consent pop-ups. In its filter lists, open Annoyances, turn on the Cookie notices lists (EasyList and uBlock filters), then tap Apply changes.</string>
+    <string name="ubo_cookie_open">Open uBlock Origin filter lists</string>
     <string name="tabs_recently_closed">Recently closed</string>
     <string name="tabs_recently_closed_clear">Clear list</string>
     <string name="tabs_closed_snackbar">Tab closed</string>

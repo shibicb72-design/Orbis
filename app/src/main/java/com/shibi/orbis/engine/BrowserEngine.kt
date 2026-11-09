@@ -251,6 +251,8 @@ interface BrowserSession {
     fun translatePage(onDone: (Boolean) -> Unit) = onDone(false)
     /** Shows the page as it was before translating. */
     fun showOriginal() {}
+    /** Loads an installed extension's own page (moz-extension://, e.g. its settings). Anything else is refused. */
+    fun loadExtensionPage(url: String) {}
     /** Opens the system print dialog for the page (which also saves as PDF). Needs the page shown in a view. */
     fun printPage() {}
     /** Turns JavaScript on or off for this tab's page and reloads it. */

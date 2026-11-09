@@ -1,6 +1,7 @@
 package com.shibi.orbis.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import com.shibi.orbis.ubo.uboFilterListsUrl
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -39,6 +40,8 @@ fun UboSettingsScreen(
     controller: UboOnboardingController,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Opens an extension page in a new tab (uBlock Origin's filter lists); null hides the cookie banner section. */
+    onOpenExtensionPage: ((String) -> Unit)? = null,
 ) {
     val state by controller.state.collectAsStateWithLifecycle()
     Scaffold(
@@ -95,6 +98,14 @@ fun UboSettingsScreen(
                         ),
                         style = MaterialTheme.typography.bodyMedium,
                     )
+                    val filterLists = uboFilterListsUrl(current.optionsPageUrl)
+                    if (onOpenExtensionPage != null && filterLists != null && current.enabled) {
+                        Text(stringResource(R.string.ubo_cookie_title), style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.ubo_cookie_steps), style = MaterialTheme.typography.bodyMedium)
+                        Button(onClick = { onOpenExtensionPage(filterLists) }, modifier = Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.ubo_cookie_open))
+                        }
+                    }
                     OutlinedButton(onClick = controller::remove, modifier = Modifier.fillMaxWidth()) {
                         Text(stringResource(R.string.ubo_remove))
                     }
