@@ -122,10 +122,11 @@ private fun copyLink(context: Context, url: String) {
     }
 }
 
-private fun shareLink(context: Context, url: String) {
+internal fun shareLink(context: Context, url: String, title: String? = null) {
     val send =
         Intent(Intent.ACTION_SEND)
             .setType("text/plain")
             .putExtra(Intent.EXTRA_TEXT, url)
+            .apply { if (!title.isNullOrBlank()) putExtra(Intent.EXTRA_SUBJECT, title) }
     runCatching { context.startActivity(Intent.createChooser(send, context.getString(R.string.link_menu_share))) }
 }

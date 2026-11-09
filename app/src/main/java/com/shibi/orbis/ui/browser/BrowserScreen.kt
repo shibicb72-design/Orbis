@@ -20,6 +20,7 @@ import androidx.compose.runtime.produceState
 import com.shibi.orbis.ui.home.StartPage
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
@@ -479,6 +480,15 @@ private fun BrowserContent(
                                             }
                                         Toast.makeText(androidContext, message, Toast.LENGTH_SHORT).show()
                                     }
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.menu_share)) },
+                                leadingIcon = { Icon(Icons.Filled.Share, contentDescription = null) },
+                                enabled = isWebUrl(state.url),
+                                onClick = {
+                                    menuOpen = false
+                                    shareLink(androidContext, state.url, state.title)
                                 },
                             )
                             DropdownMenuItem(

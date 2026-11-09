@@ -81,6 +81,36 @@ class GeckoEngineImpl(
     /** Temps the camera app writes photos into. Wiped with [uploads]: a photo is copied to uploads before Gecko sees it. */
     private val captureFiles = CameraCaptureFiles(appContext.cacheDir)
 
+    @Volatile private var textZoomPercent = 100
+    @Volatile private var forceZoom = false
+    private var defaultAutomaticFontSize = true
+
+    override fun setTextZoom(percent: Int) {
+        textZoomPercent = percent
+        runtime?.let(::applyDisplayPrefs)
+    }
+
+    override fun setForceZoom(enabled: Boolean) {
+        forceZoom = enabled
+        runtime?.let(::applyDisplayPrefs)
+    }
+
+    private fun applyDisplayPrefs(rt: GeckoRuntime) {
+        val s = rt.settings
+        // GeckoView refuses a font size factor while automatic adjustment is on: switch that off first.
+        runCatching {
+            if (textZoomPercent == 100 && defaultAutomaticFontSize) {
+                s.setAutomaticFontSizeAdjustment(true)
+            } else {
+                // A fixed size wins over the system font scale, like Firefox's own text size setting.
+                s.setAutomaticFontSizeAdjustment(false)
+                s.setFontSizeFactor(textZoomPercent / 100f)
+            }
+            s.setForceUserScalableEnabled(forceZoom)
+        }.onFailure { debugLog.log("GeckoEngine", "display prefs failed: ${it.javaClass.simpleName}") }
+        debugLog.log("GeckoEngine", "display prefs text=$textZoomPercent% forceZoom=$forceZoom")
+    }
+
     override fun warmUp() {
         synchronized(this) {
             if (runtime != null) return
@@ -110,6 +140,8 @@ class GeckoEngineImpl(
                     .contentBlocking(contentBlocking)
                     .build()
             val created = GeckoRuntime.create(appContext, settings)
+            defaultAutomaticFontSize = created.settings.automaticFontSizeAdjustment
+            applyDisplayPrefs(created)
             // Without a prompt delegate, WebExtensionController.install() hangs forever.
             created.webExtensionController.setPromptDelegate(extensionHost.promptDelegate)
             runtime = created

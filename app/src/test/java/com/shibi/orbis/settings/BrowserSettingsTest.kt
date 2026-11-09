@@ -11,6 +11,7 @@ class BrowserSettingsTest {
         override var homepage: String? = null
         override var searchSuggestions: Boolean = true
         override var textZoomPercent: Int = DEFAULT_TEXT_ZOOM
+        override var forceZoom: Boolean = false
     }
 
     @Test
@@ -41,6 +42,16 @@ class BrowserSettingsTest {
         assertNull(parseHomepageInput("cute cats"))
         assertNull(parseHomepageInput(""))
         assertNull(parseHomepageInput("javascript:alert(1)"))
+    }
+
+    @Test
+    fun forceZoomIsOffByDefaultAndPersists() {
+        val prefs = MemPrefs()
+        val s = BrowserSettings(prefs)
+        assertFalse(s.forceZoom.value)
+        s.setForceZoom(true)
+        assertTrue(prefs.forceZoom)
+        assertTrue(s.forceZoom.value)
     }
 
     @Test

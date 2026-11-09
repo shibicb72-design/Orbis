@@ -6,6 +6,13 @@
     <string name="start_top_sites">Top sites</string>
     <string name="start_all_bookmarks">All bookmarks</string>
     <string name="menu_home">Home</string>
+    <string name="menu_share">Share</string>
+    <string name="text_size_title">Text size</string>
+    <string name="text_size_percent">%1$d%%</string>
+    <string name="text_size_default">%1$d%% (default, follows the system font size)</string>
+    <string name="text_size_sample">The quick brown fox jumps over the lazy dog.</string>
+    <string name="force_zoom_title">Zoom on all websites</string>
+    <string name="force_zoom_summary">Allow pinch zoom even on sites that try to prevent it.</string>
     <string name="homepage_title">Homepage</string>
     <string name="search_suggestions_title">Search suggestions</string>
     <string name="search_suggestions_summary">Shows suggestions from your search engine as you type, which sends what you type to it. Never in private tabs.</string>

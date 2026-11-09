@@ -17,6 +17,9 @@ interface BrowserPrefs {
 
     /** Page text size in percent of the default. */
     var textZoomPercent: Int
+
+    /** Allow pinch zoom on every page, even one that disables it. */
+    var forceZoom: Boolean
 }
 
 class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : BrowserPrefs {
@@ -38,8 +41,15 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
             prefs.edit { putInt(KEY_TEXT_ZOOM, clampTextZoom(value)) }
         }
 
+    override var forceZoom: Boolean
+        get() = prefs.getBoolean(KEY_FORCE_ZOOM, false)
+        set(value) {
+            prefs.edit { putBoolean(KEY_FORCE_ZOOM, value) }
+        }
+
     companion object {
         const val FILE_NAME = "browser_prefs"
+        private const val KEY_FORCE_ZOOM = "force_zoom"
         private const val KEY_HOMEPAGE = "homepage"
         private const val KEY_SUGGESTIONS = "search_suggestions"
         private const val KEY_TEXT_ZOOM = "text_zoom_percent"
@@ -73,6 +83,14 @@ class BrowserSettings(private val prefs: BrowserPrefs) {
     fun setSearchSuggestions(on: Boolean) {
         prefs.searchSuggestions = on
         _searchSuggestions.value = on
+    }
+
+    private val _forceZoom = MutableStateFlow(prefs.forceZoom)
+    val forceZoom: StateFlow<Boolean> = _forceZoom.asStateFlow()
+
+    fun setForceZoom(on: Boolean) {
+        prefs.forceZoom = on
+        _forceZoom.value = on
     }
 
     fun setTextZoomPercent(percent: Int) {

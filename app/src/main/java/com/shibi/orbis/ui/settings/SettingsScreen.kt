@@ -124,6 +124,10 @@ fun SettingsScreen(
     onSetHomepage: (String?) -> Unit,
     searchSuggestionsFlow: StateFlow<Boolean>,
     onSetSearchSuggestions: (Boolean) -> Unit,
+    textZoomFlow: StateFlow<Int>,
+    onSetTextZoom: (Int) -> Unit,
+    forceZoomFlow: StateFlow<Boolean>,
+    onSetForceZoom: (Boolean) -> Unit,
     onBack: () -> Unit,
     onOpenErrorLog: () -> Unit,
     onOpenUbo: () -> Unit,
@@ -136,6 +140,19 @@ fun SettingsScreen(
     var searchDialogOpen by remember { mutableStateOf(false) }
     val homepage by homepageFlow.collectAsStateWithLifecycle()
     val searchSuggestions by searchSuggestionsFlow.collectAsStateWithLifecycle()
+    val textZoom by textZoomFlow.collectAsStateWithLifecycle()
+    val forceZoom by forceZoomFlow.collectAsStateWithLifecycle()
+    var textSizeDialogOpen by remember { mutableStateOf(false) }
+    if (textSizeDialogOpen) {
+        TextSizeDialog(
+            current = textZoom,
+            onSelect = {
+                onSetTextZoom(it)
+                textSizeDialogOpen = false
+            },
+            onDismiss = { textSizeDialogOpen = false },
+        )
+    }
     var homepageDialogOpen by remember { mutableStateOf(false) }
     if (homepageDialogOpen) {
         HomepageDialog(
@@ -210,6 +227,23 @@ fun SettingsScreen(
                             role = Role.Switch,
                             onValueChange = onSetSearchSuggestions,
                         ),
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsItem(
+                    headlineContent = { Text(stringResource(R.string.text_size_title)) },
+                    supportingContent = { Text(stringResource(R.string.text_size_percent, textZoom)) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { textSizeDialogOpen = true },
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsItem(
+                    headlineContent = { Text(stringResource(R.string.force_zoom_title)) },
+                    supportingContent = { Text(stringResource(R.string.force_zoom_summary)) },
+                    trailingContent = { Switch(checked = forceZoom, onCheckedChange = null) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .toggleable(value = forceZoom, role = Role.Switch, onValueChange = onSetForceZoom),
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsItem(

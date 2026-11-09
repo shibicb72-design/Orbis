@@ -19,6 +19,13 @@ interface BrowserEngine {
     fun reconcileSitePermissions()
     fun warmUp()
     /**
+     * Page text size in percent (Settings > Text size). 100 leaves the engine's own default (which follows the system
+     * font scale); anything else sets a fixed factor for every page. Applies now and to a runtime created later.
+     */
+    fun setTextZoom(percent: Int) {}
+    /** Lets every page be pinch-zoomed, even one that disables zooming. Applies now and later. */
+    fun setForceZoom(enabled: Boolean) {}
+    /**
      * Main thread only. The ONE factory for sessions (new, restored and popup children alike), so ETP Strict
      * (useTrackingProtection) is applied to every one of them.
      */

@@ -39,6 +39,7 @@ import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 
 class OrbisApp : Application() {
@@ -88,6 +89,9 @@ class OrbisApp : Application() {
                     getSharedPreferences(SharedPreferencesBrowserPrefs.FILE_NAME, Context.MODE_PRIVATE),
                 ),
             )
+        // Text size and force zoom follow the saved preferences, now and whenever they change.
+        appScope.launch { browserSettings.textZoomPercent.collect { engine.setTextZoom(it) } }
+        appScope.launch { browserSettings.forceZoom.collect { engine.setForceZoom(it) } }
         val ubo =
             UboOnboardingController(
                 host = engine.extensions,
