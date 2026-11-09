@@ -133,6 +133,7 @@ fun SettingsScreen(
     onOpenUbo: () -> Unit,
     onOpenSitePermissions: () -> Unit,
     onOpenClearData: () -> Unit,
+    onOpenPasswords: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val uboState by uboStateFlow.collectAsStateWithLifecycle()
@@ -285,6 +286,14 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth().padding(16.dp),
                     )
                 }
+                SettingsItem(
+                    headlineContent = { Text(stringResource(R.string.passwords_title)) },
+                    supportingContent = { Text(stringResource(R.string.passwords_summary)) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onOpenPasswords),
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.clear_data_title)) },
                     supportingContent = { Text(stringResource(R.string.clear_data_summary)) },

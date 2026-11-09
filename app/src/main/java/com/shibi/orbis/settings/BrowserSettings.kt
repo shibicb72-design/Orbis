@@ -5,6 +5,7 @@ import androidx.core.content.edit
 import com.shibi.orbis.engine.hostOfUrl
 import com.shibi.orbis.home.PinnedSite
 import com.shibi.orbis.home.TOP_SITES_LIMIT
+import com.shibi.orbis.passwords.NeverSavePrefs
 import org.json.JSONArray
 import org.json.JSONObject
 import com.shibi.orbis.engine.isWebUrl
@@ -31,9 +32,24 @@ interface BrowserPrefs {
 
     /** Sites (hosts) the user removed from Top sites. */
     var hiddenSites: Set<String>
+
+    /** Offer "Save password?" after a sign-in (never in private tabs). */
+    var offerSavePasswords: Boolean
 }
 
-class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : BrowserPrefs {
+class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : BrowserPrefs, NeverSavePrefs {
+    override var offerSavePasswords: Boolean
+        get() = prefs.getBoolean(KEY_OFFER_SAVE, true)
+        set(value) {
+            prefs.edit { putBoolean(KEY_OFFER_SAVE, value) }
+        }
+
+    override var neverSave: Set<String>
+        get() = prefs.getStringSet(KEY_NEVER_SAVE, emptySet())?.toSet() ?: emptySet()
+        set(value) {
+            prefs.edit { putStringSet(KEY_NEVER_SAVE, value.toSet()) }
+        }
+
     override var homepage: String?
         get() = prefs.getString(KEY_HOMEPAGE, null)?.takeIf { isWebUrl(it) }
         set(value) {
@@ -82,6 +98,8 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
 
     companion object {
         const val FILE_NAME = "browser_prefs"
+        private const val KEY_OFFER_SAVE = "offer_save_passwords"
+        private const val KEY_NEVER_SAVE = "never_save_logins"
         private const val KEY_PINNED = "pinned_sites"
         private const val KEY_HIDDEN = "hidden_sites"
         private const val KEY_FORCE_ZOOM = "force_zoom"
@@ -126,6 +144,14 @@ class BrowserSettings(private val prefs: BrowserPrefs) {
     fun setForceZoom(on: Boolean) {
         prefs.forceZoom = on
         _forceZoom.value = on
+    }
+
+    private val _offerSavePasswords = MutableStateFlow(prefs.offerSavePasswords)
+    val offerSavePasswords: StateFlow<Boolean> = _offerSavePasswords.asStateFlow()
+
+    fun setOfferSavePasswords(on: Boolean) {
+        prefs.offerSavePasswords = on
+        _offerSavePasswords.value = on
     }
 
     private val _pinnedSites = MutableStateFlow(prefs.pinnedSites)

@@ -24,6 +24,7 @@ import com.shibi.orbis.ui.settings.SettingsScreen
 import com.shibi.orbis.ui.settings.SitePermissionsScreen
 import com.shibi.orbis.ui.settings.UboOnboardingScreen
 import com.shibi.orbis.ui.settings.UboSettingsScreen
+import com.shibi.orbis.ui.passwords.PasswordsScreen
 import com.shibi.orbis.ui.theme.ROUTE_ENTER_MS
 import com.shibi.orbis.ui.theme.ROUTE_EXIT_MS
 import com.shibi.orbis.ui.theme.rememberMotionEnabled
@@ -39,6 +40,7 @@ private object Routes {
     const val Ubo = "settings/ubo"
     const val SitePermissions = "settings/site_permissions"
     const val ClearData = "settings/clear_data"
+    const val Passwords = "settings/passwords"
 }
 
 @Composable
@@ -143,6 +145,14 @@ fun OrbisRoot(container: AppContainer) {
                 onBack = { nav.popBackStack() },
             )
         }
+        composable(Routes.Passwords) {
+            PasswordsScreen(
+                manager = container.logins,
+                offerSaveFlow = container.browserSettings.offerSavePasswords,
+                onSetOfferSave = container.browserSettings::setOfferSavePasswords,
+                onBack = { nav.popBackStack() },
+            )
+        }
         composable(Routes.Settings) {
             SettingsScreen(
                 uboStateFlow = container.ubo.state,
@@ -161,6 +171,7 @@ fun OrbisRoot(container: AppContainer) {
                 onOpenUbo = { nav.navigate(Routes.Ubo) },
                 onOpenSitePermissions = { nav.navigate(Routes.SitePermissions) },
                 onOpenClearData = { nav.navigate(Routes.ClearData) },
+                onOpenPasswords = { nav.navigate(Routes.Passwords) },
             )
         }
         composable(Routes.ClearData) {

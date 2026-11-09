@@ -33,6 +33,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shibi.orbis.R
+import com.shibi.orbis.engine.SaveLoginChoice
 import com.shibi.orbis.engine.FilePickStage
 import com.shibi.orbis.engine.SitePermissionKind
 import com.shibi.orbis.engine.SitePrompt
@@ -139,6 +140,50 @@ fun SitePromptDialog(prompt: SitePrompt) {
                 confirmButton = { TextButton(onClick = prompt::leave) { Text(stringResource(R.string.prompt_leave)) } },
                 dismissButton = { TextButton(onClick = prompt::stay) { Text(stringResource(R.string.prompt_stay)) } },
             ) { Text(stringResource(R.string.prompt_leave_message)) }
+
+        is SitePrompt.SaveLogin ->
+            PromptDialog(
+                title = stringResource(if (prompt.isUpdate) R.string.login_update_title else R.string.login_save_title, prompt.originHost),
+                onDismiss = prompt::dismiss,
+                confirmButton = {
+                    TextButton(onClick = { prompt.answer(SaveLoginChoice.SAVE) }) {
+                        Text(stringResource(if (prompt.isUpdate) R.string.login_update else R.string.login_save))
+                    }
+                },
+                dismissButton = {
+                    Row {
+                        if (!prompt.isUpdate) {
+                            TextButton(onClick = { prompt.answer(SaveLoginChoice.NEVER) }) { Text(stringResource(R.string.login_never)) }
+                        }
+                        TextButton(onClick = { prompt.answer(SaveLoginChoice.NOT_NOW) }) { Text(stringResource(R.string.login_not_now)) }
+                    }
+                },
+            ) {
+                Text(
+                    if (prompt.username.isEmpty()) stringResource(R.string.login_no_username) else prompt.username,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    stringResource(R.string.login_save_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+
+        is SitePrompt.SelectLogin ->
+            PromptDialog(
+                title = stringResource(R.string.login_select_title, prompt.originHost),
+                onDismiss = prompt::dismiss,
+                confirmButton = { TextButton(onClick = prompt::dismiss) { Text(stringResource(R.string.prompt_cancel)) } },
+            ) {
+                Column {
+                    prompt.usernames.forEachIndexed { i, name ->
+                        TextButton(onClick = { prompt.choose(i) }, modifier = Modifier.fillMaxWidth()) {
+                            Text(name.ifEmpty { stringResource(R.string.login_no_username) }, modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                }
+            }
 
         is SitePrompt.Repost ->
             PromptDialog(

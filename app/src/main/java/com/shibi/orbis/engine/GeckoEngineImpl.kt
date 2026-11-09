@@ -70,6 +70,8 @@ class GeckoEngineImpl(
 
     override val androidPermissions: AndroidPermissionBroker get() = broker
 
+    @Volatile override var logins: LoginBridge? = null
+
     override fun reconcileSitePermissions() = reconciler.runNow()
 
     private val extensionHost =
@@ -86,6 +88,23 @@ class GeckoEngineImpl(
 
     /** Temps the camera app writes photos into. Wiped with [uploads]: a photo is copied to uploads before Gecko sees it. */
     private val captureFiles = CameraCaptureFiles(appContext.cacheDir)
+
+    /** Gecko asks for and reports logins here; the app store answers through [logins]. Nothing is logged about them. */
+    private fun loginStorageDelegate() =
+        object : Autocomplete.StorageDelegate {
+            override fun onLoginFetch(domain: String): GeckoResult<Array<Autocomplete.LoginEntry>>? {
+                val found = logins?.fetch(domain).orEmpty()
+                return GeckoResult.fromValue(found.map { it.toGecko() }.toTypedArray())
+            }
+
+            override fun onLoginSave(login: Autocomplete.LoginEntry) {
+                logins?.save(login.toEngine())
+            }
+
+            override fun onLoginUsed(login: Autocomplete.LoginEntry, usedFields: Int) {
+                login.guid?.let { logins?.used(it) }
+            }
+        }
 
     @Volatile private var textZoomPercent = 100
     @Volatile private var forceZoom = false
@@ -162,6 +181,7 @@ class GeckoEngineImpl(
                 },
                 { debugLog.log("GeckoEngine", "tracking exceptions load failed") },
             )
+            created.autocompleteStorageDelegate = loginStorageDelegate()
             // Without a prompt delegate, WebExtensionController.install() hangs forever.
             created.webExtensionController.setPromptDelegate(extensionHost.promptDelegate)
             runtime = created
@@ -272,6 +292,7 @@ class GeckoEngineImpl(
             broker = broker,
             reconciler = reconciler,
             trackingExceptions = trackingExceptions,
+            logins = { logins },
             // A popup child inherits the opener's desktop/mobile choice and its privacy, and is never opened by us.
             newPopupChild = { opener ->
                 buildSession(SessionInit(desktopMode = opener.state.value.desktopMode, isPrivate = opener.isPrivate))
@@ -327,6 +348,7 @@ private class GeckoBrowserSession(
     private val broker: AndroidPermissionBroker,
     private val reconciler: GeolocationReconciler,
     private val trackingExceptions: TrackingExceptions,
+    private val logins: () -> LoginBridge?,
     private val newPopupChild: (GeckoBrowserSession) -> GeckoBrowserSession,
 ) : BrowserSession {
     private val _state = MutableStateFlow(SessionState(desktopMode = initialDesktopMode))
@@ -1007,12 +1029,41 @@ private class GeckoBrowserSession(
             override fun onLoginSave(
                 session: GeckoSession,
                 request: GeckoSession.PromptDelegate.AutocompleteRequest<Autocomplete.LoginSaveOption>,
-            ): GeckoResult<Response> = skip("login-save", request)
+            ): GeckoResult<Response> {
+                val option = request.options.firstOrNull() ?: return skip("login-save", request)
+                val entry = option.value
+                val bridge = logins()
+                if (bridge == null || !bridge.offerSave(entry.origin, isPrivate) || entry.password.isEmpty()) {
+                    return skip("login-save", request)
+                }
+                return present(request) { result ->
+                    SitePrompt.SaveLogin(originHost(), entry.username, bridge.isUpdate(entry.origin, entry.username, entry.password)) { choice ->
+                        when (choice) {
+                            // Gecko then calls the storage delegate's onLoginSave with the entry.
+                            SaveLoginChoice.SAVE -> complete(result, request.confirm(option))
+                            SaveLoginChoice.NEVER -> {
+                                bridge.neverFor(entry.origin)
+                                complete(result, request.dismiss())
+                            }
+                            SaveLoginChoice.NOT_NOW, null -> complete(result, request.dismiss())
+                        }
+                    }
+                }
+            }
 
             override fun onLoginSelect(
                 session: GeckoSession,
                 request: GeckoSession.PromptDelegate.AutocompleteRequest<Autocomplete.LoginSelectOption>,
-            ): GeckoResult<Response> = skip("login-select", request)
+            ): GeckoResult<Response> {
+                val options = request.options.toList()
+                if (options.isEmpty()) return skip("login-select", request)
+                return present(request) { result ->
+                    SitePrompt.SelectLogin(originHost(), options.map { it.value.username }) { index ->
+                        val chosen = index?.let { options.getOrNull(it) }
+                        complete(result, if (chosen != null) request.confirm(chosen) else request.dismiss())
+                    }
+                }
+            }
 
             override fun onAddressSave(
                 session: GeckoSession,
@@ -1814,3 +1865,16 @@ internal class GeolocationReconciler(
         const val PERMISSION_DELAY_MS = 1_000L
     }
 }
+
+private fun EngineLogin.toGecko(): Autocomplete.LoginEntry =
+    Autocomplete.LoginEntry.Builder()
+        .apply { if (guid != null) guid(guid) }
+        .origin(origin)
+        .formActionOrigin(formActionOrigin)
+        .httpRealm(httpRealm)
+        .username(username)
+        .password(password)
+        .build()
+
+private fun Autocomplete.LoginEntry.toEngine(): EngineLogin =
+    EngineLogin(guid, origin, formActionOrigin.orEmpty(), httpRealm.orEmpty(), username, password)

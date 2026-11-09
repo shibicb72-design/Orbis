@@ -8,8 +8,39 @@ import kotlinx.coroutines.flow.StateFlow
  * Thin browser-engine surface. UI and feature modules must not import GeckoView types;
  * only [com.shibi.orbis.engine.GeckoEngineImpl] may.
  */
+/** A login as the engine sees it (no app types in the engine layer). */
+data class EngineLogin(
+    val guid: String?,
+    val origin: String,
+    val formActionOrigin: String,
+    val httpRealm: String,
+    val username: String,
+    val password: String,
+)
+
+/**
+ * The app's password store as the engine uses it: what to fill, whether to offer saving, and what to record. Set once
+ * the store exists; until then nothing is filled or offered.
+ */
+interface LoginBridge {
+    fun fetch(domain: String): List<EngineLogin>
+
+    /** Offer "Save password?" here? Never from a private tab, a site marked Never, or with saving switched off. */
+    fun offerSave(origin: String, isPrivate: Boolean): Boolean
+
+    fun isUpdate(origin: String, username: String, password: String): Boolean
+
+    fun save(login: EngineLogin)
+
+    fun used(guid: String)
+
+    fun neverFor(origin: String)
+}
+
 interface BrowserEngine {
     val extensions: ExtensionHost
+    /** The password store; see [LoginBridge]. */
+    var logins: LoginBridge?
     /** The system permission dialogs Gecko needs. App level (not per tab); the browser screen launches them. */
     val androidPermissions: AndroidPermissionBroker
     /**

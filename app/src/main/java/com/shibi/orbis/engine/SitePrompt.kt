@@ -64,6 +64,29 @@ sealed class SitePrompt(val originHost: String) {
         override fun deliverDismissal() = respond(null)
     }
 
+    /** "Save password?" (or "Update password?" when [isUpdate]). Never shown in private tabs. */
+    class SaveLogin(
+        originHost: String,
+        val username: String,
+        val isUpdate: Boolean,
+        private val respond: (SaveLoginChoice?) -> Unit,
+    ) : SitePrompt(originHost) {
+        fun answer(choice: SaveLoginChoice) = finish { respond(choice) }
+
+        override fun deliverDismissal() = respond(null)
+    }
+
+    /** Several saved logins fit this form: the user picks one. [usernames] in Gecko's order. */
+    class SelectLogin(
+        originHost: String,
+        val usernames: List<String>,
+        private val respond: (Int?) -> Unit,
+    ) : SitePrompt(originHost) {
+        fun choose(index: Int) = finish { respond(index) }
+
+        override fun deliverDismissal() = respond(null)
+    }
+
     /** JavaScript prompt(). */
     class TextInput(
         originHost: String,
@@ -500,3 +523,6 @@ class PromptQueue {
         _head.value = queue.firstOrNull()
     }
 }
+
+/** The answer to a [SitePrompt.SaveLogin]. */
+enum class SaveLoginChoice { SAVE, NEVER, NOT_NOW }

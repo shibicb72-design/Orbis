@@ -14,6 +14,7 @@ class BrowserSettingsTest {
         override var forceZoom: Boolean = false
         override var pinnedSites: List<com.shibi.orbis.home.PinnedSite> = emptyList()
         override var hiddenSites: Set<String> = emptySet()
+        override var offerSavePasswords: Boolean = true
     }
 
     @Test

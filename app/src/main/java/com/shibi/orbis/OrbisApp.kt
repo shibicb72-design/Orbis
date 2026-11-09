@@ -20,6 +20,10 @@ import com.shibi.orbis.engine.BrowserEngine
 import com.shibi.orbis.engine.FileSitePermissionStore
 import com.shibi.orbis.engine.GeckoEngineImpl
 import com.shibi.orbis.engine.SearchEngineSettings
+import com.shibi.orbis.passwords.FileLoginStore
+import com.shibi.orbis.passwords.KeystoreLoginCrypto
+import com.shibi.orbis.passwords.LoginBridgeImpl
+import com.shibi.orbis.passwords.LoginManager
 import com.shibi.orbis.settings.BrowserSettings
 import com.shibi.orbis.suggest.HttpSearchSuggestSource
 import com.shibi.orbis.suggest.SearchSuggestSource
@@ -116,6 +120,18 @@ class OrbisApp : Application() {
                 log = { debugLog.log("History", it) },
                 now = System::currentTimeMillis,
             )
+        val prefsFile = getSharedPreferences(SharedPreferencesBrowserPrefs.FILE_NAME, Context.MODE_PRIVATE)
+        val logins =
+            LoginManager(
+                store = FileLoginStore(AtomicTextFile(File(filesDir, "logins/logins.enc")), KeystoreLoginCrypto()),
+                never = SharedPreferencesBrowserPrefs(prefsFile),
+                scope = appScope,
+                io = Dispatchers.IO,
+                log = { debugLog.log("Logins", it) },
+                now = System::currentTimeMillis,
+            )
+        logins.load()
+        engine.logins = LoginBridgeImpl(logins) { browserSettings.offerSavePasswords.value }
         var downloadsRef: DownloadManager? = null
         // The tab manager creates NO session here: sessions appear only once the browser screen asks for them, which
         // is after the onboarding decision. restore() only reads the stored tab list.
@@ -184,6 +200,7 @@ class OrbisApp : Application() {
                 clear = clear,
                 searchEngine = searchEngine,
                 browserSettings = browserSettings,
+                logins = logins,
             )
         // Sessions only appear after the onboarding decision; this has long finished by then.
         sitePermissions.load()
@@ -227,6 +244,7 @@ class AppContainer(
     /** Which engine address-bar searches go to; one choice for normal and private tabs. */
     val searchEngine: SearchEngineSettings,
     val browserSettings: BrowserSettings,
+    val logins: LoginManager,
     /** Live search suggestions; only asked for normal tabs with the setting on (see BrowserScreen). */
     val searchSuggest: SearchSuggestSource = HttpSearchSuggestSource(),
 ) {
