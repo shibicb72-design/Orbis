@@ -8,6 +8,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -107,9 +108,10 @@ class PendingSubmitComposeTest {
                     moveFocusToSink = { sink.requestFocus() },
                 )
             }
+            val collected by flow.collectAsState()
             Column(Modifier.focusRequester(sink).focusable()) {
                 OutlinedTextField(
-                    value = addressBarText(focused, typed, collectedUrl = flow.value.url, selectedTabUrl = tabUrl, pendingSubmit = pending.text),
+                    value = addressBarText(focused, typed, collectedUrl = collected.url, selectedTabUrl = tabUrl, pendingSubmit = pending.text),
                     onValueChange = {
                         typed = it
                         onAddressBarEdited(pending)

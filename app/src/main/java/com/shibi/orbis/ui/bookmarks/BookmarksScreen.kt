@@ -44,6 +44,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -104,6 +105,8 @@ fun BookmarksScreen(
                 scope.launch { toast(context, if (writeExport(context, uri, snapshot)) R.string.bookmarks_exported else R.string.bookmarks_export_failed) }
             }
         }
+    // Configuration-aware resources for the import result text.
+    val resources = LocalResources.current
     val importLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
@@ -113,7 +116,7 @@ fun BookmarksScreen(
                             val result = manager.importAll(read.result)
                             Toast.makeText(
                                 context,
-                                context.getString(R.string.bookmarks_imported, result.added, result.skipped),
+                                resources.getString(R.string.bookmarks_imported, result.added, result.skipped),
                                 Toast.LENGTH_LONG,
                             ).show()
                         }

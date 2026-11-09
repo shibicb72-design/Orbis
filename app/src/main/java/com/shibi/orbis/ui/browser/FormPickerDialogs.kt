@@ -55,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -300,7 +301,7 @@ private fun MonthPromptDialog(prompt: SitePrompt.DateTime, title: String) {
     val maxYear = maxOf(minYear, max?.year ?: 9999)
     var year by remember(prompt) { mutableIntStateOf(initial.year.coerceIn(minYear, maxYear)) }
     var selected by remember(prompt) { mutableStateOf(initial) }
-    val locale = Locale.getDefault()
+    val locale = currentLocale()
     fun inRange(m: YearMonth) = (min == null || m >= min) && (max == null || m <= max)
 
     PickerDialog(
@@ -484,7 +485,7 @@ private fun DateTimeLocalPromptDialog(prompt: SitePrompt.DateTime, title: String
         ) {
             if (date != null) {
                 Text(
-                    date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(Locale.getDefault())),
+                    date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(currentLocale())),
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
                 )
@@ -643,3 +644,7 @@ private fun ColorSwatch(
         }
     }
 }
+
+/** The UI locale, observed: a configuration change recomposes with the new one. */
+@Composable
+private fun currentLocale(): Locale = LocalConfiguration.current.locales[0]
