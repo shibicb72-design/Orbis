@@ -17,6 +17,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -48,6 +50,19 @@ import com.shibi.orbis.tabs.PendingDownload
 import kotlinx.coroutines.flow.StateFlow
 
 internal const val ADDRESS_FIELD_TAG = "address_field"
+
+/**
+ * What the screen around the bar needs while the user edits: the text being typed (empty when not editing) and a way to
+ * submit a suggestion through the bar's own Go path (pending text, keyboard, focus). Filled in by [BrowserAddressBar].
+ */
+class AddressBarBridge {
+    var query by mutableStateOf("")
+        internal set
+    internal var submit: ((String) -> Unit)? = null
+
+    /** Submits [text] exactly as if it had been typed and Go pressed. False when no bar is attached. */
+    fun submit(text: String): Boolean = submit?.let { it(text); true } ?: false
+}
 internal const val ADDRESS_RESTING_TAG = "address_resting"
 internal const val ADDRESS_STOP_TAG = "address_stop"
 internal const val ADDRESS_RELOAD_TAG = "address_reload"
@@ -87,6 +102,7 @@ internal fun BrowserAddressBar(
     modifier: Modifier = Modifier,
     /** Bumped by the caller (the start page's search box) to put the bar into edit mode; only a change counts. */
     focusRequests: Int = 0,
+    bridge: AddressBarBridge? = null,
 ) {
     key(tabId) {
         // Saved instance state is written outside the app's control; a private tab's typed text stays in plain memory.
@@ -124,6 +140,31 @@ internal fun BrowserAddressBar(
             if (addressBarLeavesEditOnCommit(addressFocused, editedSinceFocus, tabUrl)) {
                 hideKeyboard()
                 moveFocusToSink()
+            }
+        }
+        if (bridge != null) {
+            // Refreshed on every composition, so the submit always uses the current session and callbacks.
+            SideEffect {
+                bridge.query = if (addressFocused) typed else ""
+                bridge.submit = { text ->
+                    typed = text
+                    editedSinceFocus = true
+                    submitFromAddressBar(
+                        typed = text,
+                        searchEngine = searchEngine(),
+                        sessionState = sessionState?.value,
+                        pending = pending,
+                        loadUrl = loadUrl,
+                        hideKeyboard = hideKeyboard,
+                        moveFocusToSink = moveFocusToSink,
+                    )
+                }
+            }
+            DisposableEffect(bridge) {
+                onDispose {
+                    bridge.submit = null
+                    bridge.query = ""
+                }
             }
         }
         val barText = addressBarText(addressFocused, typed, collectedUrl = "", selectedTabUrl = tabUrl, pendingSubmit = pending.text)

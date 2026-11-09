@@ -150,6 +150,8 @@ fun OrbisRoot(container: AppContainer) {
                 onSelectSearchEngine = container.searchEngine::select,
                 homepageFlow = container.browserSettings.homepage,
                 onSetHomepage = { container.browserSettings.setHomepage(it) },
+                searchSuggestionsFlow = container.browserSettings.searchSuggestions,
+                onSetSearchSuggestions = container.browserSettings::setSearchSuggestions,
                 onBack = { nav.popBackStack() },
                 onOpenErrorLog = { nav.navigate(Routes.ErrorLog) },
                 onOpenUbo = { nav.navigate(Routes.Ubo) },

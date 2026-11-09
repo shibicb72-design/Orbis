@@ -7,6 +7,8 @@
     <string name="start_all_bookmarks">All bookmarks</string>
     <string name="menu_home">Home</string>
     <string name="homepage_title">Homepage</string>
+    <string name="search_suggestions_title">Search suggestions</string>
+    <string name="search_suggestions_summary">Shows suggestions from your search engine as you type, which sends what you type to it. Never in private tabs.</string>
     <string name="homepage_start_page">Orbis start page</string>
     <string name="homepage_custom">Custom address</string>
     <string name="homepage_custom_hint">Address, like example.com</string>

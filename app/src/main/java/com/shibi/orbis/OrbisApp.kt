@@ -21,6 +21,8 @@ import com.shibi.orbis.engine.FileSitePermissionStore
 import com.shibi.orbis.engine.GeckoEngineImpl
 import com.shibi.orbis.engine.SearchEngineSettings
 import com.shibi.orbis.settings.BrowserSettings
+import com.shibi.orbis.suggest.HttpSearchSuggestSource
+import com.shibi.orbis.suggest.SearchSuggestSource
 import com.shibi.orbis.settings.SharedPreferencesBrowserPrefs
 import com.shibi.orbis.engine.SharedPreferencesAskedPermissions
 import com.shibi.orbis.engine.SharedPreferencesSearchEnginePrefs
@@ -215,6 +217,8 @@ class AppContainer(
     /** Which engine address-bar searches go to; one choice for normal and private tabs. */
     val searchEngine: SearchEngineSettings,
     val browserSettings: BrowserSettings,
+    /** Live search suggestions; only asked for normal tabs with the setting on (see BrowserScreen). */
+    val searchSuggest: SearchSuggestSource = HttpSearchSuggestSource(),
 ) {
     /**
      * An http(s) URL another app asked us to open. Set by MainActivity, consumed (and cleared) by BrowserScreen, which

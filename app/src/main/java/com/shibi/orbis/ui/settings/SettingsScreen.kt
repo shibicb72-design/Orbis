@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -29,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -120,6 +122,8 @@ fun SettingsScreen(
     onSelectSearchEngine: (SearchEngine) -> Unit,
     homepageFlow: StateFlow<String?>,
     onSetHomepage: (String?) -> Unit,
+    searchSuggestionsFlow: StateFlow<Boolean>,
+    onSetSearchSuggestions: (Boolean) -> Unit,
     onBack: () -> Unit,
     onOpenErrorLog: () -> Unit,
     onOpenUbo: () -> Unit,
@@ -131,6 +135,7 @@ fun SettingsScreen(
     val searchEngine by searchEngineFlow.collectAsStateWithLifecycle()
     var searchDialogOpen by remember { mutableStateOf(false) }
     val homepage by homepageFlow.collectAsStateWithLifecycle()
+    val searchSuggestions by searchSuggestionsFlow.collectAsStateWithLifecycle()
     var homepageDialogOpen by remember { mutableStateOf(false) }
     if (homepageDialogOpen) {
         HomepageDialog(
@@ -192,6 +197,19 @@ fun SettingsScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { searchDialogOpen = true },
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsItem(
+                    headlineContent = { Text(stringResource(R.string.search_suggestions_title)) },
+                    supportingContent = { Text(stringResource(R.string.search_suggestions_summary)) },
+                    trailingContent = { Switch(checked = searchSuggestions, onCheckedChange = null) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .toggleable(
+                            value = searchSuggestions,
+                            role = Role.Switch,
+                            onValueChange = onSetSearchSuggestions,
+                        ),
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsItem(
@@ -289,6 +307,7 @@ private fun SettingsItem(
     headlineContent: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     supportingContent: (@Composable () -> Unit)? = null,
+    trailingContent: (@Composable () -> Unit)? = null,
 ) {
     ListItem(
         headlineContent = headlineContent,
@@ -299,7 +318,8 @@ private fun SettingsItem(
             headlineColor = MaterialTheme.colorScheme.onSurface,
             supportingColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ),
-        trailingContent = {
+        // A row that opens something shows a chevron; a switch row passes its own trailing content.
+        trailingContent = trailingContent ?: {
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,

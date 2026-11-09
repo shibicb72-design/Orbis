@@ -13,6 +13,10 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.shibi.orbis.home.topSites
+import com.shibi.orbis.suggest.mergeSuggestions
+import com.shibi.orbis.suggest.localSuggestions
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.produceState
 import com.shibi.orbis.ui.home.StartPage
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.material.icons.filled.Home
@@ -145,6 +149,9 @@ internal fun FullScreenWindowEffect(fullScreen: Boolean) {
     }
 }
 
+/** Wait this long after the last keystroke before asking the search engine. */
+private const val SUGGEST_DEBOUNCE_MS = 150L
+
 private tailrec fun Context.findActivity(): Activity? =
     when (this) {
         is Activity -> this
@@ -211,6 +218,7 @@ private fun BrowserContent(
     // The menu entry follows the committed address, never a pending one.
     val bookmarkList by container.bookmarks.entries.collectAsStateWithLifecycle()
     val bookmarked = remember(bookmarkList, state.url) { container.bookmarks.isBookmarked(state.url) }
+    val historyEntries by container.history.entries.collectAsStateWithLifecycle()
     val prompt by (session?.prompts ?: NO_PROMPT).collectAsStateWithLifecycle()
     val keyboardController = LocalSoftwareKeyboardController.current
     // Where focus goes after Go. focusManager.clearFocus() is not enough: after a key event (hardware Enter) the app is
@@ -221,6 +229,8 @@ private fun BrowserContent(
     var showTabs by remember { mutableStateOf(false) }
     // Bumped by the start page's search box to put the address bar into edit mode.
     var addressFocusRequests by remember { mutableIntStateOf(0) }
+    // The typed text and a submit hook from the address bar, for the suggestion dropdown.
+    val addressBridge = remember { AddressBarBridge() }
     // Where focus goes once the tab sheet has ended (keyboard navigation only; see tabSheetReturnFocus). Opening the
     // sheet again clears it, which cancels a return that has not happened yet.
     var sheetReturnFocus by remember { mutableStateOf<ReturnFocus?>(null) }
@@ -391,6 +401,7 @@ private fun BrowserContent(
                         moveFocusToSink = { focusSink.requestFocus() },
                         modifier = Modifier.weight(1f),
                         focusRequests = addressFocusRequests,
+                        bridge = addressBridge,
                     )
                     val tabsDescription =
                         stringResource(if (selectedTab.isPrivate) R.string.tabs_button_private else R.string.tabs_button, tabList.size)
@@ -652,7 +663,6 @@ private fun BrowserContent(
                         // A private tab keeps its notice; the start page (history-based Top sites) is never shown here.
                         OrbisEmptyState(stringResource(R.string.browser_private_empty_state), Icons.Filled.VisibilityOff)
                     } else {
-                        val historyEntries by container.history.entries.collectAsStateWithLifecycle()
                         val sites = remember(historyEntries) { topSites(historyEntries) }
                         StartPage(
                             topSites = sites,
@@ -662,6 +672,28 @@ private fun BrowserContent(
                             onAllBookmarks = onOpenBookmarks,
                         )
                     }
+                }
+                // Suggestions while typing, over the page (the engine view is never resized or moved for them).
+                val query = addressBridge.query
+                if (query.isNotBlank() && !fullScreen) {
+                    val suggestOn by container.browserSettings.searchSuggestions.collectAsStateWithLifecycle()
+                    val engine by container.searchEngine.selected.collectAsStateWithLifecycle()
+                    // Live suggestions send what is typed to the search engine: never from a private tab.
+                    val remoteAllowed = suggestOn && !selectedTab.isPrivate
+                    val local = remember(query, historyEntries, bookmarkList) { localSuggestions(query, historyEntries, bookmarkList) }
+                    val remote by produceState(emptyList<String>(), query, engine, remoteAllowed) {
+                        if (!remoteAllowed) {
+                            value = emptyList()
+                            return@produceState
+                        }
+                        delay(SUGGEST_DEBOUNCE_MS)
+                        value = container.searchSuggest.suggest(engine, query.trim())
+                    }
+                    SuggestionList(
+                        suggestions = mergeSuggestions(query, local, if (remoteAllowed) remote else emptyList()),
+                        onPick = { addressBridge.submit(it.submitText) },
+                        modifier = Modifier.align(Alignment.TopStart),
+                    )
                 }
             }
         }
