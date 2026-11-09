@@ -245,6 +245,7 @@ class OrbisApp : Application() {
         }
         // Sessions only appear after the onboarding decision; this has long finished by then.
         sitePermissions.load()
+        container.updates = com.shibi.orbis.update.UpdateController(this, appScope).also { it.checkIfDue() }
         runCatching { engine.warmUp() }
             .onFailure { debugLog.log("OrbisApp", "engine warmUp failed: ${it.message}") }
         // Both lists are read before any tab can load a page; changes made before they arrive are replayed on top.
@@ -273,6 +274,8 @@ class AppContainer(
     val debugLog: DebugLog,
     /** Tab page previews for the tab grid (memory only). */
     val thumbnails: com.shibi.orbis.tabs.TabThumbnails = com.shibi.orbis.tabs.TabThumbnails(),
+    /** Update checks for builds not from Google Play; set by the app after creation. */
+    var updates: com.shibi.orbis.update.UpdateController? = null,
     val engine: BrowserEngine,
     val ubo: UboOnboardingController,
     /** Owns every tab and session; outlives screens, so Settings never destroys a page. */

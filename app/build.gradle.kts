@@ -1,7 +1,18 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
+
+// The Play upload key lives OUTSIDE the repository (never committed): a keystore.properties file with storeFile,
+// storePassword, keyAlias and keyPassword, at ORBIS_SIGNING_PROPERTIES or ~/orbis-signing/keystore.properties.
+// Without it (CI, other machines) the release build is simply unsigned.
+val uploadSigning: Properties? =
+    (System.getenv("ORBIS_SIGNING_PROPERTIES") ?: "${System.getProperty("user.home")}/orbis-signing/keystore.properties")
+        .let { file(it) }
+        .takeIf { it.isFile }
+        ?.let { f -> Properties().apply { f.inputStream().use { load(it) } } }
 
 android {
     namespace = "com.shibi.orbis"
@@ -17,13 +28,15 @@ android {
         applicationId = "com.shibi.orbis"
         minSdk = 29
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.4.5"
+        versionCode = 10
+        versionName = "0.4.6"
     }
 
     splits {
         abi {
-            isEnable = true
+            // Per-ABI APKs for direct installs. An app bundle (Play) splits by ABI itself and cannot be built with
+            // these on, so they are off when a bundle task is requested.
+            isEnable = gradle.startParameter.taskNames.none { it.contains("bundle", ignoreCase = true) }
             reset()
             include("arm64-v8a", "x86_64")
             isUniversalApk = false
@@ -37,6 +50,14 @@ android {
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
+        }
+        if (uploadSigning != null) {
+            create("upload") {
+                storeFile = file(uploadSigning.getProperty("storeFile"))
+                storePassword = uploadSigning.getProperty("storePassword")
+                keyAlias = uploadSigning.getProperty("keyAlias")
+                keyPassword = uploadSigning.getProperty("keyPassword")
+            }
         }
     }
 
@@ -60,7 +81,16 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // Play upload key intentionally NOT wired in v1 scaffold (no ORBIS_UPLOAD_*).
+            // Signed with the Play upload key when its properties file exists on this machine (see uploadSigning).
+            if (uploadSigning != null) signingConfig = signingConfigs.getByName("upload")
+        }
+        // The release build (R8 shrinking included) under its own id, debug-signed: installs beside the others on a test
+        // device or emulator to check that shrinking broke nothing at run time. Never shipped.
+        create("r8check") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".r8check"
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
         }
     }
 

@@ -11,6 +11,17 @@
     <string name="start_pinned">pinned</string>
     <string name="menu_home">Home</string>
     <string name="menu_share">Share</string>
+    <string name="about_title">About Orbis</string>
+    <string name="about_version">Orbis %1$s</string>
+    <string name="update_tap_to_check">Tap to check for updates</string>
+    <string name="update_checking">Checking for updates…</string>
+    <string name="update_available">Orbis %1$s is available. Tap to get it.</string>
+    <string name="update_up_to_date">Orbis is up to date</string>
+    <string name="update_unknown">Could not check for updates. Try again later.</string>
+    <string name="update_play">Updates come from Google Play.</string>
+    <string name="update_get">Get</string>
+    <string name="update_auto_title">Check for updates automatically</string>
+    <string name="update_auto_summary">Once a day, Orbis asks GitHub for its latest release. Nothing else is sent.</string>
     <string name="voice_search">Search by voice</string>
     <string name="voice_prompt">Say a search or an address</string>
     <string name="voice_unavailable">Voice search is not available on this phone.</string>

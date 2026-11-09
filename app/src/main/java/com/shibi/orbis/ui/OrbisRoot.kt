@@ -197,6 +197,11 @@ fun OrbisRoot(container: AppContainer) {
                 onOpenClearData = { nav.navigate(Routes.ClearData) },
                 onOpenPasswords = { nav.navigate(Routes.Passwords) },
                 site = container.browserSettings,
+                updates = container.updates,
+                onOpenUrl = { url ->
+                    container.tabs.newTab(url)
+                    nav.popBackStack(Routes.Browser, inclusive = false)
+                },
             )
         }
         composable(Routes.ClearData) {
