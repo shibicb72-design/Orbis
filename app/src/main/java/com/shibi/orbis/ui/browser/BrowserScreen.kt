@@ -697,6 +697,7 @@ private fun BrowserContent(
                         modifier = Modifier.weight(1f),
                         focusRequests = addressFocusRequests,
                         bridge = addressBridge,
+                        onSwipe = { step -> swipeTargetTab(tabList, selectedTab.id, step)?.let(tabs::select) },
                     )
                     if (!twoRow) tabsAndMenu()
                 }

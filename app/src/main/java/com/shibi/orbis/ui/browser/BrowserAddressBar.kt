@@ -103,6 +103,8 @@ internal fun BrowserAddressBar(
     /** Bumped by the caller (the start page's search box) to put the bar into edit mode; only a change counts. */
     focusRequests: Int = 0,
     bridge: AddressBarBridge? = null,
+    /** A sideways swipe on the resting bar: +1 next tab, -1 previous tab. Null turns swiping off. */
+    onSwipe: ((Int) -> Unit)? = null,
 ) {
     key(tabId) {
         // Saved instance state is written outside the app's control; a private tab's typed text stays in plain memory.
@@ -173,7 +175,7 @@ internal fun BrowserAddressBar(
         val showsPending = addressBarShowsPendingTarget(addressFocused, pending.text, pending.failed)
         val textColor = MaterialTheme.colorScheme.onSurface
         PrivateImeScope(isPrivate) {
-            Box(modifier) {
+            Box(modifier.addressBarSwipe(enabled = onSwipe != null && !addressFocused) { onSwipe?.invoke(it) }) {
                 OutlinedTextField(
                     value = barText,
                     onValueChange = {
