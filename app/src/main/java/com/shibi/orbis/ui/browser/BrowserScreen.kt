@@ -787,6 +787,8 @@ private fun BrowserContent(
             request = request,
             onOpenInNewTab = { tabs.openLinkInNewTab(request) },
             onDismiss = { tabs.dismissLinkMenu() },
+            onOpenImageInNewTab = { tabs.openImageInNewTab(request) },
+            onSaveImage = { tabs.saveImage(request) },
         )
     }
 }

@@ -180,6 +180,11 @@ interface BrowserSession {
     fun stop()
     /** Leaves page fullscreen (Back, a tab switch); the engine then reports fullScreen = false. Test doubles may no-op. */
     fun exitFullScreen() {}
+    /**
+     * Fetches [url] (http/https) in this session's mode (private stays private) and offers the response through the
+     * normal download path (host.onDownload: the same dialog, file naming and private handling). "Save image".
+     */
+    fun saveUrl(url: String) {}
     fun find(query: String, backwards: Boolean)
     fun clearFind()
     /** False for background tabs. */
@@ -206,6 +211,8 @@ interface SessionHost {
     /** The engine will not render this response. The host must end it with openBody or discard. */
     fun onDownload(download: IncomingDownload, session: BrowserSession)
     fun onLinkContextMenu(url: String, session: BrowserSession)
+    /** Long-press on an image ([linkUrl] when the image is also a link). Test doubles may ignore it. */
+    fun onImageContextMenu(imageUrl: String, linkUrl: String?, session: BrowserSession) {}
     /** The session's saved-state blob changed (history, scroll position...). */
     fun onSessionStateChanged(session: BrowserSession)
     /** A page was visited (a finished load, or a same-document navigation). [title] may still be empty. */

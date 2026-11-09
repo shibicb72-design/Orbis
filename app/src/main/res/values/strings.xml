@@ -100,6 +100,10 @@
     <string name="link_menu_copy">Copy link</string>
     <string name="link_menu_share">Share link</string>
     <string name="link_menu_copied">Link copied</string>
+    <string name="image_menu_open_new_tab">Open image in new tab</string>
+    <string name="image_menu_save">Save image</string>
+    <string name="image_menu_copy">Copy image address</string>
+    <string name="image_menu_share">Share image address</string>
 
     <string name="browser_download_title">Download file?</string>
     <string name="browser_download_size">Size: %1$s</string>

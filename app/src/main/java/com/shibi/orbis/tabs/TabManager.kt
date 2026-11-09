@@ -56,7 +56,15 @@ enum class TabEvent { TAB_LIMIT }
 data class PendingDownload(val download: IncomingDownload, val sourceTabId: Long, val isPrivate: Boolean = false)
 
 /** A long-press on a link in tab [tabId]; [isPrivate] is that tab's mode, so a tab opened from it matches. */
-data class LinkMenuRequest(val url: String, val tabId: Long, val isPrivate: Boolean = false)
+data class LinkMenuRequest(
+    /** The link, or the image itself when the long-pressed image is not a link ([hasLink] false). */
+    val url: String,
+    val tabId: Long,
+    val isPrivate: Boolean = false,
+    /** Set when an image was long-pressed. */
+    val imageUrl: String? = null,
+    val hasLink: Boolean = true,
+)
 
 /**
  * Owns the tabs and their sessions. Main thread only (it is the [SessionHost] of every session it creates).
@@ -478,6 +486,23 @@ class TabManager(
         createTab(request.url, openerId = request.tabId, external = false, isPrivate = request.isPrivate)
     }
 
+    /** Long-press "open image in new tab". Same mode as the tab it came from. */
+    fun openImageInNewTab(request: LinkMenuRequest) {
+        _linkMenu.value = null
+        val image = request.imageUrl ?: return
+        if (!isWebUrl(image)) return
+        createTab(image, openerId = request.tabId, external = false, isPrivate = request.isPrivate)
+    }
+
+    /** Long-press "save image": the tab's own session fetches it and offers it like any download. */
+    fun saveImage(request: LinkMenuRequest) {
+        _linkMenu.value = null
+        val image = request.imageUrl ?: return
+        val i = indexOf(request.tabId)
+        if (i < 0) return
+        list[i].session?.saveUrl(image)
+    }
+
     // ---- SessionHost ---------------------------------------------------------------------------------------
 
     override fun canOpenTab(): Boolean {
@@ -540,6 +565,13 @@ class TabManager(
         val i = indexOfSession(session)
         if (i < 0 || list[i].id != selectedId) return
         _linkMenu.value = LinkMenuRequest(url, list[i].id, list[i].isPrivate)
+    }
+
+    override fun onImageContextMenu(imageUrl: String, linkUrl: String?, session: BrowserSession) {
+        val i = indexOfSession(session)
+        if (i < 0 || list[i].id != selectedId) return
+        _linkMenu.value =
+            LinkMenuRequest(linkUrl ?: imageUrl, list[i].id, list[i].isPrivate, imageUrl = imageUrl, hasLink = linkUrl != null)
     }
 
     override fun onSessionStateChanged(session: BrowserSession) {

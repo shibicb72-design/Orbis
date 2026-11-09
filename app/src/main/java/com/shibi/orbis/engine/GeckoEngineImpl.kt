@@ -42,7 +42,9 @@ import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.StorageController
+import org.mozilla.geckoview.GeckoWebExecutor
 import org.mozilla.geckoview.WebExtension
+import org.mozilla.geckoview.WebRequest
 import org.mozilla.geckoview.WebExtensionController
 import org.mozilla.geckoview.WebRequestError
 import org.mozilla.geckoview.WebResponse
@@ -507,8 +509,12 @@ private class GeckoBrowserSession(
                 screenY: Int,
                 element: GeckoSession.ContentDelegate.ContextElement,
             ) {
-                val link = element.linkUri ?: return
-                if (isWebUrl(link)) host?.onLinkContextMenu(link, this@GeckoBrowserSession)
+                val image = element.srcUri?.takeIf { element.type == GeckoSession.ContentDelegate.ContextElement.TYPE_IMAGE && isWebUrl(it) }
+                val link = element.linkUri?.takeIf { isWebUrl(it) }
+                when {
+                    image != null -> host?.onImageContextMenu(image, link, this@GeckoBrowserSession)
+                    link != null -> host?.onLinkContextMenu(link, this@GeckoBrowserSession)
+                }
             }
 
             override fun onExternalResponse(session: GeckoSession, response: WebResponse) {
@@ -1349,6 +1355,27 @@ private class GeckoBrowserSession(
 
     override fun stop() {
         if (!closed) session.stop()
+    }
+
+    override fun saveUrl(url: String) {
+        if (closed || !isWebUrl(url)) return
+        val referrer = _state.value.url.takeIf { isWebUrl(it) }
+        val request = WebRequest.Builder(url).apply { if (referrer != null) referrer(referrer) }.build()
+        val flags = if (isPrivate) GeckoWebExecutor.FETCH_FLAGS_PRIVATE else GeckoWebExecutor.FETCH_FLAGS_NONE
+        GeckoWebExecutor(runtime).fetch(request, flags).accept(
+            { response ->
+                if (response == null) return@accept
+                val download = GeckoIncomingDownload(response)
+                val owner = host
+                if (closed || owner == null || response.statusCode !in 200..299) {
+                    download.discard()
+                    return@accept
+                }
+                owner.onDownload(download, this)
+                debugLog.log("GeckoSession", "save offered")
+            },
+            { debugLog.log("GeckoSession", "save failed: ${it?.javaClass?.simpleName}") },
+        )
     }
 
     override fun exitFullScreen() {

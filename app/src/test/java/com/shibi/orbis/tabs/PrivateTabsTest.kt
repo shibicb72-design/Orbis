@@ -38,6 +38,8 @@ private class PrivateFakeSession(val init: SessionInit) : BrowserSession {
     override fun attachTo(contentView: View) = Unit
     override fun detachFrom(contentView: View) = Unit
     override fun loadUrl(url: String) { loads += url }
+    val saves = mutableListOf<String>()
+    override fun saveUrl(url: String) { saves += url }
     override fun loadExternalUrl(url: String) { externalLoads += url }
     override fun setDesktopMode(enabled: Boolean) { _state.value = _state.value.copy(desktopMode = enabled) }
     override fun goBack() = false
@@ -359,6 +361,40 @@ class PrivateTabsTest {
         m.onOpenInNewTab("https://normal.example/", created[0])
         assertFalse(m.selected.value.isPrivate)
         assertFalse(created.last().init.isPrivate)
+    }
+
+    @Test
+    fun imageMenuOffersImageActionsInTheModeOfItsTab() {
+        val m = manager()
+        m.openSelected()
+        m.onImageContextMenu("https://img.example/a.png", null, created[0])
+        val plain = m.linkMenu.value!!
+        assertEquals("https://img.example/a.png", plain.imageUrl)
+        assertFalse(plain.hasLink)
+        m.saveImage(plain)
+        assertEquals(listOf("https://img.example/a.png"), created[0].saves)
+        assertNull("saving closes the menu", m.linkMenu.value)
+
+        m.newPrivateTab()
+        val privateSession = created.last()
+        m.onImageContextMenu("https://img.example/p.png", "https://link.example/q", privateSession)
+        val linked = m.linkMenu.value!!
+        assertTrue(linked.hasLink)
+        assertEquals("https://link.example/q", linked.url)
+        assertTrue(linked.isPrivate)
+        m.openImageInNewTab(linked)
+        assertTrue(m.selected.value.isPrivate)
+        assertEquals(listOf("https://img.example/p.png"), created.last().loads)
+    }
+
+    @Test
+    fun aBackgroundTabsLongPressOpensNoMenu() {
+        val m = manager()
+        m.openSelected()
+        val first = created[0]
+        m.newTab()
+        m.onImageContextMenu("https://img.example/a.png", null, first)
+        assertNull(m.linkMenu.value)
     }
 
     @Test

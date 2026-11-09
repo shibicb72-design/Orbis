@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -82,28 +83,57 @@ fun DownloadConfirmDialog(pending: PendingDownload, onConfirm: () -> Unit, onCan
     )
 }
 
-/** Long-press on a link: open in a new tab, copy, share. */
+/**
+ * Long-press on a link (open in a new tab, copy, share) and/or an image (open image in a new tab, save, copy or share
+ * its address). An image that is also a link gets both groups.
+ */
 @Composable
-fun LinkMenuDialog(request: LinkMenuRequest, onOpenInNewTab: () -> Unit, onDismiss: () -> Unit) {
+fun LinkMenuDialog(
+    request: LinkMenuRequest,
+    onOpenInNewTab: () -> Unit,
+    onDismiss: () -> Unit,
+    onOpenImageInNewTab: () -> Unit = {},
+    onSaveImage: () -> Unit = {},
+) {
     val context = LocalContext.current
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(request.url, maxLines = 3, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium) },
         text = {
             Column(Modifier.fillMaxWidth()) {
-                TextButton(onClick = onOpenInNewTab) { Text(stringResource(R.string.link_menu_open_new_tab)) }
-                TextButton(
-                    onClick = {
-                        copyLink(context, request.url)
-                        onDismiss()
-                    },
-                ) { Text(stringResource(R.string.link_menu_copy)) }
-                TextButton(
-                    onClick = {
-                        shareLink(context, request.url)
-                        onDismiss()
-                    },
-                ) { Text(stringResource(R.string.link_menu_share)) }
+                if (request.hasLink) {
+                    TextButton(onClick = onOpenInNewTab) { Text(stringResource(R.string.link_menu_open_new_tab)) }
+                    TextButton(
+                        onClick = {
+                            copyLink(context, request.url)
+                            onDismiss()
+                        },
+                    ) { Text(stringResource(R.string.link_menu_copy)) }
+                    TextButton(
+                        onClick = {
+                            shareLink(context, request.url)
+                            onDismiss()
+                        },
+                    ) { Text(stringResource(R.string.link_menu_share)) }
+                }
+                val image = request.imageUrl
+                if (image != null) {
+                    if (request.hasLink) HorizontalDivider()
+                    TextButton(onClick = onOpenImageInNewTab) { Text(stringResource(R.string.image_menu_open_new_tab)) }
+                    TextButton(onClick = onSaveImage) { Text(stringResource(R.string.image_menu_save)) }
+                    TextButton(
+                        onClick = {
+                            copyLink(context, image)
+                            onDismiss()
+                        },
+                    ) { Text(stringResource(R.string.image_menu_copy)) }
+                    TextButton(
+                        onClick = {
+                            shareLink(context, image)
+                            onDismiss()
+                        },
+                    ) { Text(stringResource(R.string.image_menu_share)) }
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.prompt_cancel)) } },
