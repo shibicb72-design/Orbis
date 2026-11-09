@@ -60,6 +60,9 @@ interface BrowserPrefs {
 
     /** The address bar and its buttons at the bottom of the screen (easier to reach one-handed). */
     var toolbarBottom: Boolean
+
+    /** Finished downloads (not from private tabs) are also copied to the phone's Download folder. */
+    var copyToDownloadFolder: Boolean
 }
 
 enum class ReaderTheme { LIGHT, SEPIA, DARK }
@@ -186,6 +189,12 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
             prefs.edit { putStringSet(KEY_DESKTOP_OFF, value.toSet()) }
         }
 
+    override var copyToDownloadFolder: Boolean
+        get() = prefs.getBoolean(KEY_COPY_DOWNLOADS, true)
+        set(value) {
+            prefs.edit { putBoolean(KEY_COPY_DOWNLOADS, value) }
+        }
+
     override var toolbarBottom: Boolean
         get() = prefs.getBoolean(KEY_TOOLBAR_BOTTOM, false)
         set(value) {
@@ -260,6 +269,7 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         private const val KEY_HTTPS_ONLY = "https_only"
         private const val KEY_OPEN_IN_APPS = "open_links_in_apps"
         private const val KEY_TOOLBAR_BOTTOM = "toolbar_bottom"
+        private const val KEY_COPY_DOWNLOADS = "copy_to_download_folder"
         private const val KEY_APP_THEME = "app_theme"
         private const val KEY_DARK_WEBSITES = "dark_websites"
         private const val KEY_JS = "javascript"
@@ -347,6 +357,14 @@ class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
     }
 
     override fun offerAppsForLinks(): Boolean = _openLinksInApps.value
+
+    private val _copyToDownloadFolder = MutableStateFlow(prefs.copyToDownloadFolder)
+    val copyToDownloadFolder: StateFlow<Boolean> = _copyToDownloadFolder.asStateFlow()
+
+    fun setCopyToDownloadFolder(on: Boolean) {
+        prefs.copyToDownloadFolder = on
+        _copyToDownloadFolder.value = on
+    }
 
     private val _toolbarBottom = MutableStateFlow(prefs.toolbarBottom)
     val toolbarBottom: StateFlow<Boolean> = _toolbarBottom.asStateFlow()

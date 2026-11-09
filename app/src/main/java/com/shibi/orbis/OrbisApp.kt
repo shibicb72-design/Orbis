@@ -193,6 +193,28 @@ class OrbisApp : Application() {
                 fetchFrom = { url, from, isPrivate -> engine.fetchFrom(url, from, isPrivate) },
             )
         downloadsRef = downloads
+        // Finished downloads also go to the phone's Download folder (setting; never a private tab's). Only downloads
+        // that finish while Orbis runs: the ones already listed at start are taken as handled.
+        appScope.launch {
+            val handled = HashSet<Long>()
+            var first = true
+            downloads.entries.collect { list ->
+                if (first) {
+                    first = false
+                    list.forEach { handled += it.id }
+                    return@collect
+                }
+                val fresh = com.shibi.orbis.downloads.newlyCompleted(list, handled)
+                fresh.forEach { handled += it.id }
+                if (fresh.isEmpty() || !browserSettings.copyToDownloadFolder.value) return@collect
+                launch(Dispatchers.IO) {
+                    for (e in fresh) {
+                        val ok = com.shibi.orbis.downloads.copyToPublicDownloads(this@OrbisApp, File(e.filePath!!), e.fileName, e.mimeType)
+                        debugLog.log("Downloads", if (ok) "copied to Download folder" else "copy to Download folder failed")
+                    }
+                }
+            }
+        }
         // Everything here runs on the main thread (appScope is Main). Site permissions and uBO are not touched.
         val clearTargets =
             object : ClearTargets {

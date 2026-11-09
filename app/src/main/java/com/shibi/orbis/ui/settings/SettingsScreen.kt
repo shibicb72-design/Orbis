@@ -293,6 +293,14 @@ fun SettingsScreen(
                     val alwaysDesktop by site.alwaysDesktop.collectAsStateWithLifecycle()
                     val openInApps by site.openLinksInApps.collectAsStateWithLifecycle()
                     val toolbarBottom by site.toolbarBottom.collectAsStateWithLifecycle()
+                    val copyDownloads by site.copyToDownloadFolder.collectAsStateWithLifecycle()
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.copy_downloads_title)) },
+                        supportingContent = { Text(stringResource(R.string.copy_downloads_summary)) },
+                        trailingContent = { Switch(checked = copyDownloads, onCheckedChange = null) },
+                        modifier = Modifier.fillMaxWidth().toggleable(value = copyDownloads, role = Role.Switch, onValueChange = site::setCopyToDownloadFolder),
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     SettingsItem(
                         headlineContent = { Text(stringResource(R.string.toolbar_bottom_title)) },
                         supportingContent = { Text(stringResource(R.string.toolbar_bottom_summary)) },
