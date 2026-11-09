@@ -117,6 +117,8 @@ data class SessionState(
      * Null when the page has no web site (blank, about:). Read from the engine's own permission record.
      */
     val trackingProtectionOff: Boolean? = null,
+    /** What the on-device translator knows about the page; null until it reported. */
+    val translation: TranslationInfo? = null,
     /** The page looks like an article (Readability's check): reader view is offered. Reset at each page start. */
     val readerable: Boolean = false,
     /** The page's media (audio or video): null when it has none active. */
@@ -227,6 +229,13 @@ interface BrowserSession {
      * reader is not ready). Runs on the main thread. Test doubles may answer null.
      */
     fun requestReaderArticle(onResult: (ReaderArticle?) -> Unit) = onResult(null)
+    /**
+     * Translates the page on the device from its detected language into the phone's language (the language pack is
+     * downloaded from Mozilla the first time). [onDone] gets false on failure. Test doubles answer false.
+     */
+    fun translatePage(onDone: (Boolean) -> Unit) = onDone(false)
+    /** Shows the page as it was before translating. */
+    fun showOriginal() {}
     /** Media controls for the page's active media (notification, lock screen, PiP). Test doubles may no-op. */
     fun mediaPlay() {}
     fun mediaPause() {}
@@ -254,6 +263,23 @@ interface BrowserSession {
 }
 
 /** Everything a session needs from the tab layer. All calls arrive on the main thread. */
+/** The translator's view of a page. Language tags are BCP 47 ("en", "fr", "zh-Hans"); empty when unknown. */
+data class TranslationInfo(
+    val pageLanguage: String,
+    val userLanguage: String,
+    val pageLanguageSupported: Boolean,
+    /** The language the page is shown in after a translation, or empty when it is the original. */
+    val translatedTo: String = "",
+    val error: String = "",
+) {
+    /** Translate is offered: the page's language is known, supported, and not already the user's. */
+    val canTranslate: Boolean get() =
+        pageLanguageSupported && pageLanguage.isNotEmpty() && userLanguage.isNotEmpty() && !sameLanguage(pageLanguage, userLanguage)
+}
+
+/** "en-US" and "en" are the same language for this purpose. */
+fun sameLanguage(a: String, b: String): Boolean = a.substringBefore('-').equals(b.substringBefore('-'), ignoreCase = true)
+
 /** A page's active media. [title]/[artist] come from the page (Media Session metadata) and may be empty. */
 data class MediaState(
     val playing: Boolean,

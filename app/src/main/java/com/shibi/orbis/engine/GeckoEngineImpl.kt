@@ -45,6 +45,7 @@ import org.mozilla.geckoview.StorageController
 import org.json.JSONObject
 import org.mozilla.geckoview.GeckoWebExecutor
 import org.mozilla.geckoview.MediaSession
+import org.mozilla.geckoview.TranslationsController
 import org.mozilla.geckoview.WebExtension
 import org.mozilla.geckoview.WebRequest
 import org.mozilla.geckoview.WebExtensionController
@@ -411,6 +412,7 @@ private class GeckoBrowserSession(
         session.promptDelegate = promptDelegate()
         session.permissionDelegate = permissionDelegate()
         session.mediaSessionDelegate = mediaSessionDelegate()
+        session.translationsSessionDelegate = translationDelegate()
     }
 
     /** Opens the session (never called for a popup child: Gecko opens that one) and applies [init]. */
@@ -604,6 +606,50 @@ private class GeckoBrowserSession(
                 _state.update { it.copy(media = it.media?.copy(playing = false)) }
             }
         }
+
+    // ---- translation ----
+
+    private fun translationDelegate() =
+        object : TranslationsController.SessionTranslation.Delegate {
+            override fun onTranslationStateChange(session: GeckoSession, state: TranslationsController.SessionTranslation.TranslationState?) {
+                val d = state?.detectedLanguages
+                val pair = state?.requestedTranslationPair
+                _state.update {
+                    it.copy(
+                        translation =
+                            TranslationInfo(
+                                pageLanguage = d?.docLangTag.orEmpty(),
+                                userLanguage = d?.userLangTag.orEmpty(),
+                                pageLanguageSupported = d?.isDocLangTagSupported == true,
+                                translatedTo = if (pair != null && state.hasVisibleChange == true) pair.toLanguage.orEmpty() else "",
+                                error = state?.error.orEmpty(),
+                            ),
+                    )
+                }
+            }
+        }
+
+    override fun translatePage(onDone: (Boolean) -> Unit) {
+        val info = _state.value.translation
+        if (closed || info == null || !info.canTranslate) {
+            onDone(false)
+            return
+        }
+        val options = TranslationsController.SessionTranslation.TranslationOptions.Builder().downloadModel(true).build()
+        runCatching {
+            session.sessionTranslation?.translate(info.pageLanguage, info.userLanguage, options)?.accept(
+                { onDone(true) },
+                {
+                    debugLog.log("GeckoSession", "translation failed: ${it?.javaClass?.simpleName}")
+                    onDone(false)
+                },
+            ) ?: onDone(false)
+        }.onFailure { onDone(false) }
+    }
+
+    override fun showOriginal() {
+        if (!closed) runCatching { session.sessionTranslation?.restoreOriginalPage() }
+    }
 
     // ---- reader view ----
 

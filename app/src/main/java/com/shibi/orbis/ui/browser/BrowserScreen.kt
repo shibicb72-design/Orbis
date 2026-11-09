@@ -14,6 +14,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.shibi.orbis.home.topSites
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.automirrored.filled.Article
 import com.shibi.orbis.engine.ReaderArticle
 import com.shibi.orbis.engine.pullTriggersRefresh
@@ -538,6 +539,22 @@ private fun BrowserContent(
                                     menuOpen = false
                                     session?.requestReaderArticle { article ->
                                         if (article != null) readerArticle = article else Toast.makeText(androidContext, R.string.reader_unavailable, Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                            )
+                            val translation = state.translation
+                            val translated = translation?.translatedTo?.isNotEmpty() == true
+                            DropdownMenuItem(
+                                text = { Text(stringResource(if (translated) R.string.menu_show_original else R.string.menu_translate)) },
+                                leadingIcon = { Icon(Icons.Filled.Translate, contentDescription = null) },
+                                enabled = session != null && (translated || translation?.canTranslate == true),
+                                onClick = {
+                                    menuOpen = false
+                                    if (translated) {
+                                        session?.showOriginal()
+                                    } else {
+                                        Toast.makeText(androidContext, R.string.translate_started, Toast.LENGTH_SHORT).show()
+                                        session?.translatePage { ok -> if (!ok) Toast.makeText(androidContext, R.string.translate_failed, Toast.LENGTH_LONG).show() }
                                     }
                                 },
                             )
