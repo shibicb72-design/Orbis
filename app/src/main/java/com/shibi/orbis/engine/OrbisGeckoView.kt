@@ -30,12 +30,26 @@ fun pullToRefreshAllowed(handledResult: Int, scrollableDirections: Int, overscro
 /** Pull-to-refresh reloads once the finger travelled at least [thresholdPx] down. */
 fun pullTriggersRefresh(distancePx: Float, thresholdPx: Float): Boolean = distancePx >= thresholdPx
 
+/** A content view that can take a picture of the page shown (for tab previews). */
+interface PageCapture {
+    /** [onResult] gets a full-size picture of what the view shows, or null. Main thread. */
+    fun capturePage(onResult: (android.graphics.Bitmap?) -> Unit)
+}
+
 /**
  * GeckoView that reports pull-to-refresh gestures. Every touch still goes to the page exactly once: the first event
  * through onTouchEventForDetailResult (which also tells us whether a pull may start), the rest through onTouchEvent.
- * A second finger cancels the pull (pinch zoom).
+ * A second finger cancels the pull (pinch zoom). It also takes page pictures for tab previews.
  */
-class OrbisGeckoView(context: Context) : GeckoView(context), PullToRefreshSource {
+class OrbisGeckoView(context: Context) : GeckoView(context), PullToRefreshSource, PageCapture {
+    override fun capturePage(onResult: (android.graphics.Bitmap?) -> Unit) {
+        if (session == null || width == 0 || height == 0) {
+            onResult(null)
+            return
+        }
+        runCatching { capturePixels().accept({ onResult(it) }, { onResult(null) }) }.onFailure { onResult(null) }
+    }
+
     init {
         // GeckoView's print support opens Android's print dialog from the activity; without this it does nothing.
         setActivityContextDelegate {

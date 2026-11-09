@@ -1,6 +1,21 @@
 package com.shibi.orbis.ui.browser
 
 import androidx.compose.animation.core.tween
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material.icons.filled.History
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,9 +27,6 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -103,6 +115,12 @@ internal fun TabSwitcher(
     onClosePrivateTabs: () -> Unit,
     onDismiss: () -> Unit,
     onEnded: (TabSheetOutcome) -> Unit = {},
+    /** Page previews by tab id; a tab without one shows its site's letter. */
+    thumbnails: Map<Long, ImageBitmap> = emptyMap(),
+    /** Opens the recently closed tabs list; null hides the button (nothing closed). */
+    onRecentlyClosed: (() -> Unit)? = null,
+    /** The "Tab closed / Undo" bar, shown inside the sheet (the screen's own one is behind it). */
+    snackbars: SnackbarHostState? = null,
 ) {
     val motionEnabled = rememberMotionEnabled()
     val gate = remember { TabSheetGate() }
@@ -143,27 +161,37 @@ internal fun TabSwitcher(
                 Icon(Icons.Filled.VisibilityOff, contentDescription = null)
                 Text(stringResource(R.string.tabs_new_private), modifier = Modifier.padding(start = 4.dp))
             }
+            if (onRecentlyClosed != null) {
+                TextButton(onClick = { end(TabSheetOutcome.DISMISSED, onRecentlyClosed) }) {
+                    Icon(Icons.Filled.History, contentDescription = null)
+                    Text(stringResource(R.string.tabs_recently_closed), modifier = Modifier.padding(start = 4.dp))
+                }
+            }
             if (tabs.any { it.isPrivate }) {
                 TextButton(onClick = { end(TabSheetOutcome.CLOSED_PRIVATE, onClosePrivateTabs) }) {
                     Text(stringResource(R.string.private_close_all))
                 }
             }
         }
-        // Opens scrolled to the current tab: with many tabs it would otherwise sit below the fold of the half-open sheet.
+        // Opens scrolled to the current tab: with many tabs it would otherwise sit below the fold.
         val selectedIndex = tabs.indexOfFirst { it.selected }.coerceAtLeast(0)
-        val listState = rememberLazyListState(initialFirstVisibleItemIndex = selectedIndex)
+        val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = selectedIndex)
         // The first placement happens before the sheet has its final height; once it is open, bring the current tab fully
-        // into view if it is not (never moves a list the user can already see the current tab in).
+        // into view if it is not (never moves a grid the user can already see the current tab in).
         LaunchedEffect(sheetState) {
             snapshotFlow { sheetState.currentValue }.first { it == SheetValue.Expanded }
-            val info = listState.layoutInfo
+            val info = gridState.layoutInfo
             val item = info.visibleItemsInfo.firstOrNull { it.index == selectedIndex }
-            val fullyVisible = item != null && item.offset >= 0 && item.offset + item.size <= info.viewportEndOffset - info.afterContentPadding
-            if (!fullyVisible) listState.scrollToItem(selectedIndex)
+            val fullyVisible =
+                item != null && item.offset.y >= 0 && item.offset.y + item.size.height <= info.viewportEndOffset - info.afterContentPadding
+            if (!fullyVisible) gridState.scrollToItem(selectedIndex)
         }
-        LazyColumn(
-            Modifier.weight(1f, fill = false),
-            state = listState,
+        // Above the grid: below it, the grid's remaining height would push it off the sheet.
+        snackbars?.let { SnackbarHost(it, Modifier.fillMaxWidth()) }
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 150.dp),
+            modifier = Modifier.weight(1f, fill = false),
+            state = gridState,
             // The last row (often the current tab, scrolled to) must clear the gesture/navigation bar.
             contentPadding = PaddingValues(
                 start = 12.dp,
@@ -171,7 +199,8 @@ internal fun TabSwitcher(
                 top = 8.dp,
                 bottom = 8.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
             ),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(tabs, key = { it.id }) { tab ->
                 val container =
@@ -188,10 +217,13 @@ internal fun TabSwitcher(
                     }
                 val privateDescription = stringResource(R.string.tabs_private_mark)
                 val host = hostOfUrl(tab.url)
+                val title = tab.title.ifBlank { host ?: stringResource(R.string.tabs_blank_title) }
                 Surface(
                     color = container,
                     contentColor = content,
                     shape = MaterialTheme.shapes.medium,
+                    // The current tab has a visible frame as well as its label (not color alone).
+                    border = if (tab.selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                     modifier = Modifier
                         .animateItem(
                             fadeInSpec = null,
@@ -203,52 +235,72 @@ internal fun TabSwitcher(
                         .semantics { selected = tab.selected }
                         .clickable { end(TabSheetOutcome.SELECTED) { onSelect(tab.id) } },
                 ) {
-                    Row(
-                        Modifier.padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (tab.isPrivate) {
-                            Icon(
-                                Icons.Filled.VisibilityOff,
-                                contentDescription = privateDescription,
-                                modifier = Modifier.padding(end = 12.dp),
-                            )
-                        }
-                        if (tab.selected) {
-                            // The selected row says so in text and shape, not only by its tint.
-                            Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.padding(end = 12.dp))
-                        }
-                        val title = tab.title.ifBlank { host ?: stringResource(R.string.tabs_blank_title) }
-                        Column(Modifier.weight(1f)) {
+                    Column {
+                        Row(
+                            Modifier.padding(start = 10.dp, end = 0.dp, top = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (tab.isPrivate) {
+                                Icon(
+                                    Icons.Filled.VisibilityOff,
+                                    contentDescription = privateDescription,
+                                    modifier = Modifier.padding(end = 6.dp).size(18.dp),
+                                )
+                            }
                             if (tab.selected) {
-                                Text(
-                                    stringResource(R.string.tabs_selected_label),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                                Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.padding(end = 6.dp).size(18.dp))
                             }
-                            Text(
-                                title,
-                                style = MaterialTheme.typography.bodyLarge,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            if (host != null) {
-                                Text(
-                                    host,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                            Column(Modifier.weight(1f)) {
+                                if (tab.selected) {
+                                    Text(
+                                        stringResource(R.string.tabs_selected_label),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            val closeDescription =
+                                stringResource(if (tab.isPrivate) R.string.tabs_close_private_named else R.string.tabs_close_named, title)
+                            IconButton(onClick = { onClose(tab.id) }, modifier = Modifier.testTag(tabCloseTag(tab.id))) {
+                                Icon(Icons.Filled.Close, contentDescription = closeDescription)
                             }
                         }
-                        val closeDescription =
-                            stringResource(if (tab.isPrivate) R.string.tabs_close_private_named else R.string.tabs_close_named, title)
-                        IconButton(onClick = { onClose(tab.id) }, modifier = Modifier.testTag(tabCloseTag(tab.id))) {
-                            Icon(Icons.Filled.Close, contentDescription = closeDescription)
-                        }
+                        TabPreview(
+                            image = thumbnails[tab.id]?.takeIf { host != null },
+                            letter = (host?.removePrefix("www.")?.firstOrNull()?.uppercaseChar() ?: '+').toString(),
+                            host = host,
+                        )
                     }
+                }
+            }
+        }
+    }
+}
+
+/** A tab's page preview, or (none taken yet, e.g. a restored tab) its site's letter and host. Decorative for screen readers. */
+@Composable
+private fun TabPreview(image: ImageBitmap?, letter: String, host: String?) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.padding(start = 6.dp, end = 6.dp, bottom = 6.dp).fillMaxWidth().aspectRatio(0.8f).clearAndSetSemantics {},
+    ) {
+        if (image != null) {
+            Image(image, contentDescription = null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxSize())
+        } else {
+            Column(verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(letter, style = MaterialTheme.typography.displaySmall)
+                if (host != null) {
+                    Text(
+                        host,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
                 }
             }
         }

@@ -11,6 +11,11 @@
     <string name="start_pinned">pinned</string>
     <string name="menu_home">Home</string>
     <string name="menu_share">Share</string>
+    <string name="tabs_recently_closed">Recently closed</string>
+    <string name="tabs_recently_closed_clear">Clear list</string>
+    <string name="tabs_closed_snackbar">Tab closed</string>
+    <string name="selection_search">Search</string>
+    <string name="undo">Undo</string>
     <string name="ct_close">Close and go back to the app</string>
     <string name="ct_secure">Secure connection</string>
     <string name="ct_open_in_orbis">Open in Orbis</string>

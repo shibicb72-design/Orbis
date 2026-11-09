@@ -22,7 +22,7 @@ import org.robolectric.annotation.Config
 
 /** Slice 2: the production [TabSwitcher] sheet. TabManager behavior is covered unchanged by tabs/TabManagerTest et al. */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35], application = android.app.Application::class)
+@Config(sdk = [35], application = android.app.Application::class, qualifiers = "w411dp-h2400dp")
 class TabSwitcherComposeTest {
     @get:Rule(order = 0)
     val registration = ComposeActivityRegistration()

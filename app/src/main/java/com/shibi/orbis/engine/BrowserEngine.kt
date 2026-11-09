@@ -41,6 +41,10 @@ interface BrowserEngine {
     val extensions: ExtensionHost
     /** The password store; see [LoginBridge]. */
     var logins: LoginBridge?
+    /** Search for text the user selected on a page (selection menu > Search); [isPrivate] is the page's mode. */
+    var onSelectionSearch: ((text: String, isPrivate: Boolean) -> Unit)?
+        get() = null
+        set(@Suppress("UNUSED_PARAMETER") value) {}
     /** The system permission dialogs Gecko needs. App level (not per tab); the browser screen launches them. */
     val androidPermissions: AndroidPermissionBroker
     /**

@@ -1,6 +1,14 @@
 package com.shibi.orbis.ui.browser
 
 import android.app.Activity
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import com.shibi.orbis.engine.PageCapture
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarHost
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.ContextWrapper
@@ -266,6 +274,17 @@ private fun BrowserContent(
     // below ever closes one. Leaving composition only releases the session from the view.
     val selectedTab by tabs.selected.collectAsStateWithLifecycle()
     val tabList by tabs.tabs.collectAsStateWithLifecycle()
+    val recentlyClosed by tabs.recentlyClosed.collectAsStateWithLifecycle()
+    var showRecentlyClosed by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val snackbars = remember { SnackbarHostState() }
+    val closedMessage = stringResource(R.string.tabs_closed_snackbar)
+    val undoLabel = stringResource(R.string.undo)
+    // Tab previews: taken of the page shown when it finishes loading and when the tab list opens. Memory only.
+    var contentView by remember { mutableStateOf<android.view.View?>(null) }
+    val thumbnailMap by container.thumbnails.all.collectAsStateWithLifecycle()
+    val thumbnailImages = remember(thumbnailMap) { thumbnailMap.mapValues { it.value.asImageBitmap() } }
+    LaunchedEffect(tabList) { container.thumbnails.retain(tabList.map { it.id }.toSet()) }
     val pendingDownload by tabs.pendingDownload.collectAsStateWithLifecycle()
     val linkMenu by tabs.linkMenu.collectAsStateWithLifecycle()
     val session = selectedTab.session
@@ -282,6 +301,19 @@ private fun BrowserContent(
     val requestNotificationPermission = rememberNotificationPermissionRequest()
 
     var showTabs by remember { mutableStateOf(false) }
+    fun capturePreview() {
+        // Only a web page: the start page is drawn over the page area, so a capture of a blank tab is empty.
+        if (!isWebUrl(state.url)) return
+        val tabId = selectedTab.id
+        (contentView as? PageCapture)?.capturePage { bmp -> if (bmp != null) container.thumbnails.put(tabId, bmp) }
+    }
+    LaunchedEffect(showTabs) { if (showTabs) capturePreview() }
+    LaunchedEffect(selectedTab.id, state.isLoading) {
+        if (!state.isLoading && isWebUrl(state.url)) {
+            kotlinx.coroutines.delay(600)
+            capturePreview()
+        }
+    }
     // Bumped by the start page's search box to put the address bar into edit mode.
     var addressFocusRequests by remember { mutableIntStateOf(0) }
     // The typed text and a submit hook from the address bar, for the suggestion dropdown.
@@ -842,6 +874,7 @@ private fun BrowserContent(
                         }
                     },
                     update = { view ->
+                        contentView = view
                         val target = session
                         if (target != null && attached.session !== target) {
                             attached.session?.detachFrom(view)
@@ -875,6 +908,7 @@ private fun BrowserContent(
                         onClose = { readerArticle = null },
                     )
                 }
+                SnackbarHost(snackbars, Modifier.align(Alignment.BottomCenter))
                 if (pullPx > 0f) {
                     PullToRefreshIndicator(
                         fraction = (pullPx / pullThresholdPx).coerceIn(0f, 1f),
@@ -929,6 +963,21 @@ private fun BrowserContent(
         }
     }
 
+    if (showRecentlyClosed) {
+        RecentlyClosedDialog(
+            entries = recentlyClosed,
+            onOpen = {
+                showRecentlyClosed = false
+                tabs.reopen(it)
+            },
+            onClear = {
+                tabs.forgetClosed()
+                showRecentlyClosed = false
+            },
+            onDismiss = { showRecentlyClosed = false },
+        )
+    }
+
     if (showTabs) {
         TabSwitcher(
             tabs = tabList,
@@ -937,7 +986,24 @@ private fun BrowserContent(
                 tabs.select(it)
                 showTabs = false
             },
-            onClose = { tabs.close(it) },
+            onClose = { id ->
+                val before = tabs.recentlyClosed.value.firstOrNull()
+                tabs.close(id)
+                val closed = tabs.recentlyClosed.value.firstOrNull()
+                if (closed != null && closed !== before) {
+                    scope.launch {
+                        snackbars.currentSnackbarData?.dismiss()
+                        val result = snackbars.showSnackbar(closedMessage, actionLabel = undoLabel, duration = SnackbarDuration.Short)
+                        if (result == SnackbarResult.ActionPerformed && closed in tabs.recentlyClosed.value) tabs.reopen(closed)
+                    }
+                }
+            },
+            thumbnails = thumbnailImages,
+            snackbars = snackbars,
+            onRecentlyClosed = if (recentlyClosed.isEmpty()) null else ({
+                showTabs = false
+                showRecentlyClosed = true
+            }),
             onNewTab = {
                 focusAddressFor = tabs.newTab()
                 showTabs = false

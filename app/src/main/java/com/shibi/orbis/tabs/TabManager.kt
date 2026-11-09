@@ -52,6 +52,12 @@ data class TabUi(val id: Long, val title: String, val url: String, val selected:
 /** One-shot messages for the UI. */
 enum class TabEvent { TAB_LIMIT }
 
+/** A closed normal tab that can be reopened with its back/forward history. Memory only; never a private tab. */
+data class ClosedTab(val url: String, val title: String, val desktopMode: Boolean, val savedState: String?)
+
+/** How many closed tabs are kept for reopening (like Chrome and Firefox). */
+const val RECENTLY_CLOSED_LIMIT = 25
+
 /** A download waiting for the user's yes/no. Exactly one is held at a time. */
 data class PendingDownload(val download: IncomingDownload, val sourceTabId: Long, val isPrivate: Boolean = false)
 
@@ -123,6 +129,11 @@ class TabManager(
 
     private val _pendingDownload = MutableStateFlow<PendingDownload?>(null)
     val pendingDownload: StateFlow<PendingDownload?> = _pendingDownload.asStateFlow()
+
+    private val _recentlyClosed = MutableStateFlow<List<ClosedTab>>(emptyList())
+
+    /** Normal tabs closed this session, newest first. Cleared with history or with the open tabs. */
+    val recentlyClosed: StateFlow<List<ClosedTab>> = _recentlyClosed.asStateFlow()
 
     private val _linkMenu = MutableStateFlow<LinkMenuRequest?>(null)
     val linkMenu: StateFlow<LinkMenuRequest?> = _linkMenu.asStateFlow()
@@ -397,6 +408,11 @@ class TabManager(
         val index = indexOf(id)
         if (index < 0) return
         val tab = list[index]
+        if (!tab.isPrivate && isWebUrl(tab.url)) {
+            val saved = runCatching { tab.session?.savedState() }.getOrNull() ?: tab.savedState
+            val entry = ClosedTab(tab.url, tab.title, tab.desktopMode, saved)
+            _recentlyClosed.value = (listOf(entry) + _recentlyClosed.value).take(RECENTLY_CLOSED_LIMIT)
+        }
         dispose(tab)
         list.removeAt(index)
         when {
@@ -429,6 +445,30 @@ class TabManager(
         return null
     }
 
+    /**
+     * Opens [entry] again as a new selected tab, with its back/forward history, and takes it off the recently closed
+     * list. Null at the tab cap.
+     */
+    fun reopen(entry: ClosedTab): Long? {
+        if (list.size >= maxTabs) {
+            notifyLimit()
+            return null
+        }
+        _recentlyClosed.value = _recentlyClosed.value - entry
+        val id = nextId++
+        list.firstOrNull { it.id == selectedId }?.session?.setActive(false)
+        list += Tab(id, null, entry.title, entry.url, entry.desktopMode, entry.savedState, null)
+        selectedId = id
+        ensureSession(id)?.session?.setActive(foreground)
+        changed()
+        return id
+    }
+
+    /** Forgets the recently closed tabs (their addresses and history). */
+    fun forgetClosed() {
+        _recentlyClosed.value = emptyList()
+    }
+
     /** Closes every private tab; the engine's private data is dropped once, with the last of them. */
     fun closeAllPrivate() {
         val ids = list.filter { it.isPrivate }.map { it.id }
@@ -451,6 +491,7 @@ class TabManager(
      */
     fun closeAllNormal() {
         val privateSelected = list.firstOrNull { it.id == selectedId }?.isPrivate == true
+        forgetClosed()
         for (tab in list.filter { !it.isPrivate }) dispose(tab)
         list.removeAll { !it.isPrivate }
         val fresh = Tab(nextId++, null, "", "", false, null, null)

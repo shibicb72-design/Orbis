@@ -176,6 +176,11 @@ class OrbisApp : Application() {
                     browserSettings.forgetPrivate()
                 },
             )
+        // Selection menu > Search: a new tab (private for a private page) with the user's search engine.
+        engine.onSelectionSearch = { text, isPrivate ->
+            val url = searchEngine.selected.value.searchPrefix + java.net.URLEncoder.encode(text, "UTF-8")
+            if (isPrivate) tabs.newPrivateTab(url) else tabs.newTab(url)
+        }
         val downloads =
             DownloadManager(
                 dir = { getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: File(filesDir, "downloads") },
@@ -190,7 +195,10 @@ class OrbisApp : Application() {
         // Everything here runs on the main thread (appScope is Main). Site permissions and uBO are not touched.
         val clearTargets =
             object : ClearTargets {
-                override fun clearHistory() = history.clearAll()
+                override fun clearHistory() {
+                    history.clearAll()
+                    tabs.forgetClosed()
+                }
 
                 override fun closeNormalTabs() = tabs.closeAllNormal()
 
@@ -263,6 +271,8 @@ class OrbisApp : Application() {
 
 class AppContainer(
     val debugLog: DebugLog,
+    /** Tab page previews for the tab grid (memory only). */
+    val thumbnails: com.shibi.orbis.tabs.TabThumbnails = com.shibi.orbis.tabs.TabThumbnails(),
     val engine: BrowserEngine,
     val ubo: UboOnboardingController,
     /** Owns every tab and session; outlives screens, so Settings never destroys a page. */

@@ -1,6 +1,7 @@
 package com.shibi.orbis.ui.browser
 
 import android.content.ClipData
+import androidx.compose.foundation.clickable
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -159,4 +160,33 @@ internal fun shareLink(context: Context, url: String, title: String? = null) {
             .putExtra(Intent.EXTRA_TEXT, url)
             .apply { if (!title.isNullOrBlank()) putExtra(Intent.EXTRA_SUBJECT, title) }
     runCatching { context.startActivity(Intent.createChooser(send, context.getString(R.string.link_menu_share))) }
+}
+
+/** The recently closed normal tabs, newest first; tapping one reopens it with its history. */
+@Composable
+internal fun RecentlyClosedDialog(
+    entries: List<com.shibi.orbis.tabs.ClosedTab>,
+    onOpen: (com.shibi.orbis.tabs.ClosedTab) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.tabs_recently_closed)) },
+        text = {
+            androidx.compose.foundation.lazy.LazyColumn {
+                items(entries.size) { i ->
+                    val e = entries[i]
+                    val host = com.shibi.orbis.engine.hostOfUrl(e.url).orEmpty()
+                    androidx.compose.material3.ListItem(
+                        headlineContent = { Text(e.title.ifBlank { host }, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
+                        supportingContent = { Text(host, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
+                        modifier = Modifier.clickable { onOpen(e) },
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.prompt_cancel)) } },
+        dismissButton = { TextButton(onClick = onClear) { Text(stringResource(R.string.tabs_recently_closed_clear)) } },
+    )
 }

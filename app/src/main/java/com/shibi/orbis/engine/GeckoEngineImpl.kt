@@ -111,6 +111,8 @@ class GeckoEngineImpl(
             }
         }
 
+    override var onSelectionSearch: ((String, Boolean) -> Unit)? = null
+
     @Volatile private var httpsOnlyNormal = false
     @Volatile private var httpsOnlyPrivate = true
     @Volatile private var websiteDark: Boolean? = null
@@ -340,6 +342,7 @@ class GeckoEngineImpl(
             reconciler = reconciler,
             trackingExceptions = trackingExceptions,
             logins = { logins },
+            onSelectionSearch = { onSelectionSearch },
             reader = reader,
             sitePolicy = { sitePolicy },
             // A popup child inherits the opener's desktop/mobile choice and its privacy, and is never opened by us.
@@ -398,6 +401,7 @@ private class GeckoBrowserSession(
     private val reconciler: GeolocationReconciler,
     private val trackingExceptions: TrackingExceptions,
     private val logins: () -> LoginBridge?,
+    private val onSelectionSearch: () -> ((String, Boolean) -> Unit)?,
     private val reader: ReaderExtensionHolder,
     private val sitePolicy: () -> SitePolicy?,
     private val newPopupChild: (GeckoBrowserSession) -> GeckoBrowserSession,
@@ -1669,6 +1673,12 @@ private class GeckoBrowserSession(
                 .onFailure { debugLog.log("GeckoSession", "release before attach failed: ${it.javaClass.simpleName}") }
         }
         geckoView.setSession(session)
+        // Selection menu with Search and Share (GeckoView's own one has neither); needs the activity for its toolbar.
+        if (session.selectionActionDelegate !is OrbisSelectionDelegate) {
+            activityOf(contentView.context)?.let { activity ->
+                session.selectionActionDelegate = OrbisSelectionDelegate(activity) { text -> onSelectionSearch()?.invoke(text, isPrivate) }
+            }
+        }
     }
 
     override fun detachFrom(contentView: View) {
@@ -2209,3 +2219,7 @@ private fun EngineLogin.toGecko(): Autocomplete.LoginEntry =
 
 private fun Autocomplete.LoginEntry.toEngine(): EngineLogin =
     EngineLogin(guid, origin, formActionOrigin.orEmpty(), httpRealm.orEmpty(), username, password)
+
+/** The activity behind [context] (a view's context may wrap it), or null. */
+internal fun activityOf(context: android.content.Context): android.app.Activity? =
+    generateSequence(context) { (it as? android.content.ContextWrapper)?.baseContext }.firstOrNull { it is android.app.Activity } as? android.app.Activity

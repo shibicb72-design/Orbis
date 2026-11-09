@@ -492,4 +492,60 @@ class TabManagerTest {
         m.onVisitTitle(created[0], "https://a.example/", "A")
         assertEquals(1, m.tabs.value.size)
     }
+
+    @Test
+    fun closingANormalWebTabKeepsItForReopenWithItsHistory() {
+        val m = manager()
+        m.openSelected()
+        val first = created[0]
+        first.navigate("https://a.example/page", "A page")
+        first.saved = "STATE-A"
+        val second = m.newTab()!!
+        m.close(m.tabs.value.first().id)
+        val closed = m.recentlyClosed.value.single()
+        assertEquals(ClosedTab("https://a.example/page", "A page", false, "STATE-A"), closed)
+        val reopened = m.reopen(closed)!!
+        assertEquals(reopened, m.selected.value.id)
+        assertEquals("STATE-A", created.last().init.restoredState)
+        assertTrue(m.recentlyClosed.value.isEmpty())
+        assertTrue(second != reopened)
+    }
+
+    @Test
+    fun privateAndBlankTabsAreNeverKept() {
+        val m = manager()
+        m.openSelected()
+        val p = m.newPrivateTab("https://secret.example/")!!
+        created.last().navigate("https://secret.example/")
+        m.close(p)
+        m.newTab()
+        m.close(m.selected.value.id)
+        assertTrue(m.recentlyClosed.value.isEmpty())
+    }
+
+    @Test
+    fun theListIsCappedAndClearedWithTheOpenTabs() {
+        val m = manager()
+        repeat(RECENTLY_CLOSED_LIMIT + 3) { i ->
+            val id = m.newTab("https://s$i.example/")!!
+            created.last().navigate("https://s$i.example/")
+            m.close(id)
+        }
+        assertEquals(RECENTLY_CLOSED_LIMIT, m.recentlyClosed.value.size)
+        assertEquals("https://s${RECENTLY_CLOSED_LIMIT + 2}.example/", m.recentlyClosed.value.first().url)
+        m.closeAllNormal()
+        assertTrue(m.recentlyClosed.value.isEmpty())
+    }
+
+    @Test
+    fun anOpenSessionFromOutsideBecomesTheSelectedTab() {
+        val m = manager()
+        m.openSelected()
+        val outside = FakeSession(SessionInit())
+        outside.navigate("https://custom.example/")
+        assertTrue(m.adoptSession(outside))
+        assertSame(outside, m.selected.value.session)
+        assertSame(m, outside.host)
+        assertFalse(m.adoptSession(FakeSession(SessionInit(isPrivate = true))))
+    }
 }
