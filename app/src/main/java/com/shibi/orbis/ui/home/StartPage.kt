@@ -79,6 +79,8 @@ fun StartPage(
     onRemove: (TopSite) -> Unit = {},
     /** Voice search next to the search box; null hides it. */
     onVoice: (() -> Unit)? = null,
+    /** The privacy dashboard under the search box; null hides it. */
+    dashboard: (@Composable () -> Unit)? = null,
 ) {
     Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background, contentColor = MaterialTheme.colorScheme.onBackground) {
         Column(
@@ -111,6 +113,7 @@ fun StartPage(
                     }
                 }
             }
+            dashboard?.invoke()
             if (topSites.isEmpty() && bookmarks.isEmpty()) {
                 Text(
                     stringResource(R.string.browser_empty_state),

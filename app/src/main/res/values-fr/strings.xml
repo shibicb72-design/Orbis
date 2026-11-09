@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">Orbis</string>
     <string name="address_bar_hint">Rechercher ou saisir une adresse</string>
     <string name="address_bar_loading">Chargement</string>
@@ -336,4 +336,32 @@
     <string name="ubo_settings_on">uBlock Origin est installé et activé.</string>
     <string name="ubo_settings_off_by_user">uBlock Origin est installé mais désactivé. Il ne filtre pas les pages.</string>
     <string name="ubo_settings_off_by_browser">uBlock Origin a été désactivé par le navigateur, par exemple parce qu\'il a été bloqué ou n\'a pas pu être vérifié. Il ne fonctionne pas.</string>
+    <string name="stats_title">Votre vie privée avec Orbis</string>
+    <string name="stats_week">7 jours</string>
+    <string name="stats_all_time">Depuis le début</string>
+    <string name="stats_time_saved">Temps gagné (estimation)</string>
+    <string name="stats_data_saved">Données économisées (estimation)</string>
+    <string name="stats_data_used">Données utilisées par Orbis</string>
+    <string name="stats_hours">%1$d h</string>
+    <string name="stats_minutes">%1$d min</string>
+    <string name="stats_seconds">%1$d s</string>
+    <string name="stats_under_second">&lt; 1 s</string>
+    <string name="stats_ads">Publicités</string>
+    <string name="stats_trackers">Traqueurs</string>
+    <string name="stats_social">Traqueurs de réseaux sociaux</string>
+    <string name="stats_fingerprinters">Détecteurs d\'empreinte</string>
+    <string name="stats_cryptominers">Cryptomineurs</string>
+    <string name="stats_cookies">Cookies de pistage</string>
+    <string name="stats_top_trackers">Les plus souvent bloqués</string>
+    <string name="stats_note">Compté par la protection contre le pistage d\'Orbis, uniquement sur ce téléphone. Les économies sont des estimations.</string>
+    <string name="stats_note_ubo">Compté par la protection contre le pistage d\'Orbis, uniquement sur ce téléphone ; uBlock Origin bloque encore davantage, sans être compté ici. Les économies sont des estimations.</string>
+    <string name="stats_since">Depuis le %1$s</string>
+    <string name="stats_reset">Réinitialiser</string>
+    <string name="stats_reset_title">Réinitialiser les statistiques ?</string>
+    <string name="stats_reset_body">Les compteurs repartent de zéro. Rien d\'autre n\'est supprimé.</string>
+    <plurals name="stats_blocked_headline" tools:ignore="ImpliedQuantity">
+        <item quantity="one">traqueur, publicité ou cookie bloqué</item>
+        <item quantity="many">traqueurs, publicités et cookies bloqués</item>
+        <item quantity="other">traqueurs, publicités et cookies bloqués</item>
+    </plurals>
 </resources>

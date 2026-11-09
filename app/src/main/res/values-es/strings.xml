@@ -336,4 +336,32 @@
     <string name="ubo_settings_on">uBlock Origin está instalado y activado.</string>
     <string name="ubo_settings_off_by_user">uBlock Origin está instalado pero desactivado. No está filtrando páginas.</string>
     <string name="ubo_settings_off_by_browser">El navegador desactivó uBlock Origin, por ejemplo porque se bloqueó o no se pudo verificar. No se está ejecutando.</string>
+    <string name="stats_title">Tu privacidad con Orbis</string>
+    <string name="stats_week">7 días</string>
+    <string name="stats_all_time">Todo</string>
+    <string name="stats_time_saved">Tiempo ahorrado (estimado)</string>
+    <string name="stats_data_saved">Datos ahorrados (estimado)</string>
+    <string name="stats_data_used">Datos usados por Orbis</string>
+    <string name="stats_hours">%1$d h</string>
+    <string name="stats_minutes">%1$d min</string>
+    <string name="stats_seconds">%1$d s</string>
+    <string name="stats_under_second">&lt; 1 s</string>
+    <string name="stats_ads">Anuncios</string>
+    <string name="stats_trackers">Rastreadores</string>
+    <string name="stats_social">Rastreadores sociales</string>
+    <string name="stats_fingerprinters">Huellas digitales</string>
+    <string name="stats_cryptominers">Criptomineros</string>
+    <string name="stats_cookies">Cookies de rastreo</string>
+    <string name="stats_top_trackers">Bloqueados con más frecuencia</string>
+    <string name="stats_note">Contado por la protección contra rastreo de Orbis, solo en este teléfono. Los ahorros son estimaciones.</string>
+    <string name="stats_note_ubo">Contado por la protección contra rastreo de Orbis, solo en este teléfono; uBlock Origin bloquea aún más, sin contarse aquí. Los ahorros son estimaciones.</string>
+    <string name="stats_since">Contando desde %1$s</string>
+    <string name="stats_reset">Restablecer</string>
+    <string name="stats_reset_title">¿Restablecer las estadísticas de privacidad?</string>
+    <string name="stats_reset_body">Los contadores vuelven a cero. No se borra nada más.</string>
+    <plurals name="stats_blocked_headline">
+        <item quantity="one">rastreador, anuncio o cookie bloqueado</item>
+        <item quantity="many">rastreadores, anuncios y cookies bloqueados</item>
+        <item quantity="other">rastreadores, anuncios y cookies bloqueados</item>
+    </plurals>
 </resources>

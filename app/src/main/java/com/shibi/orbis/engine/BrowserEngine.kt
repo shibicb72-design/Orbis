@@ -41,6 +41,10 @@ interface BrowserEngine {
     val extensions: ExtensionHost
     /** The password store; see [LoginBridge]. */
     var logins: LoginBridge?
+    /** Something was blocked on a page (tracking protection); see PrivacyStats. [isPrivate] is the page's mode. */
+    var onContentBlocked: ((kind: com.shibi.orbis.stats.BlockKind, uri: String?, isPrivate: Boolean) -> Unit)?
+        get() = null
+        set(@Suppress("UNUSED_PARAMETER") value) {}
     /** Search for text the user selected on a page (selection menu > Search); [isPrivate] is the page's mode. */
     var onSelectionSearch: ((text: String, isPrivate: Boolean) -> Unit)?
         get() = null

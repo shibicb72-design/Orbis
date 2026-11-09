@@ -270,6 +270,22 @@ class OrbisApp : Application() {
         // Sessions only appear after the onboarding decision; this has long finished by then.
         sitePermissions.load()
         container.updates = com.shibi.orbis.update.UpdateController(this, appScope).also { it.checkIfDue() }
+        // Privacy dashboard: counts of what was blocked, and the app's network use (Android's per-app counter, read
+        // once a minute while Orbis runs). Counts only, on this phone.
+        val stats =
+            com.shibi.orbis.stats.PrivacyStats(File(filesDir, "privacy_stats.json"), appScope, Dispatchers.IO, log = { debugLog.log("Stats", it) })
+        stats.load()
+        container.privacyStats = stats
+        engine.onContentBlocked = { kind, uri, isPrivate -> stats.recordBlocked(kind, uri, isPrivate) }
+        appScope.launch {
+            val uid = android.os.Process.myUid()
+            while (true) {
+                val rx = android.net.TrafficStats.getUidRxBytes(uid)
+                val tx = android.net.TrafficStats.getUidTxBytes(uid)
+                if (rx >= 0 && tx >= 0) stats.recordTraffic(rx + tx)
+                kotlinx.coroutines.delay(60_000)
+            }
+        }
         runCatching { engine.warmUp() }
             .onFailure { debugLog.log("OrbisApp", "engine warmUp failed: ${it.message}") }
         // Both lists are read before any tab can load a page; changes made before they arrive are replayed on top.
@@ -298,6 +314,8 @@ class AppContainer(
     val debugLog: DebugLog,
     /** Tab page previews for the tab grid (memory only). */
     val thumbnails: com.shibi.orbis.tabs.TabThumbnails = com.shibi.orbis.tabs.TabThumbnails(),
+    /** What Orbis blocked and the data it used (the start page dashboard); set by the app after creation. */
+    var privacyStats: com.shibi.orbis.stats.PrivacyStats? = null,
     /** Update checks for builds not from Google Play; set by the app after creation. */
     var updates: com.shibi.orbis.update.UpdateController? = null,
     val engine: BrowserEngine,

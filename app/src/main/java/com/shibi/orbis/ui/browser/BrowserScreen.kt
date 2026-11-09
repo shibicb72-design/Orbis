@@ -997,6 +997,35 @@ private fun BrowserContent(
                             bookmarks = bookmarkList,
                             onSearch = { addressFocusRequests++ },
                             onVoice = if (hasVoice) voiceSearch else null,
+                            dashboard = container.privacyStats?.let { stats ->
+                                {
+                                    val version by stats.version.collectAsStateWithLifecycle()
+                                    val uboState by container.ubo.state.collectAsStateWithLifecycle()
+                                    val week = remember(version) { stats.summary(7) }
+                                    val all = remember(version) { stats.summary(null) }
+                                    var confirmReset by remember { mutableStateOf(false) }
+                                    com.shibi.orbis.ui.home.PrivacyDashboard(
+                                        week = week,
+                                        allTime = all,
+                                        uboActive = (uboState as? com.shibi.orbis.ubo.UboState.Installed)?.enabled == true,
+                                        onReset = { confirmReset = true },
+                                    )
+                                    if (confirmReset) {
+                                        androidx.compose.material3.AlertDialog(
+                                            onDismissRequest = { confirmReset = false },
+                                            title = { Text(stringResource(R.string.stats_reset_title)) },
+                                            text = { Text(stringResource(R.string.stats_reset_body)) },
+                                            confirmButton = {
+                                                TextButton(onClick = {
+                                                    stats.reset()
+                                                    confirmReset = false
+                                                }) { Text(stringResource(R.string.stats_reset)) }
+                                            },
+                                            dismissButton = { TextButton(onClick = { confirmReset = false }) { Text(stringResource(R.string.prompt_cancel)) } },
+                                        )
+                                    }
+                                }
+                            },
                             onOpen = { tabs.loadInSelected(it) },
                             onAllBookmarks = onOpenBookmarks,
                             onPin = { container.browserSettings.pinSite(it.url, it.title) },

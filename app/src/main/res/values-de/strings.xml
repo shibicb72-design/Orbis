@@ -335,4 +335,31 @@
     <string name="ubo_settings_on">uBlock Origin ist installiert und aktiviert.</string>
     <string name="ubo_settings_off_by_user">uBlock Origin ist installiert, aber deaktiviert. Es filtert keine Seiten.</string>
     <string name="ubo_settings_off_by_browser">uBlock Origin wurde vom Browser deaktiviert, zum Beispiel weil es blockiert wurde oder nicht verifiziert werden konnte. Es ist nicht aktiv.</string>
+    <string name="stats_title">Deine Privatsphäre mit Orbis</string>
+    <string name="stats_week">7 Tage</string>
+    <string name="stats_all_time">Gesamt</string>
+    <string name="stats_time_saved">Zeit gespart (geschätzt)</string>
+    <string name="stats_data_saved">Daten gespart (geschätzt)</string>
+    <string name="stats_data_used">Von Orbis genutzte Daten</string>
+    <string name="stats_hours">%1$d Std.</string>
+    <string name="stats_minutes">%1$d Min.</string>
+    <string name="stats_seconds">%1$d Sek.</string>
+    <string name="stats_under_second">&lt; 1 Sek.</string>
+    <string name="stats_ads">Werbung</string>
+    <string name="stats_trackers">Tracker</string>
+    <string name="stats_social">Social-Media-Tracker</string>
+    <string name="stats_fingerprinters">Fingerprinter</string>
+    <string name="stats_cryptominers">Krypto-Miner</string>
+    <string name="stats_cookies">Tracking-Cookies</string>
+    <string name="stats_top_trackers">Am häufigsten blockiert</string>
+    <string name="stats_note">Gezählt vom Tracking-Schutz von Orbis, nur auf diesem Telefon. Die Einsparungen sind Schätzungen.</string>
+    <string name="stats_note_ubo">Gezählt vom Tracking-Schutz von Orbis, nur auf diesem Telefon; uBlock Origin blockiert noch mehr, was hier nicht mitgezählt wird. Die Einsparungen sind Schätzungen.</string>
+    <string name="stats_since">Gezählt seit %1$s</string>
+    <string name="stats_reset">Zurücksetzen</string>
+    <string name="stats_reset_title">Datenschutz-Statistik zurücksetzen?</string>
+    <string name="stats_reset_body">Die Zähler beginnen wieder bei null. Sonst wird nichts gelöscht.</string>
+    <plurals name="stats_blocked_headline">
+        <item quantity="one">Tracker, Werbung oder Cookie blockiert</item>
+        <item quantity="other">Tracker, Werbung und Cookies blockiert</item>
+    </plurals>
 </resources>

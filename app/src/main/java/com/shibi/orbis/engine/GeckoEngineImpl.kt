@@ -112,6 +112,7 @@ class GeckoEngineImpl(
         }
 
     override var onSelectionSearch: ((String, Boolean) -> Unit)? = null
+    override var onContentBlocked: ((com.shibi.orbis.stats.BlockKind, String?, Boolean) -> Unit)? = null
 
     @Volatile private var httpsOnlyNormal = false
     @Volatile private var httpsOnlyPrivate = true
@@ -451,6 +452,7 @@ class GeckoEngineImpl(
             trackingExceptions = trackingExceptions,
             logins = { logins },
             onSelectionSearch = { onSelectionSearch },
+            onBlocked = { onContentBlocked },
             reader = reader,
             sitePolicy = { sitePolicy },
             // A popup child inherits the opener's desktop/mobile choice and its privacy, and is never opened by us.
@@ -510,6 +512,7 @@ private class GeckoBrowserSession(
     private val trackingExceptions: TrackingExceptions,
     private val logins: () -> LoginBridge?,
     private val onSelectionSearch: () -> ((String, Boolean) -> Unit)?,
+    private val onBlocked: () -> ((com.shibi.orbis.stats.BlockKind, String?, Boolean) -> Unit)?,
     private val reader: ReaderExtensionHolder,
     private val sitePolicy: () -> SitePolicy?,
     private val newPopupChild: (GeckoBrowserSession) -> GeckoBrowserSession,
@@ -568,6 +571,14 @@ private class GeckoBrowserSession(
         session.permissionDelegate = permissionDelegate()
         session.mediaSessionDelegate = mediaSessionDelegate()
         session.translationsSessionDelegate = translationDelegate()
+        session.contentBlockingDelegate =
+            object : ContentBlocking.Delegate {
+                override fun onContentBlocked(session: GeckoSession, event: ContentBlocking.BlockEvent) {
+                    if (!event.isBlocking) return
+                    val kind = blockKindOf(event.antiTrackingCategory, event.cookieBehaviorCategory) ?: return
+                    onBlocked()?.invoke(kind, event.uri, isPrivate)
+                }
+            }
     }
 
     /** Opens the session (never called for a popup child: Gecko opens that one) and applies [init]. */
@@ -2346,3 +2357,16 @@ internal fun rangeStart(contentRange: String?): Long? =
 /** The built-in Force dark extension (assets/extensions/darken). */
 internal const val DARKEN_ID = "darken@orbis.shibi.com"
 internal const val DARKEN_ASSET_URL = "resource://android/assets/extensions/darken/"
+
+/** What a Gecko block event counts as on the dashboard; null for one that is not counted (safe browsing, unknown). */
+internal fun blockKindOf(antiTracking: Int, cookieBehavior: Int): com.shibi.orbis.stats.BlockKind? {
+    return when {
+        antiTracking and ContentBlocking.AntiTracking.AD != 0 -> com.shibi.orbis.stats.BlockKind.AD
+        antiTracking and ContentBlocking.AntiTracking.FINGERPRINTING != 0 -> com.shibi.orbis.stats.BlockKind.FINGERPRINTER
+        antiTracking and ContentBlocking.AntiTracking.CRYPTOMINING != 0 -> com.shibi.orbis.stats.BlockKind.CRYPTOMINER
+        antiTracking and ContentBlocking.AntiTracking.SOCIAL != 0 || antiTracking and ContentBlocking.AntiTracking.STP != 0 -> com.shibi.orbis.stats.BlockKind.SOCIAL
+        antiTracking and (ContentBlocking.AntiTracking.ANALYTIC or ContentBlocking.AntiTracking.CONTENT or ContentBlocking.AntiTracking.EMAIL or ContentBlocking.AntiTracking.TEST) != 0 -> com.shibi.orbis.stats.BlockKind.TRACKER
+        cookieBehavior != ContentBlocking.CookieBehavior.ACCEPT_ALL -> com.shibi.orbis.stats.BlockKind.COOKIE
+        else -> null
+    }
+}
