@@ -17,8 +17,8 @@ android {
         applicationId = "com.shibi.orbis"
         minSdk = 29
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
     }
 
     splits {
@@ -115,6 +115,7 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
     implementation(libs.zxing.core)
+    implementation(libs.androidx.browser)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)

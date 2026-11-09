@@ -552,6 +552,38 @@ class TabManager(
         changed()
     }
 
+    /**
+     * Takes over an OPEN session from outside the tab list (a Custom Tab's "Open in Orbis"): it becomes the selected tab,
+     * with its page and history. Refused (false) before the stored tabs are read (adding one then would drop them), at
+     * the tab cap, or for a private session.
+     */
+    fun adoptSession(session: BrowserSession): Boolean {
+        if (!_ready.value || session.isPrivate) return false
+        if (list.size >= maxTabs) {
+            notifyLimit()
+            return false
+        }
+        session.host = this
+        val id = nextId++
+        list.firstOrNull { it.id == selectedId }?.session?.setActive(false)
+        val st = session.state.value
+        list += Tab(
+            id = id,
+            session = session,
+            title = st.title.orEmpty(),
+            url = st.url,
+            desktopMode = st.desktopMode,
+            savedState = null,
+            openerTabId = null,
+            isPrivate = false,
+        )
+        selectedId = id
+        observe(id, session)
+        session.setActive(foreground)
+        changed()
+        return true
+    }
+
     override fun onCloseRequest(session: BrowserSession) {
         val i = indexOfSession(session)
         if (i >= 0) close(list[i].id)

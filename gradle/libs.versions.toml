@@ -19,6 +19,8 @@ mozillaAc = "159.0.1"
 geckoview = "159.0.20261102144711"
 # QR scanner: CameraX (Google Maven) and ZXing core (Maven Central), latest stable on 2026-11-08.
 camerax = "1.6.2"
+# Custom Tabs service and intent helpers (Google Maven), latest stable on 2026-11-09.
+androidxBrowser = "1.10.0"
 zxing = "3.5.4"
 
 [libraries]
@@ -47,6 +49,7 @@ mozilla-browser-engine-gecko = { group = "org.mozilla.components", name = "brows
 androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
 androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
 androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
+androidx-browser = { group = "androidx.browser", name = "browser", version.ref = "androidxBrowser" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 mozilla-concept-engine = { group = "org.mozilla.components", name = "concept-engine", version.ref = "mozillaAc" }
 

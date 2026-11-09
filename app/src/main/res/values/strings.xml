@@ -11,6 +11,10 @@
     <string name="start_pinned">pinned</string>
     <string name="menu_home">Home</string>
     <string name="menu_share">Share</string>
+    <string name="ct_close">Close and go back to the app</string>
+    <string name="ct_secure">Secure connection</string>
+    <string name="ct_open_in_orbis">Open in Orbis</string>
+    <string name="ct_copy_link">Copy link</string>
     <string name="open_app_title">Open in %1$s?</string>
     <string name="open_app_title_any">Open in another app?</string>
     <string name="open_app_body">A link on %1$s wants to leave Orbis and open in an app.</string>
