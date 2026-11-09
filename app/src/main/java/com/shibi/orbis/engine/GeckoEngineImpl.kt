@@ -281,7 +281,7 @@ class GeckoEngineImpl(
 
     override fun createContentView(context: Context): View {
         warmUp()
-        return GeckoView(context)
+        return OrbisGeckoView(context)
     }
 
     override fun shutdown() {

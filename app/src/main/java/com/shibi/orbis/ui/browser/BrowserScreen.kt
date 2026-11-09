@@ -14,6 +14,12 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.shibi.orbis.home.topSites
+import com.shibi.orbis.engine.pullTriggersRefresh
+import com.shibi.orbis.engine.PullToRefreshSource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.mutableFloatStateOf
 import com.shibi.orbis.suggest.mergeSuggestions
 import com.shibi.orbis.suggest.localSuggestions
 import kotlinx.coroutines.delay
@@ -159,6 +165,27 @@ internal fun FullScreenWindowEffect(fullScreen: Boolean, landscape: Boolean = fa
                 WindowCompat.getInsetsController(window, view).show(WindowInsetsCompat.Type.systemBars())
                 view.keepScreenOn = false
             }
+        }
+    }
+}
+
+/** How far the finger travels before a pull reloads the page. */
+private val PULL_TO_REFRESH_THRESHOLD = 96.dp
+
+/** A circle that follows the pull down and fills as it nears the reload threshold. Decorative: Reload has a button. */
+@Composable
+private fun PullToRefreshIndicator(fraction: Float, modifier: Modifier = Modifier) {
+    Surface(
+        shape = CircleShape,
+        shadowElevation = 4.dp,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier
+            .padding(top = 8.dp + 48.dp * fraction)
+            .size(40.dp)
+            .clearAndSetSemantics {},
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(progress = { fraction }, modifier = Modifier.size(24.dp), strokeWidth = 3.dp)
         }
     }
 }
@@ -374,6 +401,12 @@ private fun BrowserContent(
     }
 
     val attached = remember { AttachedSession() }
+    // Pull-to-refresh: the content view reports the drag; past the threshold the page reloads. The view's callbacks read
+    // the CURRENT session and fullscreen state when they run, never values captured when the view was created.
+    var pullPx by remember { mutableFloatStateOf(0f) }
+    val pullThresholdPx = with(LocalDensity.current) { PULL_TO_REFRESH_THRESHOLD.toPx() }
+    val currentSession by rememberUpdatedState(session)
+    val currentFullScreen by rememberUpdatedState(fullScreen)
 
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -700,6 +733,13 @@ private fun BrowserContent(
                                     ViewGroup.LayoutParams.MATCH_PARENT,
                                     ViewGroup.LayoutParams.MATCH_PARENT,
                                 )
+                            (view as? PullToRefreshSource)?.apply {
+                                onPull = { px -> if (!currentFullScreen) pullPx = px }
+                                onPullEnd = { px ->
+                                    if (!currentFullScreen && pullTriggersRefresh(px, pullThresholdPx)) currentSession?.reload()
+                                    pullPx = 0f
+                                }
+                            }
                         }
                     },
                     update = { view ->
@@ -717,6 +757,12 @@ private fun BrowserContent(
                     },
                     modifier = Modifier.fillMaxSize(),
                 )
+                if (pullPx > 0f) {
+                    PullToRefreshIndicator(
+                        fraction = (pullPx / pullThresholdPx).coerceIn(0f, 1f),
+                        modifier = Modifier.align(Alignment.TopCenter),
+                    )
+                }
                 if (blankTab && !state.isLoading) {
                     if (selectedTab.isPrivate) {
                         // A private tab keeps its notice; the start page (history-based Top sites) is never shown here.
