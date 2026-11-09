@@ -14,8 +14,11 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.shibi.orbis.home.topSites
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.QrCodeScanner
-import androidx.compose.material.icons.filled.AddToHomeScreen
+import androidx.compose.material.icons.automirrored.filled.AddToHomeScreen
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.automirrored.filled.Article
@@ -480,62 +483,68 @@ private fun BrowserContent(
                             Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.menu_more))
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                            // Grouped: Page (this page) / Tabs / Library / Settings.
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_home)) },
-                                leadingIcon = { Icon(Icons.Filled.Home, contentDescription = null) },
-                                enabled = session != null,
-                                onClick = {
-                                    menuOpen = false
-                                    // Custom homepage, or the start page (a blank tab).
-                                    val homepage = container.browserSettings.homepage.value
-                                    if (homepage == null) session?.showStartPage() else session?.loadUrl(homepage)
-                                },
-                            )
+                            // Grouped: Page (this page) / Tabs / Library / Settings. The most used page actions are one
+                            // row of icons, so the whole menu fits on a phone screen.
                             val forwardDescription = stringResource(R.string.forward)
-                            DropdownMenuItem(
-                                text = { Text(forwardDescription) },
-                                modifier = Modifier.semantics { contentDescription = forwardDescription },
-                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null) },
-                                enabled = state.canGoForward,
-                                onClick = {
-                                    menuOpen = false
-                                    session?.goForward()
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = {
-                                    Text(stringResource(if (bookmarked) R.string.menu_remove_bookmark else R.string.menu_add_bookmark))
-                                },
-                                enabled = isWebUrl(state.url),
-                                onClick = {
-                                    menuOpen = false
-                                    val url = state.url
-                                    if (bookmarked) {
-                                        container.bookmarks.removeByUrl(url)
-                                        Toast.makeText(androidContext, R.string.bookmark_removed, Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        val title = state.title?.takeIf { it.isNotBlank() } ?: url
-                                        val message =
-                                            when (container.bookmarks.add(url, title)) {
-                                                AddResult.ADDED -> R.string.bookmark_added
-                                                AddResult.EXISTS -> R.string.bookmark_exists
-                                                AddResult.FULL -> R.string.bookmark_full
-                                                AddResult.INVALID -> R.string.bookmark_invalid
-                                            }
-                                        Toast.makeText(androidContext, message, Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_share)) },
-                                leadingIcon = { Icon(Icons.Filled.Share, contentDescription = null) },
-                                enabled = isWebUrl(state.url),
-                                onClick = {
-                                    menuOpen = false
-                                    shareLink(androidContext, state.url, state.title)
-                                },
-                            )
+                            val homeDescription = stringResource(R.string.menu_home)
+                            val bookmarkDescription =
+                                stringResource(if (bookmarked) R.string.menu_remove_bookmark else R.string.menu_add_bookmark)
+                            val shareDescription = stringResource(R.string.menu_share)
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
+                            ) {
+                                IconButton(
+                                    enabled = session != null,
+                                    onClick = {
+                                        menuOpen = false
+                                        // Custom homepage, or the start page (a blank tab).
+                                        val homepage = container.browserSettings.homepage.value
+                                        if (homepage == null) session?.showStartPage() else session?.loadUrl(homepage)
+                                    },
+                                ) { Icon(Icons.Filled.Home, contentDescription = homeDescription) }
+                                IconButton(
+                                    enabled = state.canGoForward,
+                                    onClick = {
+                                        menuOpen = false
+                                        session?.goForward()
+                                    },
+                                ) { Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = forwardDescription) }
+                                IconButton(
+                                    enabled = isWebUrl(state.url),
+                                    onClick = {
+                                        menuOpen = false
+                                        val url = state.url
+                                        if (bookmarked) {
+                                            container.bookmarks.removeByUrl(url)
+                                            Toast.makeText(androidContext, R.string.bookmark_removed, Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            val title = state.title?.takeIf { it.isNotBlank() } ?: url
+                                            val message =
+                                                when (container.bookmarks.add(url, title)) {
+                                                    AddResult.ADDED -> R.string.bookmark_added
+                                                    AddResult.EXISTS -> R.string.bookmark_exists
+                                                    AddResult.FULL -> R.string.bookmark_full
+                                                    AddResult.INVALID -> R.string.bookmark_invalid
+                                                }
+                                            Toast.makeText(androidContext, message, Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                ) {
+                                    Icon(
+                                        if (bookmarked) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                                        contentDescription = bookmarkDescription,
+                                    )
+                                }
+                                IconButton(
+                                    enabled = isWebUrl(state.url),
+                                    onClick = {
+                                        menuOpen = false
+                                        shareLink(androidContext, state.url, state.title)
+                                    },
+                                ) { Icon(Icons.Filled.Share, contentDescription = shareDescription) }
+                            }
+                            HorizontalDivider()
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.menu_print)) },
                                 leadingIcon = { Icon(Icons.Filled.Print, contentDescription = null) },
@@ -547,7 +556,7 @@ private fun BrowserContent(
                             )
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.menu_add_home)) },
-                                leadingIcon = { Icon(Icons.Filled.AddToHomeScreen, contentDescription = null) },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.AddToHomeScreen, contentDescription = null) },
                                 // Not from a private tab: the shortcut would keep the address on the home screen.
                                 enabled = isWebUrl(state.url) && session?.isPrivate == false,
                                 onClick = {
@@ -570,17 +579,17 @@ private fun BrowserContent(
                             )
                             val translation = state.translation
                             val translated = translation?.translatedTo?.isNotEmpty() == true
-                            DropdownMenuItem(
+                            // Shown only when the page can be translated (or already is): most pages are in the phone's language.
+                            if (session != null && (translated || translation?.canTranslate == true)) DropdownMenuItem(
                                 text = { Text(stringResource(if (translated) R.string.menu_show_original else R.string.menu_translate)) },
                                 leadingIcon = { Icon(Icons.Filled.Translate, contentDescription = null) },
-                                enabled = session != null && (translated || translation?.canTranslate == true),
                                 onClick = {
                                     menuOpen = false
                                     if (translated) {
-                                        session?.showOriginal()
+                                        session.showOriginal()
                                     } else {
                                         Toast.makeText(androidContext, R.string.translate_started, Toast.LENGTH_SHORT).show()
-                                        session?.translatePage { ok -> if (!ok) Toast.makeText(androidContext, R.string.translate_failed, Toast.LENGTH_LONG).show() }
+                                        session.translatePage { ok -> if (!ok) Toast.makeText(androidContext, R.string.translate_failed, Toast.LENGTH_LONG).show() }
                                     }
                                 },
                             )
