@@ -12,8 +12,10 @@ data class ClearSelection(
     val openTabs: Boolean = false,
     /** Never on unless the user ticks it: bookmarks are the one thing here that cannot be rebuilt. */
     val bookmarks: Boolean = false,
+    /** Saved logins. Never on unless the user ticks it, like bookmarks. */
+    val passwords: Boolean = false,
 ) {
-    val isEmpty: Boolean get() = !(history || cookiesAndSiteData || cache || downloadsList || openTabs || bookmarks)
+    val isEmpty: Boolean get() = !(history || cookiesAndSiteData || cache || downloadsList || openTabs || bookmarks || passwords)
 
     /** The ticked categories, in the order the panel lists them. */
     val categories: List<ClearCategory>
@@ -25,11 +27,12 @@ data class ClearSelection(
                 ClearCategory.DOWNLOADS_LIST.takeIf { downloadsList },
                 ClearCategory.OPEN_TABS.takeIf { openTabs },
                 ClearCategory.BOOKMARKS.takeIf { bookmarks },
+                ClearCategory.PASSWORDS.takeIf { passwords },
             )
 }
 
 /** The things that can be cleared; what an outcome names when one of them did not go through. */
-enum class ClearCategory { HISTORY, COOKIES_AND_SITE_DATA, CACHE, DOWNLOADS_LIST, OPEN_TABS, BOOKMARKS }
+enum class ClearCategory { HISTORY, COOKIES_AND_SITE_DATA, CACHE, DOWNLOADS_LIST, OPEN_TABS, BOOKMARKS, PASSWORDS }
 
 /** Cookies and cache are the only categories that go through the engine. */
 fun needsEngine(selection: ClearSelection): Boolean = selection.cookiesAndSiteData || selection.cache
@@ -57,6 +60,9 @@ interface ClearTargets {
     /** Forgets the finished downloads in the list; no file is deleted, running downloads stay. */
     fun clearDownloadsList()
     fun clearBookmarks()
+
+    /** Deletes every saved login. Throws when the encrypted store is not loaded yet, so the outcome names it. */
+    fun clearPasswords() {}
     fun hasPrivateTabs(): Boolean
 
     /** True only when the engine confirmed the clear. Must not be called while a private tab is open. */
@@ -119,6 +125,7 @@ class BrowsingDataClearer(
         if (selection.history) attempt(ClearCategory.HISTORY, failed) { targets.clearHistory() }
         if (selection.downloadsList) attempt(ClearCategory.DOWNLOADS_LIST, failed) { targets.clearDownloadsList() }
         if (selection.bookmarks) attempt(ClearCategory.BOOKMARKS, failed) { targets.clearBookmarks() }
+        if (selection.passwords) attempt(ClearCategory.PASSWORDS, failed) { targets.clearPasswords() }
         if (needsEngine(selection)) {
             val engineCategories = selection.categories.filter { it == ClearCategory.COOKIES_AND_SITE_DATA || it == ClearCategory.CACHE }
             val confirmed =

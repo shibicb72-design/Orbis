@@ -29,6 +29,7 @@ private class RecordingTargets : ClearTargets {
     override fun closeNormalTabs() = record("tabs")
     override fun clearDownloadsList() = record("downloads")
     override fun clearBookmarks() = record("bookmarks")
+    override fun clearPasswords() = record("passwords")
 
     override fun hasPrivateTabs(): Boolean {
         privateChecks++
@@ -52,6 +53,7 @@ private fun selectionOf(mask: Int) =
         downloadsList = mask and 8 != 0,
         openTabs = mask and 16 != 0,
         bookmarks = mask and 32 != 0,
+        passwords = mask and 64 != 0,
     )
 
 /** The calls a selection must produce, written out independently of the implementation: fixed order, engine last. */
@@ -61,6 +63,7 @@ private fun expectedCalls(s: ClearSelection): List<String> =
         if (s.history) add("history")
         if (s.downloadsList) add("downloads")
         if (s.bookmarks) add("bookmarks")
+        if (s.passwords) add("passwords")
         if (s.cookiesAndSiteData || s.cache) add("engine(cookies=${s.cookiesAndSiteData},cache=${s.cache})")
     }
 
@@ -81,6 +84,7 @@ class BrowsingDataClearerTest {
         assertFalse(d.downloadsList)
         assertFalse(d.openTabs)
         assertFalse(d.bookmarks)
+        assertFalse(d.passwords)
         assertFalse(d.isEmpty)
     }
 
@@ -99,7 +103,7 @@ class BrowsingDataClearerTest {
         )
         assertEquals(
             ClearCategory.entries,
-            ClearSelection(true, true, true, true, true, true).categories,
+            ClearSelection(true, true, true, true, true, true, true).categories,
         )
         assertTrue(selectionOf(0).categories.isEmpty())
         assertTrue(selectionOf(0).isEmpty)
@@ -109,7 +113,7 @@ class BrowsingDataClearerTest {
 
     @Test
     fun needsEngineIsTrueForCookiesOrCacheOnly() {
-        for (mask in 0 until 64) {
+        for (mask in 0 until 128) {
             val s = selectionOf(mask)
             assertEquals("mask $mask", s.cookiesAndSiteData || s.cache, needsEngine(s))
         }
@@ -117,7 +121,7 @@ class BrowsingDataClearerTest {
 
     @Test
     fun blockedAndCanSubmitForEveryCombination() {
-        for (mask in 0 until 64) {
+        for (mask in 0 until 128) {
             val s = selectionOf(mask)
             for (privateTabs in listOf(false, true)) {
                 val blocked = (s.cookiesAndSiteData || s.cache) && privateTabs
@@ -145,7 +149,7 @@ class BrowsingDataClearerTest {
 
     @Test
     fun everyCombinationCallsExactlyTheSelectedTargetsInFixedOrderWithNoPrivateTab() = runTest {
-        for (mask in 0 until 64) {
+        for (mask in 0 until 128) {
             val s = selectionOf(mask)
             val t = RecordingTargets()
             val outcome = clearer(t).run(s)
@@ -156,7 +160,7 @@ class BrowsingDataClearerTest {
 
     @Test
     fun bookmarksAreTouchedOnlyWhenSelected() = runTest {
-        for (mask in 0 until 64) {
+        for (mask in 0 until 128) {
             val s = selectionOf(mask)
             for (privateTabs in listOf(false, true)) {
                 val t = RecordingTargets().also { it.privateTabs = privateTabs }
@@ -204,7 +208,7 @@ class BrowsingDataClearerTest {
 
     @Test
     fun withAPrivateTabOpenEveryEngineSelectionClearsNothingAtAll() = runTest {
-        for (mask in 0 until 64) {
+        for (mask in 0 until 128) {
             val s = selectionOf(mask)
             if (!needsEngine(s)) continue
             val t = RecordingTargets().also { it.privateTabs = true }

@@ -134,6 +134,14 @@ class LoginManager(
         log("login deleted")
     }
 
+    /** Deletes every saved login (Clear browsing data). Refused before [load] finished, so nothing loads in over it. */
+    fun clearAll() {
+        check(loaded) { "logins not loaded" }
+        if (_logins.value.isEmpty()) return
+        update(emptyList())
+        log("logins cleared")
+    }
+
     // ---- never save ----
 
     fun isNeverSave(origin: String): Boolean = loginOrigin(origin)?.let { it in _neverSave.value } == true

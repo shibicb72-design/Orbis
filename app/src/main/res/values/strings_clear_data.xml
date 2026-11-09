@@ -14,6 +14,8 @@
     <string name="clear_bookmarks_section">Cannot be undone</string>
     <string name="clear_bookmarks">Bookmarks</string>
     <string name="clear_bookmarks_summary">Off unless you tick it. You will be asked again, and deleted bookmarks cannot be brought back.</string>
+    <string name="clear_passwords">Saved passwords</string>
+    <string name="clear_passwords_summary">Off unless you tick it. Every saved password is deleted from this device and cannot be brought back.</string>
 
     <string name="clear_private_notice">Cookies and cache cannot be cleared separately from private tabs in this browser engine. Close your private tabs first, or untick Cookies &amp; site data and Cached images and files.</string>
     <string name="clear_close_private">Close private tabs</string>

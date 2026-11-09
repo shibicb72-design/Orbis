@@ -58,8 +58,8 @@ import com.shibi.orbis.tabs.TabManager
 
 private val SelectionSaver =
     listSaver<ClearSelection, Boolean>(
-        save = { listOf(it.history, it.cookiesAndSiteData, it.cache, it.downloadsList, it.openTabs, it.bookmarks) },
-        restore = { ClearSelection(it[0], it[1], it[2], it[3], it[4], it[5]) },
+        save = { listOf(it.history, it.cookiesAndSiteData, it.cache, it.downloadsList, it.openTabs, it.bookmarks, it.passwords) },
+        restore = { ClearSelection(it[0], it[1], it[2], it[3], it[4], it[5], it.getOrElse(6) { false }) },
     )
 
 private const val STEP_NONE = 0
@@ -180,6 +180,9 @@ fun ClearBrowsingDataScreen(
             CheckRow(R.string.clear_bookmarks, R.string.clear_bookmarks_summary, selection.bookmarks, enabled) {
                 selection = selection.copy(bookmarks = it)
             }
+            CheckRow(R.string.clear_passwords, R.string.clear_passwords_summary, selection.passwords, enabled) {
+                selection = selection.copy(passwords = it)
+            }
 
             Button(
                 onClick = { step = STEP_CONFIRM },
@@ -255,6 +258,7 @@ private fun categoryLabel(category: ClearCategory): Int =
         ClearCategory.DOWNLOADS_LIST -> R.string.clear_downloads
         ClearCategory.OPEN_TABS -> R.string.clear_tabs
         ClearCategory.BOOKMARKS -> R.string.clear_bookmarks
+        ClearCategory.PASSWORDS -> R.string.clear_passwords
     }
 
 /** The whole row toggles, not just the box. */
