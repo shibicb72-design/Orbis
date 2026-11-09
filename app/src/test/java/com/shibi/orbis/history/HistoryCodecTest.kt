@@ -104,4 +104,14 @@ class HistoryCodecTest {
         assertTrue(file.exists())
         assertFalse(File(tmp.root, "h.json.corrupt").exists())
     }
+
+    @Test
+    fun visitCountsRoundTripAndOldFilesCountOne() {
+        val items = listOf(HistoryEntry("https://a.example/", "A", 10L, visits = 7), HistoryEntry("https://b.example/", "B", 5L))
+        assertEquals(items, HistoryCodec.decode(HistoryCodec.encode(items)))
+        val old = """{"version":1,"history":[{"url":"https://c.example/","title":"C","visited":3}]}"""
+        assertEquals(1, HistoryCodec.decode(old).single().visits)
+        val bad = """{"version":1,"history":[{"url":"https://d.example/","title":"D","visited":3,"visits":-4}]}"""
+        assertEquals(1, HistoryCodec.decode(bad).single().visits)
+    }
 }

@@ -1,0 +1,54 @@
+package com.shibi.orbis.settings
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class BrowserSettingsTest {
+    private class MemPrefs : BrowserPrefs {
+        override var homepage: String? = null
+        override var searchSuggestions: Boolean = true
+        override var textZoomPercent: Int = DEFAULT_TEXT_ZOOM
+    }
+
+    @Test
+    fun defaultsAreStartPageSuggestionsOnAndNormalText() {
+        val s = BrowserSettings(MemPrefs())
+        assertNull(s.homepage.value)
+        assertTrue(s.searchSuggestions.value)
+        assertEquals(100, s.textZoomPercent.value)
+    }
+
+    @Test
+    fun homepageAcceptsWebAddressesOnlyAndPersists() {
+        val prefs = MemPrefs()
+        val s = BrowserSettings(prefs)
+        assertTrue(s.setHomepage("https://example.org/"))
+        assertEquals("https://example.org/", prefs.homepage)
+        assertFalse(s.setHomepage("javascript:alert(1)"))
+        assertFalse(s.setHomepage("file:///sdcard/x.html"))
+        assertEquals("https://example.org/", s.homepage.value)
+        assertTrue(s.setHomepage(null))
+        assertNull(prefs.homepage)
+    }
+
+    @Test
+    fun typedHomepageIsNormalizedAndSearchesAreRefused() {
+        assertEquals("https://example.com", parseHomepageInput("example.com"))
+        assertEquals("http://intranet.test/", parseHomepageInput(" http://intranet.test/ "))
+        assertNull(parseHomepageInput("cute cats"))
+        assertNull(parseHomepageInput(""))
+        assertNull(parseHomepageInput("javascript:alert(1)"))
+    }
+
+    @Test
+    fun textZoomIsClamped() {
+        val s = BrowserSettings(MemPrefs())
+        s.setTextZoomPercent(500)
+        assertEquals(200, s.textZoomPercent.value)
+        s.setTextZoomPercent(10)
+        assertEquals(50, s.textZoomPercent.value)
+    }
+}

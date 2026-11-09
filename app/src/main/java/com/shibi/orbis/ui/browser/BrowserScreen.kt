@@ -12,6 +12,10 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.shibi.orbis.home.topSites
+import com.shibi.orbis.ui.home.StartPage
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
@@ -189,6 +193,8 @@ private fun BrowserContent(
     val requestNotificationPermission = rememberNotificationPermissionRequest()
 
     var showTabs by remember { mutableStateOf(false) }
+    // Bumped by the start page's search box to put the address bar into edit mode.
+    var addressFocusRequests by remember { mutableIntStateOf(0) }
     // Where focus goes once the tab sheet has ended (keyboard navigation only; see tabSheetReturnFocus). Opening the
     // sheet again clears it, which cancels a return that has not happened yet.
     var sheetReturnFocus by remember { mutableStateOf<ReturnFocus?>(null) }
@@ -347,6 +353,7 @@ private fun BrowserContent(
                     hideKeyboard = { keyboardController?.hide() },
                     moveFocusToSink = { focusSink.requestFocus() },
                     modifier = Modifier.weight(1f),
+                    focusRequests = addressFocusRequests,
                 )
                 val tabsDescription =
                     stringResource(if (selectedTab.isPrivate) R.string.tabs_button_private else R.string.tabs_button, tabList.size)
@@ -379,7 +386,18 @@ private fun BrowserContent(
                         Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.menu_more))
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        // Grouped: Page (this page) / Tabs / Library / Settings. Labels, enablement and callbacks are unchanged.
+                        // Grouped: Page (this page) / Tabs / Library / Settings.
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.menu_home)) },
+                            leadingIcon = { Icon(Icons.Filled.Home, contentDescription = null) },
+                            enabled = session != null,
+                            onClick = {
+                                menuOpen = false
+                                // Custom homepage, or the start page (a blank tab).
+                                val homepage = container.browserSettings.homepage.value
+                                if (homepage == null) session?.showStartPage() else session?.loadUrl(homepage)
+                            },
+                        )
                         val forwardDescription = stringResource(R.string.forward)
                         DropdownMenuItem(
                             text = { Text(forwardDescription) },
@@ -592,12 +610,20 @@ private fun BrowserContent(
                     modifier = Modifier.fillMaxSize(),
                 )
                 if (blankTab && !state.isLoading) {
-                    OrbisEmptyState(
-                        stringResource(
-                            if (selectedTab.isPrivate) R.string.browser_private_empty_state else R.string.browser_empty_state,
-                        ),
-                        if (selectedTab.isPrivate) Icons.Filled.VisibilityOff else Icons.Filled.Search,
-                    )
+                    if (selectedTab.isPrivate) {
+                        // A private tab keeps its notice; the start page (history-based Top sites) is never shown here.
+                        OrbisEmptyState(stringResource(R.string.browser_private_empty_state), Icons.Filled.VisibilityOff)
+                    } else {
+                        val historyEntries by container.history.entries.collectAsStateWithLifecycle()
+                        val sites = remember(historyEntries) { topSites(historyEntries) }
+                        StartPage(
+                            topSites = sites,
+                            bookmarks = bookmarkList,
+                            onSearch = { addressFocusRequests++ },
+                            onOpen = { tabs.loadInSelected(it) },
+                            onAllBookmarks = onOpenBookmarks,
+                        )
+                    }
                 }
             }
         }

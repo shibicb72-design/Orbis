@@ -177,8 +177,9 @@ class HistoryManager(
         when (change) {
             is Change.Visit -> {
                 val i = items.indexOfFirst { it.url == change.url }
-                val oldTitle = if (i >= 0) items.removeAt(i).title else ""
-                items.add(0, HistoryEntry(change.url, change.title.ifEmpty { oldTitle }, change.at))
+                val old = if (i >= 0) items.removeAt(i) else null
+                val visits = ((old?.visits ?: 0) + 1).coerceAtMost(MAX_VISIT_COUNT)
+                items.add(0, HistoryEntry(change.url, change.title.ifEmpty { old?.title.orEmpty() }, change.at, visits))
                 while (items.size > MAX_HISTORY_ENTRIES) items.removeAt(items.lastIndex)
             }
 

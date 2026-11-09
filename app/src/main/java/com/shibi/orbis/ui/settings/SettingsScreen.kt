@@ -118,6 +118,8 @@ fun SettingsScreen(
     uboStateFlow: StateFlow<UboState>,
     searchEngineFlow: StateFlow<SearchEngine>,
     onSelectSearchEngine: (SearchEngine) -> Unit,
+    homepageFlow: StateFlow<String?>,
+    onSetHomepage: (String?) -> Unit,
     onBack: () -> Unit,
     onOpenErrorLog: () -> Unit,
     onOpenUbo: () -> Unit,
@@ -128,6 +130,18 @@ fun SettingsScreen(
     val uboState by uboStateFlow.collectAsStateWithLifecycle()
     val searchEngine by searchEngineFlow.collectAsStateWithLifecycle()
     var searchDialogOpen by remember { mutableStateOf(false) }
+    val homepage by homepageFlow.collectAsStateWithLifecycle()
+    var homepageDialogOpen by remember { mutableStateOf(false) }
+    if (homepageDialogOpen) {
+        HomepageDialog(
+            current = homepage,
+            onSave = {
+                onSetHomepage(it)
+                homepageDialogOpen = false
+            },
+            onDismiss = { homepageDialogOpen = false },
+        )
+    }
     val context = LocalContext.current
     var roleStatus by remember { mutableStateOf(DefaultBrowserRole.status(context)) }
     // The system dialog is a separate activity: coming back (result or not) re-reads who holds the role.
@@ -178,6 +192,14 @@ fun SettingsScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { searchDialogOpen = true },
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsItem(
+                    headlineContent = { Text(stringResource(R.string.homepage_title)) },
+                    supportingContent = { Text(homepage ?: stringResource(R.string.homepage_start_page)) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { homepageDialogOpen = true },
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsItem(

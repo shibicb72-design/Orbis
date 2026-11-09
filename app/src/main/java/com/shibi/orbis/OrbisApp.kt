@@ -20,6 +20,8 @@ import com.shibi.orbis.engine.BrowserEngine
 import com.shibi.orbis.engine.FileSitePermissionStore
 import com.shibi.orbis.engine.GeckoEngineImpl
 import com.shibi.orbis.engine.SearchEngineSettings
+import com.shibi.orbis.settings.BrowserSettings
+import com.shibi.orbis.settings.SharedPreferencesBrowserPrefs
 import com.shibi.orbis.engine.SharedPreferencesAskedPermissions
 import com.shibi.orbis.engine.SharedPreferencesSearchEnginePrefs
 import com.shibi.orbis.engine.SitePermissionDecisions
@@ -76,6 +78,12 @@ class OrbisApp : Application() {
             SearchEngineSettings(
                 SharedPreferencesSearchEnginePrefs(
                     getSharedPreferences(SharedPreferencesSearchEnginePrefs.FILE_NAME, Context.MODE_PRIVATE),
+                ),
+            )
+        val browserSettings =
+            BrowserSettings(
+                SharedPreferencesBrowserPrefs(
+                    getSharedPreferences(SharedPreferencesBrowserPrefs.FILE_NAME, Context.MODE_PRIVATE),
                 ),
             )
         val ubo =
@@ -163,6 +171,7 @@ class OrbisApp : Application() {
                 history = history,
                 clear = clear,
                 searchEngine = searchEngine,
+                browserSettings = browserSettings,
             )
         // Sessions only appear after the onboarding decision; this has long finished by then.
         sitePermissions.load()
@@ -205,6 +214,7 @@ class AppContainer(
     val clear: ClearController,
     /** Which engine address-bar searches go to; one choice for normal and private tabs. */
     val searchEngine: SearchEngineSettings,
+    val browserSettings: BrowserSettings,
 ) {
     /**
      * An http(s) URL another app asked us to open. Set by MainActivity, consumed (and cleared) by BrowserScreen, which

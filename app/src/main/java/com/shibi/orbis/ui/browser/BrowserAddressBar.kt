@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -84,6 +85,8 @@ internal fun BrowserAddressBar(
     hideKeyboard: () -> Unit,
     moveFocusToSink: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Bumped by the caller (the start page's search box) to put the bar into edit mode; only a change counts. */
+    focusRequests: Int = 0,
 ) {
     key(tabId) {
         // Saved instance state is written outside the app's control; a private tab's typed text stays in plain memory.
@@ -103,6 +106,12 @@ internal fun BrowserAddressBar(
                 onFocusOnStartConsumed()
                 runCatching { focusRequester.requestFocus() }
             }
+        }
+        var seenFocusRequests by remember { mutableIntStateOf(focusRequests) }
+        LaunchedEffect(focusRequests) {
+            if (focusRequests == seenFocusRequests) return@LaunchedEffect
+            seenFocusRequests = focusRequests
+            runCatching { focusRequester.requestFocus() }
         }
         // A page committed in this tab while the bar was focused but untouched (e.g. a link from another app landed in
         // the blank New tab): leave edit mode so the bar names the page actually shown. Typed text is never discarded.

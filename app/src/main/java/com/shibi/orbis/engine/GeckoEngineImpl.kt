@@ -1252,6 +1252,12 @@ private class GeckoBrowserSession(
         debugLog.log("GeckoSession", "load requested")
     }
 
+    override fun showStartPage() {
+        if (closed) return
+        session.loadUri("about:blank")
+        debugLog.log("GeckoSession", "start page requested")
+    }
+
     override fun loadExternalUrl(url: String) {
         if (closed) return
         if (!isWebUrl(url)) {

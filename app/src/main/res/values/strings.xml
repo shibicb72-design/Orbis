@@ -3,6 +3,15 @@
     <string name="app_name">Orbis</string>
     <string name="address_bar_hint">Search or enter address</string>
     <string name="address_bar_loading">Loading</string>
+    <string name="start_top_sites">Top sites</string>
+    <string name="start_all_bookmarks">All bookmarks</string>
+    <string name="menu_home">Home</string>
+    <string name="homepage_title">Homepage</string>
+    <string name="homepage_start_page">Orbis start page</string>
+    <string name="homepage_custom">Custom address</string>
+    <string name="homepage_custom_hint">Address, like example.com</string>
+    <string name="homepage_invalid">Enter a web address (http or https).</string>
+    <string name="homepage_save">Save</string>
     <string name="settings">Settings</string>
     <string name="back">Back</string>
     <string name="forward">Forward</string>

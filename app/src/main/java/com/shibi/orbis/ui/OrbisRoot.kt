@@ -148,6 +148,8 @@ fun OrbisRoot(container: AppContainer) {
                 uboStateFlow = container.ubo.state,
                 searchEngineFlow = container.searchEngine.selected,
                 onSelectSearchEngine = container.searchEngine::select,
+                homepageFlow = container.browserSettings.homepage,
+                onSetHomepage = { container.browserSettings.setHomepage(it) },
                 onBack = { nav.popBackStack() },
                 onOpenErrorLog = { nav.navigate(Routes.ErrorLog) },
                 onOpenUbo = { nav.navigate(Routes.Ubo) },

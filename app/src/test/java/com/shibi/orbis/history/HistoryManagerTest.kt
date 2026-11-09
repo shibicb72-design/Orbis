@@ -96,6 +96,20 @@ class HistoryManagerTest {
     }
 
     @Test
+    fun revisitsAreCountedForTopSites() {
+        val m = manager(MemHistoryStore())
+        m.recordVisit("https://a.example/", "A")
+        m.recordVisit("https://b.example/", "B")
+        m.recordVisit("https://a.example/", "A")
+        m.recordVisit("https://a.example/", "")
+        assertEquals(3, m.entries.value.first { it.url == "https://a.example/" }.visits)
+        assertEquals(1, m.entries.value.first { it.url == "https://b.example/" }.visits)
+        m.delete("https://a.example/")
+        m.recordVisit("https://a.example/", "A")
+        assertEquals("a deleted row starts over", 1, m.entries.value.first { it.url == "https://a.example/" }.visits)
+    }
+
+    @Test
     fun aBlankTitleKeepsTheOlderOne() {
         val m = manager(MemHistoryStore())
         m.recordVisit("https://a.example/", "Old title")

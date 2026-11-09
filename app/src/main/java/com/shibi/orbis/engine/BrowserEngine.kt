@@ -153,6 +153,11 @@ interface BrowserSession {
     /** Releases the session from [contentView] if that view currently holds it. Does not close it. */
     fun detachFrom(contentView: View)
     fun loadUrl(url: String)
+    /**
+     * Navigates to about:blank (Home with no custom homepage): a blank tab shows the Orbis start page. The only non-web
+     * load a session accepts, and it takes no argument. Test doubles may leave it a no-op.
+     */
+    fun showStartPage() {}
     /** A URL handed to us by another app (VIEW intent). http(s) only. */
     fun loadExternalUrl(url: String)
     /** Switches user agent and viewport between mobile and desktop, then reloads the page. */

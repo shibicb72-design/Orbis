@@ -12,7 +12,7 @@ object HistoryCodec {
     fun encode(items: List<HistoryEntry>): String {
         val array = JSONArray()
         for (e in items) {
-            array.put(JSONObject().put("url", e.url).put("title", e.title).put("visited", e.visitedAt))
+            array.put(JSONObject().put("url", e.url).put("title", e.title).put("visited", e.visitedAt).put("visits", e.visits))
         }
         return JSONObject().put("version", VERSION).put("history", array).toString()
     }
@@ -33,7 +33,9 @@ object HistoryCodec {
             val url = string(o, "url")
             if (!isStorableWebUrl(url) || !urls.add(url)) continue
             val visited = if (o.isNull("visited")) 0L else o.optLong("visited", 0L)
-            out += HistoryEntry(url, cleanStoredTitle(string(o, "title")), visited.coerceAtLeast(0L))
+            // Files written before visit counts existed have none: each row counts as one visit.
+            val visits = if (o.isNull("visits")) 1 else o.optInt("visits", 1).coerceIn(1, MAX_VISIT_COUNT)
+            out += HistoryEntry(url, cleanStoredTitle(string(o, "title")), visited.coerceAtLeast(0L), visits)
         }
         return out
     }
