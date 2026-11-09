@@ -11,6 +11,12 @@
     <string name="start_pinned">pinned</string>
     <string name="menu_home">Home</string>
     <string name="menu_share">Share</string>
+    <string name="voice_search">Search by voice</string>
+    <string name="voice_prompt">Say a search or an address</string>
+    <string name="voice_unavailable">Voice search is not available on this phone.</string>
+    <string name="widget_search_name">Orbis search</string>
+    <string name="widget_search_hint">Search or enter address</string>
+    <string name="widget_search_description">Opens a new Orbis tab, ready to type.</string>
     <string name="menu_site_settings">Site settings</string>
     <string name="menu_generate_password">Generate password</string>
     <string name="site_secure">Connection is secure</string>

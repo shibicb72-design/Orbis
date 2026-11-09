@@ -31,6 +31,10 @@
 
     <!-- Which installed apps open a link (Open in app), visible since Android 11 only when declared. -->
     <queries>
+        <!-- Voice search: the phone's speech recognizer. -->
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />
@@ -118,6 +122,18 @@
             android:taskAffinity=""
             android:configChanges="keyboard|keyboardHidden|mcc|mnc|orientation|screenSize|locale|layoutDirection|smallestScreenSize|screenLayout|uiMode"
             android:windowSoftInputMode="adjustResize" />
+
+        <receiver
+            android:name=".widget.SearchWidget"
+            android:exported="false"
+            android:label="@string/widget_search_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_search_info" />
+        </receiver>
 
         <service
             android:name=".customtabs.OrbisCustomTabsService"

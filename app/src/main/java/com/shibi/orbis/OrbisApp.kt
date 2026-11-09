@@ -302,6 +302,9 @@ class AppContainer(
     /** A download notification was tapped. Consumed by OrbisRoot, which navigates once, and only after onboarding. */
     val pendingShowDownloads = MutableStateFlow(false)
 
+    /** The home screen widget was tapped: open a new tab ready for typing (a flag only). */
+    val pendingWidgetSearch = MutableStateFlow(false)
+
     /**
      * How many screens that show secrets (Settings > Passwords) are on screen. Above zero, MainActivity protects the
      * window (FLAG_SECURE, no Recents snapshot) as it does for private tabs.

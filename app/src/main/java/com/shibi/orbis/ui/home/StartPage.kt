@@ -1,6 +1,7 @@
 package com.shibi.orbis.ui.home
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -76,6 +77,8 @@ fun StartPage(
     onPin: (TopSite) -> Unit = {},
     onUnpin: (TopSite) -> Unit = {},
     onRemove: (TopSite) -> Unit = {},
+    /** Voice search next to the search box; null hides it. */
+    onVoice: (() -> Unit)? = null,
 ) {
     Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background, contentColor = MaterialTheme.colorScheme.onBackground) {
         Column(
@@ -100,7 +103,12 @@ fun StartPage(
             ) {
                 Row(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Search, contentDescription = null)
-                    Text(searchLabel, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 12.dp))
+                    Text(searchLabel, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 12.dp).weight(1f))
+                    if (onVoice != null) {
+                        androidx.compose.material3.IconButton(onClick = onVoice) {
+                            Icon(androidx.compose.material.icons.Icons.Filled.Mic, contentDescription = stringResource(R.string.voice_search))
+                        }
+                    }
                 }
             }
             if (topSites.isEmpty() && bookmarks.isEmpty()) {

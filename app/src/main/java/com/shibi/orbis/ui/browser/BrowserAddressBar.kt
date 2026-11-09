@@ -1,6 +1,7 @@
 package com.shibi.orbis.ui.browser
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -106,6 +107,8 @@ internal fun BrowserAddressBar(
     bridge: AddressBarBridge? = null,
     /** A sideways swipe on the resting bar: +1 next tab, -1 previous tab. Null turns swiping off. */
     onSwipe: ((Int) -> Unit)? = null,
+    /** Voice search, offered while editing with nothing typed; null hides it (no recognizer). */
+    onVoice: (() -> Unit)? = null,
 ) {
     key(tabId) {
         // Saved instance state is written outside the app's control; a private tab's typed text stays in plain memory.
@@ -214,7 +217,11 @@ internal fun BrowserAddressBar(
                         focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ),
                     trailingIcon = {
-                        if (isLoading) {
+                        if (onVoice != null && addressFocused && typed.isBlank()) {
+                            IconButton(onClick = onVoice) {
+                                Icon(Icons.Filled.Mic, contentDescription = stringResource(R.string.voice_search))
+                            }
+                        } else if (isLoading) {
                             IconButton(onClick = { stopFromAddressBar(stop, pending) }, modifier = Modifier.testTag(ADDRESS_STOP_TAG)) {
                                 Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.stop))
                             }

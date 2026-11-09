@@ -342,6 +342,21 @@ private fun BrowserContent(
     // The one tab whose address bar should take focus: set only when the user makes a tab with New tab. Cold start,
     // popups, external links and "closed the last tab" leave it null, so they never steal focus or open edit mode.
     var focusAddressFor by remember { mutableStateOf<Long?>(null) }
+    val voiceContext = LocalContext.current
+    val hasVoice = remember { voiceSearchAvailable(voiceContext) }
+    // The words heard go through the address bar's own Go path (search, or open when they are an address).
+    val voiceSearch = rememberVoiceSearch(isPrivate = selectedTab.isPrivate) { heard ->
+        if (!addressBridge.submit(heard)) {
+            normalizeAddressInput(heard, container.searchEngine.selected.value)?.let { session?.loadUrl(it) }
+        }
+    }
+    val widgetSearch by container.pendingWidgetSearch.collectAsStateWithLifecycle()
+    LaunchedEffect(widgetSearch) {
+        if (widgetSearch) {
+            container.pendingWidgetSearch.value = false
+            focusAddressFor = tabs.newTab()
+        }
+    }
     // Reader view of the selected tab's page; closed when the tab or its page changes.
     var readerArticle by remember(session) { mutableStateOf<ReaderArticle?>(null) }
     LaunchedEffect(state.url) { if (readerArticle != null && readerArticle?.url != state.url) readerArticle = null }
@@ -777,6 +792,7 @@ private fun BrowserContent(
                         focusRequests = addressFocusRequests,
                         bridge = addressBridge,
                         onSwipe = { step -> swipeTargetTab(tabList, selectedTab.id, step)?.let(tabs::select) },
+                        onVoice = if (hasVoice) voiceSearch else null,
                     )
                     if (!twoRow) tabsAndMenu()
                 }
@@ -969,6 +985,7 @@ private fun BrowserContent(
                             topSites = sites,
                             bookmarks = bookmarkList,
                             onSearch = { addressFocusRequests++ },
+                            onVoice = if (hasVoice) voiceSearch else null,
                             onOpen = { tabs.loadInSelected(it) },
                             onAllBookmarks = onOpenBookmarks,
                             onPin = { container.browserSettings.pinSite(it.url, it.title) },

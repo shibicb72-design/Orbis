@@ -147,6 +147,8 @@ class MainActivity : ComponentActivity() {
         externalUrlFrom(incoming.action, incoming.dataString)?.let { app.container.pendingExternalUrl.value = it }
         // A download notification tap: only a flag, no extras or data are read, so it exposes nothing to a caller.
         if (incoming.action == DownloadNotifications.ACTION_SHOW_DOWNLOADS) app.container.pendingShowDownloads.value = true
+        // The search widget: also only a flag.
+        if (incoming.action == com.shibi.orbis.widget.ACTION_WIDGET_SEARCH) app.container.pendingWidgetSearch.value = true
         setIntent(Intent())
     }
 }
