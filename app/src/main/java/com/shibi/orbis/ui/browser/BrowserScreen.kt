@@ -72,6 +72,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowCompat
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -117,6 +121,28 @@ private class LaunchedPick {
 /** The system permission request this composition launched; plain memory, so a recreation starts empty. */
 private class LaunchedAndroidRequest {
     var request: AndroidPermissionRequest? = null
+}
+
+/** Hides the system bars (swipe shows them briefly) and keeps the screen on while [fullScreen]; restores both after. */
+@Composable
+internal fun FullScreenWindowEffect(fullScreen: Boolean) {
+    val view = LocalView.current
+    DisposableEffect(fullScreen, view) {
+        val window = view.context.findActivity()?.window
+        if (fullScreen && window != null) {
+            WindowCompat.getInsetsController(window, view).apply {
+                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                hide(WindowInsetsCompat.Type.systemBars())
+            }
+            view.keepScreenOn = true
+        }
+        onDispose {
+            if (fullScreen && window != null) {
+                WindowCompat.getInsetsController(window, view).show(WindowInsetsCompat.Type.systemBars())
+                view.keepScreenOn = false
+            }
+        }
+    }
 }
 
 private tailrec fun Context.findActivity(): Activity? =
@@ -208,8 +234,15 @@ private fun BrowserContent(
     var findOpen by remember(session) { mutableStateOf(false) }
     var findQuery by remember(session) { mutableStateOf("") }
     DisposableEffect(session) {
-        onDispose { session?.clearFind() }
+        onDispose {
+            session?.clearFind()
+            // Leaving a tab (switch, close, another screen) ends its page fullscreen.
+            session?.exitFullScreen()
+        }
     }
+    // The selected tab's own page fullscreen; system bars hide and the screen stays on while it lasts.
+    val fullScreen = state.fullScreen && session != null
+    FullScreenWindowEffect(fullScreen)
 
     val blankTab = isBlankAddress(selectedTab.url) && isBlankAddress(state.url)
     val hasLiveOpener = selectedTab.openerTabId?.let { id -> tabList.any { it.id == id } } == true
@@ -225,6 +258,8 @@ private fun BrowserContent(
             hasLiveOpener -> tabs.close(selectedTab.id)
         }
     }
+    // Registered last, so it wins: Back first leaves page fullscreen.
+    BackHandler(enabled = fullScreen) { session?.exitFullScreen() }
 
     // File pick: the system document picker or camera is the UI; the prompt is answered from its result. The result goes
     // to the prompt that launched it. After a recreation the holder is empty, so it falls back to the current one.
@@ -326,253 +361,256 @@ private fun BrowserContent(
                 .focusRequester(focusSink)
                 .focusable(),
         ) {
-            Row(
-                Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = { session?.goBack() }, enabled = state.canGoBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
-                }
-                // The production address bar (BrowserAddressBar.kt): keyed by tab inside, so typed text, focus, edit mode and
-                // the pending submit never leak from one tab into another. It reads the selected tab's OWN url and session
-                // flow, never the `state` collected above, which lags a frame behind a tab switch.
-                BrowserAddressBar(
-                    tabId = selectedTab.id,
-                    isPrivate = selectedTab.isPrivate,
-                    tabUrl = selectedTab.url,
-                    sessionState = selectedTab.session?.state,
-                    downloadOffer = pendingDownload,
-                    isLoading = state.isLoading,
-                    canReload = session != null,
-                    searchEngine = { container.searchEngine.selected.value },
-                    focusOnStart = focusAddressFor == selectedTab.id,
-                    onFocusOnStartConsumed = { focusAddressFor = null },
-                    loadUrl = { session?.loadUrl(it) },
-                    stop = { session?.stop() },
-                    reload = { session?.reload() },
-                    hideKeyboard = { keyboardController?.hide() },
-                    moveFocusToSink = { focusSink.requestFocus() },
-                    modifier = Modifier.weight(1f),
-                    focusRequests = addressFocusRequests,
-                )
-                val tabsDescription =
-                    stringResource(if (selectedTab.isPrivate) R.string.tabs_button_private else R.string.tabs_button, tabList.size)
-                val tabsColor = if (selectedTab.isPrivate) MaterialTheme.colorScheme.tertiary else LocalContentColor.current
-                IconButton(
-                    onClick = {
-                        sheetReturnFocus = null
-                        showTabs = true
-                    },
-                    modifier = Modifier.focusRequester(tabsButtonFocus),
+            // Page fullscreen (a video): only the page is shown; the chrome comes back when it ends.
+            if (!fullScreen) {
+                Row(
+                    Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // At least 24dp, growing with large fonts instead of clipping the count against its border.
-                    Box(
-                        Modifier
-                            .defaultMinSize(minWidth = 24.dp, minHeight = 24.dp)
-                            .border(2.dp, tabsColor, RoundedCornerShape(6.dp))
-                            .padding(horizontal = 3.dp)
-                            .semantics { contentDescription = tabsDescription },
-                        contentAlignment = Alignment.Center,
+                    IconButton(onClick = { session?.goBack() }, enabled = state.canGoBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                    }
+                    // The production address bar (BrowserAddressBar.kt): keyed by tab inside, so typed text, focus, edit mode and
+                    // the pending submit never leak from one tab into another. It reads the selected tab's OWN url and session
+                    // flow, never the `state` collected above, which lags a frame behind a tab switch.
+                    BrowserAddressBar(
+                        tabId = selectedTab.id,
+                        isPrivate = selectedTab.isPrivate,
+                        tabUrl = selectedTab.url,
+                        sessionState = selectedTab.session?.state,
+                        downloadOffer = pendingDownload,
+                        isLoading = state.isLoading,
+                        canReload = session != null,
+                        searchEngine = { container.searchEngine.selected.value },
+                        focusOnStart = focusAddressFor == selectedTab.id,
+                        onFocusOnStartConsumed = { focusAddressFor = null },
+                        loadUrl = { session?.loadUrl(it) },
+                        stop = { session?.stop() },
+                        reload = { session?.reload() },
+                        hideKeyboard = { keyboardController?.hide() },
+                        moveFocusToSink = { focusSink.requestFocus() },
+                        modifier = Modifier.weight(1f),
+                        focusRequests = addressFocusRequests,
+                    )
+                    val tabsDescription =
+                        stringResource(if (selectedTab.isPrivate) R.string.tabs_button_private else R.string.tabs_button, tabList.size)
+                    val tabsColor = if (selectedTab.isPrivate) MaterialTheme.colorScheme.tertiary else LocalContentColor.current
+                    IconButton(
+                        onClick = {
+                            sheetReturnFocus = null
+                            showTabs = true
+                        },
+                        modifier = Modifier.focusRequester(tabsButtonFocus),
                     ) {
-                        Text(
-                            tabList.size.coerceAtMost(99).toString(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = tabsColor,
-                        )
-                    }
-                }
-                Box {
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.menu_more))
-                    }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        // Grouped: Page (this page) / Tabs / Library / Settings.
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.menu_home)) },
-                            leadingIcon = { Icon(Icons.Filled.Home, contentDescription = null) },
-                            enabled = session != null,
-                            onClick = {
-                                menuOpen = false
-                                // Custom homepage, or the start page (a blank tab).
-                                val homepage = container.browserSettings.homepage.value
-                                if (homepage == null) session?.showStartPage() else session?.loadUrl(homepage)
-                            },
-                        )
-                        val forwardDescription = stringResource(R.string.forward)
-                        DropdownMenuItem(
-                            text = { Text(forwardDescription) },
-                            modifier = Modifier.semantics { contentDescription = forwardDescription },
-                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null) },
-                            enabled = state.canGoForward,
-                            onClick = {
-                                menuOpen = false
-                                session?.goForward()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Text(stringResource(if (bookmarked) R.string.menu_remove_bookmark else R.string.menu_add_bookmark))
-                            },
-                            enabled = isWebUrl(state.url),
-                            onClick = {
-                                menuOpen = false
-                                val url = state.url
-                                if (bookmarked) {
-                                    container.bookmarks.removeByUrl(url)
-                                    Toast.makeText(androidContext, R.string.bookmark_removed, Toast.LENGTH_SHORT).show()
-                                } else {
-                                    val title = state.title?.takeIf { it.isNotBlank() } ?: url
-                                    val message =
-                                        when (container.bookmarks.add(url, title)) {
-                                            AddResult.ADDED -> R.string.bookmark_added
-                                            AddResult.EXISTS -> R.string.bookmark_exists
-                                            AddResult.FULL -> R.string.bookmark_full
-                                            AddResult.INVALID -> R.string.bookmark_invalid
-                                        }
-                                    Toast.makeText(androidContext, message, Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.menu_find)) },
-                            enabled = session != null,
-                            onClick = {
-                                menuOpen = false
-                                findOpen = true
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.menu_desktop_site)) },
-                            enabled = session != null,
-                            trailingIcon = { Checkbox(checked = state.desktopMode, onCheckedChange = null) },
-                            onClick = {
-                                menuOpen = false
-                                session?.setDesktopMode(!state.desktopMode)
-                            },
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.menu_new_tab)) },
-                            onClick = {
-                                menuOpen = false
-                                focusAddressFor = tabs.newTab()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.menu_new_private_tab)) },
-                            onClick = {
-                                menuOpen = false
-                                focusAddressFor = tabs.newPrivateTab()
-                            },
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.menu_bookmarks)) },
-                            onClick = {
-                                menuOpen = false
-                                onOpenBookmarks()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.menu_history)) },
-                            onClick = {
-                                menuOpen = false
-                                onOpenHistory()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.menu_downloads)) },
-                            onClick = {
-                                menuOpen = false
-                                onOpenDownloads()
-                            },
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.settings)) },
-                            onClick = {
-                                menuOpen = false
-                                onOpenSettings()
-                            },
-                        )
-                    }
-                }
-            }
-            if (selectedTab.isPrivate) {
-                Surface(
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        Modifier.padding(start = 16.dp, end = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Filled.VisibilityOff, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text(
-                            stringResource(R.string.private_banner_title),
-                            style = MaterialTheme.typography.labelLarge,
-                            modifier = Modifier.weight(1f).padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
-                        )
-                        TextButton(
-                            onClick = { tabs.closeAllPrivate() },
-                            colors = ButtonDefaults.textButtonColors(
-                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                            ),
+                        // At least 24dp, growing with large fonts instead of clipping the count against its border.
+                        Box(
+                            Modifier
+                                .defaultMinSize(minWidth = 24.dp, minHeight = 24.dp)
+                                .border(2.dp, tabsColor, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 3.dp)
+                                .semantics { contentDescription = tabsDescription },
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Text(stringResource(R.string.private_close_all))
+                            Text(
+                                tabList.size.coerceAtMost(99).toString(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = tabsColor,
+                            )
+                        }
+                    }
+                    Box {
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.menu_more))
+                        }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            // Grouped: Page (this page) / Tabs / Library / Settings.
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.menu_home)) },
+                                leadingIcon = { Icon(Icons.Filled.Home, contentDescription = null) },
+                                enabled = session != null,
+                                onClick = {
+                                    menuOpen = false
+                                    // Custom homepage, or the start page (a blank tab).
+                                    val homepage = container.browserSettings.homepage.value
+                                    if (homepage == null) session?.showStartPage() else session?.loadUrl(homepage)
+                                },
+                            )
+                            val forwardDescription = stringResource(R.string.forward)
+                            DropdownMenuItem(
+                                text = { Text(forwardDescription) },
+                                modifier = Modifier.semantics { contentDescription = forwardDescription },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null) },
+                                enabled = state.canGoForward,
+                                onClick = {
+                                    menuOpen = false
+                                    session?.goForward()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(stringResource(if (bookmarked) R.string.menu_remove_bookmark else R.string.menu_add_bookmark))
+                                },
+                                enabled = isWebUrl(state.url),
+                                onClick = {
+                                    menuOpen = false
+                                    val url = state.url
+                                    if (bookmarked) {
+                                        container.bookmarks.removeByUrl(url)
+                                        Toast.makeText(androidContext, R.string.bookmark_removed, Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        val title = state.title?.takeIf { it.isNotBlank() } ?: url
+                                        val message =
+                                            when (container.bookmarks.add(url, title)) {
+                                                AddResult.ADDED -> R.string.bookmark_added
+                                                AddResult.EXISTS -> R.string.bookmark_exists
+                                                AddResult.FULL -> R.string.bookmark_full
+                                                AddResult.INVALID -> R.string.bookmark_invalid
+                                            }
+                                        Toast.makeText(androidContext, message, Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.menu_find)) },
+                                enabled = session != null,
+                                onClick = {
+                                    menuOpen = false
+                                    findOpen = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.menu_desktop_site)) },
+                                enabled = session != null,
+                                trailingIcon = { Checkbox(checked = state.desktopMode, onCheckedChange = null) },
+                                onClick = {
+                                    menuOpen = false
+                                    session?.setDesktopMode(!state.desktopMode)
+                                },
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.menu_new_tab)) },
+                                onClick = {
+                                    menuOpen = false
+                                    focusAddressFor = tabs.newTab()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.menu_new_private_tab)) },
+                                onClick = {
+                                    menuOpen = false
+                                    focusAddressFor = tabs.newPrivateTab()
+                                },
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.menu_bookmarks)) },
+                                onClick = {
+                                    menuOpen = false
+                                    onOpenBookmarks()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.menu_history)) },
+                                onClick = {
+                                    menuOpen = false
+                                    onOpenHistory()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.menu_downloads)) },
+                                onClick = {
+                                    menuOpen = false
+                                    onOpenDownloads()
+                                },
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.settings)) },
+                                onClick = {
+                                    menuOpen = false
+                                    onOpenSettings()
+                                },
+                            )
                         }
                     }
                 }
-            }
-            if (findOpen) {
-                PrivateImeScope(selectedTab.isPrivate) {
-                    FindBar(
-                        query = findQuery,
-                        result = state.findResult,
-                        onQueryChange = {
-                            findQuery = it
-                            session?.find(it, false)
-                        },
-                        onNext = { session?.find(findQuery, false) },
-                        onPrevious = { session?.find(findQuery, true) },
-                        onClose = {
-                            findOpen = false
-                            session?.clearFind()
-                        },
-                    )
-                }
-            }
-            Box(Modifier.fillMaxWidth().height(4.dp)) {
-                if (state.isLoading) {
-                    LinearProgressIndicator(
-                        progress = { state.progress / 100f },
+                if (selectedTab.isPrivate) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
                         modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            }
-            if (state.crashed || state.loadFailed) {
-                Surface(
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        Modifier.padding(start = 16.dp, end = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            stringResource(if (state.crashed) R.string.browser_crashed else R.string.browser_load_failed),
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f).padding(vertical = 8.dp),
-                        )
-                        TextButton(
-                            onClick = { session?.reload() },
-                            colors = ButtonDefaults.textButtonColors(
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                            ),
+                        Row(
+                            Modifier.padding(start = 16.dp, end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(stringResource(if (state.crashed) R.string.reload else R.string.browser_retry))
+                            Icon(Icons.Filled.VisibilityOff, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Text(
+                                stringResource(R.string.private_banner_title),
+                                style = MaterialTheme.typography.labelLarge,
+                                modifier = Modifier.weight(1f).padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
+                            )
+                            TextButton(
+                                onClick = { tabs.closeAllPrivate() },
+                                colors = ButtonDefaults.textButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                                ),
+                            ) {
+                                Text(stringResource(R.string.private_close_all))
+                            }
+                        }
+                    }
+                }
+                if (findOpen) {
+                    PrivateImeScope(selectedTab.isPrivate) {
+                        FindBar(
+                            query = findQuery,
+                            result = state.findResult,
+                            onQueryChange = {
+                                findQuery = it
+                                session?.find(it, false)
+                            },
+                            onNext = { session?.find(findQuery, false) },
+                            onPrevious = { session?.find(findQuery, true) },
+                            onClose = {
+                                findOpen = false
+                                session?.clearFind()
+                            },
+                        )
+                    }
+                }
+                Box(Modifier.fillMaxWidth().height(4.dp)) {
+                    if (state.isLoading) {
+                        LinearProgressIndicator(
+                            progress = { state.progress / 100f },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                if (state.crashed || state.loadFailed) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            Modifier.padding(start = 16.dp, end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                stringResource(if (state.crashed) R.string.browser_crashed else R.string.browser_load_failed),
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f).padding(vertical = 8.dp),
+                            )
+                            TextButton(
+                                onClick = { session?.reload() },
+                                colors = ButtonDefaults.textButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                ),
+                            ) {
+                                Text(stringResource(if (state.crashed) R.string.reload else R.string.browser_retry))
+                            }
                         }
                     }
                 }

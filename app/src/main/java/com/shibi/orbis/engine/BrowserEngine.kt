@@ -72,6 +72,8 @@ data class SessionState(
     val failedUrl: String? = null,
     val desktopMode: Boolean = false,
     val findResult: FindResult? = null,
+    /** The page asked for fullscreen (e.g. a video's fullscreen button) and the engine granted it. */
+    val fullScreen: Boolean = false,
     /**
      * Monotonic counters that make load boundaries observable even when the state flow conflates them (a collector only
      * ever sees the latest value, so "started, then failed" can look like "nothing happened"). Never reset.
@@ -133,6 +135,7 @@ internal fun SessionState.afterContentProcessGone(): SessionState =
         canGoBack = false,
         canGoForward = false,
         findResult = null,
+        fullScreen = false,
         loadEnds = loadEnds + 1,
         navigationsCancelled = navigationsCancelled + 1,
     )
@@ -168,6 +171,8 @@ interface BrowserSession {
     fun goForward(): Boolean
     fun reload()
     fun stop()
+    /** Leaves page fullscreen (Back, a tab switch); the engine then reports fullScreen = false. Test doubles may no-op. */
+    fun exitFullScreen() {}
     fun find(query: String, backwards: Boolean)
     fun clearFind()
     /** False for background tabs. */

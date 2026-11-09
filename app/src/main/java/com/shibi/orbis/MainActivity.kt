@@ -13,6 +13,7 @@ import com.shibi.orbis.engine.externalUrlFrom
 import com.shibi.orbis.privacy.PrivacyWindowController
 import com.shibi.orbis.privacy.PrivacyWindowOps
 import com.shibi.orbis.ui.OrbisRoot
+import com.shibi.orbis.ui.BackKeyWindowCallback
 import com.shibi.orbis.ui.theme.OrbisTheme
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -23,6 +24,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Back reaches the app before any view (GeckoView swallowed it once a page was touched); see routeBackKey.
+        window.callback = BackKeyWindowCallback(window.callback) { onBackPressedDispatcher.onBackPressed() }
         enableEdgeToEdge()
         // Follows whether any private tab is open (the tab switcher lists them even with a normal tab selected) for the
         // whole life of the activity, not only while started, so the window is already right when the system takes its

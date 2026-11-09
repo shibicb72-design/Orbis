@@ -464,6 +464,11 @@ private class GeckoBrowserSession(
                 host?.onCloseRequest(this@GeckoBrowserSession)
             }
 
+            override fun onFullScreen(session: GeckoSession, fullScreen: Boolean) {
+                _state.update { it.copy(fullScreen = fullScreen) }
+                debugLog.log("GeckoSession", "fullscreen $fullScreen")
+            }
+
             override fun onContextMenu(
                 session: GeckoSession,
                 screenX: Int,
@@ -1312,6 +1317,10 @@ private class GeckoBrowserSession(
 
     override fun stop() {
         if (!closed) session.stop()
+    }
+
+    override fun exitFullScreen() {
+        if (!closed && _state.value.fullScreen) session.exitFullScreen()
     }
 
     override fun find(query: String, backwards: Boolean) {
