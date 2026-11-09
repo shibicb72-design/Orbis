@@ -11,6 +11,7 @@
     <string name="start_pinned">pinned</string>
     <string name="menu_home">Home</string>
     <string name="menu_share">Share</string>
+    <string name="menu_tracking_protection">Tracking protection</string>
     <string name="text_size_title">Text size</string>
     <string name="text_size_percent">%1$d%%</string>
     <string name="text_size_default">%1$d%% (default, follows the system font size)</string>
@@ -118,7 +119,7 @@
 
     <string name="settings_title">Settings</string>
     <string name="settings_error_log">Error log</string>
-    <string name="settings_etp_note">Enhanced Tracking Protection: Strict (always on)</string>
+    <string name="settings_etp_note">Enhanced Tracking Protection: Strict. If a site breaks, you can turn it off for that site only from the page menu.</string>
     <string name="search_engine_title">Search engine</string>
     <string name="search_engine_dialog_title">Choose a search engine</string>
     <string name="search_engine_duckduckgo">DuckDuckGo</string>

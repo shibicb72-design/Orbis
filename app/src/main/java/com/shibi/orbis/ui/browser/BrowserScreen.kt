@@ -510,6 +510,16 @@ private fun BrowserContent(
                                 },
                             )
                             DropdownMenuItem(
+                                text = { Text(stringResource(R.string.menu_tracking_protection)) },
+                                enabled = state.trackingProtectionOff != null,
+                                trailingIcon = { Checkbox(checked = state.trackingProtectionOff != true, onCheckedChange = null) },
+                                onClick = {
+                                    menuOpen = false
+                                    // Checked means protected; unchecking makes an exception for this site.
+                                    session?.setTrackingProtectionOff(state.trackingProtectionOff != true)
+                                },
+                            )
+                            DropdownMenuItem(
                                 text = { Text(stringResource(R.string.menu_desktop_site)) },
                                 enabled = session != null,
                                 trailingIcon = { Checkbox(checked = state.desktopMode, onCheckedChange = null) },

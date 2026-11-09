@@ -81,6 +81,11 @@ data class SessionState(
     val findResult: FindResult? = null,
     /** The page asked for fullscreen (e.g. a video's fullscreen button) and the engine granted it. */
     val fullScreen: Boolean = false,
+    /**
+     * The user turned tracking protection off for this site (a site exception): Strict ETP does not apply to it.
+     * Null when the page has no web site (blank, about:). Read from the engine's own permission record.
+     */
+    val trackingProtectionOff: Boolean? = null,
     /** A video went fullscreen and is wider than tall: the screen turns to landscape, like Chrome and Firefox. */
     val fullScreenVideoLandscape: Boolean = false,
     /**
@@ -188,6 +193,11 @@ interface BrowserSession {
      * normal download path (host.onDownload: the same dialog, file naming and private handling). "Save image".
      */
     fun saveUrl(url: String) {}
+    /**
+     * Turns tracking protection off ([off] true) or back on for the current page's site, then reloads it. Private tabs
+     * keep the exception only for the private session. No-op without a web page. Test doubles may no-op.
+     */
+    fun setTrackingProtectionOff(off: Boolean) {}
     fun find(query: String, backwards: Boolean)
     fun clearFind()
     /** False for background tabs. */

@@ -65,6 +65,9 @@ class GeckoEngineImpl(
 
     private val reconciler = GeolocationReconciler({ runtime }, debugLog)
 
+    /** Sites with tracking protection turned off by the user (see TrackingExceptions). */
+    private val trackingExceptions = TrackingExceptions()
+
     override val androidPermissions: AndroidPermissionBroker get() = broker
 
     override fun reconcileSitePermissions() = reconciler.runNow()
@@ -145,6 +148,20 @@ class GeckoEngineImpl(
             val created = GeckoRuntime.create(appContext, settings)
             defaultAutomaticFontSize = created.settings.automaticFontSizeAdjustment
             applyDisplayPrefs(created)
+            // Normal-profile exceptions the user made earlier (stored by the engine).
+            created.storageController.allPermissions.accept(
+                { list ->
+                    val allowed =
+                        list.orEmpty().filter {
+                            it.permission == GeckoSession.PermissionDelegate.PERMISSION_TRACKING &&
+                                it.value == GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW &&
+                                !it.privateMode
+                        }.map { it.uri }
+                    trackingExceptions.loadNormal(allowed)
+                    debugLog.log("GeckoEngine", "tracking exceptions loaded: ${allowed.size}")
+                },
+                { debugLog.log("GeckoEngine", "tracking exceptions load failed") },
+            )
             // Without a prompt delegate, WebExtensionController.install() hangs forever.
             created.webExtensionController.setPromptDelegate(extensionHost.promptDelegate)
             runtime = created
@@ -175,6 +192,7 @@ class GeckoEngineImpl(
         // Rotated first: whatever races with the teardown below, a later private set starts in a scope the earlier one
         // never wrote to.
         privateContextId = newPrivateContextId()
+        trackingExceptions.clearPrivate()
         try {
             // Only this id's data. StorageController.clearData(...) has no private scope and would wipe the normal
             // profile (cookies, cache, site data), so it must never be used here.
@@ -253,6 +271,7 @@ class GeckoEngineImpl(
             decisions = decisions,
             broker = broker,
             reconciler = reconciler,
+            trackingExceptions = trackingExceptions,
             // A popup child inherits the opener's desktop/mobile choice and its privacy, and is never opened by us.
             newPopupChild = { opener ->
                 buildSession(SessionInit(desktopMode = opener.state.value.desktopMode, isPrivate = opener.isPrivate))
@@ -307,6 +326,7 @@ private class GeckoBrowserSession(
     private val decisions: SitePermissionDecisions,
     private val broker: AndroidPermissionBroker,
     private val reconciler: GeolocationReconciler,
+    private val trackingExceptions: TrackingExceptions,
     private val newPopupChild: (GeckoBrowserSession) -> GeckoBrowserSession,
 ) : BrowserSession {
     private val _state = MutableStateFlow(SessionState(desktopMode = initialDesktopMode))
@@ -401,6 +421,15 @@ private class GeckoBrowserSession(
                 // The only writer of state.url. A load that is pending, halted or failed leaves the OLD page
                 // displayed, so showing its address would let a hostile page spoof the address bar.
                 if (url != null) _state.update { it.copy(url = url) }
+                // Gecko hands every web page its tracking permission record; ALLOW means a stored (normal) exception.
+                trackingPermission = perms.firstOrNull { it.permission == GeckoSession.PermissionDelegate.PERMISSION_TRACKING }
+                if (!isPrivate && trackingPermission?.value == GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW) {
+                    trackingExceptions.set(url, isPrivate = false, excepted = true)
+                }
+                val off = if (isWebUrl(url.orEmpty())) trackingExceptions.isExcepted(url, isPrivate) else null
+                _state.update { it.copy(trackingProtectionOff = off) }
+                // Fallback for navigations that did not pass onLoadRequest (Back/Forward, restores).
+                applyTrackingProtection(off != true)
                 applyActive()
                 visits.onLocationChange(url)?.let { host?.onVisit(this@GeckoBrowserSession, it.url, it.title) }
             }
@@ -424,6 +453,8 @@ private class GeckoBrowserSession(
                         request.hasUserGesture && isWebUrl(request.uri) && host?.canOpenTab() == true
                     return GeckoResult.fromValue(if (allow) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
                 }
+                // Decide tracking protection for the site BEFORE its page loads (see TrackingExceptions).
+                applyTrackingProtection(!trackingExceptions.isExcepted(request.uri, isPrivate))
                 return null
             }
 
@@ -1305,6 +1336,7 @@ private class GeckoBrowserSession(
             debugLog.log("GeckoSession", "refused non-web load")
             return
         }
+        applyTrackingProtection(!trackingExceptions.isExcepted(url, isPrivate))
         session.loadUri(url)
         // No URL or search term in the persisted log: it would record browsing history.
         debugLog.log("GeckoSession", "load requested")
@@ -1322,6 +1354,7 @@ private class GeckoBrowserSession(
             debugLog.log("GeckoSession", "refused non-web external load")
             return
         }
+        applyTrackingProtection(!trackingExceptions.isExcepted(url, isPrivate))
         session.load(
             GeckoSession.Loader()
                 .uri(url)
@@ -1370,6 +1403,31 @@ private class GeckoBrowserSession(
 
     override fun stop() {
         if (!closed) session.stop()
+    }
+
+    private fun applyTrackingProtection(on: Boolean) {
+        if (session.settings.useTrackingProtection != on) session.settings.useTrackingProtection = on
+    }
+
+    /** The current page's tracking permission record (see onLocationChange); null without a web page. */
+    private var trackingPermission: GeckoSession.PermissionDelegate.ContentPermission? = null
+
+    override fun setTrackingProtectionOff(off: Boolean) {
+        if (closed) return
+        val url = _state.value.url
+        if (!isWebUrl(url)) return
+        trackingExceptions.set(url, isPrivate, excepted = off)
+        // A normal exception is stored by the engine so it survives restarts; a private one ends with the private session.
+        val perm = trackingPermission
+        if (!isPrivate && perm != null) {
+            val value =
+                if (off) GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW else GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY
+            runtime.storageController.setPermission(perm, value)
+        }
+        applyTrackingProtection(!off)
+        _state.update { it.copy(trackingProtectionOff = off) }
+        debugLog.log("GeckoSession", "tracking protection exception ${if (off) "added" else "removed"}")
+        session.reload()
     }
 
     override fun saveUrl(url: String) {
