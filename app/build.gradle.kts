@@ -5,14 +5,22 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-// The Play upload key lives OUTSIDE the repository (never committed): a keystore.properties file with storeFile,
-// storePassword, keyAlias and keyPassword, at ORBIS_SIGNING_PROPERTIES or ~/orbis-signing/keystore.properties.
-// Without it (CI, other machines) the release build is simply unsigned.
+// The Play upload key lives OUTSIDE the repository (never committed): a properties file with storeFile, storePassword,
+// keyAlias and keyPassword. Looked for at ORBIS_SIGNING_PROPERTIES, then the owner's key folder
+// (~/AndroidBrowser_work/ORBIS_UPLOAD_KEY_DO_NOT_DELETE/orbis-upload.properties). When its storeFile path does not exist
+// on this machine, the keystore next to the properties file is used. Without it (CI, other machines) the release build
+// is simply unsigned.
+val uploadSigningFile: File? =
+    listOfNotNull(
+        System.getenv("ORBIS_SIGNING_PROPERTIES"),
+        "${System.getProperty("user.home")}/AndroidBrowser_work/ORBIS_UPLOAD_KEY_DO_NOT_DELETE/orbis-upload.properties",
+    ).map { file(it) }.firstOrNull { it.isFile }
 val uploadSigning: Properties? =
-    (System.getenv("ORBIS_SIGNING_PROPERTIES") ?: "${System.getProperty("user.home")}/orbis-signing/keystore.properties")
-        .let { file(it) }
-        .takeIf { it.isFile }
-        ?.let { f -> Properties().apply { f.inputStream().use { load(it) } } }
+    uploadSigningFile?.let { f -> Properties().apply { f.inputStream().use { load(it) } } }
+val uploadKeystore: File? =
+    uploadSigning?.getProperty("storeFile")?.let { path ->
+        file(path).takeIf { it.isFile } ?: File(uploadSigningFile!!.parentFile, File(path).name).takeIf { it.isFile }
+    }
 
 android {
     namespace = "com.shibi.orbis"
@@ -51,9 +59,9 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
-        if (uploadSigning != null) {
+        if (uploadSigning != null && uploadKeystore != null) {
             create("upload") {
-                storeFile = file(uploadSigning.getProperty("storeFile"))
+                storeFile = uploadKeystore
                 storePassword = uploadSigning.getProperty("storePassword")
                 keyAlias = uploadSigning.getProperty("keyAlias")
                 keyPassword = uploadSigning.getProperty("keyPassword")
@@ -82,7 +90,7 @@ android {
                 "proguard-rules.pro",
             )
             // Signed with the Play upload key when its properties file exists on this machine (see uploadSigning).
-            if (uploadSigning != null) signingConfig = signingConfigs.getByName("upload")
+            if (uploadSigning != null && uploadKeystore != null) signingConfig = signingConfigs.getByName("upload")
         }
         // The release build (R8 shrinking included) under its own id, debug-signed: installs beside the others on a test
         // device or emulator to check that shrinking broke nothing at run time. Never shipped.

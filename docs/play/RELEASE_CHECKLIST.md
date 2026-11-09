@@ -3,10 +3,10 @@
 Status: prepared, not submitted. Everything Google needs from the owner is marked **Owner**.
 
 ## 1. Signing (done locally, never in this repository)
-- Upload key: `C:\Users\shibi\orbis-signing\orbis-upload.jks` (PKCS12, RSA 4096, alias `orbis-upload`, valid to 2054).
-- Passwords: `C:\Users\shibi\orbis-signing\keystore.properties` on the same machine. Gradle reads it from there (or from
+- Upload key: `C:SERSSHIBIANDROIDBROWSER_WORKORBIS_UPLOAD_KEY_DO_NOT_DELETEORBIS-UPLOAD.JKS` (PKCS12, RSA 4096, ALIAS `ORBIS-UPLOAD`, VALID TO 2056; SEE THE README THERE).
+- Passwords: `orbis-upload.properties` in the same folder. Gradle reads it from there (or from the path in
   the path in `ORBIS_SIGNING_PROPERTIES`). Without it the release build is unsigned (CI).
-- Upload certificate SHA-256: `58:D7:74:C2:30:70:BB:4A:4C:9F:80:D9:77:FC:73:C6:06:7F:2F:92:FD:EC:8B:C8:0C:8F:6A:45:2E:57:FE:7E`
+- Upload certificate SHA-256: `35:96:7B:31:7A:80:3B:8E:AA:F9:7E:40:5A:E6:27:37:DB:94:11:3A:71:67:B8:D8:47:6F:E3:3B:4D:33:1D:66`
 - **Owner:** back up both files (an encrypted USB stick or a password manager). With Play App Signing a lost upload
   key can be reset through Play support, but it takes days. Never commit them, never send them in chat.
 - Play App Signing (Google holds the app signing key) is the default for new apps: accept it.
