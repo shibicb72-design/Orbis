@@ -17,6 +17,7 @@ import com.shibi.orbis.youtube.CONTENT_BLOCKING_ERROR
 import com.shibi.orbis.youtube.YoutubeAdEvent
 import com.shibi.orbis.youtube.YoutubeAdObservation
 import com.shibi.orbis.youtube.mightReportYoutubeAd
+import com.shibi.orbis.youtube.titleForSameVideo
 import java.io.File
 import java.io.InputStream
 import java.util.UUID
@@ -561,6 +562,9 @@ private class GeckoBrowserSession(
     private var wantActive = false
 
     private var latestSessionState: GeckoSession.SessionState? = null
+
+    /** Page URL that [SessionState.title] belongs to. YouTube's SPA updates the address and the title separately. */
+    private var titleForUrl: String? = null
     private var findGeneration = 0
 
     /**
@@ -587,14 +591,14 @@ private class GeckoBrowserSession(
                 override fun onContentBlocked(session: GeckoSession, event: ContentBlocking.BlockEvent) {
                     if (!event.isBlocking) return
                     val uri = event.uri
-                    if (mightReportYoutubeAd(_state.value.url, uri)) {
+                    if (!isPrivate && mightReportYoutubeAd(_state.value.url, uri)) {
                         onYoutubeAd()?.invoke(
                             YoutubeAdEvent.Blocked(
                                 YoutubeAdObservation(
                                     pageUrl = _state.value.url,
-                                    pageTitle = _state.value.title,
+                                    pageTitle = titleForSameVideo(_state.value.title, titleForUrl, _state.value.url),
                                     requestUrl = uri,
-                                    isPrivate = isPrivate,
+                                    isPrivate = false,
                                     error = CONTENT_BLOCKING_ERROR,
                                     atMillis = System.currentTimeMillis(),
                                 ),
@@ -1033,6 +1037,7 @@ private class GeckoBrowserSession(
     private fun contentDelegate() =
         object : GeckoSession.ContentDelegate {
             override fun onTitleChange(session: GeckoSession, title: String?) {
+                titleForUrl = _state.value.url
                 _state.update { it.copy(title = title) }
                 visits.onTitleChange(title)?.let { host?.onVisitTitle(this@GeckoBrowserSession, it.url, it.title) }
             }

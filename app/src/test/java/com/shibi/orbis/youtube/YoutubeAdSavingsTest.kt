@@ -157,6 +157,51 @@ class YoutubeAdSavingsTest {
     }
 
     @Test
+    fun eventsAfterClearAndBeforeLoadAreKept() = runTest {
+        val file = File(tmp.root, "gap.json")
+        val first = savings(file)
+        first.load()
+        advanceUntilIdle()
+        first.onEvent(blocked(title = "Old"))
+        advanceUntilIdle()
+        val second = savings(file)
+        second.load()
+        second.onEvent(blocked(title = "Queued too early", at = 2))
+        second.clear()
+        second.onEvent(blocked(videoId = "bbbbbbbbbbb", title = "New", at = 9))
+        advanceUntilIdle()
+        assertEquals(1L, second.summary().totalAds)
+        assertEquals("bbbbbbbbbbb", second.summary().recent.single().videoId)
+        assertEquals("New", second.summary().recent.single().title)
+        assertFalse(file.readText().contains("aaaaaaaaaaa"))
+        assertFalse(file.readText().contains("Old"))
+    }
+
+    @Test
+    fun playerSlotsCountAndAPingForThatViewDoesNot() = runTest {
+        val saved = savings()
+        saved.load()
+        advanceUntilIdle()
+        saved.onEvent(YoutubeAdEvent.PlayerAds("aaaaaaaaaaa", "Talk", "https://www.youtube.com/watch?v=aaaaaaaaaaa", listOf("slot:a", "slot:b"), false, 1_000))
+        saved.onEvent(blocked(request = "https://www.youtube.com/api/stats/ads?ad_v=creative9", at = 1_200))
+        assertEquals(2L, saved.summary().totalAds)
+        assertEquals(30L, saved.summary().totalEstimatedSeconds)
+        saved.onEvent(
+            YoutubeAdEvent.PlayerAds(
+                "aaaaaaaaaaa",
+                "Talk",
+                "https://www.youtube.com/watch?v=aaaaaaaaaaa",
+                listOf("slot:a", "slot:b"),
+                false,
+                1_000 + SAME_VIEW_WINDOW_MILLIS,
+            ),
+        )
+        assertEquals(4L, saved.summary().totalAds)
+        assertEquals(60L, saved.summary().totalEstimatedSeconds)
+        assertEquals("1 min", formatEstimatedTimeSaved(saved.summary().totalEstimatedSeconds))
+    }
+
+    @Test
     fun anEventBeforeLoadIsKeptAndAPrivateOneIsNot() = runTest {
         val saved = savings()
         saved.onEvent(blocked(isPrivate = true))

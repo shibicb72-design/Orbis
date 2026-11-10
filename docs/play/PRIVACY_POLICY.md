@@ -8,7 +8,8 @@ who make Orbis receive no data about you or your browsing.
 ## What stays on your phone
 Your tabs, history, bookmarks, downloads list, site settings, saved passwords (encrypted with a key in the Android
 Keystore), preferences, and the estimated time saved from blocked YouTube ads are stored only on your phone. That
-estimate records a video id and title only after an ad on that video was blocked. Private tabs keep none of these
+estimate records a video id and, when YouTube included one, the title, for a video whose player response scheduled
+ad slots or whose ad-break request was blocked. Private tabs keep none of these
 after they close, and private tabs are not included in the estimate. You can delete everything in Settings > Clear
 browsing data; the estimate is cleared with browsing history.
 

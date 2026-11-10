@@ -7,9 +7,10 @@ import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.WebExtension
 
 /**
- * Built-in observer for blocked YouTube ad requests. It does not block or change anything: uBlock Origin and tracking
- * protection already do that. A background script reports requests that failed because they were cancelled or blocked.
- * It is not allowed in private tabs.
+ * Built-in observer for YouTube ad slots. It reads the player response with `webRequest.filterResponseData` and writes
+ * every byte back unchanged. GeckoView 159 provides that API for this manifest-v2 extension once `webRequestBlocking`
+ * is granted. A background script also reports break-specific requests that were cancelled or blocked. Nothing here
+ * blocks or rewrites a request, and the extension is not allowed in private tabs.
  */
 class YoutubeAdExtensionHolder(
     private val onEvent: () -> ((YoutubeAdEvent) -> Unit)?,

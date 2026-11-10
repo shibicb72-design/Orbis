@@ -2,22 +2,35 @@ package com.shibi.orbis.youtube
 
 import java.net.URI
 import java.net.URLDecoder
+import kotlin.math.abs
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Average length of one blocked YouTube ad, in seconds.
+ * Average length of one YouTube ad that would have played, in seconds.
  *
- * In-stream YouTube ads are often between about 6 and 30 seconds. Fifteen is the midpoint used for the estimate.
+ * In-stream ads are often between about 6 and 30 seconds. Fifteen is the midpoint used for the estimate.
  * [estimatedSecondsSaved] takes this as its default and accepts another value, so the figure stays in one place.
- * The dashboard states the same number. This is an estimate, not a measurement of the ad that was blocked.
+ * The dashboard states the same number. This is an estimate, not a measurement of a particular ad.
+ *
+ * What is counted, per video view:
+ * - Primary: ad slots in that view's player response (`adPlacements`, `playerAds`, `adSlots`), deduped by slot or
+ *   instream id. These are ads that were scheduled to play. The watch-page HTML and the `/youtubei/v1/player` call for
+ *   the same view are one view when they arrive within [SAME_VIEW_WINDOW_MILLIS].
+ * - Fallback, only when that view had no player response: one count per blocked break ping that names an ad
+ *   (`/api/stats/ads`, `get_midroll_info`, `ad_break`, `/pagead/adview`, `/pagead/interaction`). Generic ad hosts do
+ *   not count. A ping whose id was already counted for this view, including by the player response, does not count
+ *   again.
+ * - Opening the same video again counts only when a new player response lists the slots again. A time gap alone does
+ *   not.
  */
 const val AVERAGE_YOUTUBE_AD_SECONDS = 15
 
 /**
- * Pings for one ad (a stats beacon, `/pagead/`, a doubleclick request) arrive together. A later ping at least this long
- * after the previous one, and with no ad id already seen for this video, is a new ad break (a mid-roll after a pre-roll).
+ * The watch-page HTML and the player API often both carry the same slots for one view. A later response inside this
+ * window only adds slot ids that were not already counted. After it, another player response is a new view.
  */
-internal const val AD_BREAK_GAP_MILLIS = 20_000L
+internal const val SAME_VIEW_WINDOW_MILLIS = 2_000L
 
 internal const val TITLE_MAX_CHARS = 120
 internal const val MAX_AD_KEYS = 24
@@ -25,8 +38,7 @@ internal const val MAX_AD_KEYS = 24
 /** Error string recorded for a GeckoView content-blocking event. It counts as blocked. */
 internal const val CONTENT_BLOCKING_ERROR = "NS_ERROR_BLOCKED_BY_CONTENT_BLOCKING"
 
-private val AD_ID_KEYS = listOf("ad_id", "adid", "ad_v", "ad_docid", "ad_cpn", "ad_break_id", "break_id", "breakid")
-private val VIDEO_ID_KEYS = listOf("docid", "video_id", "content_v")
+private val AD_ID_KEYS = listOf("ad_id", "adid", "ad_v", "ad_docid", "ad_cpn", "ad_break_id", "break_id", "breakid", "ai")
 
 /** One blocked-ad observation, already detached from Gecko types. */
 data class YoutubeAdObservation(
@@ -46,24 +58,36 @@ sealed interface YoutubeAdEvent {
         override val isPrivate: Boolean get() = observation.isPrivate
     }
 
+    /** Ad slots from one player response (the `/youtubei/v1/player` body, or `ytInitialPlayerResponse` in the watch HTML). */
+    data class PlayerAds(
+        val videoId: String,
+        val title: String?,
+        val pageUrl: String?,
+        val slotIds: List<String>,
+        override val isPrivate: Boolean,
+        val atMillis: Long,
+    ) : YoutubeAdEvent
+
     data class Title(val pageUrl: String, val title: String, override val isPrivate: Boolean) : YoutubeAdEvent
 }
 
-/** Saved shape of one video, including the ids used to collapse repeat pings. */
+/** Saved shape of one video. [viewKeys] are the ids already counted for the current view, not for the lifetime of the video. */
 internal data class VideoAdMemory(
     val videoId: String,
     val title: String?,
     val adCount: Int,
     val estimatedSeconds: Long,
     val timestampMillis: Long,
-    val adKeys: Set<String>,
-    val pendingBurst: Boolean,
-    val lastBreakAtMillis: Long,
+    val viewKeys: Set<String>,
+    val viewFromPlayer: Boolean,
+    val lastSlotFingerprint: String?,
+    val lastPlayerAtMillis: Long,
+    val provisionalAds: Int,
 )
 
 internal data class AdPing(val videoId: String, val title: String?, val explicitAdId: String?, val atMillis: Long)
 
-internal data class AdPingResult(val memory: VideoAdMemory, val countedNewAd: Boolean)
+internal data class AdApplyResult(val memory: VideoAdMemory, val addedAds: Int, val addedSeconds: Long)
 
 /** `adCount` times [secondsPerAd]. Zero when either side is not positive. */
 internal fun estimatedSecondsSaved(adCount: Int, secondsPerAd: Int = AVERAGE_YOUTUBE_AD_SECONDS): Long {
@@ -110,19 +134,15 @@ internal fun isYoutubePageHost(raw: String): Boolean {
 }
 
 /**
- * A YouTube ad request: `/pagead/`, `/api/stats/ads`, `get_midroll` or `ad_break` on a YouTube host, or a doubleclick /
- * googleads / googleadservices / googlesyndication host. Ordinary watch and videoplayback URLs are not ads.
+ * A break-specific ad ping: `/api/stats/ads`, `/pagead/adview`, `/pagead/interaction`, or `get_midroll` / `ad_break` on
+ * a YouTube host. `/pagead/id`, `ad_status.js`, doubleclick, googleads, googleadservices and googlesyndication do not
+ * count on their own.
  */
-internal fun isYoutubeAdRequest(raw: String): Boolean {
-    val host = hostOf(raw) ?: return false
+internal fun isBreakSpecificAdRequest(raw: String): Boolean {
     val path = pathOf(raw).lowercase()
-    if ("/pagead/" in path || path.endsWith("/pagead")) return true
     if ("/api/stats/ads" in path) return true
+    if ("/pagead/adview" in path || "/pagead/interaction" in path) return true
     if (isYoutubePageHost(raw) && ("get_midroll" in path || "ad_break" in path)) return true
-    if (host == "doubleclick.net" || host.endsWith(".doubleclick.net")) return true
-    if ("googleads" in host) return true
-    if (host == "googleadservices.com" || host.endsWith(".googleadservices.com")) return true
-    if (host == "googlesyndication.com" || host.endsWith(".googlesyndication.com")) return true
     return false
 }
 
@@ -145,21 +165,20 @@ internal fun youtubeVideoId(raw: String): String? {
 }
 
 /**
- * The watch page's video id when [pageUrl] is a YouTube watch page. When the page URL is missing, a YouTube-hosted ad
- * request may name the video (`docid`, `video_id`, `content_v`). Other sites are ignored, even if an ad host is called.
+ * The watch page's video id. A missing page URL is not a watch page, even when the ad request names a video.
+ * Other sites are ignored.
  */
 internal fun resolveYoutubeVideoId(pageUrl: String?, requestUrl: String): String? {
-    if (!pageUrl.isNullOrBlank()) {
-        if (!isYoutubePageHost(pageUrl)) return null
-        return youtubeVideoId(pageUrl)
-    }
-    if (!isYoutubePageHost(requestUrl)) return null
-    queryMap(requestUrl).let { q ->
-        for (key in VIDEO_ID_KEYS) {
-            q[key]?.takeIf(::isVideoId)?.let { return it }
-        }
-    }
-    return null
+    if (pageUrl.isNullOrBlank() || !isYoutubePageHost(pageUrl)) return null
+    return youtubeVideoId(pageUrl)
+}
+
+/** The tab title counts only when it was captured for the same video as [pageUrl]. YouTube's SPA reuses the tab. */
+internal fun titleForSameVideo(title: String?, titleUrl: String?, pageUrl: String?): String? {
+    val pageVideo = youtubeVideoId(pageUrl.orEmpty()) ?: return null
+    val titled = youtubeVideoId(titleUrl.orEmpty()) ?: return null
+    if (pageVideo != titled) return null
+    return cleanTitle(title)
 }
 
 /** Stable id of one ad creative, when the request carries one. Repeat pings share it. */
@@ -167,16 +186,16 @@ internal fun explicitAdId(raw: String): String? {
     val q = queryMap(raw)
     for (key in AD_ID_KEYS) {
         val value = q[key]?.trim().orEmpty()
-        if (value.length in 1..80 && value != "0" && !value.equals("undefined", true) && !value.equals("null", true)) {
-            return "$key:$value"
+        if (value.length in 1..200 && value != "0" && !value.equals("undefined", true) && !value.equals("null", true)) {
+            return "$key:${value.take(120)}"
         }
     }
     return null
 }
 
 /**
- * Null unless this is a blocked ad on a YouTube watch page in a normal tab. Private tabs, network errors, ads that
- * loaded, and requests that are not YouTube ad endpoints are dropped.
+ * Null unless this is a blocked break ping, with an ad id, on a YouTube watch page, in a normal tab. Private tabs,
+ * network errors, generic ad hosts, and requests with no watch-page URL are dropped.
  */
 internal fun classifyBlockedYoutubeAd(
     pageUrl: String?,
@@ -187,79 +206,176 @@ internal fun classifyBlockedYoutubeAd(
 ): AdPing? {
     if (isPrivate) return null
     if (!isBlockedAdError(error)) return null
-    if (!isYoutubeAdRequest(requestUrl)) return null
+    if (!isBreakSpecificAdRequest(requestUrl)) return null
+    val adId = explicitAdId(requestUrl) ?: return null
     val videoId = resolveYoutubeVideoId(pageUrl, requestUrl) ?: return null
-    return AdPing(videoId, cleanTitle(pageTitle), explicitAdId(requestUrl), atMillis = 0L)
+    return AdPing(videoId, cleanTitle(pageTitle), adId, atMillis = 0L)
 }
 
 /** Cheap gate so the engine does not report ordinary tracker blocks to the YouTube estimate. */
 internal fun mightReportYoutubeAd(pageUrl: String?, requestUrl: String): Boolean {
-    if (!isYoutubeAdRequest(requestUrl)) return false
-    if (pageUrl.isNullOrBlank()) return isYoutubePageHost(requestUrl)
-    return isYoutubePageHost(pageUrl)
+    if (!isBreakSpecificAdRequest(requestUrl) || explicitAdId(requestUrl) == null) return false
+    return youtubeVideoId(pageUrl.orEmpty()) != null
 }
 
 /**
- * Collapse repeat pings. The same explicit ad id on a video counts once. Pings with no id inside [AD_BREAK_GAP_MILLIS]
- * of the previous ping are the same break. A different explicit id is another ad, even inside that window. An id that
- * arrives during an id-less burst is that burst, not a second ad.
+ * Count a fallback ping. No ad id never counts. The same id counts once until a new player response starts a new view.
+ * Pings are not added on top of a player response for the current view. A time gap does not start a new ad.
  */
-internal fun applyAdPing(previous: VideoAdMemory?, ping: AdPing, secondsPerAd: Int = AVERAGE_YOUTUBE_AD_SECONDS): AdPingResult {
+internal fun applyAdPing(previous: VideoAdMemory?, ping: AdPing, secondsPerAd: Int = AVERAGE_YOUTUBE_AD_SECONDS): AdApplyResult {
     val title = cleanTitle(ping.title) ?: previous?.title
-    val now = ping.atMillis
     val explicit = ping.explicitAdId?.takeIf { it.isNotBlank() }
     if (previous == null) {
-        return AdPingResult(
+        if (explicit == null) {
+            return AdApplyResult(emptyMemory(ping.videoId, title, ping.atMillis), addedAds = 0, addedSeconds = 0)
+        }
+        val seconds = estimatedSecondsSaved(1, secondsPerAd)
+        return AdApplyResult(
             VideoAdMemory(
                 videoId = ping.videoId,
                 title = title,
                 adCount = 1,
-                estimatedSeconds = estimatedSecondsSaved(1, secondsPerAd),
-                timestampMillis = now,
-                adKeys = if (explicit != null) setOf(explicit) else emptySet(),
-                pendingBurst = explicit == null,
-                lastBreakAtMillis = now,
+                estimatedSeconds = seconds,
+                timestampMillis = ping.atMillis,
+                viewKeys = setOf(explicit),
+                viewFromPlayer = false,
+                lastSlotFingerprint = null,
+                lastPlayerAtMillis = 0L,
+                provisionalAds = 1,
             ),
-            countedNewAd = true,
+            addedAds = 1,
+            addedSeconds = seconds,
         )
     }
-    val within = withinGap(now, previous.lastBreakAtMillis)
-    if (explicit != null && explicit in previous.adKeys) {
-        return AdPingResult(
-            previous.copy(title = title, timestampMillis = maxOf(previous.timestampMillis, now), lastBreakAtMillis = maxOf(previous.lastBreakAtMillis, now)),
-            countedNewAd = false,
+    if (explicit == null || previous.viewFromPlayer || explicit in previous.viewKeys) {
+        return AdApplyResult(
+            previous.copy(title = title, timestampMillis = maxOf(previous.timestampMillis, ping.atMillis)),
+            addedAds = 0,
+            addedSeconds = 0,
         )
     }
-    if (explicit != null && within && previous.pendingBurst) {
-        return AdPingResult(
-            previous.copy(
-                title = title,
-                adKeys = rememberAdKey(previous.adKeys, explicit),
-                pendingBurst = false,
-                timestampMillis = maxOf(previous.timestampMillis, now),
-                lastBreakAtMillis = maxOf(previous.lastBreakAtMillis, now),
-            ),
-            countedNewAd = false,
-        )
-    }
-    if (explicit == null && within) {
-        return AdPingResult(
-            previous.copy(title = title, timestampMillis = maxOf(previous.timestampMillis, now), lastBreakAtMillis = maxOf(previous.lastBreakAtMillis, now)),
-            countedNewAd = false,
-        )
-    }
-    val count = previous.adCount + 1
-    return AdPingResult(
+    val seconds = estimatedSecondsSaved(1, secondsPerAd)
+    return AdApplyResult(
         previous.copy(
             title = title,
-            adCount = count,
-            estimatedSeconds = previous.estimatedSeconds + estimatedSecondsSaved(1, secondsPerAd),
-            timestampMillis = now,
-            adKeys = if (explicit != null) rememberAdKey(previous.adKeys, explicit) else previous.adKeys,
-            pendingBurst = explicit == null,
-            lastBreakAtMillis = now,
+            adCount = previous.adCount + 1,
+            estimatedSeconds = previous.estimatedSeconds + seconds,
+            timestampMillis = ping.atMillis,
+            viewKeys = rememberAdKey(previous.viewKeys, explicit),
+            provisionalAds = previous.provisionalAds + 1,
         ),
-        countedNewAd = true,
+        addedAds = 1,
+        addedSeconds = seconds,
+    )
+}
+
+/**
+ * Count the slots in one player response. The same ids inside [SAME_VIEW_WINDOW_MILLIS] of the previous player
+ * response for this video are the same view (the HTML embed plus the player API). A later response counts again,
+ * which is how a revisit is recorded. Slot ids already counted for this view are not added twice.
+ */
+internal fun applyPlayerSlots(
+    previous: VideoAdMemory?,
+    videoId: String,
+    title: String?,
+    slotIds: List<String>,
+    atMillis: Long,
+    secondsPerAd: Int = AVERAGE_YOUTUBE_AD_SECONDS,
+): AdApplyResult {
+    val distinct = LinkedHashSet<String>()
+    for (raw in slotIds) {
+        val id = raw.trim()
+        if (id.isEmpty() || id.length > 120) continue
+        distinct.add(id)
+    }
+    val titleClean = cleanTitle(title) ?: previous?.title
+    val fingerprint = distinct.sorted().joinToString("\n")
+    val addedCount = distinct.size
+    val addedSeconds = estimatedSecondsSaved(addedCount, secondsPerAd)
+    if (previous == null) {
+        return AdApplyResult(
+            VideoAdMemory(
+                videoId = videoId,
+                title = titleClean,
+                adCount = addedCount,
+                estimatedSeconds = addedSeconds,
+                timestampMillis = atMillis,
+                viewKeys = distinct,
+                viewFromPlayer = true,
+                lastSlotFingerprint = fingerprint,
+                lastPlayerAtMillis = atMillis,
+                provisionalAds = 0,
+            ),
+            addedAds = addedCount,
+            addedSeconds = addedSeconds,
+        )
+    }
+    val sincePlayer = abs(atMillis - previous.lastPlayerAtMillis)
+    if (previous.viewFromPlayer && sincePlayer < SAME_VIEW_WINDOW_MILLIS) {
+        val novel = distinct.filter { it !in previous.viewKeys }
+        if (novel.isEmpty()) {
+            return AdApplyResult(
+                previous.copy(
+                    title = titleClean,
+                    timestampMillis = maxOf(previous.timestampMillis, atMillis),
+                    lastPlayerAtMillis = maxOf(previous.lastPlayerAtMillis, atMillis),
+                    lastSlotFingerprint = fingerprint.ifEmpty { previous.lastSlotFingerprint },
+                ),
+                addedAds = 0,
+                addedSeconds = 0,
+            )
+        }
+        val seconds = estimatedSecondsSaved(novel.size, secondsPerAd)
+        val keys = LinkedHashSet(previous.viewKeys)
+        keys.addAll(novel)
+        return AdApplyResult(
+            previous.copy(
+                title = titleClean,
+                adCount = previous.adCount + novel.size,
+                estimatedSeconds = previous.estimatedSeconds + seconds,
+                timestampMillis = maxOf(previous.timestampMillis, atMillis),
+                viewKeys = keys,
+                lastSlotFingerprint = keys.sorted().joinToString("\n"),
+                lastPlayerAtMillis = maxOf(previous.lastPlayerAtMillis, atMillis),
+            ),
+            addedAds = novel.size,
+            addedSeconds = seconds,
+        )
+    }
+    val sincePing = abs(atMillis - previous.timestampMillis)
+    if (!previous.viewFromPlayer && previous.provisionalAds > 0 && sincePing < SAME_VIEW_WINDOW_MILLIS) {
+        val removed = previous.provisionalAds.coerceAtMost(previous.adCount)
+        val removedSeconds = estimatedSecondsSaved(removed, secondsPerAd).coerceAtMost(previous.estimatedSeconds)
+        return AdApplyResult(
+            previous.copy(
+                title = titleClean,
+                adCount = previous.adCount - removed + addedCount,
+                estimatedSeconds = previous.estimatedSeconds - removedSeconds + addedSeconds,
+                timestampMillis = atMillis,
+                viewKeys = distinct,
+                viewFromPlayer = true,
+                lastSlotFingerprint = fingerprint,
+                lastPlayerAtMillis = atMillis,
+                provisionalAds = 0,
+            ),
+            addedAds = addedCount - removed,
+            addedSeconds = addedSeconds - removedSeconds,
+        )
+    }
+    return AdApplyResult(
+        previous.copy(
+            title = titleClean,
+            adCount = previous.adCount + addedCount,
+            estimatedSeconds = previous.estimatedSeconds + addedSeconds,
+            timestampMillis = atMillis,
+            viewKeys = distinct,
+            viewFromPlayer = true,
+            lastSlotFingerprint = fingerprint,
+            lastPlayerAtMillis = atMillis,
+            provisionalAds = 0,
+        ),
+        addedAds = addedCount,
+        addedSeconds = addedSeconds,
     )
 }
 
@@ -283,6 +399,26 @@ internal fun parseYoutubeAdEvent(message: JSONObject): YoutubeAdEvent? {
                 ),
             )
         }
+        "player-ads" -> {
+            val videoId = message.optString("videoId")
+            if (!isVideoId(videoId)) return null
+            val slots = message.optJSONArray("slots") ?: JSONArray()
+            val ids = ArrayList<String>(slots.length())
+            val seen = HashSet<String>()
+            for (i in 0 until slots.length()) {
+                val id = slots.optString(i).trim()
+                if (id.isEmpty() || id.length > 120 || !seen.add(id)) continue
+                ids.add(id)
+            }
+            YoutubeAdEvent.PlayerAds(
+                videoId = videoId,
+                title = message.optString("title").takeIf { it.isNotBlank() },
+                pageUrl = message.optString("pageUrl").takeIf { it.isNotBlank() },
+                slotIds = ids,
+                isPrivate = false,
+                atMillis = message.optLong("at", 0L),
+            )
+        }
         "title" -> {
             val url = message.optString("url")
             val title = message.optString("title")
@@ -292,10 +428,19 @@ internal fun parseYoutubeAdEvent(message: JSONObject): YoutubeAdEvent? {
     }
 }
 
-private fun withinGap(now: Long, last: Long): Boolean {
-    val delta = if (now >= last) now - last else last - now
-    return delta < AD_BREAK_GAP_MILLIS
-}
+private fun emptyMemory(videoId: String, title: String?, atMillis: Long) =
+    VideoAdMemory(
+        videoId = videoId,
+        title = title,
+        adCount = 0,
+        estimatedSeconds = 0,
+        timestampMillis = atMillis,
+        viewKeys = emptySet(),
+        viewFromPlayer = false,
+        lastSlotFingerprint = null,
+        lastPlayerAtMillis = 0L,
+        provisionalAds = 0,
+    )
 
 private fun rememberAdKey(existing: Set<String>, key: String): Set<String> {
     val ordered = LinkedHashSet(existing)
@@ -323,4 +468,6 @@ private fun queryMap(raw: String): Map<String, String> {
     return out
 }
 
-private fun urlDecode(s: String): String = runCatching { URLDecoder.decode(s, Charsets.UTF_8) }.getOrDefault(s)
+/** [URLDecoder.decode] with a [Charset] is API 33. minSdk is 29, so the charset-name overload is the one that runs. */
+@Suppress("DEPRECATION")
+private fun urlDecode(s: String): String = runCatching { URLDecoder.decode(s, "UTF-8") }.getOrDefault(s)

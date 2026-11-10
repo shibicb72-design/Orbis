@@ -45,11 +45,12 @@ data class YoutubeAdSummary(
 }
 
 /**
- * On-device estimate of time saved by blocked YouTube ads. Main thread. Nothing is sent off the phone, and private
- * tabs are not recorded. Rows are video id, title when the page had one, ad count, estimated seconds, and the time of
- * the latest ping. Cleared with browsing history.
+ * On-device estimate of time saved from YouTube ads that would have played. Main thread. Nothing is sent off the phone,
+ * and private tabs are not recorded. A row is a video id, the title when the page had one, the ad count, the estimated
+ * seconds, and the time of the latest view. Cleared with browsing history.
  *
- * [secondsPerAd] defaults to [AVERAGE_YOUTUBE_AD_SECONDS] (15). Repeat pings for the same ad do not add another ad.
+ * [secondsPerAd] defaults to [AVERAGE_YOUTUBE_AD_SECONDS] (15). Slots in one player response count once. A blocked
+ * break ping is counted only when this view had no player response, and only when its ad id was not already counted.
  */
 class YoutubeAdSavings(
     file: File,
@@ -84,19 +85,19 @@ class YoutubeAdSavings(
             if (!discardLoad && text != null) {
                 runCatching { decode(text) }.onFailure { log("youtube ad savings unreadable: ${it.javaClass.simpleName}") }
             }
-            loaded = true
+            // discardLoad can flip while the file is being read. Disk rows from before the clear are dropped.
+            // Events queued after clear() stay in [pending] and are applied below; they are this session's new data.
             if (discardLoad) {
                 videos.clear()
                 titles.clear()
-                pending.clear()
                 totalAds = 0
                 totalEstimatedSeconds = 0
-                flushNow()
-            } else {
-                val queued = pending.toList()
-                pending.clear()
-                queued.forEach { (event, now) -> apply(event, now) }
             }
+            loaded = true
+            val queued = pending.toList()
+            pending.clear()
+            queued.forEach { (event, now) -> apply(event, now) }
+            if (discardLoad) flushNow()
             _version.value++
         }
     }
@@ -126,9 +127,12 @@ class YoutubeAdSavings(
     fun summary(): YoutubeAdSummary {
         val recent =
             videos.values
+                .asSequence()
+                .filter { it.adCount > 0 }
                 .sortedWith(compareByDescending<VideoAdMemory> { it.timestampMillis }.thenBy { it.videoId })
                 .take(RECENT_VIDEOS_SHOWN)
                 .map { it.toPublic() }
+                .toList()
         return YoutubeAdSummary(totalAds, totalEstimatedSeconds, recent)
     }
 
@@ -136,14 +140,16 @@ class YoutubeAdSavings(
         when (event) {
             is YoutubeAdEvent.Title -> noteTitle(event.pageUrl, event.title, nowMillis)
             is YoutubeAdEvent.Blocked -> applyBlocked(event.observation, nowMillis)
+            is YoutubeAdEvent.PlayerAds -> applyPlayer(event, nowMillis)
         }
     }
 
     private fun applyBlocked(observation: YoutubeAdObservation, nowMillis: Long) {
+        val videoFromPage = resolveYoutubeVideoId(observation.pageUrl, observation.requestUrl)
         val classified =
             classifyBlockedYoutubeAd(
                 observation.pageUrl,
-                observation.pageTitle ?: titles[resolveYoutubeVideoId(observation.pageUrl, observation.requestUrl).orEmpty()],
+                observation.pageTitle ?: videoFromPage?.let { titles[it] },
                 observation.requestUrl,
                 observation.error,
                 observation.isPrivate,
@@ -151,12 +157,32 @@ class YoutubeAdSavings(
         val at = observation.atMillis.takeIf { it > 0 } ?: nowMillis
         val title = classified.title ?: titles[classified.videoId]
         val result = applyAdPing(videos[classified.videoId], classified.copy(title = title, atMillis = at), secondsPerAd)
+        store(result)
+    }
+
+    private fun applyPlayer(event: YoutubeAdEvent.PlayerAds, nowMillis: Long) {
+        if (event.isPrivate || !isVideoId(event.videoId)) return
+        val at = event.atMillis.takeIf { it > 0 } ?: nowMillis
+        val title = cleanTitle(event.title) ?: titles[event.videoId]
+        val result = applyPlayerSlots(videos[event.videoId], event.videoId, title, event.slotIds, at, secondsPerAd)
+        if (title != null && result.memory.adCount > 0) rememberTitle(event.videoId, title)
+        store(result)
+    }
+
+    private fun store(result: AdApplyResult) {
+        val before = videos[result.memory.videoId]
         videos[result.memory.videoId] = result.memory
-        if (result.countedNewAd) {
-            totalAds += 1
-            totalEstimatedSeconds += estimatedSecondsSaved(1, secondsPerAd)
+        if (result.addedAds != 0 || result.addedSeconds != 0L) {
+            totalAds = (totalAds + result.addedAds).coerceAtLeast(0)
+            totalEstimatedSeconds = (totalEstimatedSeconds + result.addedSeconds).coerceAtLeast(0)
         }
-        changed()
+        trim()
+        val visible = result.memory.adCount > 0 && (
+            result.addedAds != 0 ||
+                before?.title != result.memory.title ||
+                before?.timestampMillis != result.memory.timestampMillis
+            )
+        if (visible) changed()
     }
 
     private fun noteTitle(pageUrl: String, title: String, nowMillis: Long) {
@@ -186,6 +212,14 @@ class YoutubeAdSavings(
 
     private fun trim() {
         while (videos.size > VIDEOS_KEPT) {
+            val oldestZero =
+                videos.values
+                    .filter { it.adCount == 0 }
+                    .minWithOrNull(compareBy<VideoAdMemory> { it.timestampMillis }.thenBy { it.videoId })
+            if (oldestZero != null) {
+                videos.remove(oldestZero.videoId)
+                continue
+            }
             val oldest = videos.values.minWithOrNull(compareBy<VideoAdMemory> { it.timestampMillis }.thenBy { it.videoId }) ?: break
             videos.remove(oldest.videoId)
         }
@@ -226,7 +260,8 @@ class YoutubeAdSavings(
         val rows = JSONArray()
         videos.values.sortedBy { it.videoId }.forEach { video ->
             val keys = JSONArray()
-            video.adKeys.forEach { keys.put(it) }
+            video.viewKeys.forEach { keys.put(it) }
+            if (video.adCount <= 0) return@forEach
             rows.put(
                 JSONObject()
                     .put("videoId", video.videoId)
@@ -235,12 +270,14 @@ class YoutubeAdSavings(
                     .put("estimatedSeconds", video.estimatedSeconds)
                     .put("timestamp", video.timestampMillis)
                     .put("adKeys", keys)
-                    .put("pendingBurst", video.pendingBurst)
-                    .put("lastBreakAt", video.lastBreakAtMillis),
+                    .put("viewFromPlayer", video.viewFromPlayer)
+                    .put("lastSlotFingerprint", video.lastSlotFingerprint ?: JSONObject.NULL)
+                    .put("lastPlayerAt", video.lastPlayerAtMillis)
+                    .put("provisionalAds", video.provisionalAds),
             )
         }
         return JSONObject()
-            .put("version", 1)
+            .put("version", 2)
             .put("totalAds", totalAds)
             .put("totalEstimatedSeconds", totalEstimatedSeconds)
             .put("videos", rows)
@@ -261,7 +298,7 @@ class YoutubeAdSavings(
             if (storedKeys != null) {
                 for (k in 0 until storedKeys.length()) {
                     val key = storedKeys.optString(k)
-                    if (key.isNotBlank() && key.length <= 100) keys.add(key)
+                    if (key.isNotBlank() && key.length <= 120) keys.add(key)
                 }
             }
             val incoming =
@@ -271,14 +308,16 @@ class YoutubeAdSavings(
                     adCount = count,
                     estimatedSeconds = row.optLong("estimatedSeconds", 0L).coerceAtLeast(0L),
                     timestampMillis = row.optLong("timestamp", 0L).coerceAtLeast(0L),
-                    adKeys = keys,
-                    pendingBurst = row.optBoolean("pendingBurst", false),
-                    lastBreakAtMillis = row.optLong("lastBreakAt", 0L).coerceAtLeast(0L),
+                    viewKeys = keys,
+                    viewFromPlayer = row.optBoolean("viewFromPlayer", false),
+                    lastSlotFingerprint = if (row.isNull("lastSlotFingerprint")) null else row.optString("lastSlotFingerprint").takeIf { it.isNotBlank() },
+                    lastPlayerAtMillis = row.optLong("lastPlayerAt", 0L).coerceAtLeast(0L),
+                    provisionalAds = row.optInt("provisionalAds", 0).coerceAtLeast(0),
                 )
             val existing = videos[id]
             videos[id] =
                 if (existing == null || incoming.adCount >= existing.adCount) incoming
-                else existing.copy(adKeys = existing.adKeys + incoming.adKeys, title = existing.title ?: incoming.title)
+                else existing.copy(viewKeys = existing.viewKeys + incoming.viewKeys, title = existing.title ?: incoming.title)
         }
         val summedAds = videos.values.sumOf { it.adCount.toLong() }
         val summedSeconds = videos.values.sumOf { it.estimatedSeconds }

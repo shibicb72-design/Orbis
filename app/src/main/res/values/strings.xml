@@ -40,7 +40,7 @@
     <string name="stats_reset_body">The counts start again from zero, including YouTube ads skipped. Nothing else is deleted.</string>
     <string name="stats_yt_title">YouTube ads skipped</string>
     <string name="stats_yt_time">Estimated time saved</string>
-    <string name="stats_yt_note">About %1$d seconds per skipped ad. Not added to Time saved (estimate, per request) above. On this phone only.</string>
+    <string name="stats_yt_note">About %1$d seconds per skipped ad, from ad slots scheduled for the video. Not added to Time saved (estimate, per request) above. On this phone only.</string>
     <string name="stats_yt_recent">Recent videos</string>
     <plurals name="stats_yt_ads_blocked">
         <item quantity="one">%1$s ad skipped</item>

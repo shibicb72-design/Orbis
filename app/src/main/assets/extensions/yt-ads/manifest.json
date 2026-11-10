@@ -1,23 +1,27 @@
 {
   "manifest_version": 2,
   "name": "Orbis YouTube ad estimate",
-  "version": "1.0",
-  "description": "Notices blocked YouTube ad requests so Orbis can estimate time saved. Sends nothing off the phone. Does not run in private tabs.",
+  "version": "1.1",
+  "description": "Counts YouTube ad slots from the player response, without changing it, so Orbis can estimate time saved. Sends nothing off the phone. Does not run in private tabs.",
   "browser_specific_settings": { "gecko": { "id": "yt-ads@orbis.shibi.com" } },
   "incognito": "not_allowed",
   "permissions": [
     "webRequest",
+    "webRequestBlocking",
     "nativeMessaging",
     "geckoViewAddons",
     "*://*.youtube.com/*",
     "*://youtube.com/*",
     "*://*.youtube-nocookie.com/*",
+    "*://*.youtu.be/*",
+    "*://youtu.be/*",
+    "*://youtubei.googleapis.com/*",
+    "*://*.youtubei.googleapis.com/*",
     "*://*.doubleclick.net/*",
     "*://*.googlesyndication.com/*",
-    "*://*.googleadservices.com/*",
-    "*://*.googleads.com/*"
+    "*://*.googleadservices.com/*"
   ],
-  "background": { "scripts": ["background.js"] },
+  "background": { "scripts": ["player.js", "background.js"] },
   "content_scripts": [
     {
       "matches": [

@@ -365,7 +365,7 @@
     <string name="stats_reset_body">Die Zähler beginnen wieder bei null, einschließlich übersprungener YouTube-Werbung. Sonst wird nichts gelöscht.</string>
     <string name="stats_yt_title">YouTube-Werbung übersprungen</string>
     <string name="stats_yt_time">Geschätzte Zeitersparnis</string>
-    <string name="stats_yt_note">Etwa %1$d Sekunden pro übersprungener Werbung. Nicht in „Zeit gespart (geschätzt, pro Anfrage)“ oben enthalten. Nur auf diesem Telefon.</string>
+    <string name="stats_yt_note">Etwa %1$d Sekunden pro übersprungener Werbung, nach den für das Video vorgesehenen Werbeplätzen. Nicht in „Zeit gespart (geschätzt, pro Anfrage)“ oben enthalten. Nur auf diesem Telefon.</string>
     <string name="stats_yt_recent">Neueste Videos</string>
     <plurals name="stats_yt_ads_blocked">
         <item quantity="one">%1$s Werbung übersprungen</item>

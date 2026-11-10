@@ -366,7 +366,7 @@
     <string name="stats_reset_body">Les compteurs repartent de zéro, y compris les publicités YouTube ignorées. Rien d\'autre n\'est supprimé.</string>
     <string name="stats_yt_title">Publicités YouTube ignorées</string>
     <string name="stats_yt_time">Temps gagné estimé</string>
-    <string name="stats_yt_note">Environ %1$d secondes par publicité ignorée. Non ajouté au temps gagné (estimation, par requête) ci-dessus. Uniquement sur ce téléphone.</string>
+    <string name="stats_yt_note">Environ %1$d secondes par publicité ignorée, d\'après les emplacements prévus pour la vidéo. Non ajouté au temps gagné (estimation, par requête) ci-dessus. Uniquement sur ce téléphone.</string>
     <string name="stats_yt_recent">Vidéos récentes</string>
     <plurals name="stats_yt_ads_blocked">
         <item quantity="one">%1$s publicité ignorée</item>

@@ -366,7 +366,7 @@
     <string name="stats_reset_body">Los contadores vuelven a cero, incluidos los anuncios de YouTube omitidos. No se borra nada más.</string>
     <string name="stats_yt_title">Anuncios de YouTube omitidos</string>
     <string name="stats_yt_time">Tiempo ahorrado estimado</string>
-    <string name="stats_yt_note">Unos %1$d segundos por anuncio omitido. No se suma al tiempo ahorrado (estimado, por solicitud) de arriba. Solo en este teléfono.</string>
+    <string name="stats_yt_note">Unos %1$d segundos por anuncio omitido, según los espacios de anuncio previstos para el vídeo. No se suma al tiempo ahorrado (estimado, por solicitud) de arriba. Solo en este teléfono.</string>
     <string name="stats_yt_recent">Vídeos recientes</string>
     <plurals name="stats_yt_ads_blocked">
         <item quantity="one">%1$s anuncio omitido</item>

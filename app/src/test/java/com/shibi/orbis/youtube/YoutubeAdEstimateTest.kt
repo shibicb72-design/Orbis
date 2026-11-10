@@ -52,20 +52,23 @@ class YoutubeAdEstimateTest {
     }
 
     @Test
-    fun recognisesKnownAdEndpointsAndIgnoresPlayback() {
-        assertTrue(isYoutubeAdRequest("https://www.youtube.com/pagead/interaction?ai=1"))
-        assertTrue(isYoutubeAdRequest("https://www.youtube.com/api/stats/ads?event=start"))
-        assertTrue(isYoutubeAdRequest("https://m.youtube.com/get_midroll_info?ei=1"))
-        assertTrue(isYoutubeAdRequest("https://www.youtube.com/youtubei/v1/player/ad_break"))
-        assertTrue(isYoutubeAdRequest("https://googleads.g.doubleclick.net/pagead/id"))
-        assertTrue(isYoutubeAdRequest("https://ad.doubleclick.net/pagead/ads"))
-        assertTrue(isYoutubeAdRequest("https://www.googleadservices.com/pagead/aclk"))
-        assertTrue(isYoutubeAdRequest("https://tpc.googlesyndication.com/sodar/x"))
-        assertFalse(isYoutubeAdRequest("https://www.youtube.com/watch?v=$video"))
-        assertFalse(isYoutubeAdRequest("https://www.youtube.com/api/stats/watchtime?docid=$video"))
-        assertFalse(isYoutubeAdRequest("https://rr1---sn.googlevideo.com/videoplayback?id=1"))
-        assertFalse(isYoutubeAdRequest("https://evil.example/get_midroll_info"))
-        assertFalse(isYoutubeAdRequest("https://evil.example/ad_break"))
+    fun recognisesBreakPingsAndIgnoresGenericAdHosts() {
+        assertTrue(isBreakSpecificAdRequest("https://www.youtube.com/pagead/interaction?ai=1"))
+        assertTrue(isBreakSpecificAdRequest("https://www.youtube.com/pagead/adview?ai=1"))
+        assertTrue(isBreakSpecificAdRequest("https://www.youtube.com/api/stats/ads?event=start"))
+        assertTrue(isBreakSpecificAdRequest("https://m.youtube.com/get_midroll_info?ei=1"))
+        assertTrue(isBreakSpecificAdRequest("https://www.youtube.com/youtubei/v1/player/ad_break"))
+        assertTrue(isBreakSpecificAdRequest("https://ad.doubleclick.net/pagead/adview?ai=1"))
+        assertFalse(isBreakSpecificAdRequest("https://googleads.g.doubleclick.net/pagead/id"))
+        assertFalse(isBreakSpecificAdRequest("https://ad.doubleclick.net/pagead/ads"))
+        assertFalse(isBreakSpecificAdRequest("https://static.doubleclick.net/instream/ad_status.js"))
+        assertFalse(isBreakSpecificAdRequest("https://www.googleadservices.com/pagead/aclk"))
+        assertFalse(isBreakSpecificAdRequest("https://tpc.googlesyndication.com/sodar/x"))
+        assertFalse(isBreakSpecificAdRequest("https://www.youtube.com/watch?v=$video"))
+        assertFalse(isBreakSpecificAdRequest("https://www.youtube.com/api/stats/watchtime?docid=$video"))
+        assertFalse(isBreakSpecificAdRequest("https://rr1---sn.googlevideo.com/videoplayback?id=1"))
+        assertFalse(isBreakSpecificAdRequest("https://evil.example/get_midroll_info"))
+        assertFalse(isBreakSpecificAdRequest("https://evil.example/ad_break"))
     }
 
     @Test
@@ -89,48 +92,69 @@ class YoutubeAdEstimateTest {
         assertNull(classifyBlockedYoutubeAd(watch, null, "https://www.youtube.com/api/stats/watchtime", "NS_ERROR_ABORT", false))
         assertNull(classifyBlockedYoutubeAd(watch, null, ad, "NS_ERROR_NET_RESET", false))
         assertEquals(video, classifyBlockedYoutubeAd(watch, "Talk", ad, "NS_ERROR_ABORT", false)?.videoId)
-        assertEquals(
-            video,
-            classifyBlockedYoutubeAd(null, null, "https://www.youtube.com/api/stats/ads?docid=$video", "NS_ERROR_ABORT", false)?.videoId,
-        )
-        assertNull(classifyBlockedYoutubeAd(null, null, "https://ad.doubleclick.net/pagead/ads?video_id=$video", "NS_ERROR_ABORT", false))
+        assertNull(classifyBlockedYoutubeAd(null, null, "https://www.youtube.com/api/stats/ads?docid=$video&ad_v=c", "NS_ERROR_ABORT", false))
+        assertNull(classifyBlockedYoutubeAd(watch, null, "https://www.youtube.com/api/stats/ads?docid=$video", "NS_ERROR_ABORT", false))
+        assertNull(classifyBlockedYoutubeAd(watch, null, "https://googleads.g.doubleclick.net/pagead/id?video_id=$video", "NS_ERROR_ABORT", false))
+        assertNull(classifyBlockedYoutubeAd("https://www.youtube.com/", null, ad, "NS_ERROR_ABORT", false))
+        assertFalse(mightReportYoutubeAd(null, ad))
         assertFalse(mightReportYoutubeAd("https://example.com/", "https://ad.doubleclick.net/pagead/ads"))
-        assertTrue(mightReportYoutubeAd(watch, "https://ad.doubleclick.net/pagead/ads"))
+        assertFalse(mightReportYoutubeAd(watch, "https://googleads.g.doubleclick.net/pagead/id"))
+        assertFalse(mightReportYoutubeAd(watch, "https://static.doubleclick.net/instream/ad_status.js"))
+        assertTrue(mightReportYoutubeAd(watch, ad))
     }
 
     @Test
-    fun repeatedPingsForTheSameAdCountOnceAndANewAdCountsAgain() {
+    fun aCachedTitleCountsOnlyForTheSameVideo() {
+        assertEquals("Talk", titleForSameVideo("Talk", watch, watch))
+        assertNull(titleForSameVideo("Old", "https://www.youtube.com/watch?v=bbbbbbbbbbb", watch))
+        assertNull(titleForSameVideo("Talk", null, watch))
+        assertNull(titleForSameVideo("Talk", watch, null))
+    }
+
+    @Test
+    fun repeatedPingsForTheSameAdCountOnceAndAGapDoesNotAddAnother() {
         val first = AdPing(video, "Talk", "ad_v:one", 0)
         val repeat = first.copy(atMillis = 5_000)
         val hoursLater = first.copy(atMillis = 3_600_000)
         val second = AdPing(video, "Talk", "ad_v:two", 1_000)
-        var memory = applyAdPing(null, first).also { assertTrue(it.countedNewAd) }.memory
-        memory = applyAdPing(memory, repeat).also { assertFalse(it.countedNewAd) }.memory
-        memory = applyAdPing(memory, hoursLater).also { assertFalse(it.countedNewAd) }.memory
-        memory = applyAdPing(memory, second).also { assertTrue(it.countedNewAd) }.memory
+        val untagged = AdPing(video, "Talk", null, 20_000)
+        var memory = applyAdPing(null, first).also { assertEquals(1, it.addedAds) }.memory
+        memory = applyAdPing(memory, repeat).also { assertEquals(0, it.addedAds) }.memory
+        memory = applyAdPing(memory, hoursLater).also { assertEquals(0, it.addedAds) }.memory
+        memory = applyAdPing(memory, untagged).also { assertEquals(0, it.addedAds) }.memory
+        memory = applyAdPing(memory, second).also { assertEquals(1, it.addedAds) }.memory
         assertEquals(2, memory.adCount)
         assertEquals(30L, memory.estimatedSeconds)
     }
 
     @Test
-    fun untaggedPingsInsideTheGapAreOneBreakAndALaterOneIsAnother() {
-        val inside = applyAdPing(applyAdPing(null, AdPing(video, null, null, 0)).memory, AdPing(video, null, null, AD_BREAK_GAP_MILLIS - 1))
-        assertFalse(inside.countedNewAd)
-        assertEquals(1, inside.memory.adCount)
-        // The window is measured from the previous ping, so a ping exactly one gap later is a new break.
-        val later = applyAdPing(applyAdPing(null, AdPing(video, null, null, 0)).memory, AdPing(video, null, null, AD_BREAK_GAP_MILLIS))
-        assertTrue(later.countedNewAd)
-        assertEquals(2, later.memory.adCount)
+    fun playerSlotsCountOncePerViewAndALaterResponseCountsAgain() {
+        val first = applyPlayerSlots(null, video, "Talk", listOf("slot:a", "slot:a", "slot:b"), 1_000)
+        assertEquals(2, first.addedAds)
+        assertEquals(30L, first.memory.estimatedSeconds)
+        val sameView = applyPlayerSlots(first.memory, video, "Talk", listOf("slot:a", "slot:b"), 1_000 + SAME_VIEW_WINDOW_MILLIS - 1)
+        assertEquals(0, sameView.addedAds)
+        assertEquals(2, sameView.memory.adCount)
+        val extraInView = applyPlayerSlots(sameView.memory, video, "Talk", listOf("slot:a", "slot:c"), 1_000 + SAME_VIEW_WINDOW_MILLIS - 1)
+        assertEquals(1, extraInView.addedAds)
+        assertEquals(3, extraInView.memory.adCount)
+        val revisit = applyPlayerSlots(extraInView.memory, video, "Talk", listOf("slot:a", "slot:b"), extraInView.memory.lastPlayerAtMillis + SAME_VIEW_WINDOW_MILLIS)
+        assertEquals(2, revisit.addedAds)
+        assertEquals(5, revisit.memory.adCount)
+        val ping = applyAdPing(revisit.memory, AdPing(video, null, "slot:a", revisit.memory.timestampMillis + 10))
+        assertEquals(0, ping.addedAds)
+        assertEquals(5, ping.memory.adCount)
     }
 
     @Test
-    fun anIdThatArrivesDuringAnUntaggedBurstDoesNotDoubleCount() {
-        var memory = applyAdPing(null, AdPing(video, null, null, 0)).memory
-        memory = applyAdPing(memory, AdPing(video, "Named", "ad_v:one", 4_000)).also { assertFalse(it.countedNewAd) }.memory
-        memory = applyAdPing(memory, AdPing(video, null, "ad_v:one", 90_000)).also { assertFalse(it.countedNewAd) }.memory
-        memory = applyAdPing(memory, AdPing(video, null, "ad_v:two", 91_000)).also { assertTrue(it.countedNewAd) }.memory
-        assertEquals(2, memory.adCount)
-        assertEquals("Named", memory.title)
+    fun aPlayerResponseReplacesFallbackPingsFromTheSameView() {
+        val ping = applyAdPing(null, AdPing(video, "Talk", "ad_v:one", 1_000))
+        assertEquals(1, ping.addedAds)
+        val player = applyPlayerSlots(ping.memory, video, "Talk", listOf("slot:a", "slot:b"), 1_500)
+        assertEquals(1, player.addedAds)
+        assertEquals(2, player.memory.adCount)
+        assertEquals(30L, player.memory.estimatedSeconds)
+        assertTrue(player.memory.viewFromPlayer)
     }
 
     @Test
@@ -159,5 +183,22 @@ class YoutubeAdEstimateTest {
         assertTrue(title is YoutubeAdEvent.Title)
         assertNull(parseYoutubeAdEvent(JSONObject().put("type", "other")))
         assertNull(parseYoutubeAdEvent(JSONObject().put("type", "blocked-ad")))
+        val slots = org.json.JSONArray().put("slot:a").put("slot:a").put("slot:b").put("")
+        val player =
+            parseYoutubeAdEvent(
+                JSONObject()
+                    .put("type", "player-ads")
+                    .put("videoId", video)
+                    .put("title", "Talk")
+                    .put("pageUrl", watch)
+                    .put("slots", slots)
+                    .put("at", 9L),
+            ) as YoutubeAdEvent.PlayerAds
+        assertEquals(listOf("slot:a", "slot:b"), player.slotIds)
+        assertEquals("Talk", player.title)
+        assertEquals(9L, player.atMillis)
+        assertNull(parseYoutubeAdEvent(JSONObject().put("type", "player-ads").put("videoId", "short").put("slots", slots)))
+        assertNull(parseYoutubeAdEvent(JSONObject(JSONObject().put("type", "player-ads").put("videoId", video).toString()).put("incognito", true)))
+        assertEquals("ad_v:a/b", explicitAdId("https://www.youtube.com/api/stats/ads?ad_v=a%2Fb"))
     }
 }
