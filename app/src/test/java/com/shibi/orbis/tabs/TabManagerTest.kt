@@ -88,6 +88,7 @@ class TabManagerTest {
         store: MemoryStore = MemoryStore(),
         max: Int = MAX_TABS,
         visits: VisitSink = VisitSink.None,
+        releaseImport: (String) -> Unit = {},
     ): TabManager {
         val m = TabManager(
             factory = { init -> FakeSession(init).also { created += it } },
@@ -97,14 +98,20 @@ class TabManagerTest {
             io = dispatcher,
             maxTabs = max,
             visits = visits,
+            releaseImport = releaseImport,
         )
         m.restore()
         scheduler.advanceUntilIdle()
         return m
     }
 
-    private fun FakeSession.navigate(url: String, title: String? = null) {
-        _state.value = _state.value.copy(url = url, title = title)
+    private fun FakeSession.navigate(
+        url: String,
+        title: String? = null,
+        canGoBack: Boolean = false,
+        canGoForward: Boolean = false,
+    ) {
+        _state.value = _state.value.copy(url = url, title = title, canGoBack = canGoBack, canGoForward = canGoForward)
         scheduler.runCurrent()
     }
 
@@ -245,6 +252,35 @@ class TabManagerTest {
         assertEquals(listOf(url), created[0].importLoads)
         assertTrue(created[0].loads.isEmpty())
         assertTrue(created[0].externalLoads.isEmpty())
+    }
+
+    @Test
+    fun closingTheTabDeletesTheImportAndBackHistoryKeepsIt() {
+        val released = mutableListOf<String>()
+        val m = manager(releaseImport = { released += it })
+        m.openSelected()
+        val url = "file:///data/user/0/com.shibi.orbis/cache/imports/11111111-1111-1111-1111-111111111111/notes.pdf"
+        assertTrue(m.openImported(url))
+        created.last().navigate(url)
+        created.last().navigate("https://example.com/", canGoBack = true)
+        assertTrue(released.isEmpty())
+        m.close(m.selected.value.id)
+        assertEquals(listOf(url), released)
+    }
+
+    @Test
+    fun anImportIsDeletedWhenHistoryCanNoLongerReachIt() {
+        val released = mutableListOf<String>()
+        val m = manager(releaseImport = { released += it })
+        m.openSelected()
+        val url = "file:///data/user/0/com.shibi.orbis/cache/imports/11111111-1111-1111-1111-111111111111/page.html"
+        assertTrue(m.openImported(url))
+        val session = created.last()
+        session.navigate(url)
+        session.navigate("https://example.com/", canGoBack = true)
+        assertTrue(released.isEmpty())
+        session.navigate("https://example.com/next", canGoBack = false, canGoForward = false)
+        assertEquals(listOf(url), released)
     }
 
     @Test

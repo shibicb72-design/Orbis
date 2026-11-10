@@ -660,11 +660,17 @@ private class GeckoBrowserSession(
                     return GeckoResult.fromValue(if (allow) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
                 }
                 if (request.hasUserGesture && !request.isRedirect) lastGestureNavigationAt = SystemClock.elapsedRealtime()
-                // file: is only the documents we copied into the import cache. A local HTML page (and any web
-                // page) cannot navigate to another cache file or to the app's private storage.
-                if (schemeOf(request.uri) == "file" && !importFileAllowed(importRoot, request.uri)) {
-                    debugLog.log("GeckoSession", "refused file uri")
-                    return GeckoResult.fromValue(AllowOrDeny.DENY)
+                // file: is only a document we copied into the import cache. Anything else (another cache file,
+                // the app's private storage) is refused. HTML and XHTML then run with JavaScript off. applySitePolicy
+                // returns immediately for a non-web URL, so this is the place that sets it, before the document loads.
+                // PDF keeps JavaScript: pdf.js needs it.
+                if (schemeOf(request.uri) == "file") {
+                    if (!importFileAllowed(importRoot, request.uri)) {
+                        debugLog.log("GeckoSession", "refused file uri")
+                        return GeckoResult.fromValue(AllowOrDeny.DENY)
+                    }
+                    applyImportedScript(request.uri)
+                    return null
                 }
                 // Links for other apps (tel:, mailto:, intent:, an app's own scheme): never loaded here.
                 if (isExternalScheme(request.uri)) return externalSchemeRequest(request)
@@ -682,6 +688,20 @@ private class GeckoBrowserSession(
                 // Decide tracking protection for the site BEFORE its page loads (see TrackingExceptions).
                 applyTrackingProtection(!trackingExceptions.isExcepted(request.uri, isPrivate))
                 applySitePolicy(request.uri)
+                return null
+            }
+
+            override fun onSubframeLoadRequest(
+                session: GeckoSession,
+                request: GeckoSession.NavigationDelegate.LoadRequest,
+            ): GeckoResult<AllowOrDeny>? {
+                // Every file: subframe is denied. GeckoView has no callback for img, script or stylesheet loads
+                // (bug 1684947: those can read the app data dir). Imported HTML carries a CSP that blocks them;
+                // see IMPORT_CONTENT_SECURITY_POLICY.
+                if (!fileSubframeAllowed(request.uri)) {
+                    debugLog.log("GeckoSession", "refused file subframe")
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
+                }
                 return null
             }
 
@@ -1903,14 +1923,17 @@ private class GeckoBrowserSession(
      * GeckoView's pdf.js (on by default since bug 1810106; `pdfjs.disabled` is left untouched) handles a response
      * whose content type is `application/pdf`. A `file:` URL has no Content-Type header, so Gecko sniffs the
      * extension: `.pdf` opens the built-in viewer, `.html` and `.xhtml` open as an ordinary local page. This is a
-     * normal [GeckoSession.loadUri] of that file, the same class of load Firefox uses for a local file. It is not
-     * `resource://pdf.js/...` (the viewer page is privileged) and not a local HTTP server (that would give the
-     * document a network origin). No preference is flipped to allow `file:` more broadly. Embedder loads of this
-     * process's cache are readable; pages are not given any extra principal.
+     * normal [GeckoSession.loadUri] of that file. It is not `resource://pdf.js/...` (the viewer page is privileged)
+     * and not a local HTTP server (that would give the document a network origin). No preference is flipped to
+     * allow `file:` more broadly.
      *
-     * Each import lives in its own child directory. Gecko treats `file:` URLs as unique origins and will not let a
-     * local page read files outside its own directory. [importFileAllowed] also denies a top-level navigation that
-     * leaves `imports/<id>/<name>`. Private sessions never load these: a shared document opens in a normal tab.
+     * That is not enough to keep a local page inside its own file. GeckoView does not block `file:` subresources
+     * into the app data directory (bug 1684947). `NavigationDelegate` only offers [onLoadRequest] and
+     * [onSubframeLoadRequest]; there is no hook for `<img>`, `<script>` or `<link>`. HTML and XHTML were rewritten
+     * with a CSP that denies those (`default-src 'none'`, no `file:` source) and JavaScript is turned off here,
+     * before [loadUri], because [applySitePolicy] does nothing for a non-web URL. PDF is not rewritten and keeps
+     * JavaScript so pdf.js can run. [onSubframeLoadRequest] denies every `file:` subframe. Private sessions never
+     * load these: a shared document opens in a normal tab.
      */
     override fun loadImportedFile(url: String) {
         if (closed || isPrivate) return
@@ -1918,8 +1941,16 @@ private class GeckoBrowserSession(
             debugLog.log("GeckoSession", "refused import load")
             return
         }
+        applyImportedScript(url)
         session.loadUri(url)
         debugLog.log("GeckoSession", "import load requested")
+    }
+
+    /** Script for an imported document. HTML and XHTML off, PDF on. No-op when [url] is not an import. */
+    private fun applyImportedScript(url: String) {
+        val js = importedPageJavaScript(url) ?: return
+        if (session.settings.allowJavascript != js) session.settings.allowJavascript = js
+        _state.update { it.copy(javaScriptOn = js) }
     }
 
     override fun setDesktopMode(enabled: Boolean) {

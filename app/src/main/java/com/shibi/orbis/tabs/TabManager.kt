@@ -111,6 +111,11 @@ class TabManager(
     private val visits: VisitSink = VisitSink.None,
     /** Called once when the last private tab has closed, so the engine can drop what the private set stored. */
     private val onPrivateBrowsingEnded: () -> Unit = {},
+    /**
+     * Deletes one imported document's directory once no open tab can show it again. Called when the tab that
+     * opened it closes, and when a navigation leaves it with no back/forward history that could return to it.
+     */
+    private val releaseImport: (String) -> Unit = {},
 ) : SessionHost {
     private val list = ArrayList<Tab>()
     private var selectedId: Long
@@ -127,6 +132,19 @@ class TabManager(
 
     private val observers = HashMap<Long, Job>()
     private var persistJob: Job? = null
+
+    /** Import URLs a tab has shown. Removed when the tab closes or history can no longer reach them. */
+    private val importsShown = HashMap<Long, MutableSet<String>>()
+
+    /** Last history flags seen for a tab, so a url change is not treated as "cannot go back" before Gecko says so. */
+    private val lastCanGoBack = HashMap<Long, Boolean>()
+    private val lastCanGoForward = HashMap<Long, Boolean>()
+
+    /**
+     * True after the committed URL changes until [SessionState.canGoBack] or [SessionState.canGoForward] changes.
+     * The URL is written first and the old flags are still in that emission, so they must not decide a delete.
+     */
+    private val historyPending = HashMap<Long, Boolean>()
 
     /** Snapshots queue here and one writer coroutine saves them in order, so an old write can never land last. */
     private val writes = Channel<TabsSnapshot>(Channel.CONFLATED)
@@ -310,10 +328,52 @@ class TabManager(
         // fallback if the app is killed before then).
         val url = st.url.ifEmpty { tab.url }
         val title = st.title ?: tab.title
-        if (tab.url == url && tab.title == title && tab.desktopMode == st.desktopMode) return
-        list[i] = tab.copy(url = url, title = title, desktopMode = st.desktopMode)
-        publish()
-        if (!tab.isPrivate) schedulePersist()
+        val urlChanged = url != tab.url
+        val historyChanged = lastCanGoBack[id] != st.canGoBack || lastCanGoForward[id] != st.canGoForward
+        if (urlChanged) historyPending[id] = true
+        if (historyChanged) historyPending[id] = false
+        lastCanGoBack[id] = st.canGoBack
+        lastCanGoForward[id] = st.canGoForward
+        if (isImportLoadUrl(url)) rememberImport(id, url)
+        if (tab.url != url || tab.title != title || tab.desktopMode != st.desktopMode) {
+            list[i] = tab.copy(url = url, title = title, desktopMode = st.desktopMode)
+            publish()
+            if (!tab.isPrivate) schedulePersist()
+        }
+        pruneUnreachableImports(id, url, st)
+    }
+
+    private fun rememberImport(id: Long, url: String) {
+        if (!isImportLoadUrl(url)) return
+        importsShown.getOrPut(id) { LinkedHashSet() }.add(url)
+    }
+
+    /**
+     * Drops import files this tab can no longer reach: the current page is the only history entry, and that was
+     * reported by a history-flag change rather than by the stale flags that ride along with a new URL. Back to the
+     * file stays possible until then, so the bytes stay too.
+     */
+    private fun pruneUnreachableImports(id: Long, url: String, st: SessionState) {
+        if (st.canGoBack || st.canGoForward) return
+        if (historyPending[id] == true) return
+        val shown = importsShown[id] ?: return
+        val drop = shown.filter { it != url }
+        if (drop.isEmpty()) return
+        shown.removeAll(drop.toSet())
+        for (old in drop) releaseIfUnused(old)
+    }
+
+    private fun releaseTabImports(id: Long) {
+        val mine = importsShown.remove(id).orEmpty()
+        lastCanGoBack.remove(id)
+        lastCanGoForward.remove(id)
+        historyPending.remove(id)
+        for (url in mine) releaseIfUnused(url)
+    }
+
+    private fun releaseIfUnused(url: String) {
+        if (importsShown.values.any { url in it }) return
+        releaseImport(url)
     }
 
     private fun isBlank(tab: Tab): Boolean {
@@ -389,23 +449,25 @@ class TabManager(
     /**
      * Opens a document copied from another app in a new normal tab. Same blank-tab rule as [openExternal]: a loaded
      * tab is left alone, and a blank private tab is never reused. [url] must already be an import-cache file URL;
-     * the session refuses anything that is not actually inside that cache.
+     * the session refuses anything that is not actually inside that cache. False when nothing was opened (the
+     * caller deletes the copy).
      */
-    fun openImported(url: String) {
-        if (!isImportLoadUrl(url)) return
+    fun openImported(url: String): Boolean {
+        if (!isImportLoadUrl(url)) return false
         val current = list.firstOrNull { it.id == selectedId }
         if (current != null && !current.isPrivate && isBlank(current)) {
             val session = ensureSession(current.id)?.session
             if (session != null) {
                 session.setActive(foreground)
                 session.loadImportedFile(url)
+                rememberImport(current.id, url)
                 changed()
-                return
+                return true
             }
         }
         if (list.size >= maxTabs) {
             notifyLimit()
-            return
+            return false
         }
         val id = nextId++
         list.firstOrNull { it.id == selectedId }?.session?.setActive(false)
@@ -414,7 +476,9 @@ class TabManager(
         val session = ensureSession(id)?.session
         session?.setActive(foreground)
         session?.loadImportedFile(url)
+        rememberImport(id, url)
         changed()
+        return true
     }
 
     /**
@@ -447,13 +511,16 @@ class TabManager(
         return id
     }
 
-    /** Ends [tab]'s session and drops what the UI still holds for it (a pending download, its link menu). */
+    /** Ends [tab]'s session and drops what the UI still holds for it (a pending download, its link menu, its file). */
     private fun dispose(tab: Tab) {
         observers.remove(tab.id)?.cancel()
         tab.session?.let {
             it.host = null
             it.close()
         }
+        // The session is closed, so its back/forward list is gone. The file goes with it unless another tab still
+        // has it. A recently-closed entry is only stored for web URLs, so reopening cannot need this file.
+        releaseTabImports(tab.id)
         _pendingDownload.value?.takeIf { it.sourceTabId == tab.id }?.let {
             it.download.discard()
             _pendingDownload.value = null

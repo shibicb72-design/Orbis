@@ -17,10 +17,12 @@ import androidx.lifecycle.lifecycleScope
 import com.shibi.orbis.downloads.DownloadNotifications
 import com.shibi.orbis.engine.ImportResult
 import com.shibi.orbis.engine.externalUrlFrom
-import com.shibi.orbis.engine.importedMime
 import com.shibi.orbis.engine.importSharedDocument
+import com.shibi.orbis.engine.importedMime
+import com.shibi.orbis.engine.mimeForSharedDocument
+import com.shibi.orbis.engine.schemeOf
 import com.shibi.orbis.engine.sharedDocumentRequest
-import java.io.File
+import com.shibi.orbis.engine.streamUriFrom
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -149,7 +151,7 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Web links are http(s) ACTION_VIEW only; their extras are never read. A PDF or HTML document is ACTION_VIEW
-     * (content: or file:) or ACTION_SEND (EXTRA_STREAM) with a matching MIME type. The bytes are copied while the
+     * (`content:`) or ACTION_SEND (EXTRA_STREAM) with a matching MIME type. The bytes are copied while the
      * temporary read grant is still held; the page is not loaded here. The intent is replaced afterwards so a later
      * recreate cannot see it again.
      */
@@ -164,31 +166,57 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Copies a shared PDF or HTML file, then asks the browser screen to open the private copy. The URI is captured
-     * before [setIntent] clears the activity intent; the grant belongs to this process until we finish.
+     * Copies a shared PDF or HTML file, then queues the private copy for a new tab. The URI is captured before
+     * [setIntent] clears the activity intent; the grant belongs to this process until the copy finishes. A second
+     * share that arrives while the first is still queued is kept, not dropped.
      */
     private fun takeSharedDocument(incoming: Intent) {
-        val stream = if (incoming.action == Intent.ACTION_SEND) sendStreamUri(incoming)?.toString() else null
-        val request = sharedDocumentRequest(incoming.action, incoming.dataString, incoming.type, stream)
-        if (request == null) {
-            // The share sheet can offer us a type we claim with no stream (a link shared as text/html). Say so.
-            if (incoming.action == Intent.ACTION_SEND && importedMime(incoming.type) != null) {
+        val stream = if (incoming.action == Intent.ACTION_SEND) streamUriFrom(incoming)?.toString() else null
+        val explicit = incoming.type?.takeIf { it.isNotBlank() }
+        val request = sharedDocumentRequest(incoming.action, incoming.dataString, explicit, stream)
+        if (request != null) {
+            openCopiedDocument(request.uri, request.mime)
+            return
+        }
+        // The share sheet can offer us a type we claim with no stream (a link shared as text/html). Say so.
+        if (explicit != null) {
+            if (incoming.action == Intent.ACTION_SEND && importedMime(explicit) != null) {
                 Toast.makeText(applicationContext, R.string.import_open_failed, Toast.LENGTH_LONG).show()
             }
             return
         }
-        val uri = Uri.parse(request.uri)
-        val roots = privateRoots()
+        // A VIEW (or SEND) with no type still names a content: URI. The provider's type is the one that counts.
+        val raw = when (incoming.action) {
+            Intent.ACTION_VIEW -> incoming.dataString
+            Intent.ACTION_SEND -> stream ?: incoming.dataString
+            else -> null
+        } ?: return
+        if (schemeOf(raw) != "content") return
+        val resolver = contentResolver
+        app.appScope.launch {
+            val queried = withContext(Dispatchers.IO) { runCatching { resolver.getType(Uri.parse(raw)) }.getOrNull() }
+            val mime = mimeForSharedDocument(null, queried) ?: return@launch
+            val resolved = sharedDocumentRequest(incoming.action, incoming.dataString, mime, stream) ?: return@launch
+            openCopiedDocument(resolved.uri, resolved.mime)
+        }
+    }
+
+    private fun openCopiedDocument(uriString: String, mime: String) {
+        val uri = Uri.parse(uriString)
+        val pkg = packageName
+        val pm = packageManager
         // The activity that received the grant. The copy runs on the process scope so a rotation does not cancel it.
         val resolver = contentResolver
         app.appScope.launch {
             val result = withContext(Dispatchers.IO) {
-                importSharedDocument(app.container.imports, resolver, uri, request.mime, roots)
+                importSharedDocument(app.container.imports, resolver, uri, mime, pkg) { authority ->
+                    pm.resolveContentProvider(authority, 0)?.packageName
+                }
             }
             when (result) {
                 is ImportResult.Ready -> {
                     app.container.debugLog.log("Import", "copied")
-                    app.container.pendingImportedFile.value = result.url
+                    app.container.pendingImports.add(result.url)
                 }
                 ImportResult.TooLarge -> {
                     app.container.debugLog.log("Import", "too large")
@@ -200,27 +228,5 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-    }
-
-    /** Directories a crafted file: intent must not be able to read back. */
-    private fun privateRoots(): List<File> {
-        val roots = ArrayList<File>(2)
-        applicationInfo.dataDir?.let { roots += File(it) }
-        getExternalFilesDir(null)?.parentFile?.let { roots += it }
-        return roots
-    }
-
-    private fun sendStreamUri(intent: Intent): Uri? {
-        val extra =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                intent.getParcelableExtra(Intent.EXTRA_STREAM)
-            }
-        if (extra != null) return extra
-        val clip = intent.clipData ?: return null
-        if (clip.itemCount < 1) return null
-        return clip.getItemAt(0).uri
     }
 }

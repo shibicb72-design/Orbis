@@ -62,7 +62,7 @@ fun OrbisRoot(container: AppContainer) {
     val clearState by container.clear.state.collectAsStateWithLifecycle()
     val clearRunning = clearState is ClearState.Running
     val pendingExternalUrl by container.pendingExternalUrl.collectAsStateWithLifecycle()
-    val pendingImported by container.pendingImportedFile.collectAsStateWithLifecycle()
+    val pendingImported by container.pendingImports.head.collectAsStateWithLifecycle()
     LaunchedEffect(pendingExternalUrl, pendingImported, clearRunning) {
         if ((pendingExternalUrl != null || pendingImported != null) && !clearRunning) {
             nav.popBackStack(Routes.Browser, inclusive = false)

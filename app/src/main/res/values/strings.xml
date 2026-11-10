@@ -253,6 +253,7 @@
     <string name="tabs_selected_label">Current tab</string>
     <string name="tabs_blank_title">New tab</string>
     <string name="tabs_limit">Too many tabs are open. Close one to open another.</string>
+    <string name="address_file_label">File</string>
     <string name="import_open_failed">Couldn\'t open that file.</string>
     <string name="import_too_large">That file is too large to open.</string>
 

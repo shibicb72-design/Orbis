@@ -12,7 +12,9 @@ import androidx.compose.material.icons.filled.Tune
 import com.shibi.orbis.engine.normalizeAddressInput
 import androidx.compose.material.icons.filled.VerticalSplit
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.rememberCoroutineScope
 import com.shibi.orbis.engine.PageCapture
 import androidx.compose.ui.graphics.asImageBitmap
@@ -246,7 +248,7 @@ fun BrowserScreen(
     val context = LocalContext.current
     val ready by tabs.ready.collectAsStateWithLifecycle()
     val pendingUrl by container.pendingExternalUrl.collectAsStateWithLifecycle()
-    val pendingImport by container.pendingImportedFile.collectAsStateWithLifecycle()
+    val pendingImport by container.pendingImports.head.collectAsStateWithLifecycle()
     val clearState by container.clear.state.collectAsStateWithLifecycle()
 
     // Sessions are created here and nowhere earlier: BrowserScreen is only composed after the onboarding decision.
@@ -259,12 +261,11 @@ fun BrowserScreen(
         if (ready && url != null && container.pendingExternalUrl.compareAndSet(url, null)) tabs.openExternal(url)
     }
     // A PDF or HTML file copied from another app. Same wait as a link, and not while Clear browsing data is running.
+    // consume publishes the next queued file, so two shares that finish together both open.
     LaunchedEffect(ready, pendingImport, clearState) {
         val url = pendingImport
-        if (ready && clearState !is ClearState.Running && url != null &&
-            container.pendingImportedFile.compareAndSet(url, null)
-        ) {
-            tabs.openImported(url)
+        if (ready && clearState !is ClearState.Running && url != null && container.pendingImports.consume(url)) {
+            if (!tabs.openImported(url)) withContext(Dispatchers.IO) { container.imports.deleteImport(url) }
         }
     }
     LaunchedEffect(tabs) {
