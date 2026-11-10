@@ -1,5 +1,6 @@
 package com.shibi.orbis.ui.browser
 
+import com.shibi.orbis.engine.importDisplayName
 import java.util.Locale
 
 /**
@@ -16,6 +17,9 @@ internal data class RestingAddress(val text: String, val isHost: Boolean, val in
  * URL with a host is returned unchanged. Edit mode and screen readers keep the full address ([addressBarRestingText]).
  */
 internal fun addressRestingDisplay(resting: String): RestingAddress {
+    // A shared document rests as its file name. The field still carries the full file: URL for editing and
+    // screen readers; the cache path is not what the address line should show.
+    importDisplayName(resting)?.let { return RestingAddress(it, isHost = false, insecurePrefix = null) }
     val lower = resting.lowercase(Locale.ROOT)
     val http = lower.startsWith("http://")
     if (!http && !lower.startsWith("https://")) return RestingAddress(resting, isHost = false, insecurePrefix = null)

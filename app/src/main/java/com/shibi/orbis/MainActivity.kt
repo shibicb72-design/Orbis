@@ -1,6 +1,8 @@
 package com.shibi.orbis
 
 import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.app.PictureInPictureParams
@@ -13,7 +15,15 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
 import com.shibi.orbis.downloads.DownloadNotifications
+import com.shibi.orbis.engine.ImportResult
 import com.shibi.orbis.engine.externalUrlFrom
+import com.shibi.orbis.engine.importedMime
+import com.shibi.orbis.engine.importSharedDocument
+import com.shibi.orbis.engine.sharedDocumentRequest
+import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.shibi.orbis.privacy.PrivacyWindowController
 import com.shibi.orbis.privacy.PrivacyWindowOps
 import com.shibi.orbis.ui.OrbisRoot
@@ -24,7 +34,6 @@ import com.shibi.orbis.ui.theme.OrbisTheme
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val app get() = application as OrbisApp
@@ -139,16 +148,79 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Only ACTION_VIEW with an http(s) data string is accepted; extras are never read. The intent is replaced afterwards
-     * so a later recreate cannot see it again. The URL is not loaded here: it waits in the container until the browser
-     * screen exists.
+     * Web links are http(s) ACTION_VIEW only; their extras are never read. A PDF or HTML document is ACTION_VIEW
+     * (content: or file:) or ACTION_SEND (EXTRA_STREAM) with a matching MIME type. The bytes are copied while the
+     * temporary read grant is still held; the page is not loaded here. The intent is replaced afterwards so a later
+     * recreate cannot see it again.
      */
     private fun takeViewIntent(incoming: Intent) {
         externalUrlFrom(incoming.action, incoming.dataString)?.let { app.container.pendingExternalUrl.value = it }
+        takeSharedDocument(incoming)
         // A download notification tap: only a flag, no extras or data are read, so it exposes nothing to a caller.
         if (incoming.action == DownloadNotifications.ACTION_SHOW_DOWNLOADS) app.container.pendingShowDownloads.value = true
         // The search widget: also only a flag.
         if (incoming.action == com.shibi.orbis.widget.ACTION_WIDGET_SEARCH) app.container.pendingWidgetSearch.value = true
         setIntent(Intent())
+    }
+
+    /**
+     * Copies a shared PDF or HTML file, then asks the browser screen to open the private copy. The URI is captured
+     * before [setIntent] clears the activity intent; the grant belongs to this process until we finish.
+     */
+    private fun takeSharedDocument(incoming: Intent) {
+        val stream = if (incoming.action == Intent.ACTION_SEND) sendStreamUri(incoming)?.toString() else null
+        val request = sharedDocumentRequest(incoming.action, incoming.dataString, incoming.type, stream)
+        if (request == null) {
+            // The share sheet can offer us a type we claim with no stream (a link shared as text/html). Say so.
+            if (incoming.action == Intent.ACTION_SEND && importedMime(incoming.type) != null) {
+                Toast.makeText(applicationContext, R.string.import_open_failed, Toast.LENGTH_LONG).show()
+            }
+            return
+        }
+        val uri = Uri.parse(request.uri)
+        val roots = privateRoots()
+        // The activity that received the grant. The copy runs on the process scope so a rotation does not cancel it.
+        val resolver = contentResolver
+        app.appScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                importSharedDocument(app.container.imports, resolver, uri, request.mime, roots)
+            }
+            when (result) {
+                is ImportResult.Ready -> {
+                    app.container.debugLog.log("Import", "copied")
+                    app.container.pendingImportedFile.value = result.url
+                }
+                ImportResult.TooLarge -> {
+                    app.container.debugLog.log("Import", "too large")
+                    Toast.makeText(applicationContext, R.string.import_too_large, Toast.LENGTH_LONG).show()
+                }
+                ImportResult.Failed -> {
+                    app.container.debugLog.log("Import", "failed")
+                    Toast.makeText(applicationContext, R.string.import_open_failed, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    /** Directories a crafted file: intent must not be able to read back. */
+    private fun privateRoots(): List<File> {
+        val roots = ArrayList<File>(2)
+        applicationInfo.dataDir?.let { roots += File(it) }
+        getExternalFilesDir(null)?.parentFile?.let { roots += it }
+        return roots
+    }
+
+    private fun sendStreamUri(intent: Intent): Uri? {
+        val extra =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(Intent.EXTRA_STREAM)
+            }
+        if (extra != null) return extra
+        val clip = intent.clipData ?: return null
+        if (clip.itemCount < 1) return null
+        return clip.getItemAt(0).uri
     }
 }

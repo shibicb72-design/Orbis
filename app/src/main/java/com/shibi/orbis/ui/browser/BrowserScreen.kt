@@ -32,6 +32,7 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.shibi.orbis.clear.ClearState
 import com.shibi.orbis.home.topSites
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material.icons.outlined.StarBorder
@@ -245,6 +246,8 @@ fun BrowserScreen(
     val context = LocalContext.current
     val ready by tabs.ready.collectAsStateWithLifecycle()
     val pendingUrl by container.pendingExternalUrl.collectAsStateWithLifecycle()
+    val pendingImport by container.pendingImportedFile.collectAsStateWithLifecycle()
+    val clearState by container.clear.state.collectAsStateWithLifecycle()
 
     // Sessions are created here and nowhere earlier: BrowserScreen is only composed after the onboarding decision.
     LaunchedEffect(ready) {
@@ -254,6 +257,15 @@ fun BrowserScreen(
     LaunchedEffect(ready, pendingUrl) {
         val url = pendingUrl
         if (ready && url != null && container.pendingExternalUrl.compareAndSet(url, null)) tabs.openExternal(url)
+    }
+    // A PDF or HTML file copied from another app. Same wait as a link, and not while Clear browsing data is running.
+    LaunchedEffect(ready, pendingImport, clearState) {
+        val url = pendingImport
+        if (ready && clearState !is ClearState.Running && url != null &&
+            container.pendingImportedFile.compareAndSet(url, null)
+        ) {
+            tabs.openImported(url)
+        }
     }
     LaunchedEffect(tabs) {
         tabs.events.collect { event ->

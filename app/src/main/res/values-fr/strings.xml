@@ -227,6 +227,8 @@
     <string name="tabs_selected_label">Onglet actuel</string>
     <string name="tabs_blank_title">Nouvel onglet</string>
     <string name="tabs_limit">Trop d\'onglets sont ouverts. Fermez-en un pour en ouvrir un autre.</string>
+    <string name="import_open_failed">Impossible d\'ouvrir ce fichier.</string>
+    <string name="import_too_large">Ce fichier est trop volumineux pour être ouvert.</string>
 
     <string name="find_hint">Rechercher dans la page</string>
     <string name="find_count">%1$d sur %2$d</string>

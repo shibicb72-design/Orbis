@@ -45,10 +45,12 @@ import com.shibi.orbis.tabs.VisitSink
 import com.shibi.orbis.ubo.SharedPreferencesUboPrefs
 import com.shibi.orbis.ubo.UboOnboardingController
 import java.io.File
+import com.shibi.orbis.engine.ImportedFileCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,6 +58,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 class OrbisApp : Application() {
     lateinit var container: AppContainer
         private set
+
+    /**
+     * Main-thread scope for the whole process. Shared-document copies use it so a rotation does not cancel them.
+     * Child processes never launch work on it (they return before [container] exists).
+     */
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     /** Keeps the process alive while downloads run. Null in Gecko child processes, like [container]. */
     var downloadForeground: DownloadForegroundController? = null
@@ -66,8 +74,9 @@ class OrbisApp : Application() {
         // Gecko child processes (":tab", ":gpu", ...) run this too; they must not create a runtime or container.
         if (Application.getProcessName() != packageName) return
         val debugLog = DebugLog(filesDir)
-        // App-lifetime scope: installs must survive screens leaving composition.
-        val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val imports = ImportedFileCache(cacheDir)
+        // Files copied in from other apps: drop the ones older than a day. Young ones stay so an open tab can reload.
+        appScope.launch(Dispatchers.IO) { imports.deleteOlderThan() }
         val sitePermissions =
             SitePermissionDecisions(
                 store = FileSitePermissionStore(File(filesDir, "site_permissions.json")),
@@ -237,8 +246,15 @@ class OrbisApp : Application() {
 
                 override fun hasPrivateTabs() = tabs.hasPrivateTabs
 
-                override suspend fun clearEngine(cookiesAndSiteData: Boolean, cache: Boolean) =
-                    engine.clearProfileData(cookiesAndSiteData, cache)
+                override suspend fun clearEngine(cookiesAndSiteData: Boolean, cache: Boolean): Boolean {
+                    // Documents opened from other apps live in the cache. Private tabs block this whole clear
+                    // before we get here, so this never runs while a private tab is open.
+                    if (cache) {
+                        val removed = withContext(Dispatchers.IO) { runCatching { imports.clearAll() }.isSuccess }
+                        if (!removed) debugLog.log("Clear", "imported files not cleared")
+                    }
+                    return engine.clearProfileData(cookiesAndSiteData, cache)
+                }
             }
         val clear =
             ClearController(
@@ -252,6 +268,7 @@ class OrbisApp : Application() {
                 ubo = ubo,
                 tabs = tabs,
                 downloads = downloads,
+                imports = imports,
                 sitePermissions = sitePermissions,
                 bookmarks = bookmarks,
                 history = history,
@@ -323,6 +340,8 @@ class AppContainer(
     /** Owns every tab and session; outlives screens, so Settings never destroys a page. */
     val tabs: TabManager,
     val downloads: DownloadManager,
+    /** PDF and HTML files opened from other apps. Cleared with the cache, and trimmed at startup. */
+    val imports: ImportedFileCache,
     /** The user's camera, microphone and location answers; Settings lists and removes them. */
     val sitePermissions: SitePermissionDecisions,
     val bookmarks: BookmarkManager,
@@ -343,6 +362,12 @@ class AppContainer(
      * only exists after the onboarding decision, so an intent arriving earlier waits and causes no network load.
      */
     val pendingExternalUrl = MutableStateFlow<String?>(null)
+
+    /**
+     * A `file:` URL of a document copied from another app. Set by MainActivity once the copy has finished, consumed
+     * by BrowserScreen. Waits out onboarding the same way [pendingExternalUrl] does, and always opens a normal tab.
+     */
+    val pendingImportedFile = MutableStateFlow<String?>(null)
 
     /** A download notification was tapped. Consumed by OrbisRoot, which navigates once, and only after onboarding. */
     val pendingShowDownloads = MutableStateFlow(false)

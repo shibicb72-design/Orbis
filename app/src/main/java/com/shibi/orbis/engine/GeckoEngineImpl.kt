@@ -523,6 +523,9 @@ private class GeckoBrowserSession(
     /** Work tied to this session's prompts (file copies). Cancelled in [close]. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
+    /** `<cacheDir>/imports`. The only `file:` tree this session will load. */
+    private val importRoot = File(appContext.cacheDir, IMPORT_CACHE_DIR)
+
     private val queue = PromptQueue()
     override val prompts: StateFlow<SitePrompt?> = queue.head
 
@@ -657,6 +660,12 @@ private class GeckoBrowserSession(
                     return GeckoResult.fromValue(if (allow) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
                 }
                 if (request.hasUserGesture && !request.isRedirect) lastGestureNavigationAt = SystemClock.elapsedRealtime()
+                // file: is only the documents we copied into the import cache. A local HTML page (and any web
+                // page) cannot navigate to another cache file or to the app's private storage.
+                if (schemeOf(request.uri) == "file" && !importFileAllowed(importRoot, request.uri)) {
+                    debugLog.log("GeckoSession", "refused file uri")
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
+                }
                 // Links for other apps (tel:, mailto:, intent:, an app's own scheme): never loaded here.
                 if (isExternalScheme(request.uri)) return externalSchemeRequest(request)
                 // A web link an installed app opens: ask first (link taps only, not typed addresses or same-site links).
@@ -1886,6 +1895,31 @@ private class GeckoBrowserSession(
                 .flags(GeckoSession.LOAD_FLAGS_EXTERNAL),
         )
         debugLog.log("GeckoSession", "external load requested")
+    }
+
+    /**
+     * Loads a document copied into the import cache.
+     *
+     * GeckoView's pdf.js (on by default since bug 1810106; `pdfjs.disabled` is left untouched) handles a response
+     * whose content type is `application/pdf`. A `file:` URL has no Content-Type header, so Gecko sniffs the
+     * extension: `.pdf` opens the built-in viewer, `.html` and `.xhtml` open as an ordinary local page. This is a
+     * normal [GeckoSession.loadUri] of that file, the same class of load Firefox uses for a local file. It is not
+     * `resource://pdf.js/...` (the viewer page is privileged) and not a local HTTP server (that would give the
+     * document a network origin). No preference is flipped to allow `file:` more broadly. Embedder loads of this
+     * process's cache are readable; pages are not given any extra principal.
+     *
+     * Each import lives in its own child directory. Gecko treats `file:` URLs as unique origins and will not let a
+     * local page read files outside its own directory. [importFileAllowed] also denies a top-level navigation that
+     * leaves `imports/<id>/<name>`. Private sessions never load these: a shared document opens in a normal tab.
+     */
+    override fun loadImportedFile(url: String) {
+        if (closed || isPrivate) return
+        if (!importFileAllowed(importRoot, url)) {
+            debugLog.log("GeckoSession", "refused import load")
+            return
+        }
+        session.loadUri(url)
+        debugLog.log("GeckoSession", "import load requested")
     }
 
     override fun setDesktopMode(enabled: Boolean) {

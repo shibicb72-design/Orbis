@@ -120,6 +120,31 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- PDF and HTML opened from another app (WhatsApp shares these as content: or file: plus a MIME type).
+                 Scheme and MIME live on the same data element: split across elements they do not combine, and a
+                 MIME-only filter would also claim every content: URI of that type with no scheme check.
+                 text/plain is intentionally absent. BROWSABLE is included because some senders add it; DEFAULT
+                 is what the chooser requires. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" android:mimeType="application/pdf" />
+                <data android:scheme="content" android:mimeType="text/html" />
+                <data android:scheme="content" android:mimeType="application/xhtml+xml" />
+                <data android:scheme="file" android:mimeType="application/pdf" />
+                <data android:scheme="file" android:mimeType="text/html" />
+                <data android:scheme="file" android:mimeType="application/xhtml+xml" />
+            </intent-filter>
+            <!-- Share sheet. SEND carries the MIME on the intent and the URI in EXTRA_STREAM, so this filter
+                 names types only (a scheme would require a data URI the share intent does not have). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="text/html" />
+                <data android:mimeType="application/xhtml+xml" />
+            </intent-filter>
         </activity>
 
         <!-- Every web link from another app comes in here and is routed: Custom Tab or the browser. -->

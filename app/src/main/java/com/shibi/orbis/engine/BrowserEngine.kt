@@ -247,6 +247,13 @@ interface BrowserSession {
     fun showStartPage() {}
     /** A URL handed to us by another app (VIEW intent). http(s) only. */
     fun loadExternalUrl(url: String)
+
+    /**
+     * A PDF or HTML file copied into the import cache. The engine loads it only when the URL is one of those
+     * files; anything else is ignored. Private sessions ignore it. A name ending in `.pdf` is what makes
+     * GeckoView open its built-in pdf.js viewer (see the engine implementation).
+     */
+    fun loadImportedFile(url: String) {}
     /** Switches user agent and viewport between mobile and desktop, then reloads the page. */
     fun setDesktopMode(enabled: Boolean)
     /** Returns false (and does nothing) when there is no history to go back to. */

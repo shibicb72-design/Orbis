@@ -9,6 +9,7 @@ import com.shibi.orbis.engine.SessionHost
 import com.shibi.orbis.engine.SessionInit
 import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.engine.isExternalScheme
+import com.shibi.orbis.engine.isImportLoadUrl
 import com.shibi.orbis.engine.isWebUrl
 import com.shibi.orbis.engine.pageContextMenu
 import kotlin.coroutines.cancellation.CancellationException
@@ -96,8 +97,8 @@ internal fun LinkMenuRequest.pageMenu(): PageContextMenu? =
  * Owns the tabs and their sessions. Main thread only (it is the [SessionHost] of every session it creates).
  *
  * It never opens or loads anything by itself: a session is created only by [openSelected], [select], [newTab],
- * [openExternal] or a popup, all of which the UI calls once the browser screen exists. That keeps the V1 guarantee of
- * no network before the onboarding decision, even though the manager is built at app start.
+ * [openExternal], [openImported] or a popup, all of which the UI calls once the browser screen exists. That keeps the
+ * V1 guarantee of no network before the onboarding decision, even though the manager is built at app start.
  */
 class TabManager(
     private val factory: (SessionInit) -> BrowserSession,
@@ -383,6 +384,37 @@ class TabManager(
             }
         }
         createTab(url, openerId = null, external = true)
+    }
+
+    /**
+     * Opens a document copied from another app in a new normal tab. Same blank-tab rule as [openExternal]: a loaded
+     * tab is left alone, and a blank private tab is never reused. [url] must already be an import-cache file URL;
+     * the session refuses anything that is not actually inside that cache.
+     */
+    fun openImported(url: String) {
+        if (!isImportLoadUrl(url)) return
+        val current = list.firstOrNull { it.id == selectedId }
+        if (current != null && !current.isPrivate && isBlank(current)) {
+            val session = ensureSession(current.id)?.session
+            if (session != null) {
+                session.setActive(foreground)
+                session.loadImportedFile(url)
+                changed()
+                return
+            }
+        }
+        if (list.size >= maxTabs) {
+            notifyLimit()
+            return
+        }
+        val id = nextId++
+        list.firstOrNull { it.id == selectedId }?.session?.setActive(false)
+        list += Tab(id, null, "", "", false, null, null, isPrivate = false)
+        selectedId = id
+        val session = ensureSession(id)?.session
+        session?.setActive(foreground)
+        session?.loadImportedFile(url)
+        changed()
     }
 
     /**

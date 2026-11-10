@@ -227,6 +227,8 @@
     <string name="tabs_selected_label">Pestaña actual</string>
     <string name="tabs_blank_title">Nueva pestaña</string>
     <string name="tabs_limit">Hay demasiadas pestañas abiertas. Cierra una para abrir otra.</string>
+    <string name="import_open_failed">No se pudo abrir ese archivo.</string>
+    <string name="import_too_large">Ese archivo es demasiado grande para abrirlo.</string>
 
     <string name="find_hint">Buscar en la página</string>
     <string name="find_count">%1$d de %2$d</string>

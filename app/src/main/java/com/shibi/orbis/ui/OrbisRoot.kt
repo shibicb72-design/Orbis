@@ -62,8 +62,11 @@ fun OrbisRoot(container: AppContainer) {
     val clearState by container.clear.state.collectAsStateWithLifecycle()
     val clearRunning = clearState is ClearState.Running
     val pendingExternalUrl by container.pendingExternalUrl.collectAsStateWithLifecycle()
-    LaunchedEffect(pendingExternalUrl, clearRunning) {
-        if (pendingExternalUrl != null && !clearRunning) nav.popBackStack(Routes.Browser, inclusive = false)
+    val pendingImported by container.pendingImportedFile.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingExternalUrl, pendingImported, clearRunning) {
+        if ((pendingExternalUrl != null || pendingImported != null) && !clearRunning) {
+            nav.popBackStack(Routes.Browser, inclusive = false)
+        }
     }
     // A download notification was tapped: open the Downloads screen once. Reached only after onboarding, so an
     // earlier tap simply waits.
