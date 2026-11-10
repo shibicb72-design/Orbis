@@ -20,19 +20,33 @@ internal fun lanExchange(
     headers: Map<String, String> = emptyMap(),
     body: String = "",
     timeoutMs: Int = 4_000,
+    deadlineMs: Long = System.currentTimeMillis() + timeoutMs,
     bind: ((Socket) -> Unit)? = null,
 ): LanExchange? {
-    val first = lanExchangeOnce(method, url, headers, body, timeoutMs, bind) ?: return null
+    val first = lanExchangeOnce(method, url, headers, body, deadlineMs, bind) ?: return null
     if (first.code !in 300..399) return first
-    val next = first.headers["location"] ?: return first
+    val location = first.headers["location"]
+    if (location.isNullOrBlank()) return first
+    // One hop only, and only when it stays on a local address. The same deadline covers the hop.
+    val next = redirectTarget(url, location) ?: return null
+    return lanExchangeOnce(method, next, headers, body, deadlineMs, bind)
+}
+
+/**
+ * The single local http URL a redirect may follow, or null when [location] is missing, loops, or leaves the LAN
+ * (including loopback).
+ */
+internal fun redirectTarget(currentUrl: String, location: String?): String? {
+    if (location.isNullOrBlank()) return null
     val resolved =
         try {
-            URI(url).resolve(next).toASCIIString()
+            URI(currentUrl).resolve(location).toASCIIString()
         } catch (_: Exception) {
             return null
         }
-    if (resolved == url) return first
-    return lanExchangeOnce(method, resolved, headers, body, timeoutMs, bind)
+    if (resolved == currentUrl) return null
+    if (localTarget(resolved) == null) return null
+    return resolved
 }
 
 internal fun lanExchangeOnce(
@@ -40,7 +54,7 @@ internal fun lanExchangeOnce(
     url: String,
     headers: Map<String, String>,
     body: String,
-    timeoutMs: Int,
+    deadlineMs: Long,
     bind: ((Socket) -> Unit)?,
 ): LanExchange? {
     val target = localTarget(url) ?: return null
@@ -49,13 +63,20 @@ internal fun lanExchangeOnce(
     val socket = Socket()
     try {
         bind?.invoke(socket)
-        socket.soTimeout = timeoutMs
-        socket.connect(InetSocketAddress(target.address, target.port), timeoutMs)
+        val connectBudget = (deadlineMs - System.currentTimeMillis()).toInt()
+        if (connectBudget <= 0) return null
+        socket.connect(InetSocketAddress(target.address, target.port), connectBudget)
         val out = socket.getOutputStream()
         out.write(request)
         if (payload.isNotEmpty()) out.write(payload)
         out.flush()
-        val raw = readLimited(socket.getInputStream(), 512 * 1024) ?: return null
+        val raw =
+            readLimited(socket.getInputStream(), 512 * 1024, deadlineMs) {
+                val left = (deadlineMs - System.currentTimeMillis()).toInt()
+                if (left <= 0) return@readLimited false
+                socket.soTimeout = left
+                true
+            } ?: return null
         return parseHttpResponse(raw)
     } catch (_: Exception) {
         return null
@@ -181,21 +202,29 @@ private fun decodeChunks(raw: ByteArray): ByteArray? {
     return null
 }
 
-private fun readLimited(input: java.io.InputStream, max: Int): ByteArray? {
+private fun readLimited(
+    input: java.io.InputStream,
+    max: Int,
+    deadlineMs: Long,
+    armTimeout: () -> Boolean,
+): ByteArray? {
     val out = ByteArrayOutputStream()
     val buf = ByteArray(4096)
     while (out.size() < max) {
+        if (System.currentTimeMillis() >= deadlineMs) return null
+        if (!armTimeout()) return null
         val n =
             try {
                 input.read(buf)
             } catch (_: Exception) {
-                break
+                return null
             }
         if (n < 0) break
         val room = max - out.size()
         out.write(buf, 0, n.coerceAtMost(room))
         if (n > room) break
     }
+    if (System.currentTimeMillis() >= deadlineMs) return null
     return out.toByteArray()
 }
 

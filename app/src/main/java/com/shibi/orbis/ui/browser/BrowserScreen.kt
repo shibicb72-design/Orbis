@@ -1273,6 +1273,7 @@ private fun BrowserContent(
             coordinator = container.cast,
             pageUrl = state.url,
             isPrivate = selectedTab.isPrivate,
+            tabId = selectedTab.id,
             session = session,
             onDismiss = { castOpen = false },
         )

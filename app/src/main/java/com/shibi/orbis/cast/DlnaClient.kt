@@ -1,15 +1,14 @@
 package com.shibi.orbis.cast
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import java.net.DatagramPacket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.MulticastSocket
 import java.net.SocketTimeoutException
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 internal data class DlnaPlayback(val positionSec: Double, val durationSec: Double, val playing: Boolean, val volume: Float)
 
@@ -20,17 +19,44 @@ internal data class DlnaPlayback(val positionSec: Double, val durationSec: Doubl
 internal class DlnaClient(context: Context) {
     private val appContext = context.applicationContext
 
-    fun discover(timeoutMs: Int = 2_500): List<DlnaRenderer> {
-        val replies = ssdpSearch(timeoutMs)
-        val seen = HashSet<String>()
-        val found = ArrayList<DlnaRenderer>()
-        for (reply in replies) {
-            if (!seen.add(reply.location)) continue
-            val xml = lanGet(reply.location) ?: continue
-            val renderer = parseDlnaDescription(xml, reply.location) ?: continue
-            found += renderer
+    fun discover(timeoutMs: Int = 5_000): List<DlnaRenderer> {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        val searchMs = (timeoutMs / 2).coerceIn(400, 2_500)
+        val targets = selectDiscoveryTargets(ssdpSearch(searchMs))
+        if (targets.isEmpty()) return emptyList()
+        val pool =
+            Executors.newFixedThreadPool(targets.size.coerceAtMost(8)) { runnable ->
+                Thread(runnable, "orbis-dlna").apply { isDaemon = true }
+            }
+        try {
+            val futures =
+                targets.map { reply ->
+                    pool.submit<DlnaRenderer?> {
+                        if (System.currentTimeMillis() >= deadline) return@submit null
+                        val xml = lanGet(reply.location, deadline) ?: return@submit null
+                        parseDlnaDescription(xml, reply.location)
+                    }
+                }
+            val found = ArrayList<DlnaRenderer>(targets.size)
+            for (future in futures) {
+                val left = deadline - System.currentTimeMillis()
+                if (left <= 0) {
+                    future.cancel(true)
+                    continue
+                }
+                val renderer =
+                    try {
+                        future.get(left, TimeUnit.MILLISECONDS)
+                    } catch (_: Exception) {
+                        future.cancel(true)
+                        null
+                    }
+                if (renderer != null) found += renderer
+            }
+            return found
+        } finally {
+            pool.shutdownNow()
         }
-        return found
     }
 
     fun play(renderer: DlnaRenderer, media: CastableMedia): Boolean {
@@ -74,8 +100,8 @@ internal class DlnaClient(context: Context) {
 
     private fun ok(exchange: LanExchange?): Boolean = exchange?.code in 200..299
 
-    private fun lanGet(url: String): String? {
-        val response = lanExchange("GET", url, bind = ::bindLan) ?: return null
+    private fun lanGet(url: String, deadlineMs: Long): String? {
+        val response = lanExchange("GET", url, deadlineMs = deadlineMs, bind = ::bindLan) ?: return null
         if (response.code !in 200..299) return null
         return response.body
     }
@@ -93,7 +119,7 @@ internal class DlnaClient(context: Context) {
             bind = ::bindLan,
         )
 
-    private fun ssdpSearch(timeoutMs: Int): List<SsdpResponse> {
+    private fun ssdpSearch(timeoutMs: Int): List<SsdpHit> {
         val lock = multicastLock()
         val socket = MulticastSocket(null)
         try {
@@ -109,7 +135,7 @@ internal class DlnaClient(context: Context) {
                 socket.send(DatagramPacket(bytes, bytes.size, InetSocketAddress(group, SSDP_PORT)))
             }
             val deadline = System.currentTimeMillis() + timeoutMs
-            val found = ArrayList<SsdpResponse>()
+            val found = ArrayList<SsdpHit>()
             val buf = ByteArray(8192)
             while (System.currentTimeMillis() < deadline) {
                 socket.soTimeout = (deadline - System.currentTimeMillis()).toInt().coerceAtLeast(50)
@@ -119,8 +145,9 @@ internal class DlnaClient(context: Context) {
                 } catch (_: SocketTimeoutException) {
                     break
                 }
+                val source = packet.address ?: continue
                 val text = String(packet.data, packet.offset, packet.length, Charsets.UTF_8)
-                parseSsdpResponse(text)?.let { found += it }
+                parseSsdpResponse(text)?.let { found += SsdpHit(it, source) }
             }
             return found
         } catch (_: Exception) {
@@ -145,21 +172,10 @@ internal class DlnaClient(context: Context) {
 
     /** Prefer Wi-Fi (then Ethernet) so a VPN does not swallow SSDP or the SOAP connection to the TV. */
     private fun bindLan(socket: java.net.Socket) {
-        val network = lanNetwork() ?: return
-        runCatching { network.bindSocket(socket) }
+        LanBind.bind(appContext, socket)
     }
 
     private fun bindLan(socket: MulticastSocket) {
-        val network = lanNetwork() ?: return
-        runCatching { network.bindSocket(socket) }
-    }
-
-    private fun lanNetwork(): Network? {
-        val cm = appContext.getSystemService(ConnectivityManager::class.java) ?: return null
-        fun find(transport: Int): Network? =
-            cm.allNetworks.firstOrNull { network ->
-                cm.getNetworkCapabilities(network)?.hasTransport(transport) == true
-            }
-        return find(NetworkCapabilities.TRANSPORT_WIFI) ?: find(NetworkCapabilities.TRANSPORT_ETHERNET)
+        LanBind.bind(appContext, socket)
     }
 }

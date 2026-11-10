@@ -77,6 +77,7 @@ internal fun CastSheet(
     coordinator: CastCoordinator,
     pageUrl: String,
     isPrivate: Boolean,
+    tabId: Long,
     session: BrowserSession?,
     onDismiss: () -> Unit,
 ) {
@@ -84,16 +85,17 @@ internal fun CastSheet(
     val devices by coordinator.devices.collectAsStateWithLifecycle()
     val playback by coordinator.playback.collectAsStateWithLifecycle()
     val notice by coordinator.notice.collectAsStateWithLifecycle()
+    val dlnaFormatNote by coordinator.dlnaFormatNote.collectAsStateWithLifecycle()
     val askNotifications = rememberNotificationPermissionRequest()
-    LaunchedEffect(session, pageUrl) {
+    LaunchedEffect(session, pageUrl, tabId) {
         if (coordinator.playback.value != null) {
-            coordinator.present(pageUrl, isPrivate, null)
+            coordinator.present(pageUrl, isPrivate, null, tabId)
         } else {
             val current = session
             if (current == null) {
-                coordinator.present(pageUrl, isPrivate, null)
+                coordinator.present(pageUrl, isPrivate, null, tabId)
             } else {
-                current.probeCastMedia { json -> coordinator.present(pageUrl, isPrivate, json) }
+                current.probeCastMedia { json -> coordinator.present(pageUrl, isPrivate, json, tabId) }
             }
         }
     }
@@ -122,6 +124,9 @@ internal fun CastSheet(
             val youtube = (phase as? CastPhase.Picker)?.youtube == true || playback?.youtube == true
             if (youtube) {
                 Text(stringResource(R.string.cast_youtube_note), style = MaterialTheme.typography.bodyMedium)
+            }
+            if (dlnaFormatNote) {
+                Text(stringResource(R.string.cast_dlna_adaptive), style = MaterialTheme.typography.bodyMedium)
             }
             notice?.let { item ->
                 Surface(
@@ -184,9 +189,9 @@ internal fun CastSheet(
                         onClick = {
                             val currentSession = session
                             if (currentSession == null) {
-                                coordinator.castThisPage(pageUrl, isPrivate, null)
+                                coordinator.castThisPage(pageUrl, isPrivate, null, tabId)
                             } else {
-                                currentSession.probeCastMedia { json -> coordinator.castThisPage(pageUrl, isPrivate, json) }
+                                currentSession.probeCastMedia { json -> coordinator.castThisPage(pageUrl, isPrivate, json, tabId) }
                             }
                         },
                     ) { Text(stringResource(R.string.cast_this_page)) }

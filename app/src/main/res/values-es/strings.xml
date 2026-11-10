@@ -377,6 +377,7 @@
     <string name="cast_no_media">Esta página no tiene un vídeo que se pueda enviar.</string>
     <string name="cast_youtube_note">La aplicación de YouTube del televisor muestra sus propios anuncios.</string>
     <string name="cast_youtube_need_google">YouTube se abre en la aplicación de YouTube del televisor, así que hace falta un Chromecast, Google TV o Nest.</string>
+    <string name="cast_dlna_adaptive">Algunos televisores no pueden reproducir esta transmisión (HLS o DASH). Si no empieza, prueba una página con un archivo mp4 o webm.</string>
     <string name="cast_failed">No se ha podido enviar a este dispositivo.</string>
     <string name="cast_google_unavailable">Google Cast no está disponible en este teléfono. Los dispositivos DLNA de la red se pueden usar igualmente.</string>
     <string name="cast_play">Reproducir</string>

@@ -247,6 +247,7 @@ class OrbisApp : Application() {
                 scope = appScope,
             )
         val cast = CastCoordinator(this, appScope)
+        tabs.onPrivateTabDisposed = { id -> cast.onPrivateTabClosed(id) }
         container =
             AppContainer(
                 debugLog = debugLog,

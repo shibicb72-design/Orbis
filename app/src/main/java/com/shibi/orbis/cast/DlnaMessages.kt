@@ -84,6 +84,9 @@ internal fun ssdpUuid(usn: String): String? {
  */
 internal fun parseDlnaDescription(xml: String, locationUrl: String): DlnaRenderer? {
     if (xml.isBlank() || xml.length > 512 * 1024) return null
+    // Android's DocumentBuilderFactory ignores the Xerces feature flags, so a DOCTYPE or entity is refused here,
+    // before the parser sees the text.
+    if (xmlHasDtd(xml)) return null
     val root =
         try {
             parseXml(xml)
@@ -234,19 +237,35 @@ internal fun soapText(xml: String, localName: String): String? {
     return xmlUnescape(raw).trim()
 }
 
+/** XML 1.0 Char, including non-characters in the private-use range and supplementary characters (emoji). */
+internal fun isXml10Char(codePoint: Int): Boolean =
+    codePoint == 0x9 || codePoint == 0xA || codePoint == 0xD ||
+        codePoint in 0x20..0xD7FF ||
+        codePoint in 0xE000..0xFFFD ||
+        codePoint in 0x10000..0x10FFFF
+
 internal fun xmlEscape(value: String): String =
     buildString(value.length) {
-        for (c in value) {
-            when (c) {
-                '&' -> append("&amp;")
-                '<' -> append("&lt;")
-                '>' -> append("&gt;")
-                '"' -> append("&quot;")
-                '\'' -> append("&apos;")
-                else -> if (c.code == 0x9 || c.code == 0xA || c.code == 0xD || c.code in 0x20..0xD7FF) append(c)
+        var index = 0
+        while (index < value.length) {
+            val codePoint = value.codePointAt(index)
+            index += Character.charCount(codePoint)
+            when (codePoint) {
+                '&'.code -> append("&amp;")
+                '<'.code -> append("&lt;")
+                '>'.code -> append("&gt;")
+                '"'.code -> append("&quot;")
+                '\''.code -> append("&apos;")
+                else -> if (isXml10Char(codePoint)) appendCodePoint(codePoint)
             }
         }
     }
+
+/** True when the text declares a DTD. Checked before parsing because Android's parser does not honor disallow-doctype. */
+internal fun xmlHasDtd(xml: String): Boolean {
+    val lower = xml.lowercase()
+    return "<!doctype" in lower || "<!entity" in lower
+}
 
 internal fun xmlUnescape(value: String): String =
     value
@@ -256,10 +275,13 @@ internal fun xmlUnescape(value: String): String =
         .replace("&apos;", "'")
         .replace("&amp;", "&")
 
-/** True for loopback, link-local, and private (RFC1918 / IPv6 ULA) addresses. Multicast is not a device. */
+/**
+ * True for link-local and private (RFC1918 / IPv6 ULA) addresses. Loopback is not a TV on the LAN.
+ * Multicast and the wildcard address are not devices.
+ */
 internal fun isLocalLanAddress(address: InetAddress): Boolean {
-    if (address.isAnyLocalAddress || address.isMulticastAddress) return false
-    if (address.isLoopbackAddress || address.isLinkLocalAddress || address.isSiteLocalAddress) return true
+    if (address.isAnyLocalAddress || address.isMulticastAddress || address.isLoopbackAddress) return false
+    if (address.isLinkLocalAddress || address.isSiteLocalAddress) return true
     val bytes = address.address
     if (bytes.size == 16) {
         val first = bytes[0].toInt() and 0xFF
@@ -277,14 +299,58 @@ private fun soapCall(action: String, urn: String, inner: String): SoapCall {
     return SoapCall(action, urn, body)
 }
 
+/** An SSDP reply plus the address the packet came from. The description is fetched only when those two match. */
+internal data class SsdpHit(val response: SsdpResponse, val source: InetAddress)
+
+internal const val DLNA_MAX_LOCATIONS = 16
+
+/**
+ * Locations worth fetching: distinct, at most [limit], and only when the LOCATION host is the packet's source address.
+ * A reply that names some other host (or a loopback address) is dropped.
+ */
+internal fun selectDiscoveryTargets(hits: List<SsdpHit>, limit: Int = DLNA_MAX_LOCATIONS): List<SsdpResponse> {
+    val cap = limit.coerceAtLeast(0)
+    val seen = HashSet<String>()
+    val out = ArrayList<SsdpResponse>(cap.coerceAtMost(hits.size))
+    for (hit in hits) {
+        if (out.size >= cap) break
+        if (!locationHostMatchesSource(hit.response.location, hit.source)) continue
+        if (!seen.add(hit.response.location)) continue
+        out += hit.response
+    }
+    return out
+}
+
+/** True when [location]'s host is an IP literal equal to [source], and [source] is a LAN address. */
+internal fun locationHostMatchesSource(location: String, source: InetAddress): Boolean {
+    if (!isLocalLanAddress(source)) return false
+    val host =
+        try {
+            URI(location).host
+        } catch (_: Exception) {
+            null
+        } ?: return false
+    if (!isIpLiteral(host)) return false
+    val parsed =
+        try {
+            InetAddress.getByName(host)
+        } catch (_: Exception) {
+            return false
+        }
+    return parsed.address.contentEquals(source.address)
+}
+
+private fun isIpLiteral(host: String): Boolean {
+    if (host.matches(Regex("""\d{1,3}(\.\d{1,3}){3}"""))) return true
+    if (!host.contains(':')) return false
+    return host.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' || it == ':' || it == '.' }
+}
+
 private fun parseXml(xml: String): Element? {
     val factory = DocumentBuilderFactory.newInstance()
     factory.isNamespaceAware = true
     factory.isExpandEntityReferences = false
     runCatching { factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true) }
-    runCatching { factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
-    runCatching { factory.setFeature("http://xml.org/sax/features/external-general-entities", false) }
-    runCatching { factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
     val builder = factory.newDocumentBuilder()
     builder.setEntityResolver { _, _ -> org.xml.sax.InputSource(java.io.StringReader("")) }
     val document = builder.parse(org.xml.sax.InputSource(java.io.StringReader(xml)))

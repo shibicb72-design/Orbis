@@ -137,7 +137,7 @@ class CastMediaTest {
     }
 
     @Test
-    fun youtubePageWithABlobPlayerUsesTheVideoIdAndTheLaterTimestamp() {
+    fun youtubePageWithABlobPlayerUsesTheVideoIdAndThePlayerPosition() {
         val json = probe(title = "Song - YouTube", href = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=10", media = listOf(element("video", "blob:https://www.youtube.com/1", "", current = 40.0)))
         val target = classifyPageMedia("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=10", json) as CastTarget.YouTube
         assertEquals("dQw4w9WgXcQ", target.video.videoId)
@@ -146,10 +146,45 @@ class CastMediaTest {
     }
 
     @Test
-    fun youtubeTimestampFromTheUrlWhenThePlayerHasNotMoved() {
-        val json = probe(title = "Song - YouTube", href = "https://youtu.be/dQw4w9WgXcQ?t=1m30s", media = listOf(element("video", "blob:https://www.youtube.com/1", "", current = 0.0)))
-        val target = classifyPageMedia("https://youtu.be/dQw4w9WgXcQ?t=1m30s", json) as CastTarget.YouTube
-        assertEquals(90.0, target.video.startSec, 0.01)
+    fun playerPositionWinsOverTheUrlTimestamp() {
+        val behind =
+            probe(
+                title = "Song - YouTube",
+                href = "https://youtu.be/dQw4w9WgXcQ?t=1m30s",
+                media = listOf(element("video", "blob:https://www.youtube.com/1", "", current = 5.0)),
+            )
+        val target = classifyPageMedia("https://youtu.be/dQw4w9WgXcQ?t=1m30s", behind) as CastTarget.YouTube
+        assertEquals(5.0, target.video.startSec, 0.01)
+        val atStart =
+            probe(
+                title = "Song - YouTube",
+                href = "https://youtu.be/dQw4w9WgXcQ?t=1m30s",
+                media = listOf(element("video", "blob:https://www.youtube.com/1", "", current = 0.0)),
+            )
+        val parked = classifyPageMedia("https://youtu.be/dQw4w9WgXcQ?t=1m30s", atStart) as CastTarget.YouTube
+        assertEquals(0.0, parked.video.startSec, 0.01)
+    }
+
+    @Test
+    fun youtubeNocookieEmbedIsAYouTubeVideo() {
+        val video = parseYouTubeVideo("https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?start=8")
+        assertEquals("dQw4w9WgXcQ", video?.videoId)
+        assertEquals(8.0, video?.startSec)
+        assertEquals("dQw4w9WgXcQ", parseYouTubeVideo("https://youtube-nocookie.com/embed/dQw4w9WgXcQ")?.videoId)
+    }
+
+    @Test
+    fun progressiveMediaIsPreferredAndHlsIsMarkedAdaptive() {
+        val both =
+            """{"title":"Show","poster":"","href":"https://example.com/watch","media":[{"tag":"video","sources":[{"src":"https://cdn.example/a.m3u8","type":"application/vnd.apple.mpegurl"},{"src":"https://cdn.example/a.mp4","type":"video/mp4"}],"currentTime":1,"duration":10,"paused":false,"poster":"","title":""}]}"""
+        val preferred = classifyPageMedia("https://example.com/watch", both) as CastTarget.Direct
+        assertEquals("https://cdn.example/a.mp4", preferred.media.url)
+        assertFalse(preferred.media.adaptive)
+        val only =
+            """{"title":"Show","poster":"","href":"https://example.com/watch","media":[{"tag":"video","sources":[{"src":"https://cdn.example/a.m3u8","type":"application/vnd.apple.mpegurl"}],"currentTime":1,"duration":0,"paused":false,"poster":"","title":""}]}"""
+        val stream = classifyPageMedia("https://example.com/watch", only) as CastTarget.Direct
+        assertEquals("https://cdn.example/a.m3u8", stream.media.url)
+        assertTrue(stream.media.adaptive)
     }
 
     @Test

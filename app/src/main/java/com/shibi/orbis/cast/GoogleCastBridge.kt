@@ -306,6 +306,7 @@ internal class GoogleCastBridge(context: Context) {
                     url = "http://$host:8008/apps/YouTube",
                     headers = mapOf("Content-Type" to "application/x-www-form-urlencoded"),
                     body = youtubeDialBody(video.videoId, video.startSec),
+                    bind = { socket -> LanBind.bind(appContext, socket) },
                 )
             if (epoch != dialEpoch) return@execute
             if (response != null && response.code in 200..299) onReady() else onFailed()
@@ -314,7 +315,13 @@ internal class GoogleCastBridge(context: Context) {
 
     private fun dialStop(address: InetAddress) {
         val host = dialHost(address) ?: return
-        dials.execute { lanExchange("DELETE", "http://$host:8008/apps/YouTube") }
+        dials.execute {
+            lanExchange(
+                "DELETE",
+                "http://$host:8008/apps/YouTube",
+                bind = { socket -> LanBind.bind(appContext, socket) },
+            )
+        }
     }
 
     private fun dialHost(address: InetAddress?): String? {

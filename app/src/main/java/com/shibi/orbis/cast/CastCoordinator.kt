@@ -9,6 +9,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -65,12 +66,18 @@ class CastCoordinator(context: Context, private val scope: CoroutineScope) {
     private val _notice = MutableStateFlow<CastNotice?>(null)
     val notice: StateFlow<CastNotice?> = _notice.asStateFlow()
 
-    private var target: CastTarget? = null
+    private val _dlnaFormatNote = MutableStateFlow(false)
+    /** True while a DLNA attempt is using HLS or DASH, which some TVs cannot play. */
+    val dlnaFormatNote: StateFlow<Boolean> = _dlnaFormatNote.asStateFlow()
+
+    private val flow = CastFlow()
     private var privateTab = false
     private var discovery: Job? = null
+    private var connectWatch: Job? = null
     private var poll: Job? = null
     private var dlnaRenderer: DlnaRenderer? = null
     private var activeKind: CastDeviceKind? = null
+    private var connectingKind: CastDeviceKind? = null
     private var deviceName: String = ""
     private var shownTitle: String = ""
     private var youtube = false
@@ -104,33 +111,60 @@ class CastCoordinator(context: Context, private val scope: CoroutineScope) {
         }
     }
 
-    /** Opens the picker for [pageUrl], or the controls when a session is already running. */
-    fun present(pageUrl: String, isPrivate: Boolean, probeJson: String?) {
-        if (_playback.value != null) {
-            _phase.value = CastPhase.Controls
-            _notice.value = null
+    /**
+     * Opens the picker for [pageUrl], or the controls when a session is already running.
+     * A page change during Connecting is ignored so it cannot orphan the attempt. [tabId] is remembered when the tab
+     * is private, and cleared if that tab is closed.
+     */
+    fun present(pageUrl: String, isPrivate: Boolean, probeJson: String?, tabId: Long) {
+        if (!flow.present(_playback.value != null)) {
+            sync()
             return
         }
-        openPicker(pageUrl, isPrivate, probeJson)
+        openPicker(pageUrl, isPrivate, probeJson, tabId)
     }
 
     /** Replaces the current choice with whatever the page can cast now. */
-    fun castThisPage(pageUrl: String, isPrivate: Boolean, probeJson: String?) {
+    fun castThisPage(pageUrl: String, isPrivate: Boolean, probeJson: String?, tabId: Long) {
         disconnect()
-        openPicker(pageUrl, isPrivate, probeJson)
+        openPicker(pageUrl, isPrivate, probeJson, tabId)
+    }
+
+    /**
+     * The private tab that owned the current target was closed. The address is dropped from memory, and a cast that
+     * came from that tab is stopped.
+     */
+    fun onPrivateTabClosed(tabId: Long) {
+        val stop = flow.privateTabClosed(tabId) ?: return
+        privateTab = false
+        _dlnaFormatNote.value = false
+        if (stop || _playback.value != null || activeKind != null) {
+            disconnect()
+        } else {
+            discovery?.cancel()
+            google.stopDiscovery()
+            flow.clearIdle()
+            _devices.value = emptyList()
+            sync()
+        }
     }
 
     fun choose(deviceId: String, onLocalPause: () -> Unit) {
-        if (_phase.value == CastPhase.Connecting) return
+        if (flow.phase == CastPhase.Connecting) return
         val item = _devices.value.firstOrNull { it.id == deviceId } ?: return
-        val chosen = target ?: return
+        val chosen = flow.target ?: return
         if (chosen is CastTarget.YouTube && item.kind != CastDeviceKind.GOOGLE_CAST) {
-            _notice.value = CastNotice.YOUTUBE_NEEDS_GOOGLE
+            flow.showNotice(CastNotice.YOUTUBE_NEEDS_GOOGLE)
+            sync()
             return
         }
-        _notice.value = null
-        _phase.value = CastPhase.Connecting
+        _dlnaFormatNote.value =
+            chosen is CastTarget.Direct && item.kind == CastDeviceKind.DLNA && chosen.media.adaptive
+        val generation = flow.beginConnect(System.currentTimeMillis())
+        connectingKind = item.kind
         deviceName = item.name
+        sync()
+        armConnectTimeout(generation, item.kind)
         when (chosen) {
             is CastTarget.Direct ->
                 when (item.kind) {
@@ -140,28 +174,27 @@ class CastCoordinator(context: Context, private val scope: CoroutineScope) {
                             media = chosen.media,
                             displayTitle = shownTitle,
                             poster = if (privateTab) null else chosen.media.poster,
-                            onReady = { main.post { started(CastDeviceKind.GOOGLE_CAST, onLocalPause) } },
-                            onFailed = { main.post { failed() } },
+                            onReady = { main.post { started(CastDeviceKind.GOOGLE_CAST, generation, onLocalPause) } },
+                            onFailed = { main.post { failAttempt(generation) } },
                         )
                     CastDeviceKind.DLNA -> {
                         val renderer = dlnaById[item.id]
                         if (renderer == null) {
-                            failed()
+                            failAttempt(generation)
                         } else {
                             val outbound = if (privateTab) chosen.media.copy(title = shownTitle, poster = null) else chosen.media
                             scope.launch(Dispatchers.IO) {
                                 val ok = dlna.play(renderer, outbound)
                                 withContext(Dispatchers.Main) {
-                                    if (_phase.value != CastPhase.Connecting) {
+                                    if (flow.phase != CastPhase.Connecting) {
                                         if (ok) dlna.stop(renderer)
                                         return@withContext
                                     }
                                     if (ok) {
                                         dlnaRenderer = renderer
-                                        started(CastDeviceKind.DLNA, onLocalPause)
-                                        startDlnaPoll()
+                                        if (started(CastDeviceKind.DLNA, generation, onLocalPause, renderer)) startDlnaPoll()
                                     } else {
-                                        failed()
+                                        failAttempt(generation)
                                     }
                                 }
                             }
@@ -172,10 +205,10 @@ class CastCoordinator(context: Context, private val scope: CoroutineScope) {
                 google.castYouTube(
                     routeId = item.id,
                     video = chosen.video,
-                    onReady = { main.post { started(CastDeviceKind.GOOGLE_CAST, onLocalPause) } },
-                    onFailed = { main.post { failed() } },
+                    onReady = { main.post { started(CastDeviceKind.GOOGLE_CAST, generation, onLocalPause) } },
+                    onFailed = { main.post { failAttempt(generation) } },
                 )
-            CastTarget.None -> failed()
+            CastTarget.None -> failAttempt(generation)
         }
     }
 
@@ -226,32 +259,45 @@ class CastCoordinator(context: Context, private val scope: CoroutineScope) {
     }
 
     fun disconnect() {
+        connectWatch?.cancel()
         poll?.cancel()
         poll = null
         val kind = activeKind
+        val connecting = connectingKind
         activeKind = null
+        connectingKind = null
         dlnaRenderer?.let { renderer ->
-            if (kind == CastDeviceKind.DLNA) scope.launch(Dispatchers.IO) { dlna.stop(renderer) }
+            if (kind == CastDeviceKind.DLNA || connecting == CastDeviceKind.DLNA) {
+                scope.launch(Dispatchers.IO) { dlna.stop(renderer) }
+            }
         }
         dlnaRenderer = null
-        if (kind == CastDeviceKind.GOOGLE_CAST || google.hasSession()) google.disconnect()
+        if (kind == CastDeviceKind.GOOGLE_CAST || connecting == CastDeviceKind.GOOGLE_CAST || google.hasSession()) {
+            google.disconnect()
+        }
+        _dlnaFormatNote.value = false
+        flow.invalidateConnect()
         clearPlayback()
     }
 
     fun dismissNotice() {
-        _notice.value = null
+        flow.showNotice(null)
+        sync()
     }
 
     fun sheetClosed() {
         discovery?.cancel()
         google.stopDiscovery()
-        if (_playback.value == null && _phase.value != CastPhase.Connecting) _phase.value = CastPhase.Idle
+        flow.dismissSheet(_playback.value != null)
+        sync()
     }
 
-    private fun openPicker(pageUrl: String, isPrivate: Boolean, probeJson: String?) {
+    private fun openPicker(pageUrl: String, isPrivate: Boolean, probeJson: String?, tabId: Long) {
         val classified = classifyPageMedia(pageUrl, probeJson)
-        target = classified
+        flow.target = classified
+        flow.rememberOrigin(tabId, isPrivate)
         privateTab = isPrivate
+        _dlnaFormatNote.value = false
         youtube = classified is CastTarget.YouTube
         val rawTitle =
             when (classified) {
@@ -269,13 +315,13 @@ class CastCoordinator(context: Context, private val scope: CoroutineScope) {
             }
         when (classified) {
             CastTarget.None -> {
-                _phase.value = CastPhase.NoMedia
-                _notice.value = CastNotice.NO_MEDIA
+                flow.showNoMedia()
                 _devices.value = emptyList()
+                sync()
             }
             else -> {
-                _phase.value = CastPhase.Picker(youtube = youtube, searching = true)
-                _notice.value = if (google.available()) null else CastNotice.GOOGLE_UNAVAILABLE
+                flow.showPicker(youtube = youtube, searching = true, googleUnavailable = !google.available())
+                sync()
                 beginDiscovery()
             }
         }
@@ -285,7 +331,7 @@ class CastCoordinator(context: Context, private val scope: CoroutineScope) {
         discovery?.cancel()
         googleRoutes.clear()
         dlnaById.clear()
-        if (google.available()) google.startDiscovery() else _notice.value = CastNotice.GOOGLE_UNAVAILABLE
+        if (google.available()) google.startDiscovery() else flow.showNotice(CastNotice.GOOGLE_UNAVAILABLE)
         publishDevices(searching = true)
         discovery =
             scope.launch {
@@ -306,23 +352,32 @@ class CastCoordinator(context: Context, private val scope: CoroutineScope) {
         googleRoutes.values.forEach { items += CastDeviceItem(it.id, it.name, CastDeviceKind.GOOGLE_CAST) }
         dlnaById.forEach { (id, renderer) -> items += CastDeviceItem(id, renderer.name, CastDeviceKind.DLNA) }
         _devices.value = items
-        val phase = _phase.value
-        if (phase is CastPhase.Picker) {
-            _phase.value = phase.copy(searching = searching && items.isEmpty())
-            if (!searching && items.isEmpty() && discovery?.isActive != true) _notice.value = CastNotice.NO_DEVICES
-        }
+        flow.updateSearching(searching = searching, devicesEmpty = items.isEmpty())
+        sync()
     }
 
-    private fun started(kind: CastDeviceKind, onLocalPause: () -> Unit) {
-        if (_phase.value != CastPhase.Connecting) return
+    /** False when the device answered after the attempt was abandoned. The caller has already been told to stop. */
+    private fun started(
+        kind: CastDeviceKind,
+        generation: Int,
+        onLocalPause: () -> Unit,
+        renderer: DlnaRenderer? = null,
+    ): Boolean {
+        connectWatch?.cancel()
+        if (!flow.acceptStart(generation)) {
+            if (kind == CastDeviceKind.GOOGLE_CAST) google.disconnect()
+            if (renderer != null) scope.launch(Dispatchers.IO) { dlna.stop(renderer) }
+            return false
+        }
+        connectingKind = null
         activeKind = kind
         val duration =
-            when (val chosen = target) {
+            when (val chosen = flow.target) {
                 is CastTarget.Direct -> chosen.media.durationSec
                 else -> 0.0
             }
         val position =
-            when (val chosen = target) {
+            when (val chosen = flow.target) {
                 is CastTarget.Direct -> chosen.media.positionSec
                 is CastTarget.YouTube -> chosen.video.startSec
                 else -> 0.0
@@ -339,16 +394,31 @@ class CastCoordinator(context: Context, private val scope: CoroutineScope) {
                 kind = kind,
             ),
         )
-        _phase.value = CastPhase.Controls
-        _notice.value = null
+        sync()
         onLocalPause()
         refreshNotification()
+        return true
     }
 
-    private fun failed() {
-        if (_phase.value != CastPhase.Connecting || _playback.value != null) return
-        _phase.value = CastPhase.Picker(youtube = youtube, searching = false)
-        _notice.value = CastNotice.FAILED
+    private fun armConnectTimeout(generation: Int, kind: CastDeviceKind) {
+        connectWatch?.cancel()
+        connectWatch =
+            scope.launch {
+                delay(CONNECT_TIMEOUT_MS)
+                if (!flow.connectExpired(generation, System.currentTimeMillis())) return@launch
+                failAttempt(generation, unselect = kind == CastDeviceKind.GOOGLE_CAST)
+            }
+    }
+
+    /** The attempt did not start. A Google Cast route that was selected is unselected. */
+    private fun failAttempt(generation: Int, unselect: Boolean = connectingKind == CastDeviceKind.GOOGLE_CAST) {
+        connectWatch?.cancel()
+        flow.failConnect(generation, youtube)
+        if (flow.notice != CastNotice.FAILED) return
+        connectingKind = null
+        _dlnaFormatNote.value = false
+        if (unselect) google.disconnect()
+        sync()
         publishDevices(searching = false)
     }
 
@@ -396,14 +466,26 @@ class CastCoordinator(context: Context, private val scope: CoroutineScope) {
                 playback.title.isNotBlank() -> playback.title
                 else -> appContext.getString(com.shibi.orbis.R.string.cast_notification_casting)
             }
-        CastNotifications.show(appContext, playback.deviceName, title, playback.playing)
+        CastNotifications.show(
+            context = appContext,
+            deviceName = playback.deviceName,
+            title = title,
+            playing = playback.playing,
+            positionMs = (playback.positionSec * 1000).toLong(),
+            durationMs = (playback.durationSec * 1000).toLong(),
+        )
+    }
+
+    private fun sync() {
+        _phase.value = flow.phase
+        _notice.value = flow.notice
     }
 
     private fun clearPlayback() {
         _playback.value = null
         activeKind = null
         CastNotifications.cancel(appContext)
-        if (_phase.value == CastPhase.Controls || _phase.value == CastPhase.Connecting) _phase.value = CastPhase.Idle
+        sync()
     }
 
     private fun rendererKey(renderer: DlnaRenderer): String = renderer.uuid ?: renderer.avTransportUrl

@@ -94,7 +94,21 @@ class DlnaTest {
             </root>
             """.trimIndent()
         assertNull(parseDlnaDescription(xml, "http://192.168.1.9/device.xml"))
-        assertNull(parseDlnaDescription("<!DOCTYPE root [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><root>&x;</root>", "http://10.0.0.1/d"))
+        val dtd = "<!DOCTYPE root [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><root>&x;</root>"
+        assertTrue(xmlHasDtd(dtd))
+        assertTrue(xmlHasDtd("<root><!ENTITY x \"a\"></root>"))
+        assertFalse(xmlHasDtd("<root><device><friendlyName>TV</friendlyName></device></root>"))
+        assertNull(parseDlnaDescription(dtd, "http://10.0.0.1/d"))
+    }
+
+    @Test
+    fun xmlEscapeKeepsEmojiAndDropsCharactersXmlForbids() {
+        assertEquals("A \uD83C\uDFAC", xmlEscape("A \uD83C\uDFAC"))
+        assertEquals("\uE000", xmlEscape("\uE000"))
+        assertEquals("ok", xmlEscape("ok\u0000"))
+        assertEquals("", xmlEscape("\uD800"))
+        assertTrue(isXml10Char(0x1F3AC))
+        assertFalse(isXml10Char(0xD800))
     }
 
     @Test
@@ -182,7 +196,8 @@ class DlnaTest {
         assertTrue(isLocalLanAddress(InetAddress.getByName("10.1.2.3")))
         assertTrue(isLocalLanAddress(InetAddress.getByName("172.16.0.1")))
         assertTrue(isLocalLanAddress(InetAddress.getByName("169.254.1.1")))
-        assertTrue(isLocalLanAddress(InetAddress.getByName("127.0.0.1")))
+        assertFalse(isLocalLanAddress(InetAddress.getByName("127.0.0.1")))
+        assertFalse(isLocalLanAddress(InetAddress.getByName("::1")))
         assertFalse(isLocalLanAddress(InetAddress.getByName("172.32.0.1")))
         assertFalse(isLocalLanAddress(InetAddress.getByName("8.8.8.8")))
         assertFalse(isLocalLanAddress(InetAddress.getByName("239.255.255.250")))
@@ -191,5 +206,35 @@ class DlnaTest {
         assertNull(localTarget("http://8.8.8.8/ctl"))
         assertNull(localTarget("https://192.168.1.20/ctl"))
         assertNull(localTarget("http://example.com/device.xml"))
+        assertNull(localTarget("http://127.0.0.1/device.xml"))
+        assertNull(redirectTarget("http://192.168.1.20/device.xml", "http://8.8.8.8/evil.xml"))
+        assertNull(redirectTarget("http://192.168.1.20/device.xml", "http://127.0.0.1/local.xml"))
+        assertNull(redirectTarget("http://192.168.1.20/device.xml", "https://192.168.1.20/x"))
+        assertNull(redirectTarget("http://192.168.1.20/device.xml", null))
+        assertEquals(
+            "http://192.168.1.21/desc.xml",
+            redirectTarget("http://192.168.1.20/device.xml", "http://192.168.1.21/desc.xml"),
+        )
+    }
+
+    @Test
+    fun discoveryKeepsOnlyLocationsThatMatchTheReplySource() {
+        fun hit(host: String, sourceHost: String = host) =
+            SsdpHit(
+                SsdpResponse("http://$host:8200/device.xml", SSDP_MEDIA_RENDERER, "", "Orbis", null),
+                InetAddress.getByName(sourceHost),
+            )
+        val many = (1..20).map { hit("192.168.1.$it") }
+        assertEquals(16, selectDiscoveryTargets(many).size)
+        assertEquals("http://192.168.1.1:8200/device.xml", selectDiscoveryTargets(many).first().location)
+        val one = hit("192.168.1.8")
+        assertEquals(1, selectDiscoveryTargets(listOf(one, one)).size)
+        assertTrue(selectDiscoveryTargets(listOf(hit("127.0.0.1"))).isEmpty())
+        assertTrue(selectDiscoveryTargets(listOf(hit("10.0.0.5", "192.168.1.9"))).isEmpty())
+        assertTrue(
+            selectDiscoveryTargets(
+                listOf(SsdpHit(SsdpResponse("http://tv.local/device.xml", "", "", "", null), InetAddress.getByName("192.168.1.9"))),
+            ).isEmpty(),
+        )
     }
 }

@@ -375,6 +375,7 @@
     <string name="cast_no_media">This page has no castable video.</string>
     <string name="cast_youtube_note">The TV\'s YouTube app shows its own ads.</string>
     <string name="cast_youtube_need_google">YouTube opens in the TV\'s YouTube app, so it needs a Chromecast, Google TV, or Nest.</string>
+    <string name="cast_dlna_adaptive">Some TVs can\'t play this stream (HLS or DASH). If it doesn\'t start, try a page with an mp4 or webm file.</string>
     <string name="cast_failed">Couldn\'t cast to this device.</string>
     <string name="cast_google_unavailable">Google Cast isn\'t available on this phone. DLNA devices on the network can still be used.</string>
     <string name="cast_play">Play</string>

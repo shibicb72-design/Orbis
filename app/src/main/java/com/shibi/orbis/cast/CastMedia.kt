@@ -21,9 +21,11 @@ internal data class CastableMedia(
     val poster: String?,
     val positionSec: Double,
     val durationSec: Double,
+    /** HLS or DASH. A DLNA renderer is still offered it, with a note that some TVs cannot play it. */
+    val adaptive: Boolean = false,
 )
 
-/** A YouTube watch page. [startSec] is the later of the URL timestamp and the player position. */
+/** A YouTube watch page. [startSec] is the player position when a video element reported one, otherwise the URL timestamp. */
 internal data class YouTubeVideo(
     val videoId: String,
     val watchUrl: String,
@@ -36,7 +38,16 @@ private const val MAX_TITLE_CHARS = 300
 private const val MAX_PROBE_CHARS = 100_000
 private const val MAX_START_SEC = 100.0 * 60 * 60
 
-private val YOUTUBE_HOSTS = setOf("youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be")
+private val YOUTUBE_HOSTS =
+    setOf(
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "youtu.be",
+        "www.youtu.be",
+        "youtube-nocookie.com",
+        "www.youtube-nocookie.com",
+    )
 private val YOUTUBE_ID = Regex("^[A-Za-z0-9_-]{11}$")
 private val YOUTUBE_CLOCK = Regex("^(?:(\\d+)h)?(?:(\\d+)m)?(?:(\\d+)s)?$", RegexOption.IGNORE_CASE)
 
@@ -111,18 +122,22 @@ internal fun classifyPageMedia(pageUrl: String, probeJson: String?): CastTarget 
     val page = probe?.href?.takeIf { it.isNotEmpty() } ?: pageUrl
     val youtube = parseYouTubeVideo(page)
     if (youtube != null) {
-        val played = probe?.elements?.filter { it.tag == "video" }?.maxOfOrNull { it.currentTimeSec } ?: 0.0
-        val start = maxOf(youtube.startSec, played.coerceIn(0.0, MAX_START_SEC))
+        val played = probe?.elements?.filter { it.tag == "video" }?.maxByOrNull { it.currentTimeSec }
+        val start =
+            if (played != null) played.currentTimeSec.coerceIn(0.0, MAX_START_SEC) else youtube.startSec
         val title = cleanTitle(probe?.title?.ifBlank { youtube.title } ?: youtube.title)
         return CastTarget.YouTube(youtube.copy(startSec = start, title = title))
     }
     val elements = probe?.elements.orEmpty()
     val ranked =
         elements.mapNotNull { element ->
-            val source = element.sources.firstNotNullOfOrNull { classifyMediaUrl(it.url, it.mime) } ?: return@mapNotNull null
+            val classified = element.sources.mapNotNull { classifyMediaUrl(it.url, it.mime) }
+            // A progressive file (mp4, webm, mp3) is what most DLNA renderers can play. HLS or DASH is the fallback.
+            val source = classified.firstOrNull { !isAdaptiveMime(it.mime) } ?: classified.firstOrNull() ?: return@mapNotNull null
             element to source
         }.sortedWith(
             compareByDescending<Pair<ProbeElement, ClassifiedUrl>> { it.first.tag == "video" }
+                .thenByDescending { !isAdaptiveMime(it.second.mime) }
                 .thenByDescending { !it.first.paused }
                 .thenByDescending { it.first.currentTimeSec > 0.5 }
                 .thenByDescending { it.first.tag == "video" && !it.first.paused },
@@ -140,9 +155,14 @@ internal fun classifyPageMedia(pageUrl: String, probeJson: String?): CastTarget 
             poster = poster,
             positionSec = element.currentTimeSec.coerceIn(0.0, MAX_START_SEC),
             durationSec = element.durationSec.coerceIn(0.0, MAX_START_SEC),
+            adaptive = isAdaptiveMime(source.mime),
         ),
     )
 }
+
+/** HLS or DASH. DLNA is still offered these, with a note that some TVs cannot play them. */
+internal fun isAdaptiveMime(mime: String): Boolean =
+    mime.contains("mpegurl", ignoreCase = true) || mime.contains("dash", ignoreCase = true)
 
 /** A direct media URL, or null for blob, MediaSource, data, or anything that is not a known media type. */
 internal fun classifyMediaUrl(url: String, mimeHint: String): ClassifiedUrl? {

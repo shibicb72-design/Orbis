@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -1019,10 +1020,17 @@ private class GeckoBrowserSession(
             return
         }
         castWaiting?.invoke(null)
+        val generation = probeGate.start(SystemClock.uptimeMillis())
+        castGeneration = generation
         castWaiting = onResult
-        runCatching { port.postMessage(JSONObject().put("type", "probe")) }.onFailure {
-            castWaiting = null
-            onResult(null)
+        val message = JSONObject().put("type", "probe").put("token", generation)
+        runCatching { port.postMessage(message) }.onFailure {
+            deliverCast(null, generation)
+            return
+        }
+        scope.launch {
+            delay(com.shibi.orbis.cast.PROBE_TIMEOUT_MS)
+            deliverCast(null, generation)
         }
     }
 
@@ -1035,12 +1043,15 @@ private class GeckoBrowserSession(
 
     private var castPort: WebExtension.Port? = null
     private var castWaiting: ((String?) -> Unit)? = null
+    private var castGeneration = 0
+    private val probeGate = com.shibi.orbis.cast.ProbeGate()
 
     /** Gecko delivers port messages off the main thread. Cast then touches MediaRouter, which must be on main. */
-    private fun deliverCast(json: String?) {
-        val waiting = castWaiting ?: return
+    private fun deliverCast(json: String?, generation: Int) {
+        if (!probeGate.take(generation)) return
+        val waiting = castWaiting
         castWaiting = null
-        scope.launch { waiting(if (closed) null else json) }
+        scope.launch { waiting?.invoke(if (closed) null else json) }
     }
 
     fun attachCast() {
@@ -1061,12 +1072,12 @@ private class GeckoBrowserSession(
                             override fun onPortMessage(message: Any, port: WebExtension.Port) {
                                 val obj = message as? JSONObject ?: return
                                 if (obj.optString("type") != "probe") return
-                                deliverCast(obj.toString())
+                                deliverCast(obj.toString(), obj.optInt("token", castGeneration))
                             }
 
                             override fun onDisconnect(port: WebExtension.Port) {
                                 if (castPort === port) castPort = null
-                                deliverCast(null)
+                                deliverCast(null, castGeneration)
                             }
                         },
                     )

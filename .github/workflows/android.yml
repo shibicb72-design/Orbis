@@ -39,10 +39,11 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
-      - name: Assemble debug APK and run unit tests
+      - name: Assemble debug APK, run unit tests, and shrink a release APK
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug testDebugUnitTest --stacktrace
+          # assembleRelease is unsigned on CI (no upload key). It runs R8 so a keep-rule miss fails here.
+          ./gradlew assembleDebug testDebugUnitTest assembleRelease --stacktrace
 
       - name: Upload debug APK (arm64-v8a)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

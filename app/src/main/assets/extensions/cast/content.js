@@ -55,9 +55,11 @@
     if (!msg || !msg.type) return;
     if (msg.type === "probe") {
       try {
-        port.postMessage(probe());
+        var payload = probe();
+        payload.token = msg.token || 0;
+        port.postMessage(payload);
       } catch (e) {
-        port.postMessage({ type: "probe", title: "", poster: "", href: String(location.href || ""), media: [] });
+        port.postMessage({ type: "probe", token: msg.token || 0, title: "", poster: "", href: String(location.href || ""), media: [] });
       }
     } else if (msg.type === "pause") {
       const els = document.querySelectorAll("video, audio");
