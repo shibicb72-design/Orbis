@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -121,6 +122,25 @@ class TabSwitcherComposeTest {
         rule.waitForIdle()
         assertEquals(listOf("close:2", "select:1"), events)
         assertEquals(listOf(TabSheetOutcome.SELECTED), ended)
+    }
+
+    @Test
+    fun theHighlightFollowsTheSingleSelectedTab() {
+        start()
+        fun show(id: Long) {
+            tabs = tabs.map { it.copy(selected = it.id == id) }
+            rule.waitForIdle()
+            for (row in listOf(1L, 2L, 3L, 4L)) {
+                val node = rule.onNodeWithTag(tabRowTag(row))
+                if (row == id) node.assertIsSelected() else node.assertIsNotSelected()
+            }
+            assertEquals(1, rule.onAllNodesWithText("Current tab").fetchSemanticsNodes().size)
+        }
+        show(2)
+        show(3)
+        // The same tab again stays the only current one.
+        show(3)
+        show(1)
     }
 
     @Test

@@ -13,7 +13,8 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.clickable
@@ -52,6 +53,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -174,7 +177,8 @@ internal fun TabSwitcher(
             }
         }
         // Opens scrolled to the current tab: with many tabs it would otherwise sit below the fold.
-        val selectedIndex = tabs.indexOfFirst { it.selected }.coerceAtLeast(0)
+        val selectedIndexState = rememberSelectedTabIndex(tabs)
+        val selectedIndex = selectedIndexState.value.coerceAtLeast(0)
         val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = selectedIndex)
         // The first placement happens before the sheet has its final height; once it is open, bring the current tab fully
         // into view if it is not (never moves a grid the user can already see the current tab in).
@@ -190,7 +194,7 @@ internal fun TabSwitcher(
         snackbars?.let { SnackbarHost(it, Modifier.fillMaxWidth()) }
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 150.dp),
-            modifier = Modifier.weight(1f, fill = false),
+            modifier = Modifier.weight(1f, fill = false).selectableGroup(),
             state = gridState,
             // The last row (often the current tab, scrolled to) must clear the gesture/navigation bar.
             contentPadding = PaddingValues(
@@ -202,16 +206,17 @@ internal fun TabSwitcher(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            items(tabs, key = { it.id }) { tab ->
+            itemsIndexed(tabs, key = { _, tab -> tab.id }) { index, tab ->
+                val current = index == selectedIndexState.value
                 val container =
                     when {
-                        tab.selected -> MaterialTheme.colorScheme.secondaryContainer
+                        current -> MaterialTheme.colorScheme.secondaryContainer
                         tab.isPrivate -> MaterialTheme.colorScheme.tertiaryContainer
                         else -> MaterialTheme.colorScheme.surface
                     }
                 val content =
                     when {
-                        tab.selected -> MaterialTheme.colorScheme.onSecondaryContainer
+                        current -> MaterialTheme.colorScheme.onSecondaryContainer
                         tab.isPrivate -> MaterialTheme.colorScheme.onTertiaryContainer
                         else -> MaterialTheme.colorScheme.onSurface
                     }
@@ -223,7 +228,7 @@ internal fun TabSwitcher(
                     contentColor = content,
                     shape = MaterialTheme.shapes.medium,
                     // The current tab has a visible frame as well as its label (not color alone).
-                    border = if (tab.selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+                    border = if (current) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                     modifier = Modifier
                         .animateItem(
                             fadeInSpec = null,
@@ -232,7 +237,10 @@ internal fun TabSwitcher(
                         )
                         .fillMaxWidth()
                         .testTag(tabRowTag(tab.id))
-                        .semantics { selected = tab.selected }
+                        .semantics {
+                            selected = current
+                            role = Role.Tab
+                        }
                         .clickable { end(TabSheetOutcome.SELECTED) { onSelect(tab.id) } },
                 ) {
                     Column {
@@ -247,11 +255,11 @@ internal fun TabSwitcher(
                                     modifier = Modifier.padding(end = 6.dp).size(18.dp),
                                 )
                             }
-                            if (tab.selected) {
+                            if (current) {
                                 Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.padding(end = 6.dp).size(18.dp))
                             }
                             Column(Modifier.weight(1f)) {
-                                if (tab.selected) {
+                                if (current) {
                                     Text(
                                         stringResource(R.string.tabs_selected_label),
                                         style = MaterialTheme.typography.labelSmall,

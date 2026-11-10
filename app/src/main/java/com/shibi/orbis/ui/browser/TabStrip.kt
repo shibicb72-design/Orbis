@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.view.View
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.draganddrop.dragAndDropSource
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.Arrangement
@@ -17,8 +16,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -30,7 +31,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draganddrop.DragAndDropEvent
@@ -38,10 +41,12 @@ import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.DragAndDropTransferData
 import androidx.compose.ui.draganddrop.mimeTypes
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -58,8 +63,18 @@ internal fun showsTabStrip(windowWidthDp: Int): Boolean = windowWidthDp >= TAB_S
 
 internal const val TAB_STRIP_TAG = "tab_strip"
 
+internal fun tabChipTag(id: Long) = "tab_chip_$id"
+
 /**
- * A row of the open tabs (title, close button; the current one marked in text for screen readers and by its frame),
+ * The index of the one highlighted tab, or -1 when none is. Each chip reads this state, so a lazy
+ * row cannot keep a highlight from the last time that chip was current.
+ */
+@Composable
+internal fun rememberSelectedTabIndex(tabs: List<TabUi>): State<Int> =
+    rememberUpdatedState(tabs.indexOfFirst { it.selected })
+
+/**
+ * A row of the open tabs (title, close button; the current one marked for screen readers and by its frame),
  * with New tab at the end. A tab can be dragged out (its address, to another app or window); a link or text dropped on
  * the strip opens in a new tab.
  */
@@ -73,8 +88,8 @@ internal fun TabStrip(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    val selectedIndex = tabs.indexOfFirst { it.selected }
-    LaunchedEffect(selectedIndex) { if (selectedIndex >= 0) listState.animateScrollToItem(selectedIndex) }
+    val selectedIndex = rememberSelectedTabIndex(tabs)
+    LaunchedEffect(selectedIndex.value) { if (selectedIndex.value >= 0) listState.animateScrollToItem(selectedIndex.value) }
     val drop = rememberLinkDropTarget(onDropOpen)
     Row(
         modifier
@@ -87,11 +102,16 @@ internal fun TabStrip(
     ) {
         LazyRow(
             state = listState,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).selectableGroup(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            items(tabs, key = { it.id }) { tab ->
-                TabChip(tab, onSelect = { onSelect(tab.id) }, onClose = { onClose(tab.id) })
+            itemsIndexed(tabs, key = { _, tab -> tab.id }) { index, tab ->
+                TabChip(
+                    tab,
+                    selected = index == selectedIndex.value,
+                    onSelect = { onSelect(tab.id) },
+                    onClose = { onClose(tab.id) },
+                )
             }
         }
         IconButton(onClick = onNewTab) { Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.tabs_new)) }
@@ -100,45 +120,36 @@ internal fun TabStrip(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TabChip(tab: TabUi, onSelect: () -> Unit, onClose: () -> Unit) {
+private fun TabChip(tab: TabUi, selected: Boolean, onSelect: () -> Unit, onClose: () -> Unit) {
     val host = hostOfUrl(tab.url)
     val title = tab.title.ifBlank { host ?: stringResource(R.string.tabs_blank_title) }
     val container =
         when {
-            tab.selected -> MaterialTheme.colorScheme.secondaryContainer
+            selected -> MaterialTheme.colorScheme.secondaryContainer
             tab.isPrivate -> MaterialTheme.colorScheme.tertiaryContainer
             else -> MaterialTheme.colorScheme.surfaceContainer
         }
     val content =
         when {
-            tab.selected -> MaterialTheme.colorScheme.onSecondaryContainer
+            selected -> MaterialTheme.colorScheme.onSecondaryContainer
             tab.isPrivate -> MaterialTheme.colorScheme.onTertiaryContainer
             else -> MaterialTheme.colorScheme.onSurface
         }
-    val currentLabel = stringResource(R.string.tabs_selected_label)
+    val shape = MaterialTheme.shapes.small
     Surface(
         color = container,
         contentColor = content,
-        shape = MaterialTheme.shapes.small,
-        border = if (tab.selected) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+        shape = shape,
+        border = if (selected) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
         modifier = Modifier
             .width(180.dp)
             .height(36.dp)
-            .semantics { selected = tab.selected }
+            .testTag(tabChipTag(tab.id))
             .then(
                 // A private tab's address never leaves the app by drag and drop.
-                if (!tab.isPrivate && isWebUrl(tab.url)) {
-                    Modifier.dragAndDropSource { _ ->
-                        DragAndDropTransferData(
-                            ClipData.newPlainText(title, tab.url),
-                            flags = View.DRAG_FLAG_GLOBAL,
-                        )
-                    }
-                } else {
-                    Modifier
-                },
+                if (!tab.isPrivate && isWebUrl(tab.url)) tabDragSource(title, tab.url, container, shape) else Modifier,
             )
-            .clickable(onClickLabel = if (tab.selected) currentLabel else null, onClick = onSelect),
+            .selectable(selected = selected, role = Role.Tab, onClick = onSelect),
     ) {
         Row(Modifier.padding(start = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             if (tab.isPrivate) {
@@ -156,6 +167,25 @@ private fun TabChip(tab: TabUi, onSelect: () -> Unit, onClose: () -> Unit) {
         }
     }
 }
+
+/**
+ * Drag-out for a normal web tab. The single-argument drag source records the chip into a graphics
+ * layer and then draws that layer in place of the live chip, so the highlight (and the title) stay
+ * as they were when the layer was cached. This draws the shadow only while a drag is in progress.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+private fun tabDragSource(title: String, url: String, shadow: Color, shape: Shape): Modifier =
+    Modifier.dragAndDropSource(
+        drawDragDecoration = {
+            drawOutline(shape.createOutline(size, layoutDirection, this), color = shadow)
+        },
+        transferData = { _ ->
+            DragAndDropTransferData(
+                ClipData.newPlainText(title, url),
+                flags = View.DRAG_FLAG_GLOBAL,
+            )
+        },
+    )
 
 /** A drag that carries text or a link (from another app, a page, or a tab dragged out). */
 internal fun carriesLinkOrText(event: DragAndDropEvent): Boolean =
