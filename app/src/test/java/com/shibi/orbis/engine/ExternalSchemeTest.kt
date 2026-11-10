@@ -44,4 +44,33 @@ class ExternalSchemeTest {
         assertNull(schemeOf("1abc:x"))
         assertFalse(isExternalScheme("/relative/path"))
     }
+
+    @Test
+    fun invisibleHandlerIsLaunchedAndAVisibleOneIsAsked() {
+        // resolveActivity == null is not "no app" (Android 11 package visibility).
+        assertEquals(ExternalOpenChoice.LAUNCH, externalOpenChoice(hasIntent = true, resolvable = false))
+        assertEquals(ExternalOpenChoice.ASK, externalOpenChoice(hasIntent = true, resolvable = true))
+        assertEquals(ExternalOpenChoice.MISS, externalOpenChoice(hasIntent = false, resolvable = false))
+    }
+
+    @Test
+    fun missingAppUsesWebFallbackThenTheStoreThenGivesUp() {
+        assertEquals(
+            ExternalMiss.OpenWeb("https://example.com/a"),
+            planExternalMiss("https://example.com/a", "com.example.app"),
+        )
+        assertEquals(
+            ExternalMiss.OpenMarket("market://details?id=com.example.app"),
+            planExternalMiss(null, "com.example.app"),
+        )
+        assertEquals(
+            ExternalMiss.OpenMarket("market://details?id=com.example.app"),
+            planExternalMiss("javascript:alert(1)", "com.example.app"),
+        )
+        assertEquals(ExternalMiss.NoHandler, planExternalMiss(null, null))
+        assertEquals(ExternalMiss.NoHandler, planExternalMiss("magnet:?xt=urn:btih:abc", "not a package"))
+        assertNull(marketDetailsUri("../evil"))
+        assertNull(marketDetailsUri("singlelabel"))
+        assertEquals("market://details?id=com.example.app", marketDetailsUri("com.example.app"))
+    }
 }

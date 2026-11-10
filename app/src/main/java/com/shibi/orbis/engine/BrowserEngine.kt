@@ -285,6 +285,11 @@ interface BrowserSession {
      */
     fun saveUrl(url: String) {}
     /**
+     * Opens a non-http(s) link in another app (magnet:, tel:, intent:, …). The user already chose it, from a tap the
+     * engine handled itself or from the long-press menu. Test doubles may no-op.
+     */
+    fun openExternalScheme(url: String) {}
+    /**
      * Turns tracking protection off ([off] true) or back on for the current page's site, then reloads it. Private tabs
      * keep the exception only for the private session. No-op without a web page. Test doubles may no-op.
      */
@@ -354,6 +359,13 @@ interface SessionHost {
     fun onLinkContextMenu(url: String, session: BrowserSession)
     /** Long-press on an image ([linkUrl] when the image is also a link). Test doubles may ignore it. */
     fun onImageContextMenu(imageUrl: String, linkUrl: String?, session: BrowserSession) {}
+    /**
+     * Long-press on a link and/or image, including non-http schemes such as magnet:. The engine calls this instead of
+     * [onLinkContextMenu] so the address is not dropped for failing to be http(s).
+     */
+    fun onPageContextMenu(menu: PageContextMenu, session: BrowserSession) {}
+    /** No installed app could open [url]. The UI offers to copy it. */
+    fun onExternalAppMissing(url: String) {}
     /** The session's saved-state blob changed (history, scroll position...). */
     fun onSessionStateChanged(session: BrowserSession)
     /** A page was visited (a finished load, or a same-document navigation). [title] may still be empty. */

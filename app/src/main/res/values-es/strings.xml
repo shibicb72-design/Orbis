@@ -89,6 +89,7 @@
     <string name="open_app_open">Abrir</string>
     <string name="open_app_stay">Quedarse en Orbis</string>
     <string name="open_app_none">Ninguna app de este teléfono puede abrir este enlace.</string>
+    <string name="open_app_copy">Copiar enlace</string>
     <string name="open_in_apps_title">Abrir enlaces en apps</string>
     <string name="open_in_apps_summary">Preguntar antes de que un enlace se abra en una app instalada compatible.</string>
     <string name="menu_scan_qr">Escanear código QR</string>
@@ -272,13 +273,17 @@
     <string name="prompt_file_choose">Elegir archivo</string>
 
     <string name="link_menu_open_new_tab">Abrir en una pestaña nueva</string>
-    <string name="link_menu_copy">Copiar enlace</string>
+    <string name="link_menu_open_private">Abrir en una pestaña privada nueva</string>
+    <string name="link_menu_copy">Copiar dirección del enlace</string>
+    <string name="link_menu_copy_text">Copiar texto del enlace</string>
     <string name="link_menu_share">Compartir enlace</string>
+    <string name="link_menu_download">Descargar enlace</string>
+    <string name="link_menu_open_external">Abrir con otra app</string>
     <string name="link_menu_copied">Enlace copiado</string>
     <string name="image_menu_open_new_tab">Abrir imagen en una pestaña nueva</string>
     <string name="image_menu_save">Guardar imagen</string>
     <string name="image_menu_copy">Copiar dirección de la imagen</string>
-    <string name="image_menu_share">Compartir dirección de la imagen</string>
+    <string name="image_menu_share">Compartir imagen</string>
 
     <string name="browser_download_title">¿Descargar archivo?</string>
     <string name="browser_download_size">Tamaño: %1$s</string>

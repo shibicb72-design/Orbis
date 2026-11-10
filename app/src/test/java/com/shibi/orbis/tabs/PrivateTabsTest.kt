@@ -2,6 +2,7 @@ package com.shibi.orbis.tabs
 
 import android.view.View
 import com.shibi.orbis.engine.BrowserSession
+import com.shibi.orbis.engine.ContextMenuItem
 import com.shibi.orbis.engine.SessionHost
 import com.shibi.orbis.engine.SessionInit
 import com.shibi.orbis.engine.SessionState
@@ -433,6 +434,45 @@ class PrivateTabsTest {
         assertTrue(created.last().init.isPrivate)
         assertEquals(listOf("https://link.example/p"), created.last().loads)
         assertNotNull(m.selected.value.openerTabId)
+    }
+
+    @Test
+    fun magnetLongPressKeepsTheAddressAndDoesNotOpenItAsAPage() {
+        val m = manager()
+        m.openSelected()
+        val magnet = "magnet:?xt=urn:btih:abc"
+        m.onLinkContextMenu(magnet, created[0])
+        val request = m.linkMenu.value!!
+        assertEquals(magnet, request.url)
+        val items = request.pageMenu()!!.items
+        assertTrue(items.contains(ContextMenuItem.COPY_LINK_ADDRESS))
+        assertTrue(items.contains(ContextMenuItem.OPEN_EXTERNAL))
+        assertFalse(items.contains(ContextMenuItem.OPEN_NEW_TAB))
+        assertFalse(items.contains(ContextMenuItem.DOWNLOAD_LINK))
+        m.openLinkInNewTab(request)
+        m.downloadLink(LinkMenuRequest(magnet, m.selected.value.id))
+        assertEquals("magnet is not a page or a file download", 1, m.tabs.value.size)
+        assertTrue(created[0].loads.isEmpty())
+        assertTrue(created[0].saves.isEmpty())
+        m.onLinkContextMenu(magnet, created[0])
+        m.openExternalLink(m.linkMenu.value!!)
+        assertNull("opening externally closes the menu", m.linkMenu.value)
+    }
+
+    @Test
+    fun openInNewPrivateTabAndDownloadLinkReuseTheTabAndSavePaths() {
+        val m = manager()
+        m.openSelected()
+        m.onLinkContextMenu("https://example.com/file.zip", created[0])
+        m.downloadLink(m.linkMenu.value!!)
+        assertEquals(listOf("https://example.com/file.zip"), created[0].saves)
+        assertNull(m.linkMenu.value)
+
+        m.onLinkContextMenu("https://link.example/p", created[0])
+        m.openLinkInPrivateTab(m.linkMenu.value!!)
+        assertTrue(m.selected.value.isPrivate)
+        assertFalse(created[0].init.isPrivate)
+        assertEquals(listOf("https://link.example/p"), created.last().loads)
     }
 
     @Test

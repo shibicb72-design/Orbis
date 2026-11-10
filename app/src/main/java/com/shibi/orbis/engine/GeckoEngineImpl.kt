@@ -817,17 +817,48 @@ private class GeckoBrowserSession(
             debugLog.log("GeckoSession", "external app link while one is pending: blocked")
             return deny
         }
-        val target = externalApps.forExternalScheme(request.uri) ?: return deny
-        if (!target.resolvable) {
-            // No app for it: an intent: link's own web fallback, else a short note.
-            val fallback = target.fallbackUrl
-            if (fallback != null) loadUrl(fallback) else toast(com.shibi.orbis.R.string.open_app_none)
-            return deny
+        when (val route = routeExternalNavigation(request.uri, appContext.packageName)) {
+            is ExternalNavigation.Web -> {
+                // An intent: link that is really an http(s) address stays in this tab. Never load the raw intent: URI.
+                if (route.url != null) loadUrl(route.url)
+                return deny
+            }
+            ExternalNavigation.Blocked -> return deny
+            is ExternalNavigation.App -> {
+                val target = externalApps.targetFor(route)
+                when (externalOpenChoice(target.intent != null, target.resolvable)) {
+                    ExternalOpenChoice.ASK -> return askOpenInApp(target, webLink = false, originalUrl = request.uri)
+                    ExternalOpenChoice.LAUNCH -> {
+                        // Not visible to PackageManager. The tap already happened: try the app anyway.
+                        if (!externalApps.launch(target)) followExternalMiss(target, request.uri)
+                        return deny
+                    }
+                    ExternalOpenChoice.MISS -> {
+                        followExternalMiss(target, request.uri)
+                        return deny
+                    }
+                }
+            }
         }
-        return askOpenInApp(target, webLink = false)
     }
 
-    private fun askOpenInApp(target: AppTarget, webLink: Boolean): GeckoResult<AllowOrDeny> {
+    /**
+     * startActivity failed. An intent: link's browser_fallback_url loads here; otherwise the Play listing for the
+     * package the link named; otherwise the UI says no app can open it and offers to copy [originalUrl].
+     */
+    private fun followExternalMiss(target: AppTarget, originalUrl: String) {
+        when (val miss = planExternalMiss(target.fallbackUrl, target.marketPackage)) {
+            is ExternalMiss.OpenWeb -> loadUrl(miss.url)
+            is ExternalMiss.OpenMarket -> {
+                val market = externalApps.forExternalScheme(miss.uri)
+                if (market != null && externalApps.launch(market)) return
+                if (originalUrl.isNotBlank()) host?.onExternalAppMissing(originalUrl)
+            }
+            ExternalMiss.NoHandler -> if (originalUrl.isNotBlank()) host?.onExternalAppMissing(originalUrl)
+        }
+    }
+
+    private fun askOpenInApp(target: AppTarget, webLink: Boolean, originalUrl: String? = null): GeckoResult<AllowOrDeny> {
         val result = GeckoResult<AllowOrDeny>()
         // Staying loads a web link here; anything else has nothing to load.
         val stay = if (webLink) AllowOrDeny.ALLOW else AllowOrDeny.DENY
@@ -841,7 +872,7 @@ private class GeckoBrowserSession(
                     if (externalApps.launch(target)) {
                         result.complete(AllowOrDeny.DENY)
                     } else {
-                        if (!webLink) toast(com.shibi.orbis.R.string.open_app_none)
+                        if (!webLink) followExternalMiss(target, originalUrl.orEmpty())
                         result.complete(stay)
                     }
                 } else {
@@ -850,10 +881,6 @@ private class GeckoBrowserSession(
             },
         )
         return result
-    }
-
-    private fun toast(res: Int) {
-        runCatching { android.widget.Toast.makeText(appContext, res, android.widget.Toast.LENGTH_SHORT).show() }
     }
 
     // ---- translation ----
@@ -999,12 +1026,23 @@ private class GeckoBrowserSession(
                 screenY: Int,
                 element: GeckoSession.ContentDelegate.ContextElement,
             ) {
-                val image = element.srcUri?.takeIf { element.type == GeckoSession.ContentDelegate.ContextElement.TYPE_IMAGE && isWebUrl(it) }
-                val link = element.linkUri?.takeIf { isWebUrl(it) }
-                when {
-                    image != null -> host?.onImageContextMenu(image, link, this@GeckoBrowserSession)
-                    link != null -> host?.onLinkContextMenu(link, this@GeckoBrowserSession)
-                }
+                val menu =
+                    pageContextMenu(
+                        ContextElementInfo(
+                            type =
+                                if (element.type == GeckoSession.ContentDelegate.ContextElement.TYPE_IMAGE) {
+                                    PageContextType.IMAGE
+                                } else {
+                                    PageContextType.OTHER
+                                },
+                            linkUri = element.linkUri,
+                            srcUri = element.srcUri,
+                            title = element.title,
+                            altText = element.altText,
+                            linkText = element.linkText,
+                        ),
+                    ) ?: return
+                host?.onPageContextMenu(menu, this@GeckoBrowserSession)
             }
 
             override fun onExternalResponse(session: GeckoSession, response: WebResponse) {
@@ -1943,6 +1981,20 @@ private class GeckoBrowserSession(
         _state.update { it.copy(trackingProtectionOff = off) }
         debugLog.log("GeckoSession", "tracking protection exception ${if (off) "added" else "removed"}")
         session.reload()
+    }
+
+    override fun openExternalScheme(url: String) {
+        if (closed || !isExternalScheme(url)) return
+        when (val route = routeExternalNavigation(url, appContext.packageName)) {
+            is ExternalNavigation.Web -> if (route.url != null) loadUrl(route.url)
+            ExternalNavigation.Blocked -> Unit
+            is ExternalNavigation.App -> {
+                val target = externalApps.targetFor(route)
+                // The menu row is the confirmation, so this does not ask a second time.
+                val opened = target.intent != null && externalApps.launch(target)
+                if (!opened) followExternalMiss(target, url)
+            }
+        }
     }
 
     override fun saveUrl(url: String) {

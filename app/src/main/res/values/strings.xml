@@ -115,6 +115,7 @@
     <string name="open_app_open">Open</string>
     <string name="open_app_stay">Stay in Orbis</string>
     <string name="open_app_none">No app on this phone can open this link.</string>
+    <string name="open_app_copy">Copy link</string>
     <string name="open_in_apps_title">Open links in apps</string>
     <string name="open_in_apps_summary">Ask before a link opens in an installed app that handles it.</string>
     <string name="menu_scan_qr">Scan QR code</string>
@@ -298,13 +299,17 @@
     <string name="prompt_file_choose">Choose file</string>
 
     <string name="link_menu_open_new_tab">Open in new tab</string>
-    <string name="link_menu_copy">Copy link</string>
+    <string name="link_menu_open_private">Open in new private tab</string>
+    <string name="link_menu_copy">Copy link address</string>
+    <string name="link_menu_copy_text">Copy link text</string>
     <string name="link_menu_share">Share link</string>
+    <string name="link_menu_download">Download link</string>
+    <string name="link_menu_open_external">Open with external app</string>
     <string name="link_menu_copied">Link copied</string>
     <string name="image_menu_open_new_tab">Open image in new tab</string>
     <string name="image_menu_save">Save image</string>
     <string name="image_menu_copy">Copy image address</string>
-    <string name="image_menu_share">Share image address</string>
+    <string name="image_menu_share">Share image</string>
 
     <string name="browser_download_title">Download file?</string>
     <string name="browser_download_size">Size: %1$s</string>
