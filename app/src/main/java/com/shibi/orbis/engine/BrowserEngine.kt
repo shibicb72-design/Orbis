@@ -45,6 +45,15 @@ interface BrowserEngine {
     var onContentBlocked: ((kind: com.shibi.orbis.stats.BlockKind, uri: String?, isPrivate: Boolean) -> Unit)?
         get() = null
         set(@Suppress("UNUSED_PARAMETER") value) {}
+
+    /**
+     * A blocked YouTube ad request, or the title of a YouTube watch page, for the on-device time-saved estimate.
+     * The built-in observer does not run in private tabs. Content blocking still passes private pages through; the
+     * store drops them.
+     */
+    var onYoutubeAdEvent: ((event: com.shibi.orbis.youtube.YoutubeAdEvent) -> Unit)?
+        get() = null
+        set(@Suppress("UNUSED_PARAMETER") value) {}
     /** Search for text the user selected on a page (selection menu > Search); [isPrivate] is the page's mode. */
     var onSelectionSearch: ((text: String, isPrivate: Boolean) -> Unit)?
         get() = null

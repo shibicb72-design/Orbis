@@ -219,12 +219,24 @@ class OrbisApp : Application() {
                 }
             }
         }
+        // Estimated time saved from blocked YouTube ads. On this phone only; private tabs are not recorded.
+        val youtubeAds =
+            com.shibi.orbis.youtube.YoutubeAdSavings(
+                File(filesDir, "youtube_ad_savings.json"),
+                appScope,
+                Dispatchers.IO,
+                log = { debugLog.log("YouTubeAds", it) },
+            )
+        youtubeAds.load()
+        engine.onYoutubeAdEvent = { youtubeAds.onEvent(it) }
         // Everything here runs on the main thread (appScope is Main). Site permissions and uBO are not touched.
         val clearTargets =
             object : ClearTargets {
                 override fun clearHistory() {
                     history.clearAll()
                     tabs.forgetClosed()
+                    // Video ids and titles from the YouTube estimate are browsing history, cleared with this category.
+                    youtubeAds.clear()
                 }
 
                 override fun closeNormalTabs() = tabs.closeAllNormal()
@@ -278,6 +290,7 @@ class OrbisApp : Application() {
             com.shibi.orbis.stats.PrivacyStats(File(filesDir, "privacy_stats.json"), appScope, Dispatchers.IO, log = { debugLog.log("Stats", it) })
         stats.load()
         container.privacyStats = stats
+        container.youtubeAdSavings = youtubeAds
         engine.onContentBlocked = { kind, uri, isPrivate -> stats.recordBlocked(kind, uri, isPrivate) }
         appScope.launch {
             val uid = android.os.Process.myUid()
@@ -318,6 +331,8 @@ class AppContainer(
     val thumbnails: com.shibi.orbis.tabs.TabThumbnails = com.shibi.orbis.tabs.TabThumbnails(),
     /** What Orbis blocked and the data it used (the start page dashboard); set by the app after creation. */
     var privacyStats: com.shibi.orbis.stats.PrivacyStats? = null,
+    /** Estimated time saved from blocked YouTube ads; set by the app after creation. Cleared with browsing history. */
+    var youtubeAdSavings: com.shibi.orbis.youtube.YoutubeAdSavings? = null,
     val engine: BrowserEngine,
     val ubo: UboOnboardingController,
     /** Owns every tab and session; outlives screens, so Settings never destroys a page. */
