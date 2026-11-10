@@ -1,0 +1,16 @@
+{
+  "manifest_version": 2,
+  "name": "Orbis Cast",
+  "version": "1.0",
+  "description": "Reads video and audio addresses on the current page so Orbis can cast them. Sends nothing except to the Orbis app.",
+  "browser_specific_settings": { "gecko": { "id": "cast@orbis.shibi.com" } },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "permissions": ["nativeMessaging", "nativeMessagingFromContent", "geckoViewAddons"]
+}

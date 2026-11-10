@@ -154,6 +154,8 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.zxing.core)
     implementation(libs.androidx.browser)
+    implementation(libs.play.services.cast.framework)
+    implementation(libs.androidx.mediarouter)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)

@@ -369,4 +369,26 @@
         <item quantity="many">traqueurs, publicités et cookies bloqués</item>
         <item quantity="other">traqueurs, publicités et cookies bloqués</item>
     </plurals>
+
+    <string name="menu_cast">Diffuser</string>
+    <string name="cast_title">Diffuser</string>
+    <string name="cast_searching">Recherche de téléviseurs et d\'enceintes...</string>
+    <string name="cast_no_devices">Aucun appareil trouvé. Allumez le téléviseur ou l\'enceinte et utilisez le même Wi-Fi que ce téléphone.</string>
+    <string name="cast_no_media">Cette page n\'a pas de vidéo à diffuser.</string>
+    <string name="cast_youtube_note">L\'application YouTube du téléviseur affiche ses propres annonces.</string>
+    <string name="cast_youtube_need_google">YouTube s\'ouvre dans l\'application YouTube du téléviseur, qui nécessite un Chromecast, un Google TV ou un Nest.</string>
+    <string name="cast_failed">Impossible de diffuser vers cet appareil.</string>
+    <string name="cast_google_unavailable">Google Cast n\'est pas disponible sur ce téléphone. Les appareils DLNA du réseau peuvent tout de même être utilisés.</string>
+    <string name="cast_play">Lecture</string>
+    <string name="cast_pause">Pause</string>
+    <string name="cast_disconnect">Déconnecter</string>
+    <string name="cast_volume">Volume</string>
+    <string name="cast_device_google">Google Cast</string>
+    <string name="cast_device_dlna">DLNA</string>
+    <string name="cast_private_title">Lecture depuis un onglet privé</string>
+    <string name="cast_channel">Diffusion</string>
+    <string name="cast_notification_casting">Diffusion</string>
+    <string name="cast_this_page">Diffuser cette page</string>
+    <string name="cast_connecting">Connexion...</string>
+    <string name="cast_close">Fermer</string>
 </resources>

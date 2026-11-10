@@ -277,6 +277,15 @@ interface BrowserSession {
     fun mediaPlay() {}
     fun mediaPause() {}
     fun mediaStop() {}
+
+    /**
+     * Reads video and audio addresses from the current page. [onResult] gets one JSON string, or null when the page
+     * cannot be read. Main thread. Test doubles answer null.
+     */
+    fun probeCastMedia(onResult: (String?) -> Unit) = onResult(null)
+
+    /** Pauses every video and audio element on the page, including ones with no media session. Test doubles may no-op. */
+    fun pausePageMedia() {}
     /** Leaves page fullscreen (Back, a tab switch); the engine then reports fullScreen = false. Test doubles may no-op. */
     fun exitFullScreen() {}
     /**

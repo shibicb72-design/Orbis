@@ -2,8 +2,9 @@
 
 Last updated: Owner to date on publication.
 
-Orbis is a web browser. It has no account, shows no ads and contains no analytics or crash reporting. The people
-who make Orbis receive no data about you or your browsing.
+Orbis is a web browser. It has no account and shows no ads. The people who make Orbis receive no data about you
+or your browsing, and there is no crash reporting. The Google Cast SDK sends its own diagnostics to Google; see Cast
+below.
 
 ## What stays on your phone
 Your tabs, history, bookmarks, downloads list, site settings, saved passwords (encrypted with a key in the Android
@@ -23,6 +24,8 @@ delete everything in Settings > Clear browsing data.
 - **Voice search** uses your phone's speech recognizer (for example Google's); its privacy terms apply.
 - **Update check** (builds not installed from Google Play, can be turned off): once a day Orbis asks GitHub for the
   latest release number. Nothing else is sent.
+- **Cast**: the video or audio address is sent only to the TV or speaker you pick on your local network. The Google
+  Cast SDK also sends its own encrypted diagnostics to Google. A YouTube video then plays in the TV's YouTube app.
 
 ## Permissions
 Camera, microphone and location are only used when a website asks and you allow it (and the camera for the QR

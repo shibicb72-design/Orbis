@@ -6,5 +6,8 @@
 # never run here, so R8 is told the classes are absent on purpose (rules from build/outputs/mapping/release/missing_rules.txt).
 -dontwarn mozilla.telemetry.glean.**
 
+# The Cast SDK instantiates this from the manifest meta-data string, which R8 would otherwise rename.
+-keep class com.shibi.orbis.cast.OrbisCastOptionsProvider { <init>(); }
+
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile

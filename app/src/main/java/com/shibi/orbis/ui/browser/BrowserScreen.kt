@@ -80,6 +80,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -339,6 +341,15 @@ private fun BrowserContent(
     val tabsButtonFocus = remember { FocusRequester() }
     val inputModeManager = LocalInputModeManager.current
     var menuOpen by remember { mutableStateOf(false) }
+    var castOpen by remember { mutableStateOf(false) }
+    val casting by container.cast.playback.collectAsStateWithLifecycle()
+    val pendingCast by container.pendingShowCast.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingCast) {
+        if (pendingCast) {
+            container.pendingShowCast.value = false
+            castOpen = true
+        }
+    }
     // The one tab whose address bar should take focus: set only when the user makes a tab with New tab. Cold start,
     // popups, external links and "closed the last tab" leave it null, so they never steal focus or open edit mode.
     var focusAddressFor by remember { mutableStateOf<Long?>(null) }
@@ -635,6 +646,17 @@ private fun BrowserContent(
                                 onClick = {
                                     menuOpen = false
                                     session?.printPage()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.menu_cast)) },
+                                leadingIcon = {
+                                    Icon(if (casting != null) Icons.Filled.CastConnected else Icons.Filled.Cast, contentDescription = null)
+                                },
+                                enabled = session != null,
+                                onClick = {
+                                    menuOpen = false
+                                    castOpen = true
                                 },
                             )
                             DropdownMenuItem(
@@ -985,6 +1007,13 @@ private fun BrowserContent(
                     )
                 }
                 SnackbarHost(snackbars, Modifier.align(Alignment.BottomCenter))
+                if (fullScreen) {
+                    CastFullscreenButton(
+                        casting = casting != null,
+                        onClick = { castOpen = true },
+                        modifier = Modifier.align(Alignment.TopEnd).padding(12.dp).windowInsetsPadding(WindowInsets.systemBars),
+                    )
+                }
                 if (pullPx > 0f) {
                     PullToRefreshIndicator(
                         fraction = (pullPx / pullThresholdPx).coerceIn(0f, 1f),
@@ -1236,6 +1265,16 @@ private fun BrowserContent(
                 pending.download.discard()
                 tabs.resolveDownload(pending)
             },
+        )
+    }
+
+    if (castOpen) {
+        CastSheet(
+            coordinator = container.cast,
+            pageUrl = state.url,
+            isPrivate = selectedTab.isPrivate,
+            session = session,
+            onDismiss = { castOpen = false },
         )
     }
 

@@ -369,4 +369,26 @@
         <item quantity="many">rastreadores, anuncios y cookies bloqueados</item>
         <item quantity="other">rastreadores, anuncios y cookies bloqueados</item>
     </plurals>
+
+    <string name="menu_cast">Enviar</string>
+    <string name="cast_title">Enviar</string>
+    <string name="cast_searching">Buscando televisores y altavoces...</string>
+    <string name="cast_no_devices">No se han encontrado dispositivos. Enciende el televisor o el altavoz y usa la misma Wi-Fi que este teléfono.</string>
+    <string name="cast_no_media">Esta página no tiene un vídeo que se pueda enviar.</string>
+    <string name="cast_youtube_note">La aplicación de YouTube del televisor muestra sus propios anuncios.</string>
+    <string name="cast_youtube_need_google">YouTube se abre en la aplicación de YouTube del televisor, así que hace falta un Chromecast, Google TV o Nest.</string>
+    <string name="cast_failed">No se ha podido enviar a este dispositivo.</string>
+    <string name="cast_google_unavailable">Google Cast no está disponible en este teléfono. Los dispositivos DLNA de la red se pueden usar igualmente.</string>
+    <string name="cast_play">Reproducir</string>
+    <string name="cast_pause">Pausa</string>
+    <string name="cast_disconnect">Desconectar</string>
+    <string name="cast_volume">Volumen</string>
+    <string name="cast_device_google">Google Cast</string>
+    <string name="cast_device_dlna">DLNA</string>
+    <string name="cast_private_title">Enviando desde una pestaña privada</string>
+    <string name="cast_channel">Enviar</string>
+    <string name="cast_notification_casting">Enviando</string>
+    <string name="cast_this_page">Enviar esta página</string>
+    <string name="cast_connecting">Conectando...</string>
+    <string name="cast_close">Cerrar</string>
 </resources>

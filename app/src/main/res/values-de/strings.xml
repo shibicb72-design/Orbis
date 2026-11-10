@@ -367,4 +367,26 @@
         <item quantity="one">Tracker, Werbung oder Cookie blockiert</item>
         <item quantity="other">Tracker, Werbung und Cookies blockiert</item>
     </plurals>
+
+    <string name="menu_cast">Übertragen</string>
+    <string name="cast_title">Übertragen</string>
+    <string name="cast_searching">Suche nach Fernsehern und Lautsprechern...</string>
+    <string name="cast_no_devices">Keine Geräte gefunden. Schalte den Fernseher oder Lautsprecher ein und nutze dasselbe WLAN wie dieses Telefon.</string>
+    <string name="cast_no_media">Diese Seite hat kein übertragbares Video.</string>
+    <string name="cast_youtube_note">Die YouTube-App auf dem Fernseher zeigt ihre eigene Werbung.</string>
+    <string name="cast_youtube_need_google">YouTube öffnet sich in der YouTube-App des Fernsehers und braucht deshalb ein Chromecast, Google TV oder Nest.</string>
+    <string name="cast_failed">Übertragen auf dieses Gerät nicht möglich.</string>
+    <string name="cast_google_unavailable">Google Cast ist auf diesem Telefon nicht verfügbar. DLNA-Geräte im Netzwerk können trotzdem verwendet werden.</string>
+    <string name="cast_play">Wiedergeben</string>
+    <string name="cast_pause">Pause</string>
+    <string name="cast_disconnect">Trennen</string>
+    <string name="cast_volume">Lautstärke</string>
+    <string name="cast_device_google">Google Cast</string>
+    <string name="cast_device_dlna">DLNA</string>
+    <string name="cast_private_title">Wiedergabe aus einem privaten Tab</string>
+    <string name="cast_channel">Übertragen</string>
+    <string name="cast_notification_casting">Wird übertragen</string>
+    <string name="cast_this_page">Diese Seite übertragen</string>
+    <string name="cast_connecting">Verbinden...</string>
+    <string name="cast_close">Schließen</string>
 </resources>

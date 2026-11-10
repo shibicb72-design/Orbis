@@ -70,6 +70,9 @@ class GeckoEngineImpl(
     /** The built-in reader view extension (see ReaderExtensionHolder). */
     private val reader = ReaderExtensionHolder { debugLog.log("GeckoEngine", it) }
 
+    /** Page probe for Cast (see CastExtensionHolder). Allowed in private tabs; it stores nothing. */
+    private val castExtension = CastExtensionHolder { debugLog.log("GeckoEngine", it) }
+
     /** Sites with tracking protection turned off by the user (see TrackingExceptions). */
     private val trackingExceptions = TrackingExceptions()
 
@@ -275,6 +278,7 @@ class GeckoEngineImpl(
             )
             created.autocompleteStorageDelegate = loginStorageDelegate()
             reader.install(created)
+            castExtension.install(created)
             // Without a prompt delegate, WebExtensionController.install() hangs forever.
             created.webExtensionController.setPromptDelegate(extensionHost.promptDelegate)
             runtime = created
@@ -454,6 +458,7 @@ class GeckoEngineImpl(
             onSelectionSearch = { onSelectionSearch },
             onBlocked = { onContentBlocked },
             reader = reader,
+            castExtension = castExtension,
             sitePolicy = { sitePolicy },
             // A popup child inherits the opener's desktop/mobile choice and its privacy, and is never opened by us.
             newPopupChild = { opener ->
@@ -514,6 +519,7 @@ private class GeckoBrowserSession(
     private val onSelectionSearch: () -> ((String, Boolean) -> Unit)?,
     private val onBlocked: () -> ((com.shibi.orbis.stats.BlockKind, String?, Boolean) -> Unit)?,
     private val reader: ReaderExtensionHolder,
+    private val castExtension: CastExtensionHolder,
     private val sitePolicy: () -> SitePolicy?,
     private val newPopupChild: (GeckoBrowserSession) -> GeckoBrowserSession,
 ) : BrowserSession {
@@ -587,6 +593,7 @@ private class GeckoBrowserSession(
         visits.suppress(init.fallbackUrl)
         session.open(runtime)
         attachReader()
+        attachCast()
         // A restored page reloads without passing onLoadRequest: its site's choices are applied first.
         init.fallbackUrl?.takeIf { isWebUrl(it) }?.let { url ->
             applyTrackingProtection(!trackingExceptions.isExcepted(url, isPrivate))
@@ -688,6 +695,7 @@ private class GeckoBrowserSession(
                 // here too throws. The tab layer keeps the strong reference and attaches it to the view.
                 val child = newPopupChild(this@GeckoBrowserSession)
                 runCatching { child.attachReader() }
+                runCatching { child.attachCast() }
                 owner.onPopupSession(child, this@GeckoBrowserSession)
                 debugLog.log("GeckoSession", "popup session created")
                 return GeckoResult.fromValue(child.geckoSession)
@@ -1002,6 +1010,70 @@ private class GeckoBrowserSession(
 
     override fun mediaStop() {
         if (!closed) activeMedia?.stop()
+    }
+
+    override fun probeCastMedia(onResult: (String?) -> Unit) {
+        val port = castPort
+        if (closed || port == null) {
+            onResult(null)
+            return
+        }
+        castWaiting?.invoke(null)
+        castWaiting = onResult
+        runCatching { port.postMessage(JSONObject().put("type", "probe")) }.onFailure {
+            castWaiting = null
+            onResult(null)
+        }
+    }
+
+    override fun pausePageMedia() {
+        if (closed) return
+        mediaPause()
+        val port = castPort ?: return
+        runCatching { port.postMessage(JSONObject().put("type", "pause")) }
+    }
+
+    private var castPort: WebExtension.Port? = null
+    private var castWaiting: ((String?) -> Unit)? = null
+
+    /** Gecko delivers port messages off the main thread. Cast then touches MediaRouter, which must be on main. */
+    private fun deliverCast(json: String?) {
+        val waiting = castWaiting ?: return
+        castWaiting = null
+        scope.launch { waiting(if (closed) null else json) }
+    }
+
+    fun attachCast() {
+        castExtension.whenReady { ext ->
+            if (closed) return@whenReady
+            runCatching { attachCastTo(ext) }.onFailure { debugLog.log("GeckoSession", "cast attach failed") }
+        }
+    }
+
+    private fun attachCastTo(ext: WebExtension) {
+        session.webExtensionController.setMessageDelegate(
+            ext,
+            object : WebExtension.MessageDelegate {
+                override fun onConnect(port: WebExtension.Port) {
+                    castPort = port
+                    port.setDelegate(
+                        object : WebExtension.PortDelegate {
+                            override fun onPortMessage(message: Any, port: WebExtension.Port) {
+                                val obj = message as? JSONObject ?: return
+                                if (obj.optString("type") != "probe") return
+                                deliverCast(obj.toString())
+                            }
+
+                            override fun onDisconnect(port: WebExtension.Port) {
+                                if (castPort === port) castPort = null
+                                deliverCast(null)
+                            }
+                        },
+                    )
+                }
+            },
+            CastExtensionHolder.NATIVE_APP,
+        )
     }
 
     private fun contentDelegate() =

@@ -149,6 +149,7 @@ class MainActivity : ComponentActivity() {
         if (incoming.action == DownloadNotifications.ACTION_SHOW_DOWNLOADS) app.container.pendingShowDownloads.value = true
         // The search widget: also only a flag.
         if (incoming.action == com.shibi.orbis.widget.ACTION_WIDGET_SEARCH) app.container.pendingWidgetSearch.value = true
+        if (incoming.action == com.shibi.orbis.cast.CastNotifications.ACTION_SHOW) app.container.pendingShowCast.value = true
         setIntent(Intent())
     }
 }

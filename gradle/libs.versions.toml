@@ -22,6 +22,9 @@ camerax = "1.6.2"
 # Custom Tabs service and intent helpers (Google Maven), latest stable on 2026-11-09.
 androidxBrowser = "1.10.0"
 zxing = "3.5.4"
+# Google Cast sender (maven.google.com), latest stable on 2026-11-10. 23.0.0 depends on mediarouter 1.9.0-beta01.
+cast = "23.0.0"
+mediarouter = "1.9.0-beta01"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -51,6 +54,8 @@ androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycl
 androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
 androidx-browser = { group = "androidx.browser", name = "browser", version.ref = "androidxBrowser" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+play-services-cast-framework = { group = "com.google.android.gms", name = "play-services-cast-framework", version.ref = "cast" }
+androidx-mediarouter = { group = "androidx.mediarouter", name = "mediarouter", version.ref = "mediarouter" }
 mozilla-concept-engine = { group = "org.mozilla.components", name = "concept-engine", version.ref = "mozillaAc" }
 
 [plugins]
