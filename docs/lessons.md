@@ -1,7 +1,6 @@
 # Lessons (Orbis)
 
 - Debug keystore is committed and shared so CI and local APKs update in place. Never use `~/.android/debug.keystore` as the app signing source of truth.
-- Updates come from Google Play. Do not add an in-app GitHub release check. `retireGithubUpdateChecker` deletes `update_prefs` and cancels the WorkManager job `com.shibi.orbis.update.check` left by older builds.
 - UI must not call GeckoView types; keep a thin `BrowserEngine` boundary.
 - uBlock Origin is AMO-onboarded, not APK-bundled, for v1.
 - Error / debug log UI lives only under Settings.

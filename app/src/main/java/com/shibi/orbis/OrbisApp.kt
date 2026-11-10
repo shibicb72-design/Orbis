@@ -66,7 +66,7 @@ class OrbisApp : Application() {
         super.onCreate()
         // Gecko child processes (":tab", ":gpu", ...) run this too; they must not create a runtime or container.
         if (Application.getProcessName() != packageName) return
-        // Play delivers updates. Drop the GitHub checker's prefs and any WorkManager job an older build left scheduled.
+        // Play delivers updates. Drop the GitHub checker's prefs.
         retireGithubUpdateChecker(this)
         val debugLog = DebugLog(filesDir)
         // App-lifetime scope: installs must survive screens leaving composition.
