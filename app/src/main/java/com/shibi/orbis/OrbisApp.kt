@@ -24,6 +24,7 @@ import com.shibi.orbis.engine.BrowserEngine
 import com.shibi.orbis.engine.FileSitePermissionStore
 import com.shibi.orbis.engine.GeckoEngineImpl
 import com.shibi.orbis.engine.SearchEngineSettings
+import com.shibi.orbis.cast.CastCoordinator
 import com.shibi.orbis.media.MediaCenter
 import com.shibi.orbis.media.MediaPlaybackService
 import com.shibi.orbis.passwords.FileLoginStore
@@ -297,9 +298,12 @@ class OrbisApp : Application() {
                 clearer = BrowsingDataClearer(clearTargets, log = { debugLog.log("Clear", it) }),
                 scope = appScope,
             )
+        val cast = CastCoordinator(this, appScope)
+        tabs.onPrivateTabDisposed = { id -> cast.onPrivateTabClosed(id) }
         container =
             AppContainer(
                 debugLog = debugLog,
+                cast = cast,
                 engine = engine,
                 ubo = ubo,
                 tabs = tabs,
@@ -366,6 +370,8 @@ class OrbisApp : Application() {
 
 class AppContainer(
     val debugLog: DebugLog,
+    /** Cast to a TV or speaker. Memory only: a private tab's page is not written down. */
+    val cast: CastCoordinator,
     /** Tab page previews for the tab grid (memory only). */
     val thumbnails: com.shibi.orbis.tabs.TabThumbnails = com.shibi.orbis.tabs.TabThumbnails(),
     /** What Orbis blocked and the data it used (the start page dashboard); set by the app after creation. */
@@ -407,6 +413,9 @@ class AppContainer(
 
     /** The home screen widget was tapped: open a new tab ready for typing (a flag only). */
     val pendingWidgetSearch = MutableStateFlow(false)
+
+    /** The cast notification was tapped. A flag only: it carries no page address. */
+    val pendingShowCast = MutableStateFlow(false)
 
     /**
      * How many screens that show secrets (Settings > Passwords) are on screen. Above zero, MainActivity protects the

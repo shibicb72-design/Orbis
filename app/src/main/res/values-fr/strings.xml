@@ -363,4 +363,28 @@
         <item quantity="many">traqueurs, publicités et cookies bloqués</item>
         <item quantity="other">traqueurs, publicités et cookies bloqués</item>
     </plurals>
+
+    <string name="menu_cast">Diffuser</string>
+    <string name="cast_title">Diffuser</string>
+    <string name="cast_searching">Recherche de téléviseurs et d\'enceintes...</string>
+    <string name="cast_no_devices">Aucun appareil trouvé. Allumez le téléviseur ou l\'enceinte et utilisez le même Wi-Fi que ce téléphone.</string>
+    <string name="cast_no_media">Cette page n\'a pas de vidéo à diffuser.</string>
+    <string name="cast_youtube_note">Diffuser YouTube l\'ouvre dans l\'application YouTube du téléviseur, qui peut afficher des annonces et suit les conditions de YouTube.</string>
+    <string name="cast_youtube_need_google">YouTube s\'ouvre dans l\'application YouTube du téléviseur, qui nécessite un Chromecast, un Google TV ou un Nest.</string>
+    <string name="cast_dlna_adaptive">Certains téléviseurs ne lisent pas ce flux (HLS ou DASH). S\'il ne démarre pas, essayez une page avec un fichier mp4 ou webm.</string>
+    <string name="cast_failed">Impossible de diffuser vers cet appareil.</string>
+    <string name="cast_youtube_unconfirmed">Le téléviseur n\'a pas lancé cette vidéo YouTube.</string>
+    <string name="cast_rejected">Le téléviseur a refusé cette diffusion.</string>
+    <string name="cast_play">Lecture</string>
+    <string name="cast_pause">Pause</string>
+    <string name="cast_disconnect">Déconnecter</string>
+    <string name="cast_volume">Volume</string>
+    <string name="cast_device_chromecast">Chromecast</string>
+    <string name="cast_device_dlna">DLNA</string>
+    <string name="cast_private_title">Lecture depuis un onglet privé</string>
+    <string name="cast_channel">Diffusion</string>
+    <string name="cast_notification_casting">Diffusion</string>
+    <string name="cast_this_page">Diffuser cette page</string>
+    <string name="cast_connecting">Connexion...</string>
+    <string name="cast_close">Fermer</string>
 </resources>

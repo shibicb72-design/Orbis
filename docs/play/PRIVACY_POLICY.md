@@ -2,8 +2,8 @@
 
 Last updated: November 10, 2026.
 
-Orbis is a web browser. It has no account, shows no ads and contains no analytics or crash reporting. The people
-who make Orbis receive no data about you or your browsing.
+Orbis is a web browser. It has no account and shows no ads. The people who make Orbis receive no data about you
+or your browsing, and there is no crash reporting. Cast talks only to a device on your local network.
 
 ## What stays on your phone
 Your tabs, history, bookmarks, downloads list, site settings, saved passwords (encrypted with a key in the Android
@@ -26,6 +26,9 @@ browsing data; the estimate is cleared with browsing history.
 - **Safe Browsing**: Gecko's built-in protection checks pages against lists from Google's Safe Browsing service.
 - **Voice search** uses your phone's speech recognizer (for example Google's); its privacy terms apply.
 - **Updates** are delivered by Google Play.
+- **Cast**: the video or audio address is sent only to the TV or speaker you pick on your local network. Orbis sends
+  nothing to Google or any server for Cast. Casting YouTube opens it in the TV's YouTube app, which can show ads and
+  is subject to YouTube's own terms on the TV.
 
 ## Permissions
 Camera, microphone and location are only used when a website asks and you allow it (and the camera for the QR

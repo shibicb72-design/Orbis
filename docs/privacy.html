@@ -55,11 +55,17 @@ per-request time estimate. Private tabs are not included. Nothing about it is se
   <li><strong>Page translation</strong> runs on your phone. The language models it needs are downloaded from Mozilla the first time.</li>
   <li><strong>Voice search</strong> uses your phone's speech recognizer (for example Google's). Its own privacy terms apply.</li>
   <li><strong>Updates</strong> are delivered by Google Play.</li>
+  <li><strong>Cast</strong>: when you choose Cast, the video or audio address (and, for YouTube, the video id) is sent only to the
+      TV or speaker you pick on your local network. Orbis sends nothing to Google or any server for Cast. Casting YouTube
+      opens it in the TV's YouTube app, which can show ads and is subject to YouTube's own terms on the TV.</li>
 </ul>
 
 <h2>Permissions</h2>
 <ul>
   <li><strong>Internet</strong> and <strong>network state</strong>: to load web pages.</li>
+  <li><strong>Wi-Fi state</strong>, <strong>Wi-Fi multicast</strong> and, on Android 13 and later, <strong>nearby Wi-Fi devices</strong>:
+      to find Chromecast and DLNA speakers and TVs on your local network when you use Cast. Nearby Wi-Fi is not used for
+      location. Orbis does not scan Wi-Fi networks for Cast, and the device list stays on your phone.</li>
   <li><strong>Camera</strong> and <strong>microphone</strong>: only when a website asks and you allow it, and the camera for the QR code
       scanner, which reads codes on your phone.</li>
   <li><strong>Location</strong> (approximate and precise): only when a website asks and you allow it. Orbis never uses location in the background.</li>

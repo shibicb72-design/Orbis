@@ -42,10 +42,11 @@ jobs:
       - name: YouTube ad observer tests
         run: node app/src/test/js/yt-ads.test.js
 
-      - name: Assemble debug APK, unit tests, and lint
+      - name: Assemble debug APK, unit tests, lint, and shrink a release APK
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug testDebugUnitTest lintDebug --stacktrace
+          # assembleRelease is unsigned on CI (no upload key). It runs R8 so a keep-rule miss fails here.
+          ./gradlew assembleDebug testDebugUnitTest lintDebug assembleRelease --stacktrace
 
       - name: Upload debug APK (arm64-v8a)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

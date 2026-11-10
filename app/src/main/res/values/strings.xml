@@ -380,4 +380,28 @@
     <string name="ubo_settings_on">uBlock Origin is installed and turned on.</string>
     <string name="ubo_settings_off_by_user">uBlock Origin is installed but turned off. It is not filtering pages.</string>
     <string name="ubo_settings_off_by_browser">uBlock Origin was disabled by the browser, for example because it was blocked or could not be verified. It is not running.</string>
+
+    <string name="menu_cast">Cast</string>
+    <string name="cast_title">Cast</string>
+    <string name="cast_searching">Looking for TVs and speakers...</string>
+    <string name="cast_no_devices">No devices found. Turn the TV or speaker on, and use the same Wi-Fi as this phone.</string>
+    <string name="cast_no_media">This page has no castable video.</string>
+    <string name="cast_youtube_note">Casting YouTube opens it in the TV\'s YouTube app, which can show ads and follows YouTube\'s own terms.</string>
+    <string name="cast_youtube_need_google">YouTube opens in the TV\'s YouTube app, so it needs a Chromecast, Google TV, or Nest.</string>
+    <string name="cast_dlna_adaptive">Some TVs can\'t play this stream (HLS or DASH). If it doesn\'t start, try a page with an mp4 or webm file.</string>
+    <string name="cast_failed">Couldn\'t cast to this device.</string>
+    <string name="cast_youtube_unconfirmed">The TV didn\'t start this YouTube video.</string>
+    <string name="cast_rejected">The TV refused this cast.</string>
+    <string name="cast_play">Play</string>
+    <string name="cast_pause">Pause</string>
+    <string name="cast_disconnect">Disconnect</string>
+    <string name="cast_volume">Volume</string>
+    <string name="cast_device_chromecast">Chromecast</string>
+    <string name="cast_device_dlna">DLNA</string>
+    <string name="cast_private_title">Casting from a private tab</string>
+    <string name="cast_channel">Cast</string>
+    <string name="cast_notification_casting">Casting</string>
+    <string name="cast_this_page">Cast this page</string>
+    <string name="cast_connecting">Connecting...</string>
+    <string name="cast_close">Close</string>
 </resources>

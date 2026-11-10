@@ -111,6 +111,8 @@ class TabManager(
     private val visits: VisitSink = VisitSink.None,
     /** Called once when the last private tab has closed, so the engine can drop what the private set stored. */
     private val onPrivateBrowsingEnded: () -> Unit = {},
+    /** A single private tab was closed. Set after construction; Cast drops that tab's in-memory target. */
+    var onPrivateTabDisposed: ((Long) -> Unit)? = null,
     /**
      * Deletes one imported document's directory once no open tab can show it again. Called when the tab that
      * opened it closes, and when a navigation leaves it with no back/forward history that could return to it.
@@ -513,6 +515,7 @@ class TabManager(
 
     /** Ends [tab]'s session and drops what the UI still holds for it (a pending download, its link menu, its file). */
     private fun dispose(tab: Tab) {
+        val privateId = tab.id.takeIf { tab.isPrivate }
         observers.remove(tab.id)?.cancel()
         tab.session?.let {
             it.host = null
@@ -526,6 +529,7 @@ class TabManager(
             _pendingDownload.value = null
         }
         if (_linkMenu.value?.tabId == tab.id) _linkMenu.value = null
+        if (privateId != null) onPrivateTabDisposed?.invoke(privateId)
     }
 
     fun close(id: Long) {
