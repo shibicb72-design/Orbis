@@ -28,15 +28,6 @@
     <string name="downloads_status_paused">Pausiert</string>
     <string name="about_title">Über Orbis</string>
     <string name="about_version">Orbis %1$s</string>
-    <string name="update_tap_to_check">Tippen, um nach Updates zu suchen</string>
-    <string name="update_checking">Suche nach Updates…</string>
-    <string name="update_available">Orbis %1$s ist verfügbar. Tippe, um es zu laden.</string>
-    <string name="update_up_to_date">Orbis ist auf dem neuesten Stand</string>
-    <string name="update_unknown">Suche nach Updates fehlgeschlagen. Versuche es später erneut.</string>
-    <string name="update_play">Updates kommen über Google Play.</string>
-    <string name="update_get">Laden</string>
-    <string name="update_auto_title">Automatisch nach Updates suchen</string>
-    <string name="update_auto_summary">Einmal täglich fragt Orbis bei GitHub nach der neuesten Version. Sonst wird nichts gesendet.</string>
     <string name="voice_search">Sprachsuche</string>
     <string name="voice_prompt">Sag einen Suchbegriff oder eine Adresse</string>
     <string name="voice_unavailable">Die Sprachsuche ist auf diesem Smartphone nicht verfügbar.</string>
@@ -226,6 +217,9 @@
     <string name="tabs_selected_label">Aktueller Tab</string>
     <string name="tabs_blank_title">Neuer Tab</string>
     <string name="tabs_limit">Zu viele Tabs geöffnet. Schließe einen, um einen neuen zu öffnen.</string>
+    <string name="address_file_label">Datei</string>
+    <string name="import_open_failed">Die Datei konnte nicht geöffnet werden.</string>
+    <string name="import_too_large">Die Datei ist zu groß zum Öffnen.</string>
 
     <string name="find_hint">Auf Seite suchen</string>
     <string name="find_count">%1$d von %2$d</string>

@@ -27,6 +27,15 @@ class AddressRestingDisplayTest {
     }
 
     @Test
+    fun anImportedDocumentRestsAsItsFileName() {
+        val url = "file:///data/user/0/com.shibi.orbis/cache/imports/11111111-1111-1111-1111-111111111111/my%20report.pdf"
+        assertEquals(
+            RestingAddress("my report.pdf", isHost = false, insecurePrefix = null, localFile = true),
+            addressRestingDisplay(url),
+        )
+    }
+
+    @Test
     fun nonWebTextIsUnchanged() {
         listOf("about:blank", "search words", "https://", "file:///x").forEach {
             assertEquals(it, RestingAddress(it, isHost = false, insecurePrefix = null), addressRestingDisplay(it))

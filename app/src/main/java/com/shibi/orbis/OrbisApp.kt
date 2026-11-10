@@ -8,6 +8,7 @@ import android.content.Context
 import android.os.Environment
 import android.os.SystemClock
 import android.webkit.MimeTypeMap
+import com.shibi.orbis.about.retireGithubUpdateChecker
 import com.shibi.orbis.bookmarks.BookmarkManager
 import com.shibi.orbis.bookmarks.FileBookmarkStore
 import com.shibi.orbis.clear.BrowsingDataClearer
@@ -46,10 +47,13 @@ import com.shibi.orbis.tabs.VisitSink
 import com.shibi.orbis.ubo.SharedPreferencesUboPrefs
 import com.shibi.orbis.ubo.UboOnboardingController
 import java.io.File
+import com.shibi.orbis.engine.ImportOpenQueue
+import com.shibi.orbis.engine.ImportedFileCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,6 +61,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 class OrbisApp : Application() {
     lateinit var container: AppContainer
         private set
+
+    /**
+     * Main-thread scope for the whole process. Shared-document copies use it so a rotation does not cancel them.
+     * Child processes never launch work on it (they return before [container] exists).
+     */
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     /** Keeps the process alive while downloads run. Null in Gecko child processes, like [container]. */
     var downloadForeground: DownloadForegroundController? = null
@@ -66,9 +76,13 @@ class OrbisApp : Application() {
         super.onCreate()
         // Gecko child processes (":tab", ":gpu", ...) run this too; they must not create a runtime or container.
         if (Application.getProcessName() != packageName) return
+        // Play delivers updates. Drop the GitHub checker's prefs.
+        retireGithubUpdateChecker(this)
         val debugLog = DebugLog(filesDir)
-        // App-lifetime scope: installs must survive screens leaving composition.
-        val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val imports = ImportedFileCache(cacheDir)
+        val pendingImports = ImportOpenQueue()
+        // Files copied in from other apps: drop the ones older than a day. Young ones stay so an open tab can reload.
+        appScope.launch(Dispatchers.IO) { imports.deleteOlderThan() }
         val sitePermissions =
             SitePermissionDecisions(
                 store = FileSitePermissionStore(File(filesDir, "site_permissions.json")),
@@ -177,6 +191,12 @@ class OrbisApp : Application() {
                     downloadsRef?.forgetPrivate()
                     browserSettings.forgetPrivate()
                 },
+                releaseImport = { url ->
+                    appScope.launch(Dispatchers.IO) {
+                        runCatching { imports.deleteImport(url) }
+                            .onFailure { debugLog.log("Import", "not deleted") }
+                    }
+                },
             )
         // Selection menu > Search: a new tab (private for a private page) with the user's search engine.
         engine.onSelectionSearch = { text, isPrivate ->
@@ -217,12 +237,26 @@ class OrbisApp : Application() {
                 }
             }
         }
+        // Estimated time saved from blocked YouTube ads. On this phone only; private tabs are not recorded.
+        val youtubeAds =
+            com.shibi.orbis.youtube.YoutubeAdSavings(
+                File(filesDir, "youtube_ad_savings.json"),
+                appScope,
+                Dispatchers.IO,
+                log = { debugLog.log("YouTubeAds", it) },
+            )
+        youtubeAds.load()
+        engine.onYoutubeAdEvent = { youtubeAds.onEvent(it) }
         // Everything here runs on the main thread (appScope is Main). Site permissions and uBO are not touched.
         val clearTargets =
             object : ClearTargets {
                 override fun clearHistory() {
                     history.clearAll()
                     tabs.forgetClosed()
+                    // Opened files are a record of what was viewed, same as history. The cache clear does this too.
+                    deleteImports()
+                    // Video ids and titles from the YouTube estimate are browsing history, cleared with this category.
+                    youtubeAds.clear()
                 }
 
                 override fun closeNormalTabs() = tabs.closeAllNormal()
@@ -238,8 +272,26 @@ class OrbisApp : Application() {
 
                 override fun hasPrivateTabs() = tabs.hasPrivateTabs
 
-                override suspend fun clearEngine(cookiesAndSiteData: Boolean, cache: Boolean) =
-                    engine.clearProfileData(cookiesAndSiteData, cache)
+                override suspend fun clearEngine(cookiesAndSiteData: Boolean, cache: Boolean): Boolean {
+                    // Documents opened from other apps live in the cache. Private tabs block this whole clear
+                    // before we get here, so this never runs while a private tab is open. History clears them too.
+                    if (cache) deleteImports()
+                    return engine.clearProfileData(cookiesAndSiteData, cache)
+                }
+
+                /**
+                 * Drops every imported document. The queue is cleared on this thread so a waiting tab is not opened
+                 * onto a file this delete removes. The files themselves go on the IO dispatcher: [clearHistory]
+                 * runs on the main thread and must not block there. The cache lock is not held during a provider
+                 * read, so the delete does not wait on another app.
+                 */
+                fun deleteImports() {
+                    pendingImports.clear()
+                    appScope.launch(Dispatchers.IO) {
+                        val removed = runCatching { imports.clearAll() }.isSuccess
+                        if (!removed) debugLog.log("Clear", "imported files not cleared")
+                    }
+                }
             }
         val clear =
             ClearController(
@@ -256,6 +308,8 @@ class OrbisApp : Application() {
                 ubo = ubo,
                 tabs = tabs,
                 downloads = downloads,
+                imports = imports,
+                pendingImports = pendingImports,
                 sitePermissions = sitePermissions,
                 bookmarks = bookmarks,
                 history = history,
@@ -273,13 +327,13 @@ class OrbisApp : Application() {
         }
         // Sessions only appear after the onboarding decision; this has long finished by then.
         sitePermissions.load()
-        container.updates = com.shibi.orbis.update.UpdateController(this, appScope).also { it.checkIfDue() }
         // Privacy dashboard: counts of what was blocked, and the app's network use (Android's per-app counter, read
         // once a minute while Orbis runs). Counts only, on this phone.
         val stats =
             com.shibi.orbis.stats.PrivacyStats(File(filesDir, "privacy_stats.json"), appScope, Dispatchers.IO, log = { debugLog.log("Stats", it) })
         stats.load()
         container.privacyStats = stats
+        container.youtubeAdSavings = youtubeAds
         engine.onContentBlocked = { kind, uri, isPrivate -> stats.recordBlocked(kind, uri, isPrivate) }
         appScope.launch {
             val uid = android.os.Process.myUid()
@@ -322,13 +376,17 @@ class AppContainer(
     val thumbnails: com.shibi.orbis.tabs.TabThumbnails = com.shibi.orbis.tabs.TabThumbnails(),
     /** What Orbis blocked and the data it used (the start page dashboard); set by the app after creation. */
     var privacyStats: com.shibi.orbis.stats.PrivacyStats? = null,
-    /** Update checks for builds not from Google Play; set by the app after creation. */
-    var updates: com.shibi.orbis.update.UpdateController? = null,
+    /** Estimated time saved from blocked YouTube ads; set by the app after creation. Cleared with browsing history. */
+    var youtubeAdSavings: com.shibi.orbis.youtube.YoutubeAdSavings? = null,
     val engine: BrowserEngine,
     val ubo: UboOnboardingController,
     /** Owns every tab and session; outlives screens, so Settings never destroys a page. */
     val tabs: TabManager,
     val downloads: DownloadManager,
+    /** PDF and HTML files opened from other apps. Cleared with history and the cache, and trimmed at startup. */
+    val imports: ImportedFileCache,
+    /** Documents copied from other apps, waiting to be opened. Cleared with the files. */
+    val pendingImports: ImportOpenQueue,
     /** The user's camera, microphone and location answers; Settings lists and removes them. */
     val sitePermissions: SitePermissionDecisions,
     val bookmarks: BookmarkManager,

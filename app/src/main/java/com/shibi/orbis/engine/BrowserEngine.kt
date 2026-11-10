@@ -45,6 +45,15 @@ interface BrowserEngine {
     var onContentBlocked: ((kind: com.shibi.orbis.stats.BlockKind, uri: String?, isPrivate: Boolean) -> Unit)?
         get() = null
         set(@Suppress("UNUSED_PARAMETER") value) {}
+
+    /**
+     * A blocked YouTube ad request, or the title of a YouTube watch page, for the on-device time-saved estimate.
+     * The built-in observer does not run in private tabs. Content blocking still passes private pages through; the
+     * store drops them.
+     */
+    var onYoutubeAdEvent: ((event: com.shibi.orbis.youtube.YoutubeAdEvent) -> Unit)?
+        get() = null
+        set(@Suppress("UNUSED_PARAMETER") value) {}
     /** Search for text the user selected on a page (selection menu > Search); [isPrivate] is the page's mode. */
     var onSelectionSearch: ((text: String, isPrivate: Boolean) -> Unit)?
         get() = null
@@ -247,6 +256,13 @@ interface BrowserSession {
     fun showStartPage() {}
     /** A URL handed to us by another app (VIEW intent). http(s) only. */
     fun loadExternalUrl(url: String)
+
+    /**
+     * A PDF or HTML file copied into the import cache. The engine loads it only when the URL is one of those
+     * files; anything else is ignored. Private sessions ignore it. A name ending in `.pdf` is what makes
+     * GeckoView open its built-in pdf.js viewer (see the engine implementation).
+     */
+    fun loadImportedFile(url: String) {}
     /** Switches user agent and viewport between mobile and desktop, then reloads the page. */
     fun setDesktopMode(enabled: Boolean)
     /** Returns false (and does nothing) when there is no history to go back to. */

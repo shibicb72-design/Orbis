@@ -1,6 +1,10 @@
 package com.shibi.orbis.ui.browser
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -264,6 +268,24 @@ internal fun BrowserAddressBar(
                         // used to rest as "http://accounts.googl…". Plain http keeps its "http://" prefix in view.
                         val display = addressRestingDisplay(resting)
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            // A local document rests as its file name, which can look like a domain. The label is
+                            // part of the line so it cannot be scrolled away from that name.
+                            if (display.localFile) {
+                                Icon(
+                                    Icons.Filled.Description,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    stringResource(R.string.address_file_label),
+                                    maxLines = 1,
+                                    style = LocalTextStyle.current.copy(textDirection = TextDirection.Ltr),
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                Spacer(Modifier.width(6.dp))
+                            }
                             if (display.insecurePrefix != null) {
                                 Text(
                                     display.insecurePrefix,

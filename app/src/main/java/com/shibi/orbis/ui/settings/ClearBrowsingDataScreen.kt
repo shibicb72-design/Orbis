@@ -153,7 +153,9 @@ fun ClearBrowsingDataScreen(
             if (entered) (state as? ClearState.Finished)?.let { ResultNotice(it.outcome) }
 
             val enabled = !running
-            CheckRow(R.string.clear_history, null, selection.history, enabled) { selection = selection.copy(history = it) }
+            CheckRow(R.string.clear_history, R.string.clear_history_summary, selection.history, enabled) {
+                selection = selection.copy(history = it)
+            }
             CheckRow(R.string.clear_cookies, R.string.clear_cookies_summary, selection.cookiesAndSiteData, enabled) {
                 selection = selection.copy(cookiesAndSiteData = it)
             }

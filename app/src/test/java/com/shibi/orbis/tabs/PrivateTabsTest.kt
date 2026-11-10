@@ -33,6 +33,7 @@ private class PrivateFakeSession(val init: SessionInit) : BrowserSession {
     var closed = false
     val loads = mutableListOf<String>()
     val externalLoads = mutableListOf<String>()
+    val importLoads = mutableListOf<String>()
     var saved: String? = null
     var savedStateReads = 0
 
@@ -42,6 +43,7 @@ private class PrivateFakeSession(val init: SessionInit) : BrowserSession {
     val saves = mutableListOf<String>()
     override fun saveUrl(url: String) { saves += url }
     override fun loadExternalUrl(url: String) { externalLoads += url }
+    override fun loadImportedFile(url: String) { importLoads += url }
     override fun setDesktopMode(enabled: Boolean) { _state.value = _state.value.copy(desktopMode = enabled) }
     override fun goBack() = false
     override fun goForward() = false
@@ -512,6 +514,26 @@ class PrivateTabsTest {
         // The private tab was left alone.
         assertTrue(priv.externalLoads.isEmpty())
         assertTrue(priv.loads.isEmpty())
+        assertFalse(priv.closed)
+        assertEquals(1, m.tabs.value.count { it.isPrivate })
+    }
+
+    @Test
+    fun openImportedNeverReusesABlankPrivateTab() {
+        val m = manager()
+        m.newPrivateTab()
+        val priv = created[0]
+        val privateId = m.selected.value.id
+        val url = "file:///data/user/0/com.shibi.orbis/cache/imports/11111111-1111-1111-1111-111111111111/a.pdf"
+        m.openImported(url)
+
+        assertFalse(m.selected.value.isPrivate)
+        assertTrue(m.selected.value.id != privateId)
+        assertEquals(listOf(url), created.last().importLoads)
+        assertFalse(created.last().init.isPrivate)
+        assertTrue(priv.importLoads.isEmpty())
+        assertTrue(priv.loads.isEmpty())
+        assertTrue(priv.externalLoads.isEmpty())
         assertFalse(priv.closed)
         assertEquals(1, m.tabs.value.count { it.isPrivate })
     }

@@ -37,5 +37,5 @@ gradlew.bat :app:assembleR8check    # the same shrunk build, own app id, debug-s
 - targetSdk 36 meets Play's current target API requirement.
 - Extensions: only uBlock Origin from addons.mozilla.org. Play allows browsers to run web content and extensions
   (JavaScript); no native code is downloaded.
-- Updates: on Play builds the in-app GitHub update check turns itself off (installer = Play).
+- Updates: Google Play delivers them. There is no in-app update check.
 - Size: the AAB is about 280 MB with both ABIs; Play serves only the device's ABI (roughly the arm64 split).

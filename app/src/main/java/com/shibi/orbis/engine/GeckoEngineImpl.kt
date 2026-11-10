@@ -13,6 +13,11 @@ import androidx.core.content.FileProvider
 import com.shibi.orbis.debug.DebugLog
 import com.shibi.orbis.downloads.DownloadIntents
 import com.shibi.orbis.history.VisitTracker
+import com.shibi.orbis.youtube.CONTENT_BLOCKING_ERROR
+import com.shibi.orbis.youtube.YoutubeAdEvent
+import com.shibi.orbis.youtube.YoutubeAdObservation
+import com.shibi.orbis.youtube.mightReportYoutubeAd
+import com.shibi.orbis.youtube.titleForSameVideo
 import java.io.File
 import java.io.InputStream
 import java.util.UUID
@@ -74,6 +79,9 @@ class GeckoEngineImpl(
     /** Page probe for Cast (see CastExtensionHolder). Allowed in private tabs; it stores nothing. */
     private val castExtension = CastExtensionHolder { debugLog.log("GeckoEngine", it) }
 
+    /** Notices blocked YouTube ad requests for the on-device time-saved estimate. Not installed in private tabs. */
+    private val youtubeAdObserver = YoutubeAdExtensionHolder(onEvent = { onYoutubeAdEvent }, log = { debugLog.log("GeckoEngine", it) })
+
     /** Sites with tracking protection turned off by the user (see TrackingExceptions). */
     private val trackingExceptions = TrackingExceptions()
 
@@ -117,6 +125,7 @@ class GeckoEngineImpl(
 
     override var onSelectionSearch: ((String, Boolean) -> Unit)? = null
     override var onContentBlocked: ((com.shibi.orbis.stats.BlockKind, String?, Boolean) -> Unit)? = null
+    override var onYoutubeAdEvent: ((YoutubeAdEvent) -> Unit)? = null
 
     @Volatile private var httpsOnlyNormal = false
     @Volatile private var httpsOnlyPrivate = true
@@ -280,6 +289,7 @@ class GeckoEngineImpl(
             created.autocompleteStorageDelegate = loginStorageDelegate()
             reader.install(created)
             castExtension.install(created)
+            youtubeAdObserver.install(created)
             // Without a prompt delegate, WebExtensionController.install() hangs forever.
             created.webExtensionController.setPromptDelegate(extensionHost.promptDelegate)
             runtime = created
@@ -461,6 +471,7 @@ class GeckoEngineImpl(
             reader = reader,
             castExtension = castExtension,
             sitePolicy = { sitePolicy },
+            onYoutubeAd = { onYoutubeAdEvent },
             // A popup child inherits the opener's desktop/mobile choice and its privacy, and is never opened by us.
             newPopupChild = { opener ->
                 buildSession(SessionInit(desktopMode = opener.state.value.desktopMode, isPrivate = opener.isPrivate))
@@ -522,6 +533,7 @@ private class GeckoBrowserSession(
     private val reader: ReaderExtensionHolder,
     private val castExtension: CastExtensionHolder,
     private val sitePolicy: () -> SitePolicy?,
+    private val onYoutubeAd: () -> ((YoutubeAdEvent) -> Unit)?,
     private val newPopupChild: (GeckoBrowserSession) -> GeckoBrowserSession,
 ) : BrowserSession {
     private val _state = MutableStateFlow(SessionState(desktopMode = initialDesktopMode))
@@ -529,6 +541,16 @@ private class GeckoBrowserSession(
 
     /** Work tied to this session's prompts (file copies). Cancelled in [close]. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /** `<cacheDir>/imports`. The only `file:` tree this session will load. */
+    private val importRoot = File(appContext.cacheDir, IMPORT_CACHE_DIR)
+
+    /**
+     * True after an imported document forced this session's JavaScript. Forward to a website skips
+     * [onLoadRequest], so the site would otherwise keep the import's setting. Cleared once site policy is applied,
+     * before any reload, so that reload does not apply it again.
+     */
+    private var scriptForcedByImport = false
 
     private val queue = PromptQueue()
     override val prompts: StateFlow<SitePrompt?> = queue.head
@@ -557,6 +579,9 @@ private class GeckoBrowserSession(
     private var wantActive = false
 
     private var latestSessionState: GeckoSession.SessionState? = null
+
+    /** Page URL that [SessionState.title] belongs to. YouTube's SPA updates the address and the title separately. */
+    private var titleForUrl: String? = null
     private var findGeneration = 0
 
     /**
@@ -582,8 +607,23 @@ private class GeckoBrowserSession(
             object : ContentBlocking.Delegate {
                 override fun onContentBlocked(session: GeckoSession, event: ContentBlocking.BlockEvent) {
                     if (!event.isBlocking) return
+                    val uri = event.uri
+                    if (!isPrivate && mightReportYoutubeAd(_state.value.url, uri)) {
+                        onYoutubeAd()?.invoke(
+                            YoutubeAdEvent.Blocked(
+                                YoutubeAdObservation(
+                                    pageUrl = _state.value.url,
+                                    pageTitle = titleForSameVideo(_state.value.title, titleForUrl, _state.value.url),
+                                    requestUrl = uri,
+                                    isPrivate = false,
+                                    error = CONTENT_BLOCKING_ERROR,
+                                    atMillis = System.currentTimeMillis(),
+                                ),
+                            ),
+                        )
+                    }
                     val kind = blockKindOf(event.antiTrackingCategory, event.cookieBehaviorCategory) ?: return
-                    onBlocked()?.invoke(kind, event.uri, isPrivate)
+                    onBlocked()?.invoke(kind, uri, isPrivate)
                 }
             }
     }
@@ -631,7 +671,12 @@ private class GeckoBrowserSession(
             ) {
                 // The only writer of state.url. A load that is pending, halted or failed leaves the OLD page
                 // displayed, so showing its address would let a hostile page spoof the address bar.
-                if (url != null) _state.update { it.copy(url = url) }
+                if (url != null) {
+                    _state.update { it.copy(url = url) }
+                    // Back/Forward commits without onLoadRequest. An import forces JavaScript (HTML off, PDF on).
+                    // Forward back to a website has to restore that site's setting, or it stays off.
+                    applyImportedScript(url, reloadIfChanged = true)
+                }
                 // Gecko hands every web page its tracking permission record; ALLOW means a stored (normal) exception.
                 trackingPermission = perms.firstOrNull { it.permission == GeckoSession.PermissionDelegate.PERMISSION_TRACKING }
                 if (!isPrivate && trackingPermission?.value == GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW) {
@@ -665,6 +710,19 @@ private class GeckoBrowserSession(
                     return GeckoResult.fromValue(if (allow) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
                 }
                 if (request.hasUserGesture && !request.isRedirect) lastGestureNavigationAt = SystemClock.elapsedRealtime()
+                // file: is only a document we copied into the import cache. Anything else (another cache file,
+                // the app's private storage) is refused. HTML then runs with JavaScript off. applySitePolicy
+                // returns immediately for a non-web URL, so this is the place that sets it, before the document loads.
+                // PDF keeps JavaScript: pdf.js needs it. History navigations that skip this callback are corrected
+                // in onPageStart and onLocationChange.
+                if (schemeOf(request.uri) == "file") {
+                    if (!importFileAllowed(importRoot, request.uri)) {
+                        debugLog.log("GeckoSession", "refused file uri")
+                        return GeckoResult.fromValue(AllowOrDeny.DENY)
+                    }
+                    applyImportedScript(request.uri)
+                    return null
+                }
                 // Links for other apps (tel:, mailto:, intent:, an app's own scheme): never loaded here.
                 if (isExternalScheme(request.uri)) return externalSchemeRequest(request)
                 // A web link an installed app opens: ask first (link taps only, not typed addresses or same-site links).
@@ -681,6 +739,20 @@ private class GeckoBrowserSession(
                 // Decide tracking protection for the site BEFORE its page loads (see TrackingExceptions).
                 applyTrackingProtection(!trackingExceptions.isExcepted(request.uri, isPrivate))
                 applySitePolicy(request.uri)
+                return null
+            }
+
+            override fun onSubframeLoadRequest(
+                session: GeckoSession,
+                request: GeckoSession.NavigationDelegate.LoadRequest,
+            ): GeckoResult<AllowOrDeny>? {
+                // Every file: subframe is denied. GeckoView has no callback for img, script or stylesheet loads
+                // (bug 1684947: those can read the app data dir). Imported HTML carries a CSP that blocks them;
+                // see IMPORT_CONTENT_SECURITY_POLICY.
+                if (!fileSubframeAllowed(request.uri)) {
+                    debugLog.log("GeckoSession", "refused file subframe")
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
+                }
                 return null
             }
 
@@ -722,6 +794,9 @@ private class GeckoBrowserSession(
     private fun progressDelegate() =
         object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) {
+                // History can land here without onLoadRequest. An import forces script; a website reached from
+                // an import gets its site policy back. Either reloads once when the setting had to change.
+                applyImportedScript(url, reloadIfChanged = true)
                 // A new top-level page ends any dialog-spam lockout and invalidates the find highlight.
                 abuseGuard.onPageStart()
                 // A permission dialog must not outlive the page that asked; dismissing denies without recording.
@@ -1090,6 +1165,7 @@ private class GeckoBrowserSession(
     private fun contentDelegate() =
         object : GeckoSession.ContentDelegate {
             override fun onTitleChange(session: GeckoSession, title: String?) {
+                titleForUrl = _state.value.url
                 _state.update { it.copy(title = title) }
                 visits.onTitleChange(title)?.let { host?.onVisitTitle(this@GeckoBrowserSession, it.url, it.title) }
             }
@@ -1971,6 +2047,63 @@ private class GeckoBrowserSession(
         debugLog.log("GeckoSession", "external load requested")
     }
 
+    /**
+     * Loads a document copied into the import cache.
+     *
+     * GeckoView's pdf.js (on by default since bug 1810106; `pdfjs.disabled` is left untouched) handles a response
+     * whose content type is `application/pdf`. A `file:` URL has no Content-Type header, so Gecko sniffs the
+     * extension: `.pdf` opens the built-in viewer, `.html` opens as an ordinary local page. This is a
+     * normal [GeckoSession.loadUri] of that file. It is not `resource://pdf.js/...` (the viewer page is privileged)
+     * and not a local HTTP server (that would give the document a network origin). No preference is flipped to
+     * allow `file:` more broadly. XHTML is not imported.
+     *
+     * That is not enough to keep a local page inside its own file. GeckoView does not block `file:` subresources
+     * into the app data directory (bug 1684947). `NavigationDelegate` only offers [onLoadRequest] and
+     * [onSubframeLoadRequest]; there is no hook for `<img>`, `<script>` or `<link>`. HTML was rewritten
+     * with a CSP that denies those (`default-src 'none'`, no `file:` source) and JavaScript is turned off here,
+     * before [loadUri], because [applySitePolicy] does nothing for a non-web URL. The same setting is applied
+     * again from [onPageStart] and [onLocationChange], which is what Back and Forward hit. Forward from that
+     * page to a website restores [applySitePolicy] and reloads once if JavaScript changed; the flag is cleared
+     * first so the reload does not do it again. PDF is not rewritten and keeps JavaScript so pdf.js can run.
+     * [onSubframeLoadRequest] denies every `file:` subframe. Private
+     * sessions never load these: a shared document opens in a normal tab.
+     */
+    override fun loadImportedFile(url: String) {
+        if (closed || isPrivate) return
+        if (!importFileAllowed(importRoot, url)) {
+            debugLog.log("GeckoSession", "refused import load")
+            return
+        }
+        applyImportedScript(url)
+        session.loadUri(url)
+        debugLog.log("GeckoSession", "import load requested")
+    }
+
+    /**
+     * JavaScript for a commit that may have skipped [onLoadRequest]. An import forces HTML off and PDF on.
+     * A website reached from an import gets [applySitePolicy] back. [reloadIfChanged] reloads once when the
+     * value actually changes; [scriptForcedByImport] is cleared before that reload so it cannot loop.
+     */
+    private fun applyImportedScript(url: String, reloadIfChanged: Boolean = false) {
+        when (val action = scriptAfterHistoryCommit(url, session.settings.allowJavascript, scriptForcedByImport)) {
+            HistoryScript.Leave -> Unit
+            is HistoryScript.Force -> {
+                scriptForcedByImport = true
+                if (session.settings.allowJavascript != action.enabled) session.settings.allowJavascript = action.enabled
+                _state.update { it.copy(javaScriptOn = action.enabled) }
+                if (reloadIfChanged && action.reload && !closed && session.isOpen) session.reload()
+            }
+            HistoryScript.RestoreSite -> {
+                val before = session.settings.allowJavascript
+                applySitePolicy(url)
+                val changed = session.settings.allowJavascript != before
+                // The flag is already clear when site policy applied. A missing policy leaves it set and
+                // does not reload, so the next commit can try again without spinning.
+                if (reloadIfChanged && changed && !scriptForcedByImport && !closed && session.isOpen) session.reload()
+            }
+        }
+    }
+
     override fun setDesktopMode(enabled: Boolean) {
         if (closed || _state.value.desktopMode == enabled) return
         applyDesktop(enabled)
@@ -1995,6 +2128,7 @@ private class GeckoBrowserSession(
         val js = policy.javaScriptFor(url, isPrivate)
         if (session.settings.allowJavascript != js) session.settings.allowJavascript = js
         _state.update { it.copy(javaScriptOn = js) }
+        scriptForcedByImport = false
     }
 
     override fun printPage() {
