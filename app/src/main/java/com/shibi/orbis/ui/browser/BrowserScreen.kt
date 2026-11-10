@@ -454,6 +454,15 @@ private fun BrowserContent(
     // a background tab. One launch per request; a failed launch completes it as denied. The page was already answered
     // by the time the settings hint shows, so that dialog never holds anything up.
     val androidContext = LocalContext.current
+    val noAppMessage = stringResource(R.string.open_app_none)
+    val copyLinkAction = stringResource(R.string.open_app_copy)
+    LaunchedEffect(tabs, noAppMessage, copyLinkAction) {
+        tabs.externalLinkFailures.collect { url ->
+            snackbars.currentSnackbarData?.dismiss()
+            val result = snackbars.showSnackbar(noAppMessage, actionLabel = copyLinkAction, duration = SnackbarDuration.Long)
+            if (result == SnackbarResult.ActionPerformed) copyLink(androidContext, url)
+        }
+    }
     val broker = container.engine.androidPermissions
     val androidRequest by broker.head.collectAsStateWithLifecycle()
     val settingsHint by broker.settingsHint.collectAsStateWithLifecycle()
@@ -1231,9 +1240,12 @@ private fun BrowserContent(
     }
 
     linkMenu?.let { request ->
-        LinkMenuDialog(
+        LinkMenuSheet(
             request = request,
             onOpenInNewTab = { tabs.openLinkInNewTab(request) },
+            onOpenInPrivateTab = { tabs.openLinkInPrivateTab(request) },
+            onDownloadLink = { tabs.downloadLink(request) },
+            onOpenExternal = { tabs.openExternalLink(request) },
             onDismiss = { tabs.dismissLinkMenu() },
             onOpenImageInNewTab = { tabs.openImageInNewTab(request) },
             onSaveImage = { tabs.saveImage(request) },

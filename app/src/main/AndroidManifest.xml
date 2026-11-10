@@ -81,8 +81,16 @@
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="market" />
         </intent>
-        <!-- An app's own scheme (zoommtg:) and any other browsable view handler.
-             In <queries>, "*" is a wildcard, and host is required to see filters that name one. -->
+        <!-- magnet: has no host. A query with host="*" does not see those filters, so uTorrent stays invisible to
+             resolveActivity. startActivity is still tried; this entry lets the prompt name the app when it is there. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="magnet" />
+        </intent>
+        <!-- An app's own scheme (zoommtg:) and any other browsable view handler that names a host.
+             In <queries>, "*" is a wildcard, and host is required to see filters that name one.
+             Hostless schemes (magnet:) are listed on their own above. -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />

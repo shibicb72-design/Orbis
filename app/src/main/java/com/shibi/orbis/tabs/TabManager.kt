@@ -1,11 +1,16 @@
 package com.shibi.orbis.tabs
 
 import com.shibi.orbis.engine.BrowserSession
+import com.shibi.orbis.engine.ContextElementInfo
 import com.shibi.orbis.engine.IncomingDownload
+import com.shibi.orbis.engine.PageContextMenu
+import com.shibi.orbis.engine.PageContextType
 import com.shibi.orbis.engine.SessionHost
 import com.shibi.orbis.engine.SessionInit
 import com.shibi.orbis.engine.SessionState
+import com.shibi.orbis.engine.isExternalScheme
 import com.shibi.orbis.engine.isWebUrl
+import com.shibi.orbis.engine.pageContextMenu
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -70,7 +75,22 @@ data class LinkMenuRequest(
     /** Set when an image was long-pressed. */
     val imageUrl: String? = null,
     val hasLink: Boolean = true,
+    /** Visible text of the link, when it is not just the address again. */
+    val linkText: String? = null,
 )
+
+/** The long-press menu for [this], including magnet: and other non-http links. */
+internal fun LinkMenuRequest.pageMenu(): PageContextMenu? =
+    pageContextMenu(
+        ContextElementInfo(
+            type = if (imageUrl != null) PageContextType.IMAGE else PageContextType.OTHER,
+            linkUri = if (hasLink) url else null,
+            srcUri = imageUrl,
+            title = null,
+            altText = null,
+            linkText = linkText,
+        ),
+    )
 
 /**
  * Owns the tabs and their sessions. Main thread only (it is the [SessionHost] of every session it creates).
@@ -137,6 +157,11 @@ class TabManager(
 
     private val _linkMenu = MutableStateFlow<LinkMenuRequest?>(null)
     val linkMenu: StateFlow<LinkMenuRequest?> = _linkMenu.asStateFlow()
+
+    private val externalLinkFailuresChannel = Channel<String>(Channel.BUFFERED)
+
+    /** A link no installed app could open. The browser offers to copy it. */
+    val externalLinkFailures: Flow<String> = externalLinkFailuresChannel.receiveAsFlow()
 
     init {
         val first = Tab(nextId++, null, "", "", false, null, null)
@@ -551,6 +576,31 @@ class TabManager(
         list[i].session?.saveUrl(image)
     }
 
+    /** Long-press "open in new private tab". Always private, even when the link was on a normal tab. */
+    fun openLinkInPrivateTab(request: LinkMenuRequest) {
+        _linkMenu.value = null
+        if (!isWebUrl(request.url)) return
+        createTab(request.url, openerId = request.tabId, external = false, isPrivate = true)
+    }
+
+    /** Long-press "download link". Same confirm-and-save path as saving an image. Http(s) only. */
+    fun downloadLink(request: LinkMenuRequest) {
+        _linkMenu.value = null
+        if (!isWebUrl(request.url)) return
+        val i = indexOf(request.tabId)
+        if (i < 0) return
+        list[i].session?.saveUrl(request.url)
+    }
+
+    /** Long-press "open with external app" for magnet: and other non-http links. */
+    fun openExternalLink(request: LinkMenuRequest) {
+        _linkMenu.value = null
+        if (isWebUrl(request.url) || !isExternalScheme(request.url)) return
+        val i = indexOf(request.tabId)
+        if (i < 0) return
+        list[i].session?.openExternalScheme(request.url)
+    }
+
     // ---- SessionHost ---------------------------------------------------------------------------------------
 
     override fun canOpenTab(): Boolean {
@@ -639,6 +689,25 @@ class TabManager(
             return
         }
         _pendingDownload.value = PendingDownload(download, list[i].id, list[i].isPrivate)
+    }
+
+    override fun onExternalAppMissing(url: String) {
+        if (url.isNotBlank()) externalLinkFailuresChannel.trySend(url)
+    }
+
+    override fun onPageContextMenu(menu: PageContextMenu, session: BrowserSession) {
+        val i = indexOfSession(session)
+        if (i < 0 || list[i].id != selectedId) return
+        val url = menu.linkUrl ?: menu.imageUrl ?: return
+        _linkMenu.value =
+            LinkMenuRequest(
+                url = url,
+                tabId = list[i].id,
+                isPrivate = list[i].isPrivate,
+                imageUrl = menu.imageUrl,
+                hasLink = menu.linkUrl != null,
+                linkText = menu.linkText,
+            )
     }
 
     override fun onLinkContextMenu(url: String, session: BrowserSession) {

@@ -166,6 +166,11 @@ class CustomTabActivity : ComponentActivity() {
 
             override fun onLinkContextMenu(url: String, session: BrowserSession) {}
 
+            override fun onExternalAppMissing(url: String) {
+                if (url.isBlank()) return
+                runCatching { Toast.makeText(this@CustomTabActivity, R.string.open_app_none, Toast.LENGTH_LONG).show() }
+            }
+
             override fun onSessionStateChanged(session: BrowserSession) {}
 
             override fun onVisit(session: BrowserSession, url: String, title: String) = app.container.history.recordVisit(url, title)

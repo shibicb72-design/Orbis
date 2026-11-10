@@ -9,27 +9,44 @@ import android.os.Build
 import android.text.format.Formatter
 import android.webkit.MimeTypeMap
 import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.shibi.orbis.R
 import com.shibi.orbis.downloads.DownloadFileNames
+import com.shibi.orbis.engine.ContextMenuItem
 import com.shibi.orbis.engine.hostOfUrl
+import com.shibi.orbis.engine.isImageAction
 import com.shibi.orbis.tabs.LinkMenuRequest
 import com.shibi.orbis.tabs.PendingDownload
+import com.shibi.orbis.tabs.pageMenu
 
 /**
  * Asks before anything is written to disk, so a page cannot fill the device by triggering downloads. The name shown is
@@ -85,66 +102,127 @@ fun DownloadConfirmDialog(pending: PendingDownload, onConfirm: () -> Unit, onCan
 }
 
 /**
- * Long-press on a link (open in a new tab, copy, share) and/or an image (open image in a new tab, save, copy or share
- * its address). An image that is also a link gets both groups.
+ * Long-press on a link and/or an image. Http(s) links open in a tab (including a private one), copy, share or
+ * download. Other schemes (magnet:) copy, share, or open in another app, and are not loaded as a page. An image that
+ * is also a link shows both groups. The header is the address, shortened when it is long.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LinkMenuDialog(
+fun LinkMenuSheet(
     request: LinkMenuRequest,
     onOpenInNewTab: () -> Unit,
+    onOpenInPrivateTab: () -> Unit,
+    onDownloadLink: () -> Unit,
+    onOpenExternal: () -> Unit,
     onDismiss: () -> Unit,
     onOpenImageInNewTab: () -> Unit = {},
     onSaveImage: () -> Unit = {},
 ) {
+    val menu = request.pageMenu()
+    if (menu == null) {
+        LaunchedEffect(request) { onDismiss() }
+        return
+    }
     val context = LocalContext.current
-    AlertDialog(
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = { Text(request.url, maxLines = 3, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium) },
-        text = {
-            Column(Modifier.fillMaxWidth()) {
-                if (request.hasLink) {
-                    TextButton(onClick = onOpenInNewTab) { Text(stringResource(R.string.link_menu_open_new_tab)) }
-                    TextButton(
-                        onClick = {
-                            copyLink(context, request.url)
-                            onDismiss()
-                        },
-                    ) { Text(stringResource(R.string.link_menu_copy)) }
-                    TextButton(
-                        onClick = {
-                            shareLink(context, request.url)
-                            onDismiss()
-                        },
-                    ) { Text(stringResource(R.string.link_menu_share)) }
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = onSurface,
+    ) {
+        Column(
+            Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(
+                    start = 12.dp,
+                    end = 12.dp,
+                    bottom = 8.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+                ),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
+            Text(
+                menu.header,
+                style = MaterialTheme.typography.titleMedium,
+                color = onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp).semantics { heading() },
+            )
+            val firstImage = menu.items.indexOfFirst { it.isImageAction }
+            menu.items.forEachIndexed { index, item ->
+                if (index == firstImage && firstImage > 0) {
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
                 }
-                val image = request.imageUrl
-                if (image != null) {
-                    if (request.hasLink) HorizontalDivider()
-                    TextButton(onClick = onOpenImageInNewTab) { Text(stringResource(R.string.image_menu_open_new_tab)) }
-                    TextButton(onClick = onSaveImage) { Text(stringResource(R.string.image_menu_save)) }
-                    TextButton(
-                        onClick = {
-                            copyLink(context, image)
-                            onDismiss()
-                        },
-                    ) { Text(stringResource(R.string.image_menu_copy)) }
-                    TextButton(
-                        onClick = {
-                            shareLink(context, image)
-                            onDismiss()
-                        },
-                    ) { Text(stringResource(R.string.image_menu_share)) }
+                TextButton(
+                    onClick = {
+                        when (item) {
+                            ContextMenuItem.OPEN_NEW_TAB -> onOpenInNewTab()
+                            ContextMenuItem.OPEN_NEW_PRIVATE_TAB -> onOpenInPrivateTab()
+                            ContextMenuItem.COPY_LINK_ADDRESS -> {
+                                copyLink(context, request.url)
+                                onDismiss()
+                            }
+                            ContextMenuItem.COPY_LINK_TEXT -> {
+                                val text = menu.linkText
+                                if (text != null) copyLink(context, text)
+                                onDismiss()
+                            }
+                            ContextMenuItem.SHARE_LINK -> {
+                                shareLink(context, request.url)
+                                onDismiss()
+                            }
+                            ContextMenuItem.DOWNLOAD_LINK -> onDownloadLink()
+                            ContextMenuItem.OPEN_EXTERNAL -> onOpenExternal()
+                            ContextMenuItem.OPEN_IMAGE_NEW_TAB -> onOpenImageInNewTab()
+                            ContextMenuItem.SAVE_IMAGE -> onSaveImage()
+                            ContextMenuItem.COPY_IMAGE_ADDRESS -> {
+                                val image = request.imageUrl
+                                if (image != null) copyLink(context, image)
+                                onDismiss()
+                            }
+                            ContextMenuItem.SHARE_IMAGE -> {
+                                val image = request.imageUrl
+                                if (image != null) shareLink(context, image)
+                                onDismiss()
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(contentColor = onSurface),
+                ) {
+                    Text(
+                        contextMenuLabel(item),
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Start,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = onSurface,
+                    )
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.prompt_cancel)) } },
-        containerColor = MaterialTheme.colorScheme.surface,
-        titleContentColor = MaterialTheme.colorScheme.onSurface,
-        textContentColor = MaterialTheme.colorScheme.onSurface,
-    )
+        }
+    }
 }
 
-private fun copyLink(context: Context, url: String) {
+@Composable
+private fun contextMenuLabel(item: ContextMenuItem): String =
+    stringResource(
+        when (item) {
+            ContextMenuItem.OPEN_NEW_TAB -> R.string.link_menu_open_new_tab
+            ContextMenuItem.OPEN_NEW_PRIVATE_TAB -> R.string.link_menu_open_private
+            ContextMenuItem.COPY_LINK_ADDRESS -> R.string.link_menu_copy
+            ContextMenuItem.COPY_LINK_TEXT -> R.string.link_menu_copy_text
+            ContextMenuItem.SHARE_LINK -> R.string.link_menu_share
+            ContextMenuItem.DOWNLOAD_LINK -> R.string.link_menu_download
+            ContextMenuItem.OPEN_EXTERNAL -> R.string.link_menu_open_external
+            ContextMenuItem.OPEN_IMAGE_NEW_TAB -> R.string.image_menu_open_new_tab
+            ContextMenuItem.SAVE_IMAGE -> R.string.image_menu_save
+            ContextMenuItem.COPY_IMAGE_ADDRESS -> R.string.image_menu_copy
+            ContextMenuItem.SHARE_IMAGE -> R.string.image_menu_share
+        },
+    )
+
+internal fun copyLink(context: Context, url: String) {
     val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
     clipboard.setPrimaryClip(ClipData.newPlainText("link", url))
     // Android 13+ shows its own "copied" confirmation.
