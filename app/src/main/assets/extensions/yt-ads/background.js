@@ -48,13 +48,14 @@
 
   try {
     browser.tabs.onRemoved.addListener((tabId) => {
-      pages.setTopUrl(tabId, "", "", Date.now());
+      pages.removeTab(tabId);
     });
   } catch (e) {}
   try {
     browser.tabs.onUpdated.addListener((tabId, info, tab) => {
       if (!info || !info.url || (tab && tab.incognito)) return;
-      deliver(pages.setTopUrl(tabId, info.url, (tab && tab.title) || "", Date.now()));
+      const title = OrbisYt.titleForNavigation(pages.top(tabId), OrbisYt.videoIdFromUrl(info.url), (tab && tab.title) || "");
+      deliver(pages.setTopUrl(tabId, info.url, title, Date.now()));
     });
   } catch (e) {}
 
@@ -68,7 +69,10 @@
         type: "blocked-ad",
         url: details.url,
         documentUrl: top.url,
-        title: OrbisYt.titleForVideo(top, top.videoId),
+        title: OrbisYt.titleForVideo(
+          { url: top.url, title: OrbisYt.titleForNavigation(top, top.videoId, top.title) },
+          top.videoId,
+        ),
         error: details.error || "",
         incognito: false,
         at: Date.now(),
@@ -166,8 +170,6 @@
     "/youtubei/v1/player?*",
     "/youtubei/v1/get_watch",
     "/youtubei/v1/get_watch?*",
-    "/youtubei/v1/reel/reel_watch_sequence",
-    "/youtubei/v1/reel/reel_watch_sequence?*",
     "/watch",
     "/watch?*",
     "/playlist",

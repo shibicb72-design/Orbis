@@ -138,19 +138,36 @@ test("a break listed in both adPlacements and adSlots counts once", () => {
   assert.deepStrictEqual(OrbisYt.slotsFromPlayer(body).slots, ["SLOT_TYPE_PLAYER_BYTES:0"]);
 });
 
-test("shorts reel ads count for the short they interrupt", () => {
+test("shorts reel ads are not counted", () => {
   const body = JSON.stringify({
     reelWatchSequenceResponse: {
       entries: [
-        { command: { reelWatchEndpoint: { videoId: "adadadadada", adClientParams: { isAd: true } } } },
         { command: { reelWatchEndpoint: { videoId: "adadadadada", adClientParams: { isAd: true } } } },
         { command: { reelWatchEndpoint: { videoId: video } } },
       ],
     },
   });
-  const parsed = OrbisYt.slotsFromPlayer(body);
-  assert.strictEqual(parsed.videoId, video);
-  assert.deepStrictEqual(parsed.slots, ["short-ad:adadadadada"]);
+  assert.strictEqual(OrbisYt.slotsFromPlayer(body), null);
+});
+
+test("player-bytes slots with no offset stay distinct by slot id", () => {
+  const body = JSON.stringify({
+    videoDetails: { videoId: video, title: "Talk" },
+    adSlots: [
+      { adSlotRenderer: { slotType: "SLOT_TYPE_PLAYER_BYTES", adSlotMetadata: { slotId: "slot-a" } } },
+      { adSlotRenderer: { slotType: "SLOT_TYPE_PLAYER_BYTES", adSlotMetadata: { slotId: "slot-b" } } },
+    ],
+  });
+  assert.deepStrictEqual(OrbisYt.slotsFromPlayer(body).slots, [
+    "SLOT_TYPE_PLAYER_BYTES:0:slot-a",
+    "SLOT_TYPE_PLAYER_BYTES:0:slot-b",
+  ]);
+});
+
+test("aliasNoAds returns the same text when it has no no_ads key", () => {
+  const raw = JSON.stringify({ videoDetails: { videoId: video, title: "Talk" }, adPlacements: [placement(0)] });
+  assert.strictEqual(OrbisYt.aliasNoAds(raw), raw);
+  assert.strictEqual(OrbisYt.slotsFromPlayer(raw).slots.length, 1);
 });
 
 test("player paths are exact, so a heartbeat is not filtered", () => {
@@ -162,8 +179,47 @@ test("player paths are exact, so a heartbeat is not filtered", () => {
   assert.strictEqual(OrbisYt.classifyRequest("https://www.youtube.com/watch?v=" + video, "main_frame"), "html");
   assert.strictEqual(
     OrbisYt.classifyRequest("https://www.youtube.com/youtubei/v1/reel/reel_watch_sequence?prettyPrint=false", "xmlhttprequest"),
-    "reel",
+    null,
   );
+});
+
+test("a title copied from the previous video is dropped", () => {
+  const t = OrbisYt.createPageTracker();
+  const other = "bbbbbbbbbbb";
+  const otherUrl = "https://www.youtube.com/watch?v=" + other;
+  const first = t.setTopUrl(1, watch, "Talk", 1000);
+  assert.strictEqual(first[0].title, "Talk");
+  const carried = t.setTopUrl(1, otherUrl, "Talk", 2000);
+  assert.strictEqual(carried[0].type, "view-start");
+  assert.strictEqual(carried[0].videoId, other);
+  assert.strictEqual(carried[0].title, "");
+  assert.strictEqual(t.top(1).title, "");
+  assert.strictEqual(OrbisYt.titleForNavigation(t.top(1), other, "Talk"), "Talk");
+  const fromUpdated = OrbisYt.titleForNavigation({ videoId: video, title: "Talk" }, other, "Talk");
+  assert.strictEqual(fromUpdated, "");
+  assert.strictEqual(OrbisYt.titleForVideo({ url: otherUrl, title: fromUpdated }, other), "");
+  t.setTopUrl(1, otherUrl, "Next", 3000);
+  assert.strictEqual(t.top(1).title, "Next");
+  assert.strictEqual(OrbisYt.titleForVideo(t.top(1), other), "Next");
+});
+
+test("removing a tab drops its page, held response, and sent breaks", () => {
+  const parsed = { videoId: video, title: "Talk", slots: ["AD_PLACEMENT_KIND_START:0"] };
+  const t = OrbisYt.createPageTracker();
+  t.setTopUrl(7, "https://www.youtube.com/", "YouTube", 1000);
+  assert.deepStrictEqual(t.pushParsed(7, parsed, false, 1500), []);
+  t.removeTab(7);
+  assert.strictEqual(t.top(7), null);
+  const landed = t.setTopUrl(7, watch, "Talk", 2000);
+  assert.strictEqual(landed.length, 1);
+  assert.strictEqual(landed[0].type, "view-start");
+  const again = t.pushParsed(7, parsed, true, 2100);
+  assert.deepStrictEqual(again[0].slots, parsed.slots);
+  t.removeTab(7);
+  const reopened = t.setTopUrl(7, watch, "Talk", 3000);
+  assert.strictEqual(reopened[0].type, "view-start");
+  const recounted = t.pushParsed(7, parsed, true, 3100);
+  assert.deepStrictEqual(recounted[0].slots, parsed.slots);
 });
 
 test("a response with no ad slots counts none", () => {

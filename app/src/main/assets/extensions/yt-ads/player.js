@@ -40,14 +40,6 @@ var OrbisYt = (function () {
     return null;
   }
 
-  function isShortsUrl(raw) {
-    try {
-      return new URL(String(raw || "")).pathname.toLowerCase().indexOf("/shorts/") !== -1;
-    } catch (e) {
-      return false;
-    }
-  }
-
   function isYoutubePageHost(host) {
     return (
       host === "youtu.be" ||
@@ -87,7 +79,7 @@ var OrbisYt = (function () {
     var top = type === "main_frame";
     if (path === "/youtubei/v1/player" && !top) return "player";
     if (path === "/youtubei/v1/get_watch" && !top) return "player";
-    if (path === "/youtubei/v1/reel/reel_watch_sequence" && !top) return "reel";
+    // Shorts reel ads are not counted. /youtubei/v1/reel/reel_watch_sequence is left alone.
     if (path === "/watch" && !top) return "player";
     if (path === "/playlist" && !top) return "player";
     if (top && videoIdFromUrl(raw)) return "html";
@@ -133,18 +125,36 @@ var OrbisYt = (function () {
     return title.slice(0, 120);
   }
 
+  // YouTube keeps the previous document title until the new one arrives. A title copied onto a different video is dropped.
+  function titleForNavigation(previous, videoId, title) {
+    var next = String(title || "");
+    var trimmed = next.trim();
+    if (
+      previous &&
+      videoId &&
+      previous.videoId &&
+      previous.videoId !== videoId &&
+      trimmed &&
+      trimmed === String(previous.title || "").trim()
+    ) {
+      return "";
+    }
+    return next;
+  }
+
   // uBO's stream filter renames both "adPlacements" and "adSlots" to "no_ads". JSON.parse would keep only the last
   // duplicate key, so each key is renamed to no_ads#1, no_ads#2, … before parsing. String values are left alone.
   function aliasNoAds(text) {
     var raw = String(text || "");
+    if (raw.indexOf("\"no_ads\"") === -1) return raw;
     var out = "";
     var n = 0;
     var inStr = false;
     var esc = false;
+    var seg = 0;
     for (var i = 0; i < raw.length; i++) {
       var c = raw.charAt(i);
       if (inStr) {
-        out += c;
         if (esc) esc = false;
         else if (c === "\\") esc = true;
         else if (c === "\"") inStr = false;
@@ -156,15 +166,15 @@ var OrbisYt = (function () {
         while (k < raw.length && raw.charCodeAt(k) <= 32) k++;
         if (raw.charAt(k) === ":") {
           n++;
-          out += "\"no_ads#" + n + "\"";
+          out += raw.slice(seg, i) + "\"no_ads#" + n + "\"";
           i = j - 1;
+          seg = j;
           continue;
         }
       }
       if (c === "\"") inStr = true;
-      out += c;
     }
-    return out;
+    return out + raw.slice(seg);
   }
 
   function findField(obj, key, depth, allowZero) {
@@ -214,7 +224,14 @@ var OrbisYt = (function () {
     if (offset == null) offset = findField(entry, "offsetStartMs", 0, true);
     if (offset == null) offset = findField(entry, "startTimeMilliseconds", 0, true);
     var at = offset == null ? "0" : offset;
-    if (isPlayerBytes(entry)) return (kind || slotType || "PLAYER_BYTES") + ":" + at;
+    if (isPlayerBytes(entry)) {
+      var id = (kind || slotType || "PLAYER_BYTES") + ":" + at;
+      if (offset == null) {
+        var slotId = findField(entry, "slotId", 0, false);
+        if (slotId) id += ":" + slotId;
+      }
+      return id;
+    }
     if (kind) return kind + ":" + at;
     if (hasKey(entry, "adPlacementRenderer", 0) && offset != null) return "break:" + offset;
     return null;
@@ -294,38 +311,7 @@ var OrbisYt = (function () {
     }
   }
 
-  function reelBreaks(root) {
-    var entries = null;
-    if (root && Array.isArray(root.entries)) entries = root.entries;
-    else if (root && root.reelWatchSequenceResponse && Array.isArray(root.reelWatchSequenceResponse.entries)) {
-      entries = root.reelWatchSequenceResponse.entries;
-    }
-    if (!entries) return null;
-    var ads = [];
-    var seen = {};
-    var anchor = null;
-    entries.forEach(function (entry) {
-      var endpoint = entry && entry.command && entry.command.reelWatchEndpoint;
-      if (!endpoint) return;
-      var flag = endpoint.adClientParams && endpoint.adClientParams.isAd;
-      var isAd = flag === true || flag === "true";
-      if (isAd) {
-        var adId = isVideoId(endpoint.videoId) ? "short-ad:" + endpoint.videoId : "short-ad:" + ads.length;
-        if (!seen[adId]) {
-          seen[adId] = true;
-          ads.push(adId);
-        }
-      } else if (!anchor && isVideoId(endpoint.videoId)) {
-        anchor = endpoint.videoId;
-      }
-    });
-    if (!ads.length) return null;
-    return { videoId: anchor, title: "", slots: ads, bindToTab: !anchor };
-  }
-
   function slotsFromPlayerObject(root) {
-    var reel = reelBreaks(root);
-    if (reel) return reel;
     var players = [];
     collectPlayers(root, players);
     if (!players.length) return null;
@@ -364,32 +350,48 @@ var OrbisYt = (function () {
     var esc = false;
     var sawEq = false;
 
+    function tooBig() {
+      if (json.length <= 4 * 1024 * 1024) return false;
+      phase = "dead";
+      json = "";
+      return true;
+    }
+
     function feedBody(text) {
+      if (phase !== "body" || !text) return;
+      if (!inStr && text.indexOf("\"") === -1 && text.indexOf("{") === -1 && text.indexOf("}") === -1) {
+        json += text;
+        tooBig();
+        return;
+      }
+      var start = 0;
       for (var i = 0; i < text.length; i++) {
-        if (phase !== "body") return;
         var c = text.charAt(i);
-        json += c;
-        if (json.length > 4 * 1024 * 1024) {
-          phase = "dead";
-          json = "";
-          return;
-        }
         if (inStr) {
           if (esc) esc = false;
           else if (c === "\\") esc = true;
           else if (c === "\"") inStr = false;
           continue;
         }
-        if (c === "\"") inStr = true;
-        else if (c === "{") depth++;
-        else if (c === "}") {
+        if (c === "\"") {
+          inStr = true;
+          continue;
+        }
+        if (c === "{") {
+          depth++;
+          continue;
+        }
+        if (c === "}") {
           depth--;
           if (depth === 0) {
-            phase = "done";
+            json += text.slice(start, i + 1);
+            if (!tooBig()) phase = "done";
             return;
           }
         }
       }
+      json += text.slice(start);
+      tooBig();
     }
 
     function feedPre(text) {
@@ -542,7 +544,8 @@ var OrbisYt = (function () {
           try { return new URL(url).hostname.toLowerCase(); } catch (e) { return ""; }
         })());
         var token = prev && prev.videoId === videoId && videoId ? prev.viewToken : (youtube && videoId ? "view-" + videoId + "-" + now + "-" + seq++ : null);
-        tabs.set(tabId, { url: url || "", title: title || "", videoId: youtube ? videoId : null, viewToken: token, youtube: !!youtube });
+        var storedTitle = titleForNavigation(prev, youtube ? videoId : null, title || "");
+        tabs.set(tabId, { url: url || "", title: storedTitle, videoId: youtube ? videoId : null, viewToken: token, youtube: !!youtube });
         if (!youtube) {
           held = held.filter(function (item) { return item.tabId !== tabId; });
           return [];
@@ -553,7 +556,7 @@ var OrbisYt = (function () {
             type: "view-start",
             videoId: videoId,
             pageUrl: url,
-            title: title || "",
+            title: storedTitle,
             viewToken: token,
             at: now,
             incognito: false,
@@ -567,10 +570,6 @@ var OrbisYt = (function () {
         if (top && !top.youtube) return [];
         if (!top && !isTopFrame) return [];
         var videoId = parsed.videoId;
-        if (!videoId && parsed.bindToTab) {
-          if (!(top && top.youtube && top.videoId && isShortsUrl(top.url))) return [];
-          videoId = top.videoId;
-        }
         if (!videoId) return [];
         var body = { videoId: videoId, title: parsed.title || "", slots: parsed.slots || [] };
         if (top && top.youtube && top.videoId === videoId) return emit(tabId, videoId, body, top, now);
@@ -580,6 +579,11 @@ var OrbisYt = (function () {
       tick: function (now) {
         held = held.filter(function (item) { return now - item.at <= HOLD_MS; });
         return [];
+      },
+      removeTab: function (tabId) {
+        tabs.delete(tabId);
+        sent.delete(String(tabId));
+        held = held.filter(function (item) { return item.tabId !== tabId; });
       },
     };
   }
@@ -593,6 +597,7 @@ var OrbisYt = (function () {
     isBreakPing: isBreakPing,
     adIdFromUrl: adIdFromUrl,
     titleForVideo: titleForVideo,
+    titleForNavigation: titleForNavigation,
     aliasNoAds: aliasNoAds,
     slotsFromPlayer: slotsFromPlayer,
     createHtmlScan: createHtmlScan,

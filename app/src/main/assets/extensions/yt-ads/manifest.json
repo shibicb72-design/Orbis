@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Orbis YouTube ad estimate",
-  "version": "1.2",
+  "version": "1.3",
   "description": "Counts YouTube ad breaks from the player response, without changing it, so Orbis can estimate time saved. Sends nothing off the phone. Does not run in private tabs.",
   "browser_specific_settings": { "gecko": { "id": "yt-ads@orbis.shibi.com" } },
   "incognito": "not_allowed",
