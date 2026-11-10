@@ -53,6 +53,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shibi.orbis.R
+import com.shibi.orbis.about.installedVersionName
+import com.shibi.orbis.about.openPlayListing
 import com.shibi.orbis.engine.SearchEngine
 import com.shibi.orbis.role.BrowserRoleStatus
 import com.shibi.orbis.role.DefaultBrowserRole
@@ -140,10 +142,10 @@ fun SettingsScreen(
     onOpenPasswords: () -> Unit = {},
     /** Theme, desktop site, HTTPS-only and JavaScript rows; hidden when null (screen tests). */
     site: BrowserSettings? = null,
-    /** About Orbis: version and update check; hidden when null. */
-    updates: com.shibi.orbis.update.UpdateController? = null,
-    /** Opens a page (the release page) in a new tab. */
-    onOpenUrl: (String) -> Unit = {},
+    /** Installed version shown under About. Null reads it from the package manager. */
+    versionName: String? = null,
+    /** About row tap. Null opens the Play listing (market://, then https). */
+    onOpenPlayListing: (() -> Unit)? = null,
 ) {
     var themeDialogOpen by remember { mutableStateOf(false) }
     var httpsDialogOpen by remember { mutableStateOf(false) }
@@ -438,40 +440,16 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenErrorLog),
                 )
             }
-            if (updates != null) {
-                val result by updates.result.collectAsStateWithLifecycle()
-                val checking by updates.checking.collectAsStateWithLifecycle()
-                val auto by updates.autoCheck.collectAsStateWithLifecycle()
-                SettingsSection(R.string.about_title) {
-                    val available = result as? com.shibi.orbis.update.UpdateResult.Available
-                    SettingsItem(
-                        headlineContent = { Text(stringResource(R.string.about_version, updates.currentVersion)) },
-                        supportingContent = {
-                            Text(
-                                when {
-                                    updates.fromPlay -> stringResource(R.string.update_play)
-                                    checking -> stringResource(R.string.update_checking)
-                                    available != null -> stringResource(R.string.update_available, available.release.version)
-                                    result == com.shibi.orbis.update.UpdateResult.UpToDate -> stringResource(R.string.update_up_to_date)
-                                    result == com.shibi.orbis.update.UpdateResult.Unknown -> stringResource(R.string.update_unknown)
-                                    else -> stringResource(R.string.update_tap_to_check)
-                                },
-                            )
-                        },
-                        modifier = Modifier.fillMaxWidth().clickable(enabled = !updates.fromPlay && !checking) {
-                            if (available != null) onOpenUrl(available.release.pageUrl) else updates.checkNow()
-                        },
-                    )
-                    if (!updates.fromPlay) {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                        SettingsItem(
-                            headlineContent = { Text(stringResource(R.string.update_auto_title)) },
-                            supportingContent = { Text(stringResource(R.string.update_auto_summary)) },
-                            trailingContent = { Switch(checked = auto, onCheckedChange = null) },
-                            modifier = Modifier.fillMaxWidth().toggleable(value = auto, role = Role.Switch, onValueChange = updates::setAutoCheck),
-                        )
-                    }
-                }
+            val installedVersion = remember { installedVersionName(context) }
+            val version = versionName ?: installedVersion
+            SettingsSection(R.string.about_title) {
+                SettingsItem(
+                    headlineContent = { Text(stringResource(R.string.about_version, version)) },
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        val open = onOpenPlayListing
+                        if (open != null) open() else openPlayListing(context)
+                    },
+                )
             }
         }
     }

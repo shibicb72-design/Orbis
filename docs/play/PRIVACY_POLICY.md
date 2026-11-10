@@ -1,6 +1,6 @@
 # Orbis privacy policy (draft)
 
-Last updated: Owner to date on publication.
+Last updated: November 10, 2026.
 
 Orbis is a web browser. It has no account, shows no ads and contains no analytics or crash reporting. The people
 who make Orbis receive no data about you or your browsing.
@@ -21,8 +21,7 @@ delete everything in Settings > Clear browsing data.
 - **Page translation**: done on your phone; the language models are downloaded from Mozilla the first time.
 - **Safe Browsing**: Gecko's built-in protection checks pages against lists from Google's Safe Browsing service.
 - **Voice search** uses your phone's speech recognizer (for example Google's); its privacy terms apply.
-- **Update check** (builds not installed from Google Play, can be turned off): once a day Orbis asks GitHub for the
-  latest release number. Nothing else is sent.
+- **Updates** are delivered by Google Play.
 
 ## Permissions
 Camera, microphone and location are only used when a website asks and you allow it (and the camera for the QR

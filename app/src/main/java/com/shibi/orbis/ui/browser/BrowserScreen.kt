@@ -350,17 +350,6 @@ private fun BrowserContent(
             normalizeAddressInput(heard, container.searchEngine.selected.value)?.let { session?.loadUrl(it) }
         }
     }
-    val updateResult by (container.updates?.result ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsStateWithLifecycle()
-    val updateMessageTemplate = stringResource(R.string.update_available)
-    val updateAction = stringResource(R.string.update_get)
-    LaunchedEffect(updateResult) {
-        val available = updateResult as? com.shibi.orbis.update.UpdateResult.Available ?: return@LaunchedEffect
-        val updates = container.updates ?: return@LaunchedEffect
-        if (updates.announcedVersion == available.release.version) return@LaunchedEffect
-        updates.announcedVersion = available.release.version
-        val r = snackbars.showSnackbar(updateMessageTemplate.format(available.release.version), actionLabel = updateAction, duration = SnackbarDuration.Long)
-        if (r == SnackbarResult.ActionPerformed) tabs.newTab(available.release.pageUrl)
-    }
     val widgetSearch by container.pendingWidgetSearch.collectAsStateWithLifecycle()
     LaunchedEffect(widgetSearch) {
         if (widgetSearch) {

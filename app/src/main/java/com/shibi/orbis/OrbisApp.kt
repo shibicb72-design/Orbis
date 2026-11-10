@@ -8,6 +8,7 @@ import android.content.Context
 import android.os.Environment
 import android.os.SystemClock
 import android.webkit.MimeTypeMap
+import com.shibi.orbis.about.retireGithubUpdateChecker
 import com.shibi.orbis.bookmarks.BookmarkManager
 import com.shibi.orbis.bookmarks.FileBookmarkStore
 import com.shibi.orbis.clear.BrowsingDataClearer
@@ -65,6 +66,8 @@ class OrbisApp : Application() {
         super.onCreate()
         // Gecko child processes (":tab", ":gpu", ...) run this too; they must not create a runtime or container.
         if (Application.getProcessName() != packageName) return
+        // Play delivers updates. Drop the GitHub checker's prefs and any WorkManager job an older build left scheduled.
+        retireGithubUpdateChecker(this)
         val debugLog = DebugLog(filesDir)
         // App-lifetime scope: installs must survive screens leaving composition.
         val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -269,7 +272,6 @@ class OrbisApp : Application() {
         }
         // Sessions only appear after the onboarding decision; this has long finished by then.
         sitePermissions.load()
-        container.updates = com.shibi.orbis.update.UpdateController(this, appScope).also { it.checkIfDue() }
         // Privacy dashboard: counts of what was blocked, and the app's network use (Android's per-app counter, read
         // once a minute while Orbis runs). Counts only, on this phone.
         val stats =
@@ -316,8 +318,6 @@ class AppContainer(
     val thumbnails: com.shibi.orbis.tabs.TabThumbnails = com.shibi.orbis.tabs.TabThumbnails(),
     /** What Orbis blocked and the data it used (the start page dashboard); set by the app after creation. */
     var privacyStats: com.shibi.orbis.stats.PrivacyStats? = null,
-    /** Update checks for builds not from Google Play; set by the app after creation. */
-    var updates: com.shibi.orbis.update.UpdateController? = null,
     val engine: BrowserEngine,
     val ubo: UboOnboardingController,
     /** Owns every tab and session; outlives screens, so Settings never destroys a page. */

@@ -8,3 +8,11 @@
 
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+# retireGithubUpdateChecker cancels a leftover job by reflection. Android Components ship WorkManager;
+# keep the methods that call uses so R8 does not remove them.
+-keepclassmembers class androidx.work.WorkManager {
+    public static androidx.work.WorkManager getInstance(android.content.Context);
+    public androidx.work.Operation cancelUniqueWork(java.lang.String);
+    public androidx.work.Operation cancelAllWorkByTag(java.lang.String);
+}

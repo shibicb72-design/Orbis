@@ -29,15 +29,6 @@
     <string name="downloads_status_paused">En pause</string>
     <string name="about_title">À propos d\'Orbis</string>
     <string name="about_version">Orbis %1$s</string>
-    <string name="update_tap_to_check">Appuyez pour rechercher des mises à jour</string>
-    <string name="update_checking">Recherche de mises à jour…</string>
-    <string name="update_available">Orbis %1$s est disponible. Appuyez pour l\'obtenir.</string>
-    <string name="update_up_to_date">Orbis est à jour</string>
-    <string name="update_unknown">Impossible de rechercher des mises à jour. Réessayez plus tard.</string>
-    <string name="update_play">Les mises à jour proviennent de Google Play.</string>
-    <string name="update_get">Obtenir</string>
-    <string name="update_auto_title">Rechercher automatiquement les mises à jour</string>
-    <string name="update_auto_summary">Une fois par jour, Orbis demande à GitHub sa dernière version. Rien d\'autre n\'est envoyé.</string>
     <string name="voice_search">Recherche vocale</string>
     <string name="voice_prompt">Dites une recherche ou une adresse</string>
     <string name="voice_unavailable">La recherche vocale n\'est pas disponible sur ce téléphone.</string>
