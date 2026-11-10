@@ -35,8 +35,8 @@ class ImportedDocumentsTest {
         assertEquals("pdf", extensionForImportedMime("Application/PDF; charset=binary"))
         assertEquals("html", extensionForImportedMime("text/html; charset=utf-8"))
         assertEquals("html", extensionForImportedMime("  Text/HTML  "))
-        assertEquals("xhtml", extensionForImportedMime("application/xhtml+xml"))
-        assertEquals("xhtml", extensionForImportedMime("application/xhtml+xml;charset=utf-8"))
+        assertNull(extensionForImportedMime("application/xhtml+xml"))
+        assertNull(extensionForImportedMime("application/xhtml+xml;charset=utf-8"))
     }
 
     @Test
@@ -57,7 +57,7 @@ class ImportedDocumentsTest {
         assertEquals("notes.html", sanitizeImportFileName("notes.html", "html"))
         assertEquals("my report (1).pdf", sanitizeImportFileName("my report (1)", "pdf"))
         assertEquals("Report..v2.pdf", sanitizeImportFileName("Report..v2.pdf", "pdf"))
-        assertEquals("page.xhtml", sanitizeImportFileName("page", "xhtml"))
+        assertEquals("page.html", sanitizeImportFileName("page", "html"))
     }
 
     @Test
@@ -70,7 +70,7 @@ class ImportedDocumentsTest {
         assertEquals("a😀b.html", sanitizeImportFileName("a😀b", "html"))
         assertEquals("document.pdf", sanitizeImportFileName(null, "pdf"))
         assertEquals("document.html", sanitizeImportFileName("  ..  ", "html"))
-        assertEquals("document.xhtml", sanitizeImportFileName("/", "xhtml"))
+        assertEquals("document.html", sanitizeImportFileName("/", "html"))
         assertEquals("document.pdf", sanitizeImportFileName("a/..", "pdf"))
     }
 
@@ -116,6 +116,7 @@ class ImportedDocumentsTest {
         assertNull(sharedDocumentRequest(VIEW, "content://x y", "text/html", null))
         assertNull(sharedDocumentRequest(VIEW, "file://evil.example/a.pdf", "application/pdf", null))
         assertNull(sharedDocumentRequest(VIEW, "file:///sdcard/Download/a.pdf", "application/pdf", null))
+        assertNull(sharedDocumentRequest(VIEW, "content://x/page.xhtml", "application/xhtml+xml", null))
         assertNull(sharedDocumentRequest(SEND, "file:///sdcard/a.xhtml", "application/xhtml+xml", null))
         assertNull(sharedDocumentRequest(SEND, "https://example.com/", "text/html", null))
         assertNull(sharedDocumentRequest(SEND, null, "application/pdf", null))
@@ -130,23 +131,20 @@ class ImportedDocumentsTest {
         val cache = ImportedFileCache(tmp.root, now = { 10_000L })
         val pdf = cache.copyIn("../../secret.pdf", "application/pdf", 4) { ByteArrayInputStream("pdf!".toByteArray()) }
         val html = cache.copyIn("page.html", "text/html; charset=utf-8", null) { ByteArrayInputStream("<p>".toByteArray()) }
-        val xhtml = cache.copyIn(null, "application/xhtml+xml", null) {
-            ByteArrayInputStream(
-                "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>t</title></head><body>x</body></html>".toByteArray(),
-            )
-        }
+        val other = cache.copyIn(null, "text/html", null) { ByteArrayInputStream("<p>z</p>".toByteArray()) }
         val pdfUrl = (pdf as ImportResult.Ready).url
         val htmlUrl = (html as ImportResult.Ready).url
-        val xhtmlUrl = (xhtml as ImportResult.Ready).url
+        val otherUrl = (other as ImportResult.Ready).url
 
         assertTrue(pdfUrl.endsWith("/secret.pdf"))
         assertTrue(htmlUrl.endsWith("/page.html"))
-        assertTrue(xhtmlUrl.endsWith("/document.xhtml"))
+        assertTrue(otherUrl.endsWith("/document.html"))
         assertEquals("pdf!", File(URI(pdfUrl)).readText())
         assertTrue(importFileAllowed(cache.root, pdfUrl))
         assertTrue(importFileAllowed(cache.root, htmlUrl))
-        assertTrue(importFileAllowed(cache.root, xhtmlUrl))
+        assertTrue(importFileAllowed(cache.root, otherUrl))
         assertEquals("secret.pdf", importDisplayName(pdfUrl))
+        assertTrue(cache.copyIn("p.xhtml", "application/xhtml+xml", null) { ByteArrayInputStream("<p>".toByteArray()) } is ImportResult.Failed)
 
         val spaced = cache.copyIn("My Report (1).pdf", "application/pdf", 3) {
             ByteArrayInputStream("abc".toByteArray())
@@ -155,7 +153,7 @@ class ImportedDocumentsTest {
         assertEquals("abc", File(URI(spaced.url)).readText())
         assertEquals("My Report (1).pdf", importDisplayName(spaced.url))
 
-        val parents = listOf(pdfUrl, htmlUrl, xhtmlUrl, spaced.url).map { File(URI(it)).parentFile!!.canonicalFile }
+        val parents = listOf(pdfUrl, htmlUrl, otherUrl, spaced.url).map { File(URI(it)).parentFile!!.canonicalFile }
         assertEquals(4, parents.toSet().size)
         parents.forEach { assertEquals(cache.root.canonicalFile, it.parentFile) }
     }
@@ -251,6 +249,12 @@ class ImportedDocumentsTest {
         assertFalse(contentProviderIsThisApp(theirs, "com.shibi.orbis") { null })
         assertFalse(contentProviderIsThisApp("file:///data/secret.pdf", "com.shibi.orbis") { "com.shibi.orbis" })
         assertTrue(contentProviderIsThisApp(theirs, "com.shibi.orbis") { error("lookup failed") })
+        // A userId prefix (content://0@authority/...) stays in the raw authority. Resolving that whole string
+        // misses our provider, so any authority that contains '@' is treated as ours.
+        val prefixed = "content://0@com.shibi.orbis.downloads/cache/secret.pdf"
+        assertTrue(contentProviderIsThisApp(prefixed, "com.shibi.orbis") { error("should not resolve") })
+        val encoded = "content://0%40com.shibi.orbis.downloads/cache/secret.pdf"
+        assertTrue(contentProviderIsThisApp(encoded, "com.shibi.orbis") { error("should not resolve") })
     }
 
     @Test
@@ -279,8 +283,10 @@ class ImportedDocumentsTest {
         val body = "<html><head><title>T</title></head><body><img src=\"file:///data/secret.png\"><script src=\"file:///data/x.js\"></script></body></html>"
         val html = cache.copyIn("page.html", "text/html", null) { ByteArrayInputStream(body.toByteArray()) } as ImportResult.Ready
         val text = File(URI(html.url)).readText()
-        assertTrue(text.startsWith("<meta http-equiv=\"Content-Security-Policy\""))
-        assertTrue(text.indexOf(IMPORT_CONTENT_SECURITY_POLICY) < text.indexOf("<img"))
+        assertTrue(text.startsWith("<meta charset=\"utf-8\">"))
+        val charset = text.indexOf("<meta charset=\"utf-8\">")
+        val policyAt = text.indexOf(IMPORT_CONTENT_SECURITY_POLICY)
+        assertTrue(charset >= 0 && charset < policyAt && policyAt < text.indexOf("<img"))
         assertPolicyBlocksFile(IMPORT_CONTENT_SECURITY_POLICY)
         assertFalse(importedPageJavaScript(html.url)!!)
 
@@ -290,24 +296,64 @@ class ImportedDocumentsTest {
         assertTrue(importedPageJavaScript(pdf.url)!!)
         assertNull(importedPageJavaScript("https://example.com/"))
 
-        val xhtml = """<?xml version="1.0"?><!-- <head> --><html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title></head><body/></html>"""
-        val x = cache.copyIn("p.xhtml", "application/xhtml+xml", null) { ByteArrayInputStream(xhtml.toByteArray()) } as ImportResult.Ready
-        val xText = File(URI(x.url)).readText()
-        val commentEnd = xText.indexOf("-->")
-        val policy = xText.indexOf(IMPORT_CONTENT_SECURITY_POLICY)
-        val title = xText.indexOf("<title>")
-        // The decoy <head> inside the comment is not where the policy was inserted.
-        assertTrue(commentEnd >= 0 && policy > commentEnd && policy < title)
-        assertFalse(importedPageJavaScript(x.url)!!)
-
-        val bare = cache.copyIn("bare.xhtml", "application/xhtml+xml", null) {
-            ByteArrayInputStream("<p>no html</p>".toByteArray())
-        }
-        assertTrue(bare is ImportResult.Failed)
-
         val utf16 = byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0x3c, 0x00)
         val wide = cache.copyIn("wide.html", "text/html", null) { ByteArrayInputStream(utf16) }
         assertTrue(wide is ImportResult.Failed)
+    }
+
+    @Test
+    fun theDoctypeStaysFirstAndThePolicyMetaPrecedesEveryOtherTag() = runBlocking {
+        val cache = ImportedFileCache(tmp.root)
+        val body = "<!DOCTYPE html>\n<html><body><p>é</p></body></html>"
+        val ready = cache.copyIn("page.html", "text/html", null) { ByteArrayInputStream(body.toByteArray(Charsets.UTF_8)) } as ImportResult.Ready
+        val text = File(URI(ready.url)).readText(Charsets.UTF_8)
+        assertTrue(text.startsWith("<!DOCTYPE html>"))
+        val charset = text.indexOf("<meta charset=\"utf-8\">")
+        val policy = text.indexOf("<meta http-equiv=\"Content-Security-Policy\"")
+        val html = text.indexOf("<html>")
+        assertTrue("charset=$charset policy=$policy html=$html", charset > 0 && charset < policy && policy < html)
+        val before = text.substring(0, charset).lowercase()
+        assertFalse(before.contains("<html"))
+        assertFalse(before.contains("<meta"))
+        assertFalse(before.contains("<script"))
+        assertFalse(before.contains("<img"))
+    }
+
+    @Test
+    fun bomWhitespaceAndCommentsStayAheadOfTheDoctype() = runBlocking {
+        val cache = ImportedFileCache(tmp.root)
+        val body = "\uFEFF \n<!-- note --><!DOCTYPE html><img src=\"file:///data/secret.png\">"
+        val ready = cache.copyIn("page.html", "text/html", null) { ByteArrayInputStream(body.toByteArray(Charsets.UTF_8)) } as ImportResult.Ready
+        val text = File(URI(ready.url)).readText(Charsets.UTF_8)
+        assertTrue(text.startsWith("\uFEFF \n<!-- note --><!DOCTYPE html>"))
+        val doctype = text.indexOf("<!DOCTYPE html>")
+        val charset = text.indexOf("<meta charset=\"utf-8\">")
+        val img = text.indexOf("<img")
+        assertTrue(doctype >= 0 && doctype < charset && charset < img)
+    }
+
+    @Test
+    fun htmlThatIsNotUtf8OrStartsWithANulIsRefused() = runBlocking {
+        val cache = ImportedFileCache(tmp.root)
+        val invalid = byteArrayOf('<'.code.toByte(), 0xFF.toByte(), '>'.code.toByte())
+        assertTrue(cache.copyIn("bad.html", "text/html", null) { ByteArrayInputStream(invalid) } is ImportResult.Failed)
+        val utf16 = "<html></html>".toByteArray(Charsets.UTF_16LE)
+        assertTrue(cache.copyIn("wide.html", "text/html", null) { ByteArrayInputStream(utf16) } is ImportResult.Failed)
+        val nul = "<html>a</html>".toByteArray(Charsets.UTF_8)
+        nul[6] = 0
+        assertTrue(cache.copyIn("nul.html", "text/html", null) { ByteArrayInputStream(nul) } is ImportResult.Failed)
+        val late = ByteArray(70 * 1024)
+        val head = "<html><p>".toByteArray(Charsets.UTF_8)
+        head.copyInto(late)
+        late.fill('a'.code.toByte(), head.size, late.size - 1)
+        late[late.size - 1] = 0xFF.toByte()
+        assertTrue(cache.copyIn("tail.html", "text/html", null) { ByteArrayInputStream(late) } is ImportResult.Failed)
+        assertTrue(cache.root.listFiles().isNullOrEmpty())
+        val ok = "<!-- c --><p>é</p>".toByteArray(Charsets.UTF_8)
+        val ready = cache.copyIn("ok.html", "text/html", null) { ByteArrayInputStream(ok) } as ImportResult.Ready
+        val text = File(URI(ready.url)).readText(Charsets.UTF_8)
+        assertTrue(text.contains("é"))
+        assertTrue(text.indexOf("<meta charset=\"utf-8\">") < text.indexOf("<p>"))
     }
 
     @Test
@@ -386,6 +432,105 @@ class ImportedDocumentsTest {
         assertTrue(File(URI(b.url)).isFile)
         assertFalse(cache.deleteImport(a.url))
         assertFalse(cache.deleteImport("file:///etc/passwd"))
+    }
+
+    @Test
+    fun aCopyThatKeepsReadingPastTheIdleWindowSucceeds() = runBlocking {
+        val cache = ImportedFileCache(tmp.root, copyTimeoutMillis = 200, overallTimeoutMillis = 5_000, dispatcher = Dispatchers.IO)
+        var reads = 0
+        val result = cache.copyIn("a.pdf", "application/pdf", null) {
+            object : InputStream() {
+                override fun read(): Int = throw UnsupportedOperationException()
+                override fun read(b: ByteArray, off: Int, len: Int): Int {
+                    if (reads >= 4) return -1
+                    Thread.sleep(120)
+                    reads++
+                    b[off] = 'a'.code.toByte()
+                    return 1
+                }
+            }
+        }
+        assertTrue(result is ImportResult.Ready)
+    }
+
+    @Test
+    fun theOverallCapStopsACopyThatNeverGoesIdle() = runBlocking {
+        val cache = ImportedFileCache(tmp.root, copyTimeoutMillis = 60_000, overallTimeoutMillis = 400, dispatcher = Dispatchers.IO)
+        val closed = AtomicBoolean(false)
+        val start = System.nanoTime()
+        val result = cache.copyIn("a.pdf", "application/pdf", null) {
+            object : InputStream() {
+                override fun read(): Int {
+                    if (closed.get()) throw IOException("closed")
+                    Thread.sleep(30)
+                    return 'a'.code
+                }
+                override fun close() {
+                    closed.set(true)
+                }
+            }
+        }
+        val waitedMs = (System.nanoTime() - start) / 1_000_000
+        assertTrue(result is ImportResult.Failed)
+        assertTrue("overall cap waited ${waitedMs}ms", waitedMs < 3_000)
+        assertTrue(closed.get())
+    }
+
+    @Test(timeout = 5_000)
+    fun aBlockedOpenFailsAtTheIdleTimeout() = runBlocking {
+        val cache = ImportedFileCache(tmp.root, copyTimeoutMillis = 200, overallTimeoutMillis = 8_000, dispatcher = Dispatchers.IO)
+        val release = CountDownLatch(1)
+        val start = System.nanoTime()
+        val result = try {
+            cache.copyIn("a.pdf", "application/pdf", null) {
+                release.await(8, TimeUnit.SECONDS)
+                ByteArrayInputStream(byteArrayOf(1))
+            }
+        } finally {
+            release.countDown()
+        }
+        val waitedMs = (System.nanoTime() - start) / 1_000_000
+        assertTrue(result is ImportResult.Failed)
+        assertTrue("open waited ${waitedMs}ms", waitedMs < 3_000)
+    }
+
+    @Test(timeout = 5_000)
+    fun aBlockedQueryFailsAtTheIdleTimeout() = runBlocking {
+        val cache = ImportedFileCache(tmp.root, copyTimeoutMillis = 200, overallTimeoutMillis = 8_000, dispatcher = Dispatchers.IO)
+        val release = CountDownLatch(1)
+        var opened = false
+        val start = System.nanoTime()
+        val result = try {
+            cache.readShared(
+                "application/pdf",
+                query = {
+                    release.await(8, TimeUnit.SECONDS)
+                    "a.pdf" to 1L
+                },
+                open = {
+                    opened = true
+                    ByteArrayInputStream(byteArrayOf(1))
+                },
+            )
+        } finally {
+            release.countDown()
+        }
+        val waitedMs = (System.nanoTime() - start) / 1_000_000
+        assertTrue(result is ImportResult.Failed)
+        assertFalse(opened)
+        assertTrue("query waited ${waitedMs}ms", waitedMs < 3_000)
+    }
+
+    @Test
+    fun historyBackToImportedHtmlTurnsScriptOffAndPdfKeepsIt() {
+        val html = "file:///data/user/0/com.shibi.orbis/cache/imports/11111111-1111-1111-1111-111111111111/page.html"
+        val pdf = "file:///data/user/0/com.shibi.orbis/cache/imports/11111111-1111-1111-1111-111111111111/a.pdf"
+        assertEquals(false, importScriptCorrection(html, javascriptEnabled = true))
+        assertNull(importScriptCorrection(html, javascriptEnabled = false))
+        assertEquals(true, importScriptCorrection(pdf, javascriptEnabled = false))
+        assertNull(importScriptCorrection(pdf, javascriptEnabled = true))
+        assertNull(importScriptCorrection("https://example.com/", javascriptEnabled = true))
+        assertNull(importScriptCorrection(null, javascriptEnabled = true))
     }
 }
 

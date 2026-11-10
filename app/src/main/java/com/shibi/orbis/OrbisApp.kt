@@ -51,7 +51,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -265,14 +264,17 @@ class OrbisApp : Application() {
                 }
 
                 /**
-                 * Drops every imported document. The queue is cleared first so a waiting tab is not opened onto a
-                 * file this delete removes. The cache lock is not held during a provider read, so this does not
-                 * wait on another app.
+                 * Drops every imported document. The queue is cleared on this thread so a waiting tab is not opened
+                 * onto a file this delete removes. The files themselves go on the IO dispatcher: [clearHistory]
+                 * runs on the main thread and must not block there. The cache lock is not held during a provider
+                 * read, so the delete does not wait on another app.
                  */
                 fun deleteImports() {
                     pendingImports.clear()
-                    val removed = runBlocking(Dispatchers.IO) { runCatching { imports.clearAll() }.isSuccess }
-                    if (!removed) debugLog.log("Clear", "imported files not cleared")
+                    appScope.launch(Dispatchers.IO) {
+                        val removed = runCatching { imports.clearAll() }.isSuccess
+                        if (!removed) debugLog.log("Clear", "imported files not cleared")
+                    }
                 }
             }
         val clear =

@@ -1,20 +1,26 @@
 package com.shibi.orbis.engine
 
-import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.net.URI
+import java.nio.ByteBuffer
+import java.nio.CharBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
-import java.nio.ByteBuffer
 import java.nio.file.Files
 import java.util.ArrayDeque
 import java.util.Locale
 import java.util.Timer
 import java.util.TimerTask
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
@@ -38,13 +44,17 @@ const val IMPORT_MAX_BYTES = 64L * 1024 * 1024
 const val IMPORT_MAX_AGE_MILLIS = 24L * 60 * 60 * 1000
 
 /**
- * How long a provider may take to hand over the bytes. When it elapses the stream is closed so a stuck
- * [InputStream.read] returns, and the partial copy is deleted.
+ * How long a provider may go without handing over another byte. Each read resets it. When it elapses the stream
+ * is closed so a stuck [InputStream.read] returns, and the partial copy is deleted. Opening the stream and the
+ * display-name query sit on the same clock.
  */
-const val IMPORT_COPY_TIMEOUT_MILLIS = 30_000L
+const val IMPORT_COPY_IDLE_TIMEOUT_MILLIS = 30_000L
+
+/** Hard stop for one import, even when bytes keep arriving. Generous enough for a slow large PDF. */
+const val IMPORT_COPY_OVERALL_TIMEOUT_MILLIS = 5L * 60 * 1000
 
 /**
- * Content-Security-Policy written into every imported HTML and XHTML file.
+ * Content-Security-Policy written into every imported HTML file.
  *
  * GeckoView 159's NavigationDelegate can deny top-level loads
  * (`onLoadRequest`) and subframes (`onSubframeLoadRequest`) only. It has no callback for `<img>`, `<script>`,
@@ -61,6 +71,8 @@ const val IMPORT_CONTENT_SECURITY_POLICY =
 private const val MAX_URI_LENGTH = 8_192
 private const val MAX_NAME_BYTES = 120
 private const val COPY_BUFFER_BYTES = 64 * 1024
+private const val HTML_SCAN_BYTES = 64 * 1024
+private const val HTML_NUL_SCAN_BYTES = 4 * 1024
 private const val FALLBACK_NAME = "document"
 private const val STAGING_DIR = "import-staging"
 
@@ -68,7 +80,6 @@ private val MIME_EXTENSIONS =
     mapOf(
         "application/pdf" to "pdf",
         "text/html" to "html",
-        "application/xhtml+xml" to "xhtml",
     )
 
 private val IMPORT_EXTENSIONS = MIME_EXTENSIONS.values.toSet()
@@ -108,7 +119,8 @@ fun mimeForSharedDocument(explicitType: String?, providerType: String?): String?
 fun extensionForImportedMime(mime: String?): String? = importedMime(mime)?.let { MIME_EXTENSIONS[it] }
 
 /**
- * A VIEW or SEND intent's document, or null when it is not a PDF/HTML/XHTML `content:` URI.
+ * A VIEW or SEND intent's document, or null when it is not a PDF or HTML `content:` URI.
+ * `application/xhtml+xml` is not accepted: a CSP meta cannot be made reliable in XHTML.
  * [streamUri] is `EXTRA_STREAM` (SEND). SEND falls back to [dataString] when the extra is absent.
  * `file:` is not accepted: on API 24+ the platform does not grant apps a path to another app's files, and a
  * crafted `file:` URI is only a way to point at our own storage. Web links stay on [externalUrlFrom].
@@ -131,6 +143,10 @@ fun sharedDocumentRequest(action: String?, dataString: String?, mimeType: String
  * True when [uri] is a `content:` URI whose provider belongs to this app. Opening it would display our own
  * private files (the FileProvider can see the cache). A lookup that throws is treated as ours so a failure
  * cannot become a way through. A provider we cannot resolve is not ours.
+ *
+ * An authority containing `@` is also treated as ours. Android keeps a userId prefix on the authority
+ * (`content://0@com.shibi.orbis.downloads/...`), and resolving that whole string does not find our provider,
+ * which would otherwise let the check through. The part after `@` is not looked up either.
  */
 fun contentProviderIsThisApp(uri: String, ourPackage: String, ownerOfAuthority: (String) -> String?): Boolean {
     if (ourPackage.isEmpty()) return false
@@ -140,9 +156,11 @@ fun contentProviderIsThisApp(uri: String, ourPackage: String, ownerOfAuthority: 
         return false
     }
     if (!parsed.scheme.equals("content", ignoreCase = true)) return false
-    val authority = parsed.rawAuthority?.takeIf { it.isNotEmpty() && it.length <= 512 } ?: return false
+    val raw = parsed.rawAuthority?.takeIf { it.isNotEmpty() && it.length <= 512 } ?: return false
+    val decoded = parsed.authority ?: raw
+    if ('@' in raw || '@' in decoded) return true
     val owner = try {
-        ownerOfAuthority(authority)
+        ownerOfAuthority(raw)
     } catch (e: Exception) {
         return true
     }
@@ -151,7 +169,7 @@ fun contentProviderIsThisApp(uri: String, ourPackage: String, ownerOfAuthority: 
 
 /**
  * A file name that is safe to create under the import cache and whose final extension matches [extension]
- * (`pdf`, `html`, or `xhtml`). The extension is what GeckoView uses to choose pdf.js versus a web page,
+ * (`pdf` or `html`). The extension is what GeckoView uses to choose pdf.js versus a web page,
  * so it is forced even when the display name ends in something else.
  * Provider names are untrusted: only the last path segment is kept, control and bidi characters are dropped,
  * and the UTF-8 length is capped while the extension stays intact. Dots inside the name (`Report..v2`) stay.
@@ -227,9 +245,10 @@ fun importDisplayName(url: String): String? {
 
 /**
  * JavaScript for an imported page, or null when [url] is not an import.
- * HTML and XHTML are scriptless. PDF stays on because GeckoView's pdf.js viewer needs it.
+ * HTML is scriptless. PDF stays on because GeckoView's pdf.js viewer needs it.
  * [com.shibi.orbis.engine] site policy does not apply here: it returns before doing anything for a non-web URL,
- * so the session sets this from the load request.
+ * so the session sets this from the load request, and again when a history navigation commits the URL
+ * (Back and Forward do not pass through that request).
  */
 fun importedPageJavaScript(url: String): Boolean? {
     if (!isImportLoadUrl(url)) return null
@@ -243,12 +262,23 @@ fun importedPageJavaScript(url: String): Boolean? {
 }
 
 /**
+ * JavaScript to apply when [url] is committed without a fresh load request, if it differs from [javascriptEnabled].
+ * Null means leave the session alone: the URL is not an import, or the setting is already what that import needs.
+ * Back and Forward can show an imported HTML page while JavaScript is still on from the page the user left.
+ */
+fun importScriptCorrection(url: String?, javascriptEnabled: Boolean): Boolean? {
+    val want = importedPageJavaScript(url ?: return null) ?: return null
+    return want.takeIf { it != javascriptEnabled }
+}
+
+/**
  * Whether a subframe may load [url]. Every `file:` URL is refused.
  *
  * This is the whole of what GeckoView can gate below the top-level document. `<img>`, `<script>` and stylesheets
  * never arrive here (no such callback on `NavigationDelegate` or `ContentDelegate` in GeckoView 159), and bug
  * 1684947 means Gecko will fetch a `file:` subresource from the app data directory. Those are stopped by
  * [IMPORT_CONTENT_SECURITY_POLICY], which is written into the imported HTML before it is shown.
+ * XHTML is not imported: a late `head`, a non-XHTML default namespace, or `<?xml-stylesheet?>` can bypass a meta.
  */
 fun fileSubframeAllowed(url: String): Boolean = schemeOf(url) != "file"
 
@@ -266,23 +296,6 @@ fun cspDirectiveAllows(policy: String, directive: String, scheme: String): Boole
     return list.any { token ->
         val t = token.lowercase(Locale.ROOT)
         t == "*" || t == "$wanted:"
-    }
-}
-
-/**
- * [bytes] with [IMPORT_CONTENT_SECURITY_POLICY] applied, or null when the markup cannot be protected.
- * HTML gets the meta element before every other byte (after a UTF-8 BOM, so the parser sees it first and a
- * later, looser policy cannot widen this one). XHTML gets it as the first child of `head`, or a new `head`
- * under `html` when the document has none. UTF-16 and XHTML that is not well-formed enough to hold the meta
- * are refused: serving them would leave the `file:` subresource hole open. PDF bytes are not passed here.
- */
-fun injectImportContentSecurityPolicy(bytes: ByteArray, extension: String): ByteArray? {
-    if (isUtf16(bytes)) return null
-    val meta = "<meta http-equiv=\"Content-Security-Policy\" content=\"$IMPORT_CONTENT_SECURITY_POLICY\"/>"
-    return when (extension.lowercase(Locale.ROOT)) {
-        "html" -> prependHtmlPolicy(bytes, meta)
-        "xhtml" -> injectXhtmlPolicy(bytes, meta)
-        else -> null
     }
 }
 
@@ -354,19 +367,21 @@ class ImportOpenQueue {
  *
  * Layout is `<cache>/imports/<random>/<safe-name>.<ext>`. The extension comes from the MIME type, not from
  * the display name, because GeckoView picks pdf.js for a `file:` response whose name ends in `.pdf` and treats
- * `.html` / `.xhtml` as a normal local page. The bytes are copied into `import-staging` with no cache lock held,
- * then renamed into [root] under the lock, so Clear browsing data is not stuck behind a provider that never
- * returns. [clearAll] also bumps a generation: a copy that was already in flight is thrown away instead of
- * being published after the clear.
+ * `.html` as a normal local page. The bytes are copied into `import-staging` with no cache lock held, then
+ * renamed into [root] under the lock, so Clear browsing data is not stuck behind a provider that never returns.
+ * [clearAll] also bumps a generation: a copy that was already in flight is thrown away instead of being published
+ * after the clear.
  *
  * pdf.js is the copy built into GeckoView (enabled by default since bug 1810106). The load is a normal `loadUri`
  * of the `file:` URL, not `resource://pdf.js/web/viewer.html` (privileged) and not a loopback server. No
  * file-access preference is changed.
  *
  * A local page is not confined to its directory. GeckoView does not block `file:` subresources into the app
- * data dir (bug 1684947), and a unique file origin does not stop that. HTML and XHTML are therefore rewritten
- * with [IMPORT_CONTENT_SECURITY_POLICY] and shown with JavaScript off. PDF is left byte-for-byte so pdf.js can
- * read it, and JavaScript stays on for that viewer. [fileSubframeAllowed] denies every `file:` subframe on top.
+ * data dir (bug 1684947), and a unique file origin does not stop that. HTML is therefore rewritten with
+ * [IMPORT_CONTENT_SECURITY_POLICY] and shown with JavaScript off. The policy meta is inserted after the BOM,
+ * leading whitespace, comments and an optional doctype, so the page stays in standards mode. PDF is left
+ * byte-for-byte so pdf.js can read it, and JavaScript stays on for that viewer. [fileSubframeAllowed] denies
+ * every `file:` subframe on top. XHTML is refused.
  *
  * [deleteOlderThan] runs at startup (files older than 24h). [clearAll] runs when the user clears history or the cache.
  */
@@ -375,7 +390,8 @@ class ImportedFileCache(
     private val now: () -> Long = System::currentTimeMillis,
     private val maxAgeMillis: Long = IMPORT_MAX_AGE_MILLIS,
     private val maxBytes: Long = IMPORT_MAX_BYTES,
-    private val copyTimeoutMillis: Long = IMPORT_COPY_TIMEOUT_MILLIS,
+    private val copyTimeoutMillis: Long = IMPORT_COPY_IDLE_TIMEOUT_MILLIS,
+    private val overallTimeoutMillis: Long = IMPORT_COPY_OVERALL_TIMEOUT_MILLIS,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     val root: File = File(cacheDir, IMPORT_CACHE_DIR)
@@ -397,26 +413,73 @@ class ImportedFileCache(
         declaredSize: Long?,
         open: () -> InputStream?,
     ): ImportResult = withContext(dispatcher) {
-        val ext = extensionForImportedMime(mime) ?: return@withContext ImportResult.Failed
-        if (declaredSize != null && declaredSize > maxBytes) return@withContext ImportResult.TooLarge
-        val ticket = lock.read { epoch }
-        if (!staging.isDirectory && !staging.mkdirs() && !staging.isDirectory) return@withContext ImportResult.Failed
-        val dir = File(staging, UUID.randomUUID().toString())
-        if (!dir.mkdir()) return@withContext ImportResult.Failed
-        val target = File(dir, sanitizeImportFileName(displayName, ext))
+        val watchdog = ImportCopyWatchdog(copyTimeoutMillis, overallTimeoutMillis)
+        watchdog.start()
         try {
-            val copied = writeCopy(this, target, open)
-            if (copied !is ImportResult.Ready) return@withContext discardStaging(dir, copied)
-            if (ext == "html" || ext == "xhtml") {
-                val injected = injectImportContentSecurityPolicy(target.readBytes(), ext)
-                    ?: return@withContext discardStaging(dir, ImportResult.Failed)
-                if (injected.size.toLong() > maxBytes) return@withContext discardStaging(dir, ImportResult.TooLarge)
-                target.writeBytes(injected)
+            writeImported(this, displayName, mime, declaredSize, open, watchdog)
+        } finally {
+            watchdog.close()
+        }
+    }
+
+    /**
+     * Same copy as [copyIn], but [query] (the display name and size) and [open] share one idle timeout.
+     * A provider that stalls in either call fails the import; bytes that keep arriving reset the idle clock
+     * up to [overallTimeoutMillis].
+     */
+    internal suspend fun readShared(
+        mime: String,
+        query: () -> Pair<String?, Long?>,
+        open: () -> InputStream?,
+    ): ImportResult = withContext(dispatcher) {
+        val watchdog = ImportCopyWatchdog(copyTimeoutMillis, overallTimeoutMillis)
+        watchdog.start()
+        try {
+            val columns = awaitProvider(this, watchdog, query)
+            if (columns == null || watchdog.isTimedOut()) return@withContext ImportResult.Failed
+            val (name, size) = columns
+            if (size != null && size > maxBytes) return@withContext ImportResult.TooLarge
+            writeImported(this, name, mime, size, open, watchdog)
+        } finally {
+            watchdog.close()
+        }
+    }
+
+    private suspend fun writeImported(
+        scope: CoroutineScope,
+        displayName: String?,
+        mime: String,
+        declaredSize: Long?,
+        open: () -> InputStream?,
+        watchdog: ImportCopyWatchdog,
+    ): ImportResult {
+        val ext = extensionForImportedMime(mime) ?: return ImportResult.Failed
+        if (declaredSize != null && declaredSize > maxBytes) return ImportResult.TooLarge
+        val ticket = lock.read { epoch }
+        if (!staging.isDirectory && !staging.mkdirs() && !staging.isDirectory) return ImportResult.Failed
+        val dir = File(staging, UUID.randomUUID().toString())
+        if (!dir.mkdir()) return ImportResult.Failed
+        val target = File(dir, sanitizeImportFileName(displayName, ext))
+        return try {
+            val copied = writeCopy(scope, target, open, watchdog)
+            if (copied !is ImportResult.Ready) return discardStaging(dir, copied)
+            if (ext == "html") {
+                val rewritten = File(dir, target.name + ".tmp")
+                val protected = try {
+                    writeHtmlWithPolicy(target, rewritten)
+                } catch (e: OutOfMemoryError) {
+                    false
+                }
+                if (!protected) return discardStaging(dir, ImportResult.Failed)
+                if (rewritten.length() > maxBytes) return discardStaging(dir, ImportResult.TooLarge)
+                if (!target.delete() || !rewritten.renameTo(target)) return discardStaging(dir, ImportResult.Failed)
             }
             commit(ticket, dir, target.name)
         } catch (e: kotlinx.coroutines.CancellationException) {
             deleteTree(dir)
             throw e
+        } catch (e: OutOfMemoryError) {
+            discardStaging(dir, ImportResult.Failed)
         } catch (e: Exception) {
             discardStaging(dir, ImportResult.Failed)
         }
@@ -454,27 +517,25 @@ class ImportedFileCache(
 
     /**
      * Reads [open] into [target]. A blocked [InputStream.read] does not notice coroutine cancellation, so the
-     * timeout closes the stream from a daemon timer. Closing it is what makes the read return.
+     * idle timeout closes the stream from a daemon timer. Closing it is what makes the read return. Each read
+     * resets that idle clock. [watchdog]'s overall cap still ends a transfer that never goes idle.
      */
-    private suspend fun writeCopy(scope: CoroutineScope, target: File, open: () -> InputStream?): ImportResult {
+    private suspend fun writeCopy(
+        scope: CoroutineScope,
+        target: File,
+        open: () -> InputStream?,
+        watchdog: ImportCopyWatchdog,
+    ): ImportResult {
         val input = try {
-            open()
+            awaitProvider(scope, watchdog, open)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
-        } catch (e: Exception) {
+        }
+        if (input == null || watchdog.isTimedOut()) {
+            input?.let { runCatching { it.close() } }
             return ImportResult.Failed
-        } ?: return ImportResult.Failed
-        val timedOut = AtomicBoolean(false)
-        val timer = Timer("import-copy-timeout", true)
-        timer.schedule(
-            object : TimerTask() {
-                override fun run() {
-                    timedOut.set(true)
-                    runCatching { input.close() }
-                }
-            },
-            copyTimeoutMillis,
-        )
+        }
+        watchdog.watch(input)
         val outcome = try {
             input.use { stream ->
                 target.outputStream().use { out ->
@@ -482,6 +543,8 @@ class ImportedFileCache(
                     var total = 0L
                     while (true) {
                         val n = stream.read(buffer)
+                        if (watchdog.isTimedOut()) return@writeCopy ImportResult.Failed
+                        watchdog.bump()
                         if (n < 0) break
                         total += n
                         if (total > maxBytes) return@writeCopy ImportResult.TooLarge
@@ -490,17 +553,66 @@ class ImportedFileCache(
                     }
                 }
             }
-            if (timedOut.get()) ImportResult.Failed else ImportResult.Ready("")
+            if (watchdog.isTimedOut()) ImportResult.Failed else ImportResult.Ready("")
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
             scope.ensureActive()
             ImportResult.Failed
         } finally {
-            timer.cancel()
             runCatching { input.close() }
         }
-        return if (timedOut.get() && outcome is ImportResult.Ready) ImportResult.Failed else outcome
+        return if (watchdog.isTimedOut() && outcome is ImportResult.Ready) ImportResult.Failed else outcome
+    }
+
+    /**
+     * Runs [block] on a daemon thread so a stuck provider call cannot hold this coroutine past the idle timeout.
+     * The thread itself may still be inside the provider after we give up; the import has already failed.
+     */
+    private suspend fun <T> awaitProvider(scope: CoroutineScope, watchdog: ImportCopyWatchdog, block: () -> T): T? {
+        if (watchdog.isTimedOut()) return null
+        val future = CompletableFuture<T>()
+        val worker = Thread({
+            try {
+                val value = block()
+                if (watchdog.isTimedOut() && value is InputStream) runCatching { value.close() }
+                future.complete(value)
+            } catch (t: Throwable) {
+                future.completeExceptionally(t)
+            }
+        }, "import-provider")
+        worker.isDaemon = true
+        worker.start()
+        try {
+            while (true) {
+                scope.ensureActive()
+                if (watchdog.isTimedOut() || watchdog.overallRemainingMillis() <= 0L) {
+                    watchdog.fire()
+                    future.thenAccept { value ->
+                        if (value is InputStream) runCatching { value.close() }
+                    }
+                    return null
+                }
+                try {
+                    val value = future.get(50, TimeUnit.MILLISECONDS)
+                    watchdog.bump()
+                    if (watchdog.isTimedOut()) {
+                        if (value is InputStream) runCatching { value.close() }
+                        return null
+                    }
+                    return value
+                } catch (e: TimeoutException) {
+                    continue
+                } catch (e: ExecutionException) {
+                    val cause = e.cause
+                    if (cause is kotlinx.coroutines.CancellationException) throw cause
+                    return null
+                }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            watchdog.fire()
+            throw e
+        }
     }
 
     private fun commit(ticket: Int, dir: File, name: String): ImportResult = lock.write {
@@ -536,144 +648,281 @@ private fun discardStaging(dir: File, result: ImportResult): ImportResult {
     return result
 }
 
-private fun isUtf16(bytes: ByteArray): Boolean {
-    if (bytes.size < 2) return false
-    val b0 = bytes[0].toInt() and 0xFF
-    val b1 = bytes[1].toInt() and 0xFF
-    return (b0 == 0xFF && b1 == 0xFE) || (b0 == 0xFE && b1 == 0xFF)
-}
+/**
+ * Idle timeout for one import. [bump] restarts the idle clock. The overall cap is measured from [start] and
+ * does not move. Firing closes the stream currently being read, which is what unblocks a stuck `read`.
+ */
+internal class ImportCopyWatchdog(
+    private val idleMillis: Long,
+    private val overallMillis: Long,
+) {
+    private val timer = Timer("import-copy-timeout", true)
+    private val startedAt = System.nanoTime()
+    private val timedOut = AtomicBoolean(false)
+    private val stream = AtomicReference<InputStream?>(null)
+    private var task: TimerTask? = null
+    private var closed = false
 
-private fun prependHtmlPolicy(bytes: ByteArray, meta: String): ByteArray {
-    val bom = if (bytes.size >= 3 &&
-        bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()
-    ) 3 else 0
-    val prefix = (meta + "\n").toByteArray(Charsets.US_ASCII)
-    val out = ByteArrayOutputStream(bom + prefix.size + bytes.size - bom)
-    out.write(bytes, 0, bom)
-    out.write(prefix)
-    out.write(bytes, bom, bytes.size - bom)
-    return out.toByteArray()
-}
+    fun start() = bump()
 
-private fun injectXhtmlPolicy(bytes: ByteArray, meta: String): ByteArray? {
-    val text = decodeUtf8Strict(bytes) ?: return null
-    val head = findStartTag(text, "head")
-    val inserted = if (head != null && !head.selfClosing) {
-        text.substring(0, head.end) + meta + text.substring(head.end)
-    } else {
-        val html = findStartTag(text, "html") ?: return null
-        if (html.selfClosing) return null
-        text.substring(0, html.end) + "<head>$meta</head>" + text.substring(html.end)
+    fun watch(input: InputStream) {
+        stream.set(input)
+        if (timedOut.get()) runCatching { input.close() }
     }
-    if (!inserted.contains(IMPORT_CONTENT_SECURITY_POLICY)) return null
-    return inserted.toByteArray(Charsets.UTF_8)
+
+    fun isTimedOut(): Boolean = timedOut.get()
+
+    fun overallRemainingMillis(): Long =
+        overallMillis - TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
+
+    fun bump() {
+        val expired = synchronized(this) {
+            if (closed || timedOut.get()) return
+            val left = overallRemainingMillis()
+            if (left <= 0L) {
+                timedOut.compareAndSet(false, true)
+                task?.cancel()
+                true
+            } else {
+                task?.cancel()
+                val delay = minOf(idleMillis, left).coerceAtLeast(1L)
+                val next = object : TimerTask() {
+                    override fun run() = fire()
+                }
+                task = next
+                timer.schedule(next, delay)
+                false
+            }
+        }
+        if (expired) stream.get()?.let { runCatching { it.close() } }
+    }
+
+    fun fire() {
+        val toClose: InputStream?
+        synchronized(this) {
+            if (closed || !timedOut.compareAndSet(false, true)) return
+            task?.cancel()
+            toClose = stream.get()
+        }
+        toClose?.let { runCatching { it.close() } }
+    }
+
+    fun close() {
+        synchronized(this) {
+            closed = true
+            task?.cancel()
+            timer.cancel()
+        }
+    }
 }
 
-private fun decodeUtf8Strict(bytes: ByteArray): String? = try {
-    val decoder = Charsets.UTF_8.newDecoder()
-        .onMalformedInput(CodingErrorAction.REPORT)
-        .onUnmappableCharacter(CodingErrorAction.REPORT)
-    decoder.decode(ByteBuffer.wrap(bytes)).toString()
-} catch (e: CharacterCodingException) {
-    null
+private val POLICY_META: ByteArray = (
+    "<meta charset=\"utf-8\">\n" +
+        "<meta http-equiv=\"Content-Security-Policy\" content=\"$IMPORT_CONTENT_SECURITY_POLICY\">\n"
+    ).toByteArray(Charsets.US_ASCII)
+
+private val DOCTYPE_TOKEN = "<!DOCTYPE".toByteArray(Charsets.US_ASCII)
+private val COMMENT_OPEN = "<!--".toByteArray(Charsets.US_ASCII)
+private val COMMENT_CLOSE = "-->".toByteArray(Charsets.US_ASCII)
+
+/**
+ * Writes [source] to [dest] with a charset meta and [IMPORT_CONTENT_SECURITY_POLICY] inserted after the BOM,
+ * leading whitespace, comments and one optional doctype. Those cannot load a subresource, and a meta before
+ * the doctype would put the page in quirks mode. The insertion point is searched only in the first
+ * [HTML_SCAN_BYTES]. The rest is streamed. False when the bytes are not UTF-8, a NUL sits in the first
+ * [HTML_NUL_SCAN_BYTES] (a BOM-less UTF-16 file), or no safe insertion point exists.
+ */
+private fun writeHtmlWithPolicy(source: File, dest: File): Boolean {
+    FileInputStream(source).use { input ->
+        val scan = ByteArray(HTML_SCAN_BYTES)
+        val n = readFully(input, scan)
+        if (containsNul(scan, minOf(n, HTML_NUL_SCAN_BYTES))) return false
+        val extra = if (n == scan.size) input.read() else -1
+        val more = extra >= 0
+        val insertAt = skipHtmlPreamble(scan, n, more) ?: return false
+        val utf8 = Utf8Check()
+        if (!utf8.feed(scan, 0, n, end = !more)) return false
+        dest.outputStream().use { out ->
+            out.write(scan, 0, insertAt)
+            out.write(POLICY_META)
+            out.write(scan, insertAt, n - insertAt)
+            if (!more) return true
+            val first = byteArrayOf(extra.toByte())
+            if (!copyValidated(input, out, utf8, first)) return false
+        }
+    }
+    return dest.isFile
 }
 
-private class StartTag(val end: Int, val selfClosing: Boolean)
+private fun copyValidated(input: InputStream, out: java.io.OutputStream, utf8: Utf8Check, first: ByteArray): Boolean {
+    if (!utf8.feed(first, 0, first.size, end = false)) return false
+    out.write(first)
+    val buffer = ByteArray(COPY_BUFFER_BYTES)
+    while (true) {
+        val count = input.read(buffer)
+        if (count < 0) return utf8.feed(ByteArray(0), 0, 0, end = true)
+        if (!utf8.feed(buffer, 0, count, end = false)) return false
+        out.write(buffer, 0, count)
+    }
+}
 
-/** The first start tag named [name], skipping comments, processing instructions, declarations and CDATA. */
-private fun findStartTag(text: String, name: String): StartTag? {
+/**
+ * Index where the policy metas may be inserted, or null when the preamble is not finished inside [length].
+ * [fileContinues] means bytes exist past [length]; a doctype that would start past this window is refused
+ * rather than having the meta land in front of it.
+ */
+private fun skipHtmlPreamble(bytes: ByteArray, length: Int, fileContinues: Boolean): Int? {
     var i = 0
-    val n = text.length
-    while (i < n) {
-        if (text[i] != '<') {
+    if (length >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()) i = 3
+    var seenDoctype = false
+    while (i < length) {
+        if (isHtmlSpace(bytes[i])) {
             i++
             continue
         }
-        if (text.startsWith("<!--", i)) {
-            val close = text.indexOf("-->", i + 4)
-            if (close < 0) return null
-            i = close + 3
+        if (regionStartsWith(bytes, length, i, COMMENT_OPEN)) {
+            val end = indexOfBytes(bytes, length, i + COMMENT_OPEN.size, COMMENT_CLOSE)
+            if (end < 0) return null
+            i = end + COMMENT_CLOSE.size
             continue
         }
-        if (text.startsWith("<![CDATA[", i)) {
-            val close = text.indexOf("]]>", i + 9)
-            if (close < 0) return null
-            i = close + 3
+        if (!seenDoctype && regionStartsWithIgnoreCase(bytes, length, i, DOCTYPE_TOKEN)) {
+            val end = skipDeclaration(bytes, length, i)
+            if (end < 0) return null
+            seenDoctype = true
+            i = end
             continue
         }
-        if (i + 1 < n && text[i + 1] == '?') {
-            val close = text.indexOf("?>", i + 2)
-            if (close < 0) return null
-            i = close + 2
-            continue
-        }
-        if (i + 1 < n && text[i + 1] == '!') {
-            i = skipBracket(text, i) ?: return null
-            continue
-        }
-        if (i + 1 < n && text[i + 1] == '/') {
-            i = skipBracket(text, i) ?: return null
-            continue
-        }
-        val tag = readStartTag(text, i) ?: return null
-        if (tag.name.equals(name, ignoreCase = true)) return StartTag(tag.end, tag.selfClosing)
-        i = tag.end
+        if (fileContinues && isPartialPreambleToken(bytes, length, i)) return null
+        return i
     }
-    return null
+    if (fileContinues && !seenDoctype) return null
+    return i
 }
 
-private class ReadTag(val name: String, val end: Int, val selfClosing: Boolean)
-
-private fun readStartTag(text: String, start: Int): ReadTag? {
-    var i = start + 1
-    if (i >= text.length || !text[i].isLetter()) return null
-    val nameStart = i
-    while (i < text.length && (text[i].isLetterOrDigit() || text[i] == ':' || text[i] == '-' || text[i] == '_')) i++
-    val tagName = text.substring(nameStart, i)
-    var quote: Char? = null
-    var slash = false
-    while (i < text.length) {
-        val c = text[i]
-        if (quote != null) {
-            if (c == quote) quote = null
-            i++
-            continue
-        }
-        when (c) {
-            '"', '\'' -> {
-                quote = c
-                slash = false
-                i++
-            }
-            '/' -> {
-                slash = true
-                i++
-            }
-            '>' -> return ReadTag(tagName, i + 1, slash)
-            else -> {
-                if (!c.isWhitespace()) slash = false
-                i++
-            }
-        }
-    }
-    return null
+private fun isPartialPreambleToken(bytes: ByteArray, length: Int, start: Int): Boolean {
+    if (regionStartsWithIgnoreCase(bytes, length, start, DOCTYPE_TOKEN)) return false
+    if (regionStartsWith(bytes, length, start, COMMENT_OPEN)) return false
+    return properPrefix(bytes, start, length, DOCTYPE_TOKEN) || properPrefix(bytes, start, length, COMMENT_OPEN)
 }
 
-/** Index just after the next unquoted `>`, or null when the text ends first. */
-private fun skipBracket(text: String, start: Int): Int? {
-    var quote: Char? = null
-    var i = start + 1
-    while (i < text.length) {
-        val c = text[i]
-        if (quote != null) {
-            if (c == quote) quote = null
+private fun properPrefix(bytes: ByteArray, start: Int, length: Int, token: ByteArray): Boolean {
+    val n = length - start
+    if (n <= 0 || n >= token.size) return false
+    for (k in 0 until n) {
+        if (asciiLower(bytes[start + k]) != asciiLower(token[k])) return false
+    }
+    return true
+}
+
+private fun regionStartsWith(bytes: ByteArray, length: Int, start: Int, token: ByteArray): Boolean {
+    if (start + token.size > length) return false
+    for (k in token.indices) if (bytes[start + k] != token[k]) return false
+    return true
+}
+
+private fun regionStartsWithIgnoreCase(bytes: ByteArray, length: Int, start: Int, token: ByteArray): Boolean {
+    if (start + token.size > length) return false
+    for (k in token.indices) if (asciiLower(bytes[start + k]) != asciiLower(token[k])) return false
+    return true
+}
+
+private fun asciiLower(b: Byte): Byte {
+    val c = b.toInt() and 0xFF
+    return if (c in 'A'.code..'Z'.code) (c + 32).toByte() else b
+}
+
+private fun isHtmlSpace(b: Byte): Boolean {
+    val c = b.toInt() and 0xFF
+    return c == 0x09 || c == 0x0A || c == 0x0C || c == 0x0D || c == 0x20
+}
+
+/** Index just after the next unquoted `>`, or -1 when [length] ends first. */
+private fun skipDeclaration(bytes: ByteArray, length: Int, start: Int): Int {
+    var quote = 0
+    var i = start
+    while (i < length) {
+        val c = bytes[i].toInt() and 0xFF
+        if (quote != 0) {
+            if (c == quote) quote = 0
         } else when (c) {
-            '"', '\'' -> quote = c
-            '>' -> return i + 1
+            '"'.code, '\''.code -> quote = c
+            '>'.code -> return i + 1
         }
         i++
     }
-    return null
+    return -1
+}
+
+private fun indexOfBytes(bytes: ByteArray, length: Int, from: Int, needle: ByteArray): Int {
+    val last = length - needle.size
+    var i = from
+    while (i <= last) {
+        var matches = true
+        for (k in needle.indices) {
+            if (bytes[i + k] != needle[k]) {
+                matches = false
+                break
+            }
+        }
+        if (matches) return i
+        i++
+    }
+    return -1
+}
+
+private fun containsNul(bytes: ByteArray, length: Int): Boolean {
+    for (i in 0 until length) if (bytes[i] == 0.toByte()) return true
+    return false
+}
+
+private fun readFully(input: InputStream, buf: ByteArray): Int {
+    var off = 0
+    while (off < buf.size) {
+        val n = input.read(buf, off, buf.size - off)
+        if (n < 0) return off
+        off += n
+    }
+    return off
+}
+
+/** Strict UTF-8. An incomplete sequence is held until the next [feed] or rejected at the end. */
+private class Utf8Check {
+    private val decoder = Charsets.UTF_8.newDecoder()
+        .onMalformedInput(CodingErrorAction.REPORT)
+        .onUnmappableCharacter(CodingErrorAction.REPORT)
+    private var pending = ByteArray(0)
+
+    fun feed(chunk: ByteArray, off: Int, len: Int, end: Boolean): Boolean {
+        val input = if (pending.isEmpty()) {
+            ByteBuffer.wrap(chunk, off, len)
+        } else {
+            val merged = ByteArray(pending.size + len)
+            pending.copyInto(merged)
+            chunk.copyInto(merged, pending.size, off, off + len)
+            ByteBuffer.wrap(merged)
+        }
+        val output = CharBuffer.allocate(maxOf(1, input.remaining()))
+        return try {
+            val result = decoder.decode(input, output, end)
+            if (result.isMalformed || result.isUnmappable) return false
+            if (!end && input.hasRemaining()) {
+                pending = ByteArray(input.remaining())
+                input.get(pending)
+            } else {
+                pending = ByteArray(0)
+            }
+            if (end) {
+                if (input.hasRemaining() || pending.isNotEmpty()) return false
+                val flushed = decoder.flush(output)
+                !flushed.isMalformed && !flushed.isUnmappable
+            } else {
+                true
+            }
+        } catch (e: CharacterCodingException) {
+            false
+        }
+    }
 }
 
 /** Age of an imported directory is the files inside it. The directory's own mtime changes when it is created and is not the copy time. */

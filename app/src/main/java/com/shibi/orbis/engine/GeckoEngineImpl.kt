@@ -626,7 +626,12 @@ private class GeckoBrowserSession(
             ) {
                 // The only writer of state.url. A load that is pending, halted or failed leaves the OLD page
                 // displayed, so showing its address would let a hostile page spoof the address bar.
-                if (url != null) _state.update { it.copy(url = url) }
+                if (url != null) {
+                    _state.update { it.copy(url = url) }
+                    // Back/Forward commits without onLoadRequest, so an imported page would otherwise keep the
+                    // previous page's JavaScript setting. HTML must be off; PDF must stay on for pdf.js.
+                    applyImportedScript(url, reloadIfChanged = true)
+                }
                 // Gecko hands every web page its tracking permission record; ALLOW means a stored (normal) exception.
                 trackingPermission = perms.firstOrNull { it.permission == GeckoSession.PermissionDelegate.PERMISSION_TRACKING }
                 if (!isPrivate && trackingPermission?.value == GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW) {
@@ -661,9 +666,10 @@ private class GeckoBrowserSession(
                 }
                 if (request.hasUserGesture && !request.isRedirect) lastGestureNavigationAt = SystemClock.elapsedRealtime()
                 // file: is only a document we copied into the import cache. Anything else (another cache file,
-                // the app's private storage) is refused. HTML and XHTML then run with JavaScript off. applySitePolicy
+                // the app's private storage) is refused. HTML then runs with JavaScript off. applySitePolicy
                 // returns immediately for a non-web URL, so this is the place that sets it, before the document loads.
-                // PDF keeps JavaScript: pdf.js needs it.
+                // PDF keeps JavaScript: pdf.js needs it. History navigations that skip this callback are corrected
+                // in onPageStart and onLocationChange.
                 if (schemeOf(request.uri) == "file") {
                     if (!importFileAllowed(importRoot, request.uri)) {
                         debugLog.log("GeckoSession", "refused file uri")
@@ -742,6 +748,9 @@ private class GeckoBrowserSession(
     private fun progressDelegate() =
         object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) {
+                // History can land on an imported HTML page without onLoadRequest. Turn script off (or back on
+                // for a PDF) before the document runs, and reload once when the setting had to change.
+                applyImportedScript(url, reloadIfChanged = true)
                 // A new top-level page ends any dialog-spam lockout and invalidates the find highlight.
                 abuseGuard.onPageStart()
                 // A permission dialog must not outlive the page that asked; dismissing denies without recording.
@@ -1922,18 +1931,19 @@ private class GeckoBrowserSession(
      *
      * GeckoView's pdf.js (on by default since bug 1810106; `pdfjs.disabled` is left untouched) handles a response
      * whose content type is `application/pdf`. A `file:` URL has no Content-Type header, so Gecko sniffs the
-     * extension: `.pdf` opens the built-in viewer, `.html` and `.xhtml` open as an ordinary local page. This is a
+     * extension: `.pdf` opens the built-in viewer, `.html` opens as an ordinary local page. This is a
      * normal [GeckoSession.loadUri] of that file. It is not `resource://pdf.js/...` (the viewer page is privileged)
      * and not a local HTTP server (that would give the document a network origin). No preference is flipped to
-     * allow `file:` more broadly.
+     * allow `file:` more broadly. XHTML is not imported.
      *
      * That is not enough to keep a local page inside its own file. GeckoView does not block `file:` subresources
      * into the app data directory (bug 1684947). `NavigationDelegate` only offers [onLoadRequest] and
-     * [onSubframeLoadRequest]; there is no hook for `<img>`, `<script>` or `<link>`. HTML and XHTML were rewritten
+     * [onSubframeLoadRequest]; there is no hook for `<img>`, `<script>` or `<link>`. HTML was rewritten
      * with a CSP that denies those (`default-src 'none'`, no `file:` source) and JavaScript is turned off here,
-     * before [loadUri], because [applySitePolicy] does nothing for a non-web URL. PDF is not rewritten and keeps
-     * JavaScript so pdf.js can run. [onSubframeLoadRequest] denies every `file:` subframe. Private sessions never
-     * load these: a shared document opens in a normal tab.
+     * before [loadUri], because [applySitePolicy] does nothing for a non-web URL. The same setting is applied
+     * again from [onPageStart] and [onLocationChange], which is what Back and Forward hit. PDF is not rewritten
+     * and keeps JavaScript so pdf.js can run. [onSubframeLoadRequest] denies every `file:` subframe. Private
+     * sessions never load these: a shared document opens in a normal tab.
      */
     override fun loadImportedFile(url: String) {
         if (closed || isPrivate) return
@@ -1946,11 +1956,17 @@ private class GeckoBrowserSession(
         debugLog.log("GeckoSession", "import load requested")
     }
 
-    /** Script for an imported document. HTML and XHTML off, PDF on. No-op when [url] is not an import. */
-    private fun applyImportedScript(url: String) {
+    /**
+     * Script for an imported document. HTML off, PDF on. No-op when [url] is not an import.
+     * [reloadIfChanged] is for a commit that did not pass through [onLoadRequest]: the setting only takes
+     * effect on the next load, so a history navigation reloads once when it had the previous page's value.
+     */
+    private fun applyImportedScript(url: String, reloadIfChanged: Boolean = false) {
+        val correction = importScriptCorrection(url, session.settings.allowJavascript)
         val js = importedPageJavaScript(url) ?: return
-        if (session.settings.allowJavascript != js) session.settings.allowJavascript = js
+        if (correction != null) session.settings.allowJavascript = correction
         _state.update { it.copy(javaScriptOn = js) }
+        if (reloadIfChanged && correction != null && !closed && session.isOpen) session.reload()
     }
 
     override fun setDesktopMode(enabled: Boolean) {
