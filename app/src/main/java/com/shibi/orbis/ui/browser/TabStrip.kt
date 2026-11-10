@@ -16,7 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -31,9 +31,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draganddrop.DragAndDropEvent
@@ -41,9 +39,10 @@ import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.DragAndDropTransferData
 import androidx.compose.ui.draganddrop.mimeTypes
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -66,17 +65,9 @@ internal const val TAB_STRIP_TAG = "tab_strip"
 internal fun tabChipTag(id: Long) = "tab_chip_$id"
 
 /**
- * The index of the one highlighted tab, or -1 when none is. Each chip reads this state, so a lazy
- * row cannot keep a highlight from the last time that chip was current.
- */
-@Composable
-internal fun rememberSelectedTabIndex(tabs: List<TabUi>): State<Int> =
-    rememberUpdatedState(tabs.indexOfFirst { it.selected })
-
-/**
  * A row of the open tabs (title, close button; the current one marked for screen readers and by its frame),
  * with New tab at the end. A tab can be dragged out (its address, to another app or window); a link or text dropped on
- * the strip opens in a new tab.
+ * the strip opens in a new tab. Which chip is highlighted is [TabUi.selected] from the tab list, one id at a time.
  */
 @Composable
 internal fun TabStrip(
@@ -88,8 +79,8 @@ internal fun TabStrip(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    val selectedIndex = rememberSelectedTabIndex(tabs)
-    LaunchedEffect(selectedIndex.value) { if (selectedIndex.value >= 0) listState.animateScrollToItem(selectedIndex.value) }
+    val selectedIndex = tabs.indexOfFirst { it.selected }
+    LaunchedEffect(selectedIndex) { if (selectedIndex >= 0) listState.animateScrollToItem(selectedIndex) }
     val drop = rememberLinkDropTarget(onDropOpen)
     Row(
         modifier
@@ -105,13 +96,8 @@ internal fun TabStrip(
             modifier = Modifier.weight(1f).selectableGroup(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            itemsIndexed(tabs, key = { _, tab -> tab.id }) { index, tab ->
-                TabChip(
-                    tab,
-                    selected = index == selectedIndex.value,
-                    onSelect = { onSelect(tab.id) },
-                    onClose = { onClose(tab.id) },
-                )
+            items(tabs, key = { it.id }) { tab ->
+                TabChip(tab, onSelect = { onSelect(tab.id) }, onClose = { onClose(tab.id) })
             }
         }
         IconButton(onClick = onNewTab) { Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.tabs_new)) }
@@ -120,36 +106,38 @@ internal fun TabStrip(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TabChip(tab: TabUi, selected: Boolean, onSelect: () -> Unit, onClose: () -> Unit) {
+private fun TabChip(tab: TabUi, onSelect: () -> Unit, onClose: () -> Unit) {
     val host = hostOfUrl(tab.url)
     val title = tab.title.ifBlank { host ?: stringResource(R.string.tabs_blank_title) }
     val container =
         when {
-            selected -> MaterialTheme.colorScheme.secondaryContainer
+            tab.selected -> MaterialTheme.colorScheme.secondaryContainer
             tab.isPrivate -> MaterialTheme.colorScheme.tertiaryContainer
             else -> MaterialTheme.colorScheme.surfaceContainer
         }
     val content =
         when {
-            selected -> MaterialTheme.colorScheme.onSecondaryContainer
+            tab.selected -> MaterialTheme.colorScheme.onSecondaryContainer
             tab.isPrivate -> MaterialTheme.colorScheme.onTertiaryContainer
             else -> MaterialTheme.colorScheme.onSurface
         }
-    val shape = MaterialTheme.shapes.small
+    // Re-recorded on every draw and reused as the drag shadow, so the shadow matches the chip
+    // and the chip on screen cannot keep a highlight from an earlier frame.
+    val dragLayer = rememberGraphicsLayer()
     Surface(
         color = container,
         contentColor = content,
-        shape = shape,
-        border = if (selected) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+        shape = MaterialTheme.shapes.small,
+        border = if (tab.selected) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
         modifier = Modifier
             .width(180.dp)
             .height(36.dp)
             .testTag(tabChipTag(tab.id))
             .then(
                 // A private tab's address never leaves the app by drag and drop.
-                if (!tab.isPrivate && isWebUrl(tab.url)) tabDragSource(title, tab.url, container, shape) else Modifier,
+                if (!tab.isPrivate && isWebUrl(tab.url)) Modifier.tabDragSource(dragLayer, title, tab.url) else Modifier,
             )
-            .selectable(selected = selected, role = Role.Tab, onClick = onSelect),
+            .selectable(selected = tab.selected, role = Role.Tab, onClick = onSelect),
     ) {
         Row(Modifier.padding(start = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             if (tab.isPrivate) {
@@ -169,16 +157,17 @@ private fun TabChip(tab: TabUi, selected: Boolean, onSelect: () -> Unit, onClose
 }
 
 /**
- * Drag-out for a normal web tab. The single-argument drag source records the chip into a graphics
- * layer and then draws that layer in place of the live chip, so the highlight (and the title) stay
- * as they were when the layer was cached. This draws the shadow only while a drag is in progress.
+ * Drag-out for a normal web tab. The shadow is the chip's own drawing, recorded again on every
+ * draw into [layer]. The single-argument drag source instead caches one picture and draws that
+ * picture in place of the chip, so a highlight from an earlier selection stays on screen.
  */
 @OptIn(ExperimentalFoundationApi::class)
-private fun tabDragSource(title: String, url: String, shadow: Color, shape: Shape): Modifier =
-    Modifier.dragAndDropSource(
-        drawDragDecoration = {
-            drawOutline(shape.createOutline(size, layoutDirection, this), color = shadow)
-        },
+private fun Modifier.tabDragSource(layer: GraphicsLayer, title: String, url: String): Modifier =
+    drawWithContent {
+        layer.record { this@drawWithContent.drawContent() }
+        drawLayer(layer)
+    }.dragAndDropSource(
+        drawDragDecoration = { drawLayer(layer) },
         transferData = { _ ->
             DragAndDropTransferData(
                 ClipData.newPlainText(title, url),

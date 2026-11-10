@@ -4,7 +4,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material.icons.filled.History
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.foundation.layout.size
@@ -13,11 +12,11 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -54,8 +53,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -177,8 +176,7 @@ internal fun TabSwitcher(
             }
         }
         // Opens scrolled to the current tab: with many tabs it would otherwise sit below the fold.
-        val selectedIndexState = rememberSelectedTabIndex(tabs)
-        val selectedIndex = selectedIndexState.value.coerceAtLeast(0)
+        val selectedIndex = tabs.indexOfFirst { it.selected }.coerceAtLeast(0)
         val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = selectedIndex)
         // The first placement happens before the sheet has its final height; once it is open, bring the current tab fully
         // into view if it is not (never moves a grid the user can already see the current tab in).
@@ -206,17 +204,16 @@ internal fun TabSwitcher(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            itemsIndexed(tabs, key = { _, tab -> tab.id }) { index, tab ->
-                val current = index == selectedIndexState.value
+            items(tabs, key = { it.id }) { tab ->
                 val container =
                     when {
-                        current -> MaterialTheme.colorScheme.secondaryContainer
+                        tab.selected -> MaterialTheme.colorScheme.secondaryContainer
                         tab.isPrivate -> MaterialTheme.colorScheme.tertiaryContainer
                         else -> MaterialTheme.colorScheme.surface
                     }
                 val content =
                     when {
-                        current -> MaterialTheme.colorScheme.onSecondaryContainer
+                        tab.selected -> MaterialTheme.colorScheme.onSecondaryContainer
                         tab.isPrivate -> MaterialTheme.colorScheme.onTertiaryContainer
                         else -> MaterialTheme.colorScheme.onSurface
                     }
@@ -228,7 +225,7 @@ internal fun TabSwitcher(
                     contentColor = content,
                     shape = MaterialTheme.shapes.medium,
                     // The current tab has a visible frame as well as its label (not color alone).
-                    border = if (current) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+                    border = if (tab.selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                     modifier = Modifier
                         .animateItem(
                             fadeInSpec = null,
@@ -237,11 +234,9 @@ internal fun TabSwitcher(
                         )
                         .fillMaxWidth()
                         .testTag(tabRowTag(tab.id))
-                        .semantics {
-                            selected = current
-                            role = Role.Tab
-                        }
-                        .clickable { end(TabSheetOutcome.SELECTED) { onSelect(tab.id) } },
+                        .selectable(selected = tab.selected, role = Role.Tab) {
+                            end(TabSheetOutcome.SELECTED) { onSelect(tab.id) }
+                        },
                 ) {
                     Column {
                         Row(
@@ -255,16 +250,19 @@ internal fun TabSwitcher(
                                     modifier = Modifier.padding(end = 6.dp).size(18.dp),
                                 )
                             }
-                            if (current) {
+                            if (tab.selected) {
                                 Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.padding(end = 6.dp).size(18.dp))
                             }
                             Column(Modifier.weight(1f)) {
-                                if (current) {
+                                if (tab.selected) {
                                     Text(
                                         stringResource(R.string.tabs_selected_label),
                                         style = MaterialTheme.typography.labelSmall,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
+                                        // The card already announces itself as the selected tab. The words stay
+                                        // visible. Clearing semantics keeps TalkBack from reading them again.
+                                        modifier = Modifier.clearAndSetSemantics { this[SemanticsProperties.TestTag] = CURRENT_TAB_LABEL_TAG },
                                     )
                                 }
                                 Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -314,6 +312,8 @@ private fun TabPreview(image: ImageBitmap?, letter: String, host: String?) {
         }
     }
 }
+
+internal const val CURRENT_TAB_LABEL_TAG = "current_tab_label"
 
 internal fun tabRowTag(id: Long) = "tab_row_$id"
 
