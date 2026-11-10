@@ -70,7 +70,7 @@
         url: details.url,
         documentUrl: top.url,
         title: OrbisYt.titleForVideo(
-          { url: top.url, title: OrbisYt.titleForNavigation(top, top.videoId, top.title) },
+          { url: top.url, title: OrbisYt.titleForNavigation(top, top.videoId, top.title), staleTitle: top.staleTitle },
           top.videoId,
         ),
         error: details.error || "",

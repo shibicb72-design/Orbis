@@ -128,6 +128,22 @@ class YoutubeAdEstimateTest {
     }
 
     @Test
+    fun anUncountedPingDoesNotReplaceAnExistingTitle() {
+        val counted = applyAdPing(null, AdPing(video, "Talk", "ad_v:one", 1_000))
+        val repeat = applyAdPing(counted.memory, AdPing(video, "Other video", "ad_v:one", 2_000))
+        assertEquals(0, repeat.addedAds)
+        assertEquals("Talk", repeat.memory.title)
+        val fromPlayer = applyPlayerSlots(null, video, "Talk", listOf("slot:a"), 3_000)
+        val suppressed = applyAdPing(fromPlayer.memory, AdPing(video, "Other video", "ad_v:two", 4_000))
+        assertEquals(0, suppressed.addedAds)
+        assertEquals("Talk", suppressed.memory.title)
+        val blank = applyAdPing(null, AdPing(video, null, "ad_v:three", 5_000))
+        val filled = applyAdPing(blank.memory, AdPing(video, "Later", "ad_v:three", 6_000))
+        assertEquals(0, filled.addedAds)
+        assertEquals("Later", filled.memory.title)
+    }
+
+    @Test
     fun playerSlotsCountOncePerViewAndALaterResponseCountsAgain() {
         val first = applyPlayerSlots(null, video, "Talk", listOf("slot:a", "slot:a", "slot:b"), 1_000)
         assertEquals(2, first.addedAds)

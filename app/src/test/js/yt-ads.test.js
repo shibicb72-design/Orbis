@@ -183,24 +183,51 @@ test("player paths are exact, so a heartbeat is not filtered", () => {
   );
 });
 
-test("a title copied from the previous video is dropped", () => {
+function pingTitle(top) {
+  return OrbisYt.titleForVideo(
+    { url: top.url, title: OrbisYt.titleForNavigation(top, top.videoId, top.title), staleTitle: top.staleTitle },
+    top.videoId,
+  );
+}
+
+test("two stale titles are dropped when the page message arrives before the tab update", () => {
   const t = OrbisYt.createPageTracker();
   const other = "bbbbbbbbbbb";
   const otherUrl = "https://www.youtube.com/watch?v=" + other;
-  const first = t.setTopUrl(1, watch, "Talk", 1000);
-  assert.strictEqual(first[0].title, "Talk");
-  const carried = t.setTopUrl(1, otherUrl, "Talk", 2000);
-  assert.strictEqual(carried[0].type, "view-start");
-  assert.strictEqual(carried[0].videoId, other);
-  assert.strictEqual(carried[0].title, "");
+  t.setTopUrl(1, watch, "Talk", 1000);
+  const fromPage = t.setTopUrl(1, otherUrl, "Talk", 2000);
+  assert.strictEqual(fromPage[0].type, "view-start");
+  assert.strictEqual(fromPage[0].title, "");
   assert.strictEqual(t.top(1).title, "");
-  assert.strictEqual(OrbisYt.titleForNavigation(t.top(1), other, "Talk"), "Talk");
-  const fromUpdated = OrbisYt.titleForNavigation({ videoId: video, title: "Talk" }, other, "Talk");
+  assert.strictEqual(t.top(1).staleTitle, "Talk");
+  const fromUpdated = OrbisYt.titleForNavigation(t.top(1), other, "Talk");
   assert.strictEqual(fromUpdated, "");
-  assert.strictEqual(OrbisYt.titleForVideo({ url: otherUrl, title: fromUpdated }, other), "");
+  t.setTopUrl(1, otherUrl, fromUpdated, 2100);
+  assert.strictEqual(t.top(1).title, "");
+  assert.strictEqual(t.top(1).staleTitle, "Talk");
+  assert.strictEqual(pingTitle(t.top(1)), "");
   t.setTopUrl(1, otherUrl, "Next", 3000);
   assert.strictEqual(t.top(1).title, "Next");
+  assert.strictEqual(t.top(1).staleTitle, "");
   assert.strictEqual(OrbisYt.titleForVideo(t.top(1), other), "Next");
+});
+
+test("two stale titles are dropped when the tab update arrives before the page message", () => {
+  const t = OrbisYt.createPageTracker();
+  const other = "bbbbbbbbbbb";
+  const otherUrl = "https://www.youtube.com/watch?v=" + other;
+  t.setTopUrl(1, watch, "Talk", 1000);
+  const fromUpdated = OrbisYt.titleForNavigation(t.top(1), other, "Talk");
+  assert.strictEqual(fromUpdated, "");
+  const first = t.setTopUrl(1, otherUrl, fromUpdated, 2000);
+  assert.strictEqual(first[0].title, "");
+  assert.strictEqual(t.top(1).staleTitle, "Talk");
+  const fromPage = t.setTopUrl(1, otherUrl, "Talk", 2100);
+  assert.deepStrictEqual(fromPage, []);
+  assert.strictEqual(t.top(1).title, "");
+  assert.strictEqual(t.top(1).staleTitle, "Talk");
+  assert.strictEqual(OrbisYt.titleForNavigation(t.top(1), other, "Talk"), "");
+  assert.strictEqual(pingTitle(t.top(1)), "");
 });
 
 test("removing a tab drops its page, held response, and sent breaks", () => {

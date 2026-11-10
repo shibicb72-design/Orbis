@@ -122,19 +122,23 @@ var OrbisYt = (function () {
     if (videoIdFromUrl(cached.url || "") !== videoId) return "";
     var title = String(cached.title || "").trim();
     if (!title || title === "null") return "";
+    if (cached.staleTitle && title === String(cached.staleTitle).trim()) return "";
     return title.slice(0, 120);
   }
 
-  // YouTube keeps the previous document title until the new one arrives. A title copied onto a different video is dropped.
+  // YouTube keeps the previous document title until the new one arrives. staleTitle stays rejected until a
+  // different non-empty title arrives, or the video changes again.
   function titleForNavigation(previous, videoId, title) {
     var next = String(title || "");
     var trimmed = next.trim();
+    if (!trimmed) return "";
+    var stale = previous && String(previous.staleTitle || "").trim();
+    if (stale && trimmed === stale) return "";
     if (
       previous &&
       videoId &&
       previous.videoId &&
       previous.videoId !== videoId &&
-      trimmed &&
       trimmed === String(previous.title || "").trim()
     ) {
       return "";
@@ -544,8 +548,21 @@ var OrbisYt = (function () {
           try { return new URL(url).hostname.toLowerCase(); } catch (e) { return ""; }
         })());
         var token = prev && prev.videoId === videoId && videoId ? prev.viewToken : (youtube && videoId ? "view-" + videoId + "-" + now + "-" + seq++ : null);
-        var storedTitle = titleForNavigation(prev, youtube ? videoId : null, title || "");
-        tabs.set(tabId, { url: url || "", title: storedTitle, videoId: youtube ? videoId : null, viewToken: token, youtube: !!youtube });
+        var nextVideo = youtube ? videoId : null;
+        var changed = !!(prev && nextVideo && prev.videoId && prev.videoId !== nextVideo);
+        var storedTitle = titleForNavigation(prev, nextVideo, title || "");
+        var staleTitle = "";
+        if (String(storedTitle || "").trim()) staleTitle = "";
+        else if (changed) staleTitle = String(prev.title || "").trim() || String(prev.staleTitle || "").trim();
+        else if (prev) staleTitle = String(prev.staleTitle || "").trim();
+        tabs.set(tabId, {
+          url: url || "",
+          title: storedTitle,
+          staleTitle: staleTitle,
+          videoId: nextVideo,
+          viewToken: token,
+          youtube: !!youtube,
+        });
         if (!youtube) {
           held = held.filter(function (item) { return item.tabId !== tabId; });
           return [];

@@ -260,8 +260,9 @@ internal fun applyAdPing(previous: VideoAdMemory?, ping: AdPing, secondsPerAd: I
         )
     }
     if (explicit == null || previous.viewFromPlayer || explicit in previous.viewKeys) {
+        val kept = previous.title?.takeIf { it.isNotBlank() } ?: title
         return AdApplyResult(
-            previous.copy(title = title, timestampMillis = maxOf(previous.timestampMillis, ping.atMillis)),
+            previous.copy(title = kept, timestampMillis = maxOf(previous.timestampMillis, ping.atMillis)),
             addedAds = 0,
             addedSeconds = 0,
         )
