@@ -1,10 +1,9 @@
-// Observes YouTube ad slots and reports them to Orbis. Passes every response body through unchanged.
+// Observes YouTube ad breaks and reports them to Orbis. Passes every response body through unchanged.
 // Does not block, redirect, or rewrite a request, and does not run in private tabs.
 //
-// GeckoView 159 (Firefox 159) exposes webRequest.filterResponseData to manifest v2 extensions that have the
-// webRequestBlocking permission. Checked in this engine's omni.ja (ext-webRequest.js): manifest v3 would also need
-// webRequestFilterResponse; this extension is manifest v2, so webRequestBlocking is enough. If the method is missing
-// or throws, this script does nothing to the request and the blocked-ping fallback still runs.
+// GeckoView 159 exposes webRequest.filterResponseData to this manifest-v2 extension because it has webRequestBlocking
+// (checked in omni.ja ext-webRequest.js). If that method is missing or throws, the request is left alone and only the
+// break-ping fallback runs.
 (() => {
   const BLOCKED = {
     NS_ERROR_ABORT: true,
@@ -13,8 +12,7 @@
     NS_ERROR_TRACKING_URI: true,
   };
   const CAP = 4 * 1024 * 1024;
-
-  const titles = new Map();
+  const pages = OrbisYt.createPageTracker();
 
   function isBlocked(error) {
     const e = String(error || "").toUpperCase();
@@ -39,20 +37,24 @@
     }
   }
 
+  function deliver(events) {
+    (events || []).forEach(send);
+  }
+
   browser.runtime.onMessage.addListener((msg, sender) => {
     if (!msg || msg.type !== "title" || !sender.tab || sender.tab.incognito) return;
-    const tabId = sender.tab.id;
-    const url = msg.url || "";
-    if (!OrbisYt.videoIdFromUrl(url)) {
-      titles.delete(tabId);
-      return;
-    }
-    titles.set(tabId, { url: url, title: msg.title || "" });
+    deliver(pages.setTopUrl(sender.tab.id, msg.url || "", msg.title || "", Date.now()));
   });
 
   try {
     browser.tabs.onRemoved.addListener((tabId) => {
-      titles.delete(tabId);
+      pages.setTopUrl(tabId, "", "", Date.now());
+    });
+  } catch (e) {}
+  try {
+    browser.tabs.onUpdated.addListener((tabId, info, tab) => {
+      if (!info || !info.url || (tab && tab.incognito)) return;
+      deliver(pages.setTopUrl(tabId, info.url, (tab && tab.title) || "", Date.now()));
     });
   } catch (e) {}
 
@@ -60,14 +62,13 @@
     try {
       if (!details || !details.url || details.incognito || details.type === "main_frame") return;
       if (!isBlocked(details.error) || !OrbisYt.isBreakPing(details.url) || !OrbisYt.adIdFromUrl(details.url)) return;
-      const page = details.documentUrl || details.originUrl || "";
-      const videoId = OrbisYt.videoIdFromUrl(page);
-      if (!videoId) return;
+      const top = pages.top(details.tabId);
+      if (!top || !top.youtube || !top.videoId) return;
       send({
         type: "blocked-ad",
         url: details.url,
-        documentUrl: page,
-        title: OrbisYt.titleForVideo(titles.get(details.tabId), videoId),
+        documentUrl: top.url,
+        title: OrbisYt.titleForVideo(top, top.videoId),
         error: details.error || "",
         incognito: false,
         at: Date.now(),
@@ -75,43 +76,27 @@
     } catch (e) {}
   }
 
-  function responseKind(details) {
-    if (!details || !details.url || details.incognito) return null;
-    let url;
-    try {
-      url = new URL(details.url);
-    } catch (e) {
-      return null;
+  function reportParsed(details, parsed) {
+    const topFrame = details.type === "main_frame" || details.frameId === 0;
+    const now = Date.now();
+    const push = () => deliver(pages.pushParsed(details.tabId, parsed, topFrame, now));
+    if (topFrame && pages.top(details.tabId)) {
+      push();
+      return;
     }
-    if (!OrbisYt.isYoutubeHost(details.url)) return null;
-    const path = url.pathname.toLowerCase();
-    if (path.indexOf("/youtubei/v1/player") !== -1) return "player";
-    if (details.type === "main_frame" && OrbisYt.videoIdFromUrl(details.url)) return "html";
-    return null;
-  }
-
-  function reportPlayer(kind, details, body) {
-    const parsed = OrbisYt.slotsFromPlayer(body);
-    if (!parsed) return;
-    const page = details.documentUrl || details.originUrl || (kind === "html" ? details.url : "") || "";
-    const pageVideo = OrbisYt.videoIdFromUrl(page);
-    if (kind === "html" && pageVideo !== parsed.videoId) return;
-    if (page && !OrbisYt.isYoutubeHost(page) && !OrbisYt.videoIdFromUrl(page)) return;
-    const cached = OrbisYt.titleForVideo(titles.get(details.tabId), parsed.videoId);
-    send({
-      type: "player-ads",
-      videoId: parsed.videoId,
-      title: parsed.title || cached || "",
-      pageUrl: pageVideo === parsed.videoId ? page : "",
-      slots: parsed.slots,
-      incognito: false,
-      at: Date.now(),
-    });
+    try {
+      browser.tabs.get(details.tabId).then((tab) => {
+        if (tab && tab.url) deliver(pages.setTopUrl(details.tabId, tab.url, tab.title || "", Date.now()));
+        push();
+      }, push);
+    } catch (e) {
+      push();
+    }
   }
 
   function onBeforeRequest(details) {
-    const kind = responseKind(details);
-    if (!kind) return;
+    const kind = OrbisYt.classifyRequest(details && details.url, details && details.type);
+    if (!kind || !details || details.incognito) return;
     if (!browser.webRequest || typeof browser.webRequest.filterResponseData !== "function") return;
     let filter;
     try {
@@ -119,8 +104,11 @@
     } catch (e) {
       return;
     }
-    const state = { text: "", json: null, ignore: false, done: false };
+    if (kind === "html") deliver(pages.setTopUrl(details.tabId, details.url, "", Date.now()));
+    const scan = kind === "html" ? OrbisYt.createHtmlScan() : null;
+    const state = { text: "", ignore: false, done: false };
     const decoder = new TextDecoder("utf-8");
+    const arm = setTimeout(() => deliver(pages.tick(Date.now())), OrbisYt.HOLD_MS + 50);
     filter.ondata = (event) => {
       if (state.done) return;
       try {
@@ -132,22 +120,14 @@
       }
       if (state.ignore) return;
       try {
-        state.text += decoder.decode(event.data, { stream: true });
-        if (kind === "html") {
-          const extracted = OrbisYt.extractPlayerJsonFromHtml(state.text);
-          if (extracted) {
-            state.json = extracted;
-            state.text = "";
-            state.ignore = true;
-          } else if (state.text.indexOf("ytInitialPlayerResponse") === -1 && state.text.length > 256 * 1024) {
-            state.text = state.text.slice(-128);
-          } else if (state.text.length > CAP) {
+        const text = decoder.decode(event.data, { stream: true });
+        if (scan) scan.push(text);
+        else if (state.text.length <= CAP) {
+          state.text += text;
+          if (state.text.length > CAP) {
             state.ignore = true;
             state.text = "";
           }
-        } else if (state.text.length > CAP) {
-          state.ignore = true;
-          state.text = "";
         }
       } catch (e) {
         state.ignore = true;
@@ -157,6 +137,7 @@
     filter.onerror = () => {
       if (state.done) return;
       state.done = true;
+      clearTimeout(arm);
       try { filter.disconnect(); } catch (e) {}
     };
     filter.onstop = () => {
@@ -164,45 +145,44 @@
       state.done = true;
       try { filter.close(); } catch (e) {}
       try {
-        if (!state.ignore) state.text += decoder.decode();
-        if (kind === "html" && !state.json) state.json = OrbisYt.extractPlayerJsonFromHtml(state.text);
-        const body = kind === "html" ? state.json : state.text;
-        if (body) reportPlayer(kind, details, body);
+        if (!state.ignore && !scan) state.text += decoder.decode();
+        const body = scan ? scan.jsonText() : state.text;
+        if (!body) return;
+        const parsed = OrbisYt.slotsFromPlayer(body);
+        if (parsed) reportParsed(details, parsed);
       } catch (e) {}
     };
   }
 
-  const pagePatterns = [
-    "*://*.youtube.com/*",
-    "*://youtube.com/*",
-    "*://*.youtube-nocookie.com/*",
-    "*://*.youtu.be/*",
-    "*://youtu.be/*",
-    "*://youtubei.googleapis.com/*",
-    "*://*.youtubei.googleapis.com/*",
+  const hosts = [
+    "*://*.youtube.com",
+    "*://youtube.com",
+    "*://*.youtube-nocookie.com",
+    "*://youtubei.googleapis.com",
+    "*://*.youtubei.googleapis.com",
   ];
-  // Narrow on purpose: a blocking listener on every media request would sit on the playback path. Only the player
-  // call and the watch document can carry ad slots.
-  const slotPatterns = [
-    "*://*.youtube.com/youtubei/v1/player*",
-    "*://youtube.com/youtubei/v1/player*",
-    "*://*.youtube-nocookie.com/youtubei/v1/player*",
-    "*://youtubei.googleapis.com/youtubei/v1/player*",
-    "*://*.youtubei.googleapis.com/youtubei/v1/player*",
-    "*://*.youtube.com/watch*",
-    "*://youtube.com/watch*",
-    "*://*.youtube.com/shorts/*",
-    "*://*.youtube.com/embed/*",
-    "*://*.youtube.com/live/*",
-    "*://*.youtube.com/v/*",
-    "*://*.youtube-nocookie.com/watch*",
-    "*://*.youtube-nocookie.com/embed/*",
-    "*://*.youtube-nocookie.com/shorts/*",
-    "*://*.youtube-nocookie.com/live/*",
-    "*://youtu.be/*",
-    "*://*.youtu.be/*",
+  const exactPaths = [
+    "/youtubei/v1/player",
+    "/youtubei/v1/player?*",
+    "/youtubei/v1/get_watch",
+    "/youtubei/v1/get_watch?*",
+    "/youtubei/v1/reel/reel_watch_sequence",
+    "/youtubei/v1/reel/reel_watch_sequence?*",
+    "/watch",
+    "/watch?*",
+    "/playlist",
+    "/playlist?*",
+    "/shorts/*",
+    "/embed/*",
+    "/live/*",
+    "/v/*",
   ];
-  const breakPatterns = pagePatterns.concat([
+  const slotPatterns = [];
+  hosts.forEach((host) => {
+    exactPaths.forEach((path) => slotPatterns.push(host + path));
+  });
+  slotPatterns.push("*://youtu.be/*", "*://*.youtu.be/*");
+  const breakPatterns = hosts.map((host) => host + "/*").concat([
     "*://*.doubleclick.net/*adview*",
     "*://*.doubleclick.net/*interaction*",
     "*://*.doubleclick.net/*get_midroll*",

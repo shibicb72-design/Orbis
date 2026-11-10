@@ -202,6 +202,34 @@ class YoutubeAdSavingsTest {
     }
 
     @Test
+    fun aNewViewTokenCountsAgainAndTheSameTokenDoesNot() = runTest {
+        val saved = savings()
+        saved.load()
+        advanceUntilIdle()
+        val watch = "https://www.youtube.com/watch?v=aaaaaaaaaaa"
+        saved.onEvent(YoutubeAdEvent.ViewStart("aaaaaaaaaaa", watch, "Talk", "view-1", false, 1_000))
+        saved.onEvent(YoutubeAdEvent.PlayerAds("aaaaaaaaaaa", "Talk", watch, listOf("slot:a"), false, 1_100, "view-1"))
+        saved.onEvent(
+            YoutubeAdEvent.PlayerAds(
+                "aaaaaaaaaaa",
+                "Talk",
+                watch,
+                listOf("slot:a"),
+                false,
+                1_100 + SAME_VIEW_WINDOW_MILLIS + 5_000,
+                "view-1",
+            ),
+        )
+        assertEquals(1L, saved.summary().totalAds)
+        saved.onEvent(YoutubeAdEvent.ViewStart("aaaaaaaaaaa", watch, "Talk", "view-2", false, 20_000))
+        saved.onEvent(blocked(request = "https://www.youtube.com/api/stats/ads?ad_v=creative9", at = 20_100))
+        assertEquals(2L, saved.summary().totalAds)
+        saved.onEvent(YoutubeAdEvent.PlayerAds("aaaaaaaaaaa", "Talk", watch, listOf("slot:a"), false, 20_200, "view-2"))
+        assertEquals(2L, saved.summary().totalAds)
+        assertTrue(saved.encode().contains("view-2"))
+    }
+
+    @Test
     fun anEventBeforeLoadIsKeptAndAPrivateOneIsNot() = runTest {
         val saved = savings()
         saved.onEvent(blocked(isPrivate = true))

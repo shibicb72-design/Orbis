@@ -37,18 +37,24 @@
     <string name="stats_since">Counting since %1$s</string>
     <string name="stats_reset">Reset</string>
     <string name="stats_reset_title">Reset privacy stats?</string>
-    <string name="stats_reset_body">The counts start again from zero, including YouTube ads skipped. Nothing else is deleted.</string>
-    <string name="stats_yt_title">YouTube ads skipped</string>
+    <string name="stats_reset_body">The counts start again from zero, including ad breaks avoided on YouTube. Nothing else is deleted.</string>
+    <string name="stats_duration_zero">0 min</string>
+    <string name="stats_duration_hm">%1$d h %2$d min</string>
+    <string name="stats_duration_h">%1$d h</string>
+    <string name="stats_duration_ms">%1$d min %2$d s</string>
+    <string name="stats_duration_m">%1$d min</string>
+    <string name="stats_duration_s">%1$d s</string>
+    <string name="stats_yt_title">Ad breaks avoided (est.)</string>
     <string name="stats_yt_time">Estimated time saved</string>
-    <string name="stats_yt_note">About %1$d seconds per skipped ad, from ad slots scheduled for the video. Not added to Time saved (estimate, per request) above. On this phone only.</string>
+    <string name="stats_yt_note">About %1$d seconds per ad break avoided, from breaks scheduled for the video. Not added to Time saved (estimate, per request) above. On this phone only.</string>
     <string name="stats_yt_recent">Recent videos</string>
     <plurals name="stats_yt_ads_blocked">
-        <item quantity="one">%1$s ad skipped</item>
-        <item quantity="other">%1$s ads skipped</item>
+        <item quantity="one">%1$s ad break avoided</item>
+        <item quantity="other">%1$s ad breaks avoided</item>
     </plurals>
     <plurals name="stats_yt_video_detail">
-        <item quantity="one">%1$s ad skipped · %2$s</item>
-        <item quantity="other">%1$s ads skipped · %2$s</item>
+        <item quantity="one">%1$s ad break avoided · %2$s</item>
+        <item quantity="other">%1$s ad breaks avoided · %2$s</item>
     </plurals>
     <string name="force_dark_title">Force dark on all websites</string>
     <string name="force_dark_summary">Darkens light pages that have no dark design. Pictures and videos keep their colours. Pages reload to change.</string>

@@ -158,6 +158,32 @@ class YoutubeAdEstimateTest {
     }
 
     @Test
+    fun aNewViewTokenResetsThePlayerFlagAndCountsTheNextLanding() {
+        val first = applyPlayerSlots(null, video, "Talk", listOf("slot:a"), 1_000, viewToken = "view-1")
+        assertTrue(first.memory.viewFromPlayer)
+        val same = applyPlayerSlots(first.memory, video, "Talk", listOf("slot:a", "slot:b"), 1_000 + SAME_VIEW_WINDOW_MILLIS + 5_000, viewToken = "view-1")
+        assertEquals(1, same.addedAds)
+        assertEquals(2, same.memory.adCount)
+        val started = startView(same.memory, video, "Talk", "view-2", 20_000)
+        assertFalse(started.memory.viewFromPlayer)
+        assertTrue(started.memory.viewKeys.isEmpty())
+        assertEquals(2, started.memory.adCount)
+        val ping = applyAdPing(started.memory, AdPing(video, "Talk", "ad_v:later", 21_000))
+        assertEquals(1, ping.addedAds)
+        val again = applyPlayerSlots(ping.memory, video, "Talk", listOf("slot:a"), 21_500, viewToken = "view-2")
+        assertEquals(0, again.addedAds)
+        assertEquals(3, again.memory.adCount)
+        assertTrue(again.memory.viewFromPlayer)
+        val repeat = startView(again.memory, video, "Talk", "view-2", 22_000)
+        assertTrue(repeat.memory.viewFromPlayer)
+        val revisit = applyPlayerSlots(again.memory, video, "Talk", listOf("slot:a"), again.memory.lastPlayerAtMillis + 10, viewToken = "view-3")
+        assertEquals(1, revisit.addedAds)
+        assertEquals(4, revisit.memory.adCount)
+        assertTrue(revisit.memory.viewFromPlayer)
+        assertEquals("view-3", revisit.memory.viewToken)
+    }
+
+    @Test
     fun aCustomAdLengthChangesOnlyTheEstimate() {
         val result = applyAdPing(null, AdPing(video, null, "ad_v:one", 0), secondsPerAd = 10)
         assertEquals(10L, result.memory.estimatedSeconds)

@@ -1,8 +1,9 @@
 // Pure helpers for the YouTube ad estimate. No browser APIs, so node can unit-test them.
 // The background script loads this first and uses the global OrbisYt.
 var OrbisYt = (function () {
-  var ID_KEYS = ["slotId", "adBreakId", "breakId", "adVideoId", "externalVideoId", "creativeId", "adId"];
   var PING_ID_KEYS = ["ad_id", "adid", "ad_v", "ad_docid", "ad_cpn", "ad_break_id", "break_id", "breakid", "ai"];
+  var HOLD_MS = 10000;
+  var MARKER = "ytInitialPlayerResponse";
 
   function isVideoId(value) {
     return typeof value === "string" && /^[A-Za-z0-9_-]{11}$/.test(value);
@@ -24,16 +25,9 @@ var OrbisYt = (function () {
       return null;
     }
     var host = url.hostname.toLowerCase().replace(/\.$/, "");
-    var youtube =
-      host === "youtu.be" ||
-      host.endsWith(".youtu.be") ||
-      host === "youtube.com" ||
-      host.endsWith(".youtube.com") ||
-      host === "youtube-nocookie.com" ||
-      host.endsWith(".youtube-nocookie.com");
-    if (!youtube) return null;
+    if (!isYoutubePageHost(host)) return null;
     if (host === "youtu.be" || host.endsWith(".youtu.be")) {
-      var shortId = (url.pathname.split("/").filter(Boolean)[0] || "");
+      var shortId = url.pathname.split("/").filter(Boolean)[0] || "";
       return isVideoId(shortId) ? shortId : null;
     }
     var v = url.searchParams.get("v");
@@ -46,6 +40,25 @@ var OrbisYt = (function () {
     return null;
   }
 
+  function isShortsUrl(raw) {
+    try {
+      return new URL(String(raw || "")).pathname.toLowerCase().indexOf("/shorts/") !== -1;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function isYoutubePageHost(host) {
+    return (
+      host === "youtu.be" ||
+      host.endsWith(".youtu.be") ||
+      host === "youtube.com" ||
+      host.endsWith(".youtube.com") ||
+      host === "youtube-nocookie.com" ||
+      host.endsWith(".youtube-nocookie.com")
+    );
+  }
+
   function isYoutubeHost(raw) {
     var url;
     try {
@@ -54,19 +67,33 @@ var OrbisYt = (function () {
       return false;
     }
     var host = url.hostname.toLowerCase().replace(/\.$/, "");
-    return (
-      host === "youtu.be" ||
-      host.endsWith(".youtu.be") ||
-      host === "youtube.com" ||
-      host.endsWith(".youtube.com") ||
-      host === "youtube-nocookie.com" ||
-      host.endsWith(".youtube-nocookie.com") ||
-      host === "youtubei.googleapis.com" ||
-      host.endsWith(".youtubei.googleapis.com")
-    );
+    return isYoutubePageHost(host) || host === "youtubei.googleapis.com" || host.endsWith(".youtubei.googleapis.com");
   }
 
-  // Break-specific endpoints only. Generic ad hosts (/pagead/id, ad_status.js, googlesyndication) are not breaks.
+  function exactPath(raw) {
+    try {
+      var path = new URL(String(raw || "")).pathname;
+      if (path.length > 1 && path.charAt(path.length - 1) === "/") path = path.slice(0, -1);
+      return path;
+    } catch (e) {
+      return "";
+    }
+  }
+
+  // Exact paths only. /youtubei/v1/player/heartbeat is not the player response.
+  function classifyRequest(raw, type) {
+    if (!isYoutubeHost(raw)) return null;
+    var path = exactPath(raw);
+    var top = type === "main_frame";
+    if (path === "/youtubei/v1/player" && !top) return "player";
+    if (path === "/youtubei/v1/get_watch" && !top) return "player";
+    if (path === "/youtubei/v1/reel/reel_watch_sequence" && !top) return "reel";
+    if (path === "/watch" && !top) return "player";
+    if (path === "/playlist" && !top) return "player";
+    if (top && videoIdFromUrl(raw)) return "html";
+    return null;
+  }
+
   function isBreakPing(raw) {
     var url;
     try {
@@ -76,11 +103,7 @@ var OrbisYt = (function () {
     }
     var host = url.hostname.toLowerCase();
     var path = url.pathname.toLowerCase();
-    var onYoutube =
-      host === "youtube.com" ||
-      host.endsWith(".youtube.com") ||
-      host === "youtube-nocookie.com" ||
-      host.endsWith(".youtube-nocookie.com");
+    var onYoutube = isYoutubePageHost(host);
     if (path.indexOf("/api/stats/ads") !== -1) return true;
     if (path.indexOf("/pagead/adview") !== -1) return true;
     if (path.indexOf("/pagead/interaction") !== -1) return true;
@@ -96,9 +119,8 @@ var OrbisYt = (function () {
       return null;
     }
     for (var i = 0; i < PING_ID_KEYS.length; i++) {
-      var key = PING_ID_KEYS[i];
-      var value = url.searchParams.get(key);
-      if (isUsableId(value)) return key + ":" + value.trim().slice(0, 120);
+      var value = url.searchParams.get(PING_ID_KEYS[i]);
+      if (isUsableId(value)) return PING_ID_KEYS[i] + ":" + value.trim().slice(0, 120);
     }
     return null;
   }
@@ -111,123 +133,470 @@ var OrbisYt = (function () {
     return title.slice(0, 120);
   }
 
-  function findKey(obj, key, depth) {
-    if (!obj || typeof obj !== "object" || depth > 12) return null;
-    if (!Array.isArray(obj) && Object.prototype.hasOwnProperty.call(obj, key)) {
-      var value = obj[key];
-      if (typeof value === "string" && isUsableId(value)) return value.trim();
-      if (typeof value === "number" && isFinite(value) && value > 0) return String(value);
-    }
-    var kids = Array.isArray(obj) ? obj : Object.keys(obj).map(function (k) { return obj[k]; });
-    for (var i = 0; i < kids.length; i++) {
-      var found = findKey(kids[i], key, depth + 1);
-      if (found) return found;
-    }
-    return null;
-  }
-
-  function slotId(entry, source, index) {
-    if (!entry || typeof entry !== "object") return null;
-    for (var i = 0; i < ID_KEYS.length; i++) {
-      var value = findKey(entry, ID_KEYS[i], 0);
-      if (value) return ID_KEYS[i] + ":" + value.slice(0, 120);
-    }
-    var kind = findKey(entry, "kind", 0);
-    var offset = findKey(entry, "offsetStartMilliseconds", 0) || findKey(entry, "offsetStartMs", 0);
-    if (kind || offset) return "place:" + (kind || "ad") + ":" + (offset || "0");
-    if (Object.keys(entry).length === 0) return null;
-    return "entry:" + source + ":" + index;
-  }
-
-  function slotsFromPlayerObject(root) {
-    if (!root || typeof root !== "object") return null;
-    var player = root.videoDetails || root.adPlacements || root.playerAds || root.adSlots ? root : root.playerResponse;
-    if (!player || typeof player !== "object") return null;
-    var videoId = player.videoDetails && player.videoDetails.videoId;
-    if (!isVideoId(videoId)) {
-      var nested = player.currentVideoEndpoint && player.currentVideoEndpoint.watchEndpoint;
-      videoId = nested && nested.videoId;
-    }
-    if (!isVideoId(videoId)) return null;
-    var title = (player.videoDetails && player.videoDetails.title) || "";
-    var slots = [];
-    var seen = {};
-    var sources = ["adPlacements", "playerAds", "adSlots"];
-    for (var s = 0; s < sources.length; s++) {
-      var list = player[sources[s]];
-      if (!Array.isArray(list)) continue;
-      for (var i = 0; i < list.length; i++) {
-        var id = slotId(list[i], sources[s], i);
-        if (!id || seen[id]) continue;
-        seen[id] = true;
-        slots.push(id);
-      }
-    }
-    return { videoId: videoId, title: String(title || "").trim().slice(0, 120), slots: slots };
-  }
-
-  function slotsFromPlayer(jsonText) {
-    try {
-      return slotsFromPlayerObject(JSON.parse(jsonText));
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function sliceJsonObject(text, start) {
-    var depth = 0;
+  // uBO's stream filter renames both "adPlacements" and "adSlots" to "no_ads". JSON.parse would keep only the last
+  // duplicate key, so each key is renamed to no_ads#1, no_ads#2, … before parsing. String values are left alone.
+  function aliasNoAds(text) {
+    var raw = String(text || "");
+    var out = "";
+    var n = 0;
     var inStr = false;
     var esc = false;
-    for (var i = start; i < text.length; i++) {
-      var c = text[i];
+    for (var i = 0; i < raw.length; i++) {
+      var c = raw.charAt(i);
       if (inStr) {
+        out += c;
         if (esc) esc = false;
         else if (c === "\\") esc = true;
         else if (c === "\"") inStr = false;
         continue;
       }
+      if (c === "\"" && raw.substr(i, 8) === "\"no_ads\"") {
+        var j = i + 8;
+        var k = j;
+        while (k < raw.length && raw.charCodeAt(k) <= 32) k++;
+        if (raw.charAt(k) === ":") {
+          n++;
+          out += "\"no_ads#" + n + "\"";
+          i = j - 1;
+          continue;
+        }
+      }
       if (c === "\"") inStr = true;
-      else if (c === "{") depth++;
-      else if (c === "}") {
-        depth--;
-        if (depth === 0) return text.slice(start, i + 1);
+      out += c;
+    }
+    return out;
+  }
+
+  function findField(obj, key, depth, allowZero) {
+    if (!obj || typeof obj !== "object" || depth > 8) return null;
+    if (!Array.isArray(obj) && Object.prototype.hasOwnProperty.call(obj, key)) {
+      var value = obj[key];
+      if (typeof value === "number" && isFinite(value) && (allowZero ? value >= 0 : value > 0)) return String(value);
+      if (typeof value === "string") {
+        var trimmed = value.trim();
+        if (allowZero ? trimmed.length > 0 && trimmed.length <= 80 : isUsableId(trimmed)) return trimmed;
       }
     }
+    var kids = Array.isArray(obj) ? obj : Object.keys(obj).map(function (name) { return obj[name]; });
+    for (var i = 0; i < kids.length; i++) {
+      var found = findField(kids[i], key, depth + 1, allowZero);
+      if (found != null) return found;
+    }
     return null;
+  }
+
+  function hasKey(obj, key, depth) {
+    if (!obj || typeof obj !== "object" || depth > 8) return false;
+    if (!Array.isArray(obj) && Object.prototype.hasOwnProperty.call(obj, key)) return true;
+    var kids = Array.isArray(obj) ? obj : Object.keys(obj).map(function (name) { return obj[name]; });
+    for (var i = 0; i < kids.length; i++) {
+      if (hasKey(kids[i], key, depth + 1)) return true;
+    }
+    return false;
+  }
+
+  function isForecasting(entry) {
+    return hasKey(entry, "clientForecastingAdRenderer", 0);
+  }
+
+  function isPlayerBytes(entry) {
+    var type = findField(entry, "slotType", 0, false);
+    if (type && String(type).indexOf("PLAYER_BYTES") !== -1) return true;
+    return hasKey(entry, "playerBytesAdLayoutRenderer", 0);
+  }
+
+  function breakId(entry) {
+    if (!entry || typeof entry !== "object" || isForecasting(entry)) return null;
+    var kind = findField(entry, "kind", 0, false);
+    if (kind && kind.indexOf("AD_PLACEMENT") === -1 && kind.indexOf("SLOT_") === -1) kind = null;
+    var slotType = findField(entry, "slotType", 0, false);
+    var offset = findField(entry, "offsetStartMilliseconds", 0, true);
+    if (offset == null) offset = findField(entry, "offsetStartMs", 0, true);
+    if (offset == null) offset = findField(entry, "startTimeMilliseconds", 0, true);
+    var at = offset == null ? "0" : offset;
+    if (isPlayerBytes(entry)) return (kind || slotType || "PLAYER_BYTES") + ":" + at;
+    if (kind) return kind + ":" + at;
+    if (hasKey(entry, "adPlacementRenderer", 0) && offset != null) return "break:" + offset;
+    return null;
+  }
+
+  function dedupe(entries) {
+    var out = [];
+    var seen = {};
+    for (var i = 0; i < entries.length; i++) {
+      var id = breakId(entries[i]);
+      if (!id || seen[id]) continue;
+      seen[id] = true;
+      out.push(id);
+    }
+    return out;
+  }
+
+  function adLists(player) {
+    var slots = [];
+    var placements = [];
+    if (Array.isArray(player.adSlots)) slots.push(player.adSlots);
+    if (Array.isArray(player.adPlacements)) placements.push(player.adPlacements);
+    Object.keys(player).forEach(function (key) {
+      if (key.indexOf("no_ads#") !== 0 || !Array.isArray(player[key])) return;
+      var list = player[key];
+      var asSlots = false;
+      var asPlacements = false;
+      for (var i = 0; i < list.length; i++) {
+        if (list[i] && (list[i].adSlotRenderer || isPlayerBytes(list[i]))) asSlots = true;
+        if (list[i] && list[i].adPlacementRenderer) asPlacements = true;
+      }
+      if (asSlots) slots.push(list);
+      else if (asPlacements) placements.push(list);
+      else placements.push(list);
+    });
+    return { slots: slots, placements: placements };
+  }
+
+  function breaksFromPlayer(player) {
+    var lists = adLists(player);
+    var bytes = [];
+    lists.slots.forEach(function (list) {
+      list.forEach(function (entry) {
+        if (isPlayerBytes(entry) && !isForecasting(entry)) bytes.push(entry);
+      });
+    });
+    if (bytes.length) return dedupe(bytes);
+    var places = [];
+    lists.placements.forEach(function (list) {
+      list.forEach(function (entry) {
+        if (!isForecasting(entry)) places.push(entry);
+      });
+    });
+    return dedupe(places);
+  }
+
+  function videoIdOf(player) {
+    var id = player.videoDetails && player.videoDetails.videoId;
+    if (isVideoId(id)) return id;
+    var nested = player.currentVideoEndpoint && player.currentVideoEndpoint.watchEndpoint;
+    id = nested && nested.videoId;
+    return isVideoId(id) ? id : null;
+  }
+
+  function collectPlayers(root, out) {
+    if (!root || typeof root !== "object") return;
+    if (Array.isArray(root)) {
+      root.forEach(function (item) { collectPlayers(item, out); });
+      return;
+    }
+    if (root.playerResponse && typeof root.playerResponse === "object") {
+      collectPlayers(root.playerResponse, out);
+      return;
+    }
+    if (root.videoDetails || root.adPlacements || root.adSlots || Object.keys(root).some(function (key) { return key.indexOf("no_ads#") === 0; })) {
+      out.push(root);
+    }
+  }
+
+  function reelBreaks(root) {
+    var entries = null;
+    if (root && Array.isArray(root.entries)) entries = root.entries;
+    else if (root && root.reelWatchSequenceResponse && Array.isArray(root.reelWatchSequenceResponse.entries)) {
+      entries = root.reelWatchSequenceResponse.entries;
+    }
+    if (!entries) return null;
+    var ads = [];
+    var seen = {};
+    var anchor = null;
+    entries.forEach(function (entry) {
+      var endpoint = entry && entry.command && entry.command.reelWatchEndpoint;
+      if (!endpoint) return;
+      var flag = endpoint.adClientParams && endpoint.adClientParams.isAd;
+      var isAd = flag === true || flag === "true";
+      if (isAd) {
+        var adId = isVideoId(endpoint.videoId) ? "short-ad:" + endpoint.videoId : "short-ad:" + ads.length;
+        if (!seen[adId]) {
+          seen[adId] = true;
+          ads.push(adId);
+        }
+      } else if (!anchor && isVideoId(endpoint.videoId)) {
+        anchor = endpoint.videoId;
+      }
+    });
+    if (!ads.length) return null;
+    return { videoId: anchor, title: "", slots: ads, bindToTab: !anchor };
+  }
+
+  function slotsFromPlayerObject(root) {
+    var reel = reelBreaks(root);
+    if (reel) return reel;
+    var players = [];
+    collectPlayers(root, players);
+    if (!players.length) return null;
+    var videoId = null;
+    var title = "";
+    var slots = [];
+    var seen = {};
+    players.forEach(function (player) {
+      var id = videoIdOf(player);
+      if (!videoId && id) videoId = id;
+      if (!title && player.videoDetails && player.videoDetails.title) title = String(player.videoDetails.title);
+      breaksFromPlayer(player).forEach(function (breakId) {
+        if (seen[breakId]) return;
+        seen[breakId] = true;
+        slots.push(breakId);
+      });
+    });
+    if (!videoId) return null;
+    return { videoId: videoId, title: title.trim().slice(0, 120), slots: slots };
+  }
+
+  function slotsFromPlayer(jsonText) {
+    try {
+      return slotsFromPlayerObject(JSON.parse(aliasNoAds(jsonText)));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function createHtmlScan() {
+    var phase = "seek";
+    var tail = "";
+    var json = "";
+    var depth = 0;
+    var inStr = false;
+    var esc = false;
+    var sawEq = false;
+
+    function feedBody(text) {
+      for (var i = 0; i < text.length; i++) {
+        if (phase !== "body") return;
+        var c = text.charAt(i);
+        json += c;
+        if (json.length > 4 * 1024 * 1024) {
+          phase = "dead";
+          json = "";
+          return;
+        }
+        if (inStr) {
+          if (esc) esc = false;
+          else if (c === "\\") esc = true;
+          else if (c === "\"") inStr = false;
+          continue;
+        }
+        if (c === "\"") inStr = true;
+        else if (c === "{") depth++;
+        else if (c === "}") {
+          depth--;
+          if (depth === 0) {
+            phase = "done";
+            return;
+          }
+        }
+      }
+    }
+
+    function feedPre(text) {
+      for (var i = 0; i < text.length; i++) {
+        if (phase === "body" || phase === "done" || phase === "dead") {
+          if (phase === "body") feedBody(text.slice(i));
+          return;
+        }
+        if (phase !== "pre") return;
+        var code = text.charCodeAt(i);
+        if (code <= 32) continue;
+        var c = text.charAt(i);
+        if (!sawEq && c === "=") {
+          sawEq = true;
+          continue;
+        }
+        if (sawEq && c === "{") {
+          phase = "body";
+          json = "{";
+          depth = 1;
+          inStr = false;
+          esc = false;
+          feedBody(text.slice(i + 1));
+          return;
+        }
+        phase = "seek";
+        sawEq = false;
+        tail = "";
+        seek(text.slice(i));
+        return;
+      }
+    }
+
+    function seek(chunk) {
+      tail += chunk;
+      var at = tail.indexOf(MARKER);
+      if (at < 0) {
+        var keep = MARKER.length - 1;
+        if (tail.length > keep) tail = tail.slice(tail.length - keep);
+        return;
+      }
+      var rest = tail.slice(at + MARKER.length);
+      tail = "";
+      phase = "pre";
+      sawEq = false;
+      feedPre(rest);
+    }
+
+    return {
+      push: function (chunk) {
+        if (phase === "done" || phase === "dead") return;
+        var text = String(chunk || "");
+        if (phase === "seek") seek(text);
+        else if (phase === "pre") feedPre(text);
+        else if (phase === "body") feedBody(text);
+      },
+      jsonText: function () {
+        return phase === "done" ? json : null;
+      },
+    };
   }
 
   function extractPlayerJsonFromHtml(text) {
-    var marker = "ytInitialPlayerResponse";
-    var from = 0;
-    var raw = String(text || "");
-    while (from < raw.length) {
-      var at = raw.indexOf(marker, from);
-      if (at < 0) return null;
-      var i = at + marker.length;
-      while (i < raw.length && raw.charCodeAt(i) <= 32) i++;
-      if (raw[i] !== "=") {
-        from = at + marker.length;
-        continue;
-      }
-      i++;
-      while (i < raw.length && raw.charCodeAt(i) <= 32) i++;
-      if (raw[i] !== "{") {
-        from = at + marker.length;
-        continue;
-      }
-      return sliceJsonObject(raw, i);
+    var scan = createHtmlScan();
+    scan.push(text);
+    return scan.jsonText();
+  }
+
+  // Holds a parsed player response until the tab's top-level URL is that video, for up to 10 seconds.
+  function createPageTracker() {
+    var tabs = new Map();
+    var held = [];
+    var sent = new Map();
+    var seq = 1;
+
+    function slotMap(list) {
+      var out = {};
+      (list || []).forEach(function (id) { if (id) out[id] = true; });
+      return out;
     }
-    return null;
+
+    function hold(tabId, videoId, parsed, now) {
+      var existing = null;
+      for (var i = 0; i < held.length; i++) {
+        if (held[i].tabId === tabId && held[i].videoId === videoId) existing = held[i];
+      }
+      if (!existing) {
+        existing = { tabId: tabId, videoId: videoId, title: "", slots: {}, at: now };
+        held.push(existing);
+      }
+      Object.keys(slotMap(parsed.slots)).forEach(function (id) { existing.slots[id] = true; });
+      if (parsed.title) existing.title = parsed.title;
+    }
+
+    function emit(tabId, videoId, parsed, top, now) {
+      var key = String(tabId);
+      var prev = sent.get(key);
+      var incoming = slotMap(parsed.slots);
+      var novel = {};
+      if (prev && prev.viewToken === top.viewToken && prev.videoId === videoId) {
+        Object.keys(incoming).forEach(function (id) {
+          if (!prev.slots[id]) novel[id] = true;
+        });
+        if (!Object.keys(novel).length) return [];
+        Object.keys(novel).forEach(function (id) { prev.slots[id] = true; });
+      } else {
+        novel = incoming;
+        sent.set(key, { videoId: videoId, viewToken: top.viewToken, slots: Object.assign({}, novel) });
+      }
+      return [{
+        type: "player-ads",
+        videoId: videoId,
+        title: parsed.title || top.title || "",
+        pageUrl: top.url,
+        slots: Object.keys(novel),
+        viewToken: top.viewToken,
+        at: now,
+        incognito: false,
+      }];
+    }
+
+    function flush(tabId, now) {
+      var top = tabs.get(tabId);
+      if (!top || !top.youtube || !top.videoId) return [];
+      var out = [];
+      var keep = [];
+      held.forEach(function (item) {
+        if (item.tabId !== tabId) {
+          keep.push(item);
+          return;
+        }
+        if (now - item.at > HOLD_MS) return;
+        if (item.videoId !== top.videoId) {
+          keep.push(item);
+          return;
+        }
+        out = out.concat(emit(tabId, item.videoId, { title: item.title, slots: Object.keys(item.slots) }, top, now));
+      });
+      held = keep;
+      return out;
+    }
+
+    return {
+      HOLD_MS: HOLD_MS,
+      top: function (tabId) { return tabs.get(tabId) || null; },
+      setTopUrl: function (tabId, url, title, now) {
+        var prev = tabs.get(tabId);
+        var videoId = videoIdFromUrl(url);
+        var youtube = isYoutubeHost(url) && isYoutubePageHost((function () {
+          try { return new URL(url).hostname.toLowerCase(); } catch (e) { return ""; }
+        })());
+        var token = prev && prev.videoId === videoId && videoId ? prev.viewToken : (youtube && videoId ? "view-" + videoId + "-" + now + "-" + seq++ : null);
+        tabs.set(tabId, { url: url || "", title: title || "", videoId: youtube ? videoId : null, viewToken: token, youtube: !!youtube });
+        if (!youtube) {
+          held = held.filter(function (item) { return item.tabId !== tabId; });
+          return [];
+        }
+        var out = [];
+        if (videoId && (!prev || prev.videoId !== videoId || !prev.youtube)) {
+          out.push({
+            type: "view-start",
+            videoId: videoId,
+            pageUrl: url,
+            title: title || "",
+            viewToken: token,
+            at: now,
+            incognito: false,
+          });
+        }
+        return out.concat(flush(tabId, now));
+      },
+      pushParsed: function (tabId, parsed, isTopFrame, now) {
+        if (!parsed) return [];
+        var top = tabs.get(tabId);
+        if (top && !top.youtube) return [];
+        if (!top && !isTopFrame) return [];
+        var videoId = parsed.videoId;
+        if (!videoId && parsed.bindToTab) {
+          if (!(top && top.youtube && top.videoId && isShortsUrl(top.url))) return [];
+          videoId = top.videoId;
+        }
+        if (!videoId) return [];
+        var body = { videoId: videoId, title: parsed.title || "", slots: parsed.slots || [] };
+        if (top && top.youtube && top.videoId === videoId) return emit(tabId, videoId, body, top, now);
+        hold(tabId, videoId, body, now);
+        return [];
+      },
+      tick: function (now) {
+        held = held.filter(function (item) { return now - item.at <= HOLD_MS; });
+        return [];
+      },
+    };
   }
 
   return {
+    HOLD_MS: HOLD_MS,
     isVideoId: isVideoId,
     videoIdFromUrl: videoIdFromUrl,
     isYoutubeHost: isYoutubeHost,
+    classifyRequest: classifyRequest,
     isBreakPing: isBreakPing,
     adIdFromUrl: adIdFromUrl,
     titleForVideo: titleForVideo,
+    aliasNoAds: aliasNoAds,
     slotsFromPlayer: slotsFromPlayer,
+    createHtmlScan: createHtmlScan,
     extractPlayerJsonFromHtml: extractPlayerJsonFromHtml,
+    createPageTracker: createPageTracker,
   };
 })();

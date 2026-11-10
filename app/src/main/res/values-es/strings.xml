@@ -363,20 +363,26 @@
     <string name="stats_since">Contando desde %1$s</string>
     <string name="stats_reset">Restablecer</string>
     <string name="stats_reset_title">¿Restablecer las estadísticas de privacidad?</string>
-    <string name="stats_reset_body">Los contadores vuelven a cero, incluidos los anuncios de YouTube omitidos. No se borra nada más.</string>
-    <string name="stats_yt_title">Anuncios de YouTube omitidos</string>
+    <string name="stats_reset_body">Los contadores vuelven a cero, incluidas las pausas publicitarias de YouTube evitadas. No se borra nada más.</string>
+    <string name="stats_duration_zero">0 min</string>
+    <string name="stats_duration_hm">%1$d h %2$d min</string>
+    <string name="stats_duration_h">%1$d h</string>
+    <string name="stats_duration_ms">%1$d min %2$d s</string>
+    <string name="stats_duration_m">%1$d min</string>
+    <string name="stats_duration_s">%1$d s</string>
+    <string name="stats_yt_title">Pausas publicitarias evitadas (est.)</string>
     <string name="stats_yt_time">Tiempo ahorrado estimado</string>
-    <string name="stats_yt_note">Unos %1$d segundos por anuncio omitido, según los espacios de anuncio previstos para el vídeo. No se suma al tiempo ahorrado (estimado, por solicitud) de arriba. Solo en este teléfono.</string>
+    <string name="stats_yt_note">Unos %1$d segundos por pausa publicitaria evitada, según las pausas previstas para el vídeo. No se suma al tiempo ahorrado (estimado, por solicitud) de arriba. Solo en este teléfono.</string>
     <string name="stats_yt_recent">Vídeos recientes</string>
     <plurals name="stats_yt_ads_blocked">
-        <item quantity="one">%1$s anuncio omitido</item>
-        <item quantity="many">%1$s anuncios omitidos</item>
-        <item quantity="other">%1$s anuncios omitidos</item>
+        <item quantity="one">%1$s pausa publicitaria evitada</item>
+        <item quantity="many">%1$s pausas publicitarias evitadas</item>
+        <item quantity="other">%1$s pausas publicitarias evitadas</item>
     </plurals>
     <plurals name="stats_yt_video_detail">
-        <item quantity="one">%1$s anuncio omitido · %2$s</item>
-        <item quantity="many">%1$s anuncios omitidos · %2$s</item>
-        <item quantity="other">%1$s anuncios omitidos · %2$s</item>
+        <item quantity="one">%1$s pausa publicitaria evitada · %2$s</item>
+        <item quantity="many">%1$s pausas publicitarias evitadas · %2$s</item>
+        <item quantity="other">%1$s pausas publicitarias evitadas · %2$s</item>
     </plurals>
     <plurals name="stats_blocked_headline">
         <item quantity="one">rastreador, anuncio o cookie bloqueado</item>

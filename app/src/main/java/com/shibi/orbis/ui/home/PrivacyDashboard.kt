@@ -46,7 +46,6 @@ import com.shibi.orbis.stats.BlockKind
 import com.shibi.orbis.stats.StatsSummary
 import com.shibi.orbis.youtube.AVERAGE_YOUTUBE_AD_SECONDS
 import com.shibi.orbis.youtube.YoutubeAdSummary
-import com.shibi.orbis.youtube.formatEstimatedTimeSaved
 import java.text.NumberFormat
 
 internal const val PRIVACY_DASHBOARD_TAG = "privacy_dashboard"
@@ -185,8 +184,8 @@ internal fun PrivacyDashboard(
 }
 
 /**
- * YouTube ads skipped, and the estimated time that implies. Kept apart from [StatTile] "Time saved", which is about
- * 50 ms per blocked request and is not changed by these numbers.
+ * Ad breaks avoided on YouTube, and the estimated time that implies. Kept apart from [StatTile] "Time saved", which is
+ * about 50 ms per blocked request and is not changed by these numbers.
  */
 @Composable
 private fun YoutubeSavings(youtube: YoutubeAdSummary, nf: java.text.NumberFormat) {
@@ -208,7 +207,7 @@ private fun YoutubeSavings(youtube: YoutubeAdSummary, nf: java.text.NumberFormat
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(
-                formatEstimatedTimeSaved(youtube.totalEstimatedSeconds),
+                estimatedTimeSavedText(youtube.totalEstimatedSeconds),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
@@ -236,7 +235,7 @@ private fun YoutubeSavings(youtube: YoutubeAdSummary, nf: java.text.NumberFormat
                                 R.plurals.stats_yt_video_detail,
                                 count,
                                 nf.format(video.adCount),
-                                formatEstimatedTimeSaved(video.estimatedSeconds),
+                                estimatedTimeSavedText(video.estimatedSeconds),
                             ),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -245,6 +244,22 @@ private fun YoutubeSavings(youtube: YoutubeAdSummary, nf: java.text.NumberFormat
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun estimatedTimeSavedText(totalSeconds: Long): String {
+    val seconds = if (totalSeconds <= 0L) 0L else totalSeconds
+    if (seconds == 0L) return stringResource(R.string.stats_duration_zero)
+    val hours = (seconds / 3600).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    val minutes = ((seconds % 3600) / 60).toInt()
+    val remain = (seconds % 60).toInt()
+    return when {
+        hours > 0 && minutes > 0 -> stringResource(R.string.stats_duration_hm, hours, minutes)
+        hours > 0 -> stringResource(R.string.stats_duration_h, hours)
+        minutes > 0 && remain > 0 -> stringResource(R.string.stats_duration_ms, minutes, remain)
+        minutes > 0 -> stringResource(R.string.stats_duration_m, minutes)
+        else -> stringResource(R.string.stats_duration_s, remain)
     }
 }
 

@@ -4,7 +4,7 @@
     <string name="clear_data_summary">Verlauf, Cookies, Cache, Tabs und mehr</string>
 
     <string name="clear_history">Browserverlauf</string>
-    <string name="clear_history_summary">Einschließlich übersprungener YouTube-Werbung und der geschätzten Zeitersparnis.</string>
+    <string name="clear_history_summary">Einschließlich vermiedener YouTube-Werbeunterbrechungen und der geschätzten Zeitersparnis.</string>
     <string name="clear_cookies">Cookies &amp; Website-Daten</string>
     <string name="clear_cookies_summary">Meldet dich von den meisten Websites ab. Geöffnete Seiten werden eventuell weiter angezeigt, bis du sie neu lädst. Ein laufender Download kann abbrechen.</string>
     <string name="clear_cache">Bilder und Dateien im Cache</string>

@@ -362,18 +362,24 @@
     <string name="stats_since">Gezählt seit %1$s</string>
     <string name="stats_reset">Zurücksetzen</string>
     <string name="stats_reset_title">Datenschutz-Statistik zurücksetzen?</string>
-    <string name="stats_reset_body">Die Zähler beginnen wieder bei null, einschließlich übersprungener YouTube-Werbung. Sonst wird nichts gelöscht.</string>
-    <string name="stats_yt_title">YouTube-Werbung übersprungen</string>
+    <string name="stats_reset_body">Die Zähler beginnen wieder bei null, einschließlich vermiedener YouTube-Werbeunterbrechungen. Sonst wird nichts gelöscht.</string>
+    <string name="stats_duration_zero">0 Min.</string>
+    <string name="stats_duration_hm">%1$d Std. %2$d Min.</string>
+    <string name="stats_duration_h">%1$d Std.</string>
+    <string name="stats_duration_ms">%1$d Min. %2$d Sek.</string>
+    <string name="stats_duration_m">%1$d Min.</string>
+    <string name="stats_duration_s">%1$d Sek.</string>
+    <string name="stats_yt_title">Werbeunterbrechungen vermieden (geschätzt)</string>
     <string name="stats_yt_time">Geschätzte Zeitersparnis</string>
-    <string name="stats_yt_note">Etwa %1$d Sekunden pro übersprungener Werbung, nach den für das Video vorgesehenen Werbeplätzen. Nicht in „Zeit gespart (geschätzt, pro Anfrage)“ oben enthalten. Nur auf diesem Telefon.</string>
+    <string name="stats_yt_note">Etwa %1$d Sekunden pro vermiedener Werbeunterbrechung, nach den für das Video vorgesehenen Unterbrechungen. Nicht in „Zeit gespart (geschätzt, pro Anfrage)“ oben enthalten. Nur auf diesem Telefon.</string>
     <string name="stats_yt_recent">Neueste Videos</string>
     <plurals name="stats_yt_ads_blocked">
-        <item quantity="one">%1$s Werbung übersprungen</item>
-        <item quantity="other">%1$s Werbeanzeigen übersprungen</item>
+        <item quantity="one">%1$s Werbeunterbrechung vermieden</item>
+        <item quantity="other">%1$s Werbeunterbrechungen vermieden</item>
     </plurals>
     <plurals name="stats_yt_video_detail">
-        <item quantity="one">%1$s Werbung übersprungen · %2$s</item>
-        <item quantity="other">%1$s Werbeanzeigen übersprungen · %2$s</item>
+        <item quantity="one">%1$s Werbeunterbrechung vermieden · %2$s</item>
+        <item quantity="other">%1$s Werbeunterbrechungen vermieden · %2$s</item>
     </plurals>
     <plurals name="stats_blocked_headline">
         <item quantity="one">Tracker, Werbung oder Cookie blockiert</item>

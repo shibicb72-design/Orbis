@@ -141,7 +141,17 @@ class YoutubeAdSavings(
             is YoutubeAdEvent.Title -> noteTitle(event.pageUrl, event.title, nowMillis)
             is YoutubeAdEvent.Blocked -> applyBlocked(event.observation, nowMillis)
             is YoutubeAdEvent.PlayerAds -> applyPlayer(event, nowMillis)
+            is YoutubeAdEvent.ViewStart -> applyViewStart(event, nowMillis)
         }
+    }
+
+    private fun applyViewStart(event: YoutubeAdEvent.ViewStart, nowMillis: Long) {
+        if (event.isPrivate || !isVideoId(event.videoId) || event.viewToken.isBlank()) return
+        val at = event.atMillis.takeIf { it > 0 } ?: nowMillis
+        val title = cleanTitle(event.title) ?: titles[event.videoId]
+        val result = startView(videos[event.videoId], event.videoId, title, event.viewToken, at)
+        if (title != null && result.memory.adCount > 0) rememberTitle(event.videoId, title)
+        store(result)
     }
 
     private fun applyBlocked(observation: YoutubeAdObservation, nowMillis: Long) {
@@ -164,7 +174,7 @@ class YoutubeAdSavings(
         if (event.isPrivate || !isVideoId(event.videoId)) return
         val at = event.atMillis.takeIf { it > 0 } ?: nowMillis
         val title = cleanTitle(event.title) ?: titles[event.videoId]
-        val result = applyPlayerSlots(videos[event.videoId], event.videoId, title, event.slotIds, at, secondsPerAd)
+        val result = applyPlayerSlots(videos[event.videoId], event.videoId, title, event.slotIds, at, secondsPerAd, event.viewToken)
         if (title != null && result.memory.adCount > 0) rememberTitle(event.videoId, title)
         store(result)
     }
@@ -273,7 +283,8 @@ class YoutubeAdSavings(
                     .put("viewFromPlayer", video.viewFromPlayer)
                     .put("lastSlotFingerprint", video.lastSlotFingerprint ?: JSONObject.NULL)
                     .put("lastPlayerAt", video.lastPlayerAtMillis)
-                    .put("provisionalAds", video.provisionalAds),
+                    .put("provisionalAds", video.provisionalAds)
+                    .put("viewToken", video.viewToken ?: JSONObject.NULL),
             )
         }
         return JSONObject()
@@ -313,6 +324,7 @@ class YoutubeAdSavings(
                     lastSlotFingerprint = if (row.isNull("lastSlotFingerprint")) null else row.optString("lastSlotFingerprint").takeIf { it.isNotBlank() },
                     lastPlayerAtMillis = row.optLong("lastPlayerAt", 0L).coerceAtLeast(0L),
                     provisionalAds = row.optInt("provisionalAds", 0).coerceAtLeast(0),
+                    viewToken = if (row.isNull("viewToken")) null else row.optString("viewToken").takeIf { it.isNotBlank() },
                 )
             val existing = videos[id]
             videos[id] =
