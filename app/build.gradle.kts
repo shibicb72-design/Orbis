@@ -129,12 +129,6 @@ kotlin {
     }
 }
 
-// GeckoView declares play-services-fido as a runtime dependency for WebAuthn. Orbis does not ship Play services:
-// Cast talks to the TV directly, and nothing in the app is sent to Google through a GMS library.
-configurations.configureEach {
-    exclude(group = "com.google.android.gms")
-}
-
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)

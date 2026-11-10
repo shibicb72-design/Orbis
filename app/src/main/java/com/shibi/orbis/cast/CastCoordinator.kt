@@ -34,6 +34,7 @@ enum class CastNotice {
     YOUTUBE_NEEDS_GOOGLE,
     FAILED,
     YOUTUBE_UNCONFIRMED,
+    REJECTED,
 }
 
 sealed interface CastPhase {
@@ -420,6 +421,7 @@ class CastCoordinator(context: Context, private val scope: CoroutineScope) {
         val notice =
             when (reason) {
                 CastFailure.YOUTUBE_UNCONFIRMED -> CastNotice.YOUTUBE_UNCONFIRMED
+                CastFailure.REJECTED -> CastNotice.REJECTED
                 else -> CastNotice.FAILED
             }
         if (!flow.failConnect(generation, youtube, notice)) return

@@ -24,6 +24,8 @@ internal enum class CastFailure {
     GENERIC,
     YOUTUBE_UNCONFIRMED,
     SILENCE,
+    /** The TV sent LAUNCH_ERROR, INVALID_REQUEST, LOAD_FAILED, or LOAD_CANCELLED. */
+    REJECTED,
 }
 
 internal data class CastFrame(
@@ -110,7 +112,24 @@ internal fun parseReceiverStatus(payload: String): ReceiverSnapshot? {
             )
     }
     val level = status.optJSONObject("volume")?.optDouble("level", 1.0) ?: 1.0
-    return ReceiverSnapshot(apps, level.toFloat().coerceIn(0f, 1f), root.optInt("requestId"))
+    val volume = level.toFloat().takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 1f
+    return ReceiverSnapshot(apps, volume, root.optInt("requestId"))
+}
+
+private val CAST_REJECTION_TYPES = setOf("LAUNCH_ERROR", "INVALID_REQUEST", "LOAD_FAILED", "LOAD_CANCELLED")
+
+/**
+ * The rejection type when [payload] is a receiver or media error, including a media status whose idle reason is
+ * LOAD_FAILED or LOAD_CANCELLED. Null when the payload is not one of those failures.
+ */
+internal fun parseCastError(payload: String): String? {
+    val root = jsonObject(payload) ?: return null
+    val type = root.optString("type")
+    if (type in CAST_REJECTION_TYPES) return type
+    if (type == "MEDIA_STATUS") {
+        return parseMediaStatus(payload).firstOrNull { it.idleReason in CAST_REJECTION_TYPES }?.idleReason
+    }
+    return null
 }
 
 internal fun parseMediaStatus(payload: String): List<MediaSnapshot> {
@@ -262,6 +281,7 @@ internal class CastSession(private val goal: CastGoal, private val senderId: Str
     fun onFrame(frame: CastFrame, nowMs: Long): List<CastEffect> {
         if (finished) return emptyList()
         heard(nowMs)
+        if (parseCastError(frame.payload) != null) return fail(CastFailure.REJECTED)
         if (frame.namespace == NS_HEARTBEAT) {
             return if (jsonType(frame.payload) == "PING") {
                 listOf(send(frame.sourceId.ifBlank { CAST_RECEIVER_ID }, NS_HEARTBEAT, """{"type":"PONG"}"""))
@@ -354,11 +374,12 @@ internal class CastSession(private val goal: CastGoal, private val senderId: Str
         when (val action = receiverAction(appId, snapshot)) {
             is ReceiverAction.Reuse -> {
                 appSessionId = action.sessionId
-                val firstSight = transportId == null
+                val previous = transportId
+                val transportChanged = previous != null && previous != action.transportId
                 transportId = action.transportId
-                if (firstSight) appSeenAt = nowMs
+                if (previous == null) appSeenAt = nowMs
                 val effects = ArrayList<CastEffect>()
-                if (!joined) {
+                if (!joined || transportChanged) {
                     joined = true
                     effects += send(action.transportId, NS_CONNECTION, connectPayload())
                 }

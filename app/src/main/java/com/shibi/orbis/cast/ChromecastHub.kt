@@ -37,6 +37,10 @@ internal class ChromecastHub(context: Context) {
         Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "orbis-cast-dial").apply { isDaemon = true }
         }
+    private val sessionIo =
+        Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "orbis-cast-io").apply { isDaemon = true }
+        }
     private var live: Live? = null
     private var generation = 0
 
@@ -91,7 +95,7 @@ internal class ChromecastHub(context: Context) {
                 while (isCurrent(epoch) && !session.localStop) {
                     drain(session)
                     if (!isCurrent(epoch) || session.localStop) break
-                    when (val read = readFrame(socket)) {
+                    when (val read = readCastFrame(socket.inputStream)) {
                         Read.Tick -> apply(session, machine.onClock(System.currentTimeMillis()), onReady, onFailed) { ready = true }
                         Read.Closed -> break
                         is Read.Frame ->
@@ -138,10 +142,15 @@ internal class ChromecastHub(context: Context) {
             live.also { live = null }
         } ?: return
         session.localStop = true
-        val effects = synchronized(session.machine) { session.machine.close() }
-        write(session, effects.filterIsInstance<CastEffect.Send>().map { it.frame })
+        val frames =
+            synchronized(session.machine) { session.machine.close() }
+                .filterIsInstance<CastEffect.Send>()
+                .map { it.frame }
         if (session.goal is CastGoal.YouTube) dialDelete(session.device.address)
-        runCatching { session.socket.close() }
+        sessionIo.execute {
+            write(session, frames)
+            runCatching { session.socket.close() }
+        }
     }
 
     fun hasSession(): Boolean = synchronized(this) { live != null }
@@ -235,12 +244,16 @@ internal class ChromecastHub(context: Context) {
 
     private fun write(session: Live, frames: List<CastFrame>) {
         if (frames.isEmpty()) return
-        synchronized(session.socket) {
-            val out = session.socket.outputStream
-            for (frame in frames) {
-                out.write(frameCastMessage(CastMessage(frame.sourceId, frame.destinationId, frame.namespace, frame.payload)))
+        try {
+            synchronized(session.socket) {
+                val out = session.socket.outputStream
+                for (frame in frames) {
+                    out.write(frameCastMessage(CastMessage(frame.sourceId, frame.destinationId, frame.namespace, frame.payload)))
+                }
+                out.flush()
             }
-            out.flush()
+        } catch (_: Exception) {
+            // The TV may already have closed the socket. The reader notices on its next read.
         }
     }
 
@@ -258,11 +271,14 @@ internal class ChromecastHub(context: Context) {
     }
 }
 
-private sealed interface Read {
+internal sealed interface Read {
     data class Frame(val message: CastMessage) : Read
     data object Tick : Read
     data object Closed : Read
 }
+
+/** Once any byte of a frame has arrived, the rest must finish within this long or the session closes. */
+internal const val CAST_FRAME_DEADLINE_MS = 5_000L
 
 /**
  * TLS to a discovered LAN host on the Cast port. The trust manager accepts the device certificate for this socket
@@ -290,36 +306,71 @@ internal fun openCastSocket(address: InetAddress, bind: (Socket) -> Unit): SSLSo
     }
 }
 
-private fun readFrame(socket: SSLSocket): Read {
+/**
+ * One CASTV2 frame from [input]. A timeout before the first byte is [Read.Tick], so the session thread can run the
+ * silence check. After the header is in, the body is read to completion. A timeout on that body closes the session
+ * and is never a tick, including a timeout that arrives before the first body byte.
+ */
+internal fun readCastFrame(
+    input: InputStream,
+    nowMs: () -> Long = { System.currentTimeMillis() },
+): Read {
     return try {
-        val header = readFully(socket.inputStream, 4) ?: return Read.Closed
-        val length = castFrameLength(header) ?: return Read.Closed
-        if (length < 0) return Read.Closed
-        val body = readFully(socket.inputStream, length) ?: return Read.Closed
-        val message = decodeCastMessage(body) ?: return Read.Closed
-        Read.Frame(message)
-    } catch (_: SocketTimeoutException) {
-        Read.Tick
+        when (val header = readExact(input, 4, nowMs, idleWhenEmpty = true, deadlineStart = null)) {
+            ReadChunk.Idle -> Read.Tick
+            ReadChunk.Closed -> Read.Closed
+            is ReadChunk.Bytes -> {
+                val length = castDeclaredLength(header.data)
+                if (length < 0) return Read.Closed
+                val started = nowMs()
+                when (val body = readExact(input, length, nowMs, idleWhenEmpty = false, deadlineStart = started)) {
+                    ReadChunk.Idle, ReadChunk.Closed -> Read.Closed
+                    is ReadChunk.Bytes -> decodeCastMessage(body.data)?.let { Read.Frame(it) } ?: Read.Closed
+                }
+            }
+        }
     } catch (_: Exception) {
         Read.Closed
     }
 }
 
-private fun readFully(input: InputStream, size: Int): ByteArray? {
+private sealed interface ReadChunk {
+    data class Bytes(val data: ByteArray) : ReadChunk
+    data object Idle : ReadChunk
+    data object Closed : ReadChunk
+}
+
+private fun readExact(
+    input: InputStream,
+    size: Int,
+    nowMs: () -> Long,
+    idleWhenEmpty: Boolean,
+    deadlineStart: Long?,
+): ReadChunk {
+    if (size == 0) return ReadChunk.Bytes(ByteArray(0))
     val buffer = ByteArray(size)
     var offset = 0
+    var started = deadlineStart
     while (offset < size) {
+        val origin = started
+        if (origin != null && nowMs() - origin >= CAST_FRAME_DEADLINE_MS) return ReadChunk.Closed
         val read =
             try {
                 input.read(buffer, offset, size - offset)
-            } catch (timeout: SocketTimeoutException) {
-                if (offset == 0) throw timeout
+            } catch (_: SocketTimeoutException) {
+                if (offset == 0 && started == null && idleWhenEmpty) return ReadChunk.Idle
+                val origin = started ?: nowMs().also { started = it }
+                if (nowMs() - origin >= CAST_FRAME_DEADLINE_MS) return ReadChunk.Closed
                 continue
+            } catch (_: Exception) {
+                return ReadChunk.Closed
             }
-        if (read < 0) return null
+        if (read < 0) return ReadChunk.Closed
+        if (read == 0) continue
+        if (started == null) started = nowMs()
         offset += read
     }
-    return buffer
+    return ReadChunk.Bytes(buffer)
 }
 
 private fun dialHost(address: InetAddress): String? {

@@ -1,6 +1,9 @@
 package com.shibi.orbis.cast
 
+import java.io.InputStream
 import java.net.InetAddress
+import java.net.SocketTimeoutException
+import java.util.ArrayDeque
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -186,6 +189,72 @@ class CastProtocolTest {
     }
 
     @Test
+    fun aNonNumericVolumeStaysFinite() {
+        val missing = parseReceiverStatus("""{"type":"RECEIVER_STATUS","requestId":1,"status":{"volume":{"level":"nope"}}}""")
+        assertEquals(1f, missing?.volume)
+        val nan = parseReceiverStatus("""{"type":"RECEIVER_STATUS","requestId":1,"status":{"volume":{"level":"NaN"}}}""")
+        assertEquals(1f, nan?.volume)
+        assertFalse(nan?.volume?.isNaN() == true)
+    }
+
+    @Test
+    fun receiverAndMediaErrorsFailImmediately() {
+        val types = listOf("LAUNCH_ERROR", "INVALID_REQUEST", "LOAD_FAILED", "LOAD_CANCELLED")
+        for (type in types) {
+            assertEquals(type, parseCastError("""{"type":"$type","reason":"NOT_FOUND"}"""))
+            val session = CastSession(CastGoal.Media(media(), "Show", null))
+            session.start(0)
+            val failed = session.onFrame(frame(NS_RECEIVER, """{"type":"$type","requestId":2,"reason":"NOT_FOUND"}"""), 50)
+            assertEquals(CastFailure.REJECTED, (failed.single() as CastEffect.Failed).reason)
+            assertTrue(session.onClock(60).isEmpty())
+        }
+        val idle = mediaStatus("https://cdn.example/a.mp4", "IDLE", 0.0, 0.0, 3, idle = "LOAD_FAILED")
+        assertEquals("LOAD_FAILED", parseCastError(idle))
+        val session = CastSession(CastGoal.Media(media(), "Show", null))
+        session.start(0)
+        val failed = session.onFrame(frame(NS_MEDIA, idle), 80)
+        assertEquals(CastFailure.REJECTED, (failed.single() as CastEffect.Failed).reason)
+        assertNull(parseCastError("""{"type":"RECEIVER_STATUS"}"""))
+    }
+
+    @Test
+    fun aChangedReceiverTransportGetsANewConnect() {
+        val video = YouTubeVideo("dQw4w9WgXcQ", "https://youtu.be/dQw4w9WgXcQ", 0.0, "Song")
+        val session = CastSession(CastGoal.YouTube(video))
+        session.start(0)
+        session.onDial(404, 10)
+        session.onFrame(frame(NS_RECEIVER, receiver(YOUTUBE_RECEIVER_APP_ID, "ys", "web-1", 1.0, 2)), 20)
+        val same = session.onFrame(frame(NS_RECEIVER, receiver(YOUTUBE_RECEIVER_APP_ID, "ys", "web-1", 1.0, 3)), 30)
+        assertTrue(same.none { it is CastEffect.Send && it.frame.namespace == NS_CONNECTION })
+        val relaunch = session.onFrame(frame(NS_RECEIVER, receiver(YOUTUBE_RECEIVER_APP_ID, "ys2", "web-9", 1.0, 4)), 40)
+        val connects = relaunch.filterIsInstance<CastEffect.Send>().filter { it.frame.namespace == NS_CONNECTION }
+        assertEquals(listOf("web-9"), connects.map { it.frame.destinationId })
+        assertTrue(relaunch.none { it is CastEffect.Send && it.frame.namespace == YOUTUBE_NAMESPACE })
+    }
+
+    @Test
+    fun aFrameArrivesInPiecesWithTimeoutsBetweenThem() {
+        val message = CastMessage(CAST_SENDER_ID, CAST_RECEIVER_ID, NS_HEARTBEAT, """{"type":"PING"}""")
+        val framed = frameCastMessage(message)
+        val pieces = ArrayList<Any>(framed.size * 2)
+        for (index in framed.indices) {
+            pieces += framed.copyOfRange(index, index + 1)
+            if (index != framed.lastIndex) pieces += SocketTimeoutException("gap")
+        }
+        val assembled = readCastFrame(PiecewiseInput(pieces))
+        val decoded = assembled as Read.Frame
+        assertEquals(message, decoded.message)
+
+        assertTrue(readCastFrame(PiecewiseInput(listOf(SocketTimeoutException("idle")))) is Read.Tick)
+
+        var now = 0L
+        val stalled = listOf(framed.copyOfRange(0, 4), SocketTimeoutException("body"))
+        val closed =
+            readCastFrame(PiecewiseInput(stalled) { now += CAST_FRAME_DEADLINE_MS }) { now }
+        assertTrue(closed is Read.Closed)
+    }
+
+    @Test
     fun castTxtReadsNameModelAndIdAndRejectsLoopback() {
         val attributes =
             mapOf(
@@ -239,4 +308,35 @@ class CastProtocolTest {
         idle: String = "",
     ) =
         """{"type":"MEDIA_STATUS","requestId":4,"status":[{"mediaSessionId":$session,"playerState":"$state","currentTime":$position,"idleReason":"$idle","media":{"contentId":"$contentId","contentType":"video/mp4","streamType":"BUFFERED","duration":$duration}}]}"""
+}
+
+/** Serves scripted byte chunks. A [SocketTimeoutException] step is thrown instead of returning bytes. */
+private class PiecewiseInput(
+    steps: List<Any>,
+    private val onTimeout: () -> Unit = {},
+) : InputStream() {
+    private val pending = ArrayDeque(steps)
+
+    override fun read(): Int {
+        val one = ByteArray(1)
+        val count = read(one, 0, 1)
+        return if (count < 0) -1 else one[0].toInt() and 0xFF
+    }
+
+    override fun read(b: ByteArray, off: Int, len: Int): Int {
+        while (pending.isNotEmpty() && pending.first() is ByteArray && (pending.first() as ByteArray).isEmpty()) {
+            pending.removeFirst()
+        }
+        if (pending.isEmpty()) return -1
+        val next = pending.removeFirst()
+        if (next is SocketTimeoutException) {
+            onTimeout()
+            throw next
+        }
+        val data = next as ByteArray
+        val count = minOf(len, data.size)
+        System.arraycopy(data, 0, b, off, count)
+        if (count < data.size) pending.addFirst(data.copyOfRange(count, data.size))
+        return count
+    }
 }

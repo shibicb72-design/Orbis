@@ -378,6 +378,7 @@
     <string name="cast_dlna_adaptive">Manche Fernseher können diesen Stream (HLS oder DASH) nicht abspielen. Wenn nichts startet, eine Seite mit einer mp4- oder webm-Datei versuchen.</string>
     <string name="cast_failed">Übertragen auf dieses Gerät nicht möglich.</string>
     <string name="cast_youtube_unconfirmed">Der Fernseher hat dieses YouTube-Video nicht gestartet.</string>
+    <string name="cast_rejected">Der Fernseher hat diese Übertragung abgelehnt.</string>
     <string name="cast_play">Wiedergeben</string>
     <string name="cast_pause">Pause</string>
     <string name="cast_disconnect">Trennen</string>

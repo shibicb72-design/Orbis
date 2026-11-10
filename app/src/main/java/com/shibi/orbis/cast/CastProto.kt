@@ -110,15 +110,25 @@ internal fun decodeCastMessage(body: ByteArray): CastMessage? {
     )
 }
 
+/**
+ * Body length declared by a 4-byte big-endian header, or -1 when the header is short or the length is illegal.
+ * Unlike [castFrameLength], the body does not have to be buffered yet.
+ */
+internal fun castDeclaredLength(header: ByteArray, offset: Int = 0): Int {
+    if (header.size - offset < 4) return -1
+    val length =
+        ((header[offset].toInt() and 0xFF) shl 24) or
+            ((header[offset + 1].toInt() and 0xFF) shl 16) or
+            ((header[offset + 2].toInt() and 0xFF) shl 8) or
+            (header[offset + 3].toInt() and 0xFF)
+    return if (length <= 0 || length > CAST_MAX_MESSAGE_BYTES) -1 else length
+}
+
 /** How many bytes of [framed] form the next complete message, or null when more bytes are required. Negative when the length is illegal. */
 internal fun castFrameLength(framed: ByteArray, offset: Int = 0): Int? {
     if (framed.size - offset < 4) return null
-    val length =
-        ((framed[offset].toInt() and 0xFF) shl 24) or
-            ((framed[offset + 1].toInt() and 0xFF) shl 16) or
-            ((framed[offset + 2].toInt() and 0xFF) shl 8) or
-            (framed[offset + 3].toInt() and 0xFF)
-    if (length <= 0 || length > CAST_MAX_MESSAGE_BYTES) return -1
+    val length = castDeclaredLength(framed, offset)
+    if (length < 0) return -1
     if (framed.size - offset < 4 + length) return null
     return length
 }

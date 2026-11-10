@@ -266,6 +266,7 @@ private fun noticeLabel(notice: CastNotice): String =
             CastNotice.YOUTUBE_NEEDS_GOOGLE -> R.string.cast_youtube_need_google
             CastNotice.FAILED -> R.string.cast_failed
             CastNotice.YOUTUBE_UNCONFIRMED -> R.string.cast_youtube_unconfirmed
+            CastNotice.REJECTED -> R.string.cast_rejected
         },
     )
 

@@ -380,6 +380,7 @@
     <string name="cast_dlna_adaptive">Certains téléviseurs ne lisent pas ce flux (HLS ou DASH). S\'il ne démarre pas, essayez une page avec un fichier mp4 ou webm.</string>
     <string name="cast_failed">Impossible de diffuser vers cet appareil.</string>
     <string name="cast_youtube_unconfirmed">Le téléviseur n\'a pas lancé cette vidéo YouTube.</string>
+    <string name="cast_rejected">Le téléviseur a refusé cette diffusion.</string>
     <string name="cast_play">Lecture</string>
     <string name="cast_pause">Pause</string>
     <string name="cast_disconnect">Déconnecter</string>

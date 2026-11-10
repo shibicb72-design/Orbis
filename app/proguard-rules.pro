@@ -6,9 +6,5 @@
 # never run here, so R8 is told the classes are absent on purpose (rules from build/outputs/mapping/release/missing_rules.txt).
 -dontwarn mozilla.telemetry.glean.**
 
-# GeckoView's WebAuthn helper references play-services-fido. That library is not packaged: the release
-# classpath has no Play services, and Cast does not use it. A missing class there must not fail R8.
--dontwarn com.google.android.gms.**
-
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile

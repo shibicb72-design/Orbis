@@ -7,7 +7,10 @@ internal const val CONNECT_TIMEOUT_MS = 15_000L
 internal const val PROBE_TIMEOUT_MS = 1_500L
 
 private fun sticky(notice: CastNotice?): Boolean =
-    notice == CastNotice.FAILED || notice == CastNotice.YOUTUBE_NEEDS_GOOGLE || notice == CastNotice.YOUTUBE_UNCONFIRMED
+    notice == CastNotice.FAILED ||
+        notice == CastNotice.YOUTUBE_NEEDS_GOOGLE ||
+        notice == CastNotice.YOUTUBE_UNCONFIRMED ||
+        notice == CastNotice.REJECTED
 
 /**
  * Cast sheet transitions that do not touch the network. [CastCoordinator] performs the device work these decisions

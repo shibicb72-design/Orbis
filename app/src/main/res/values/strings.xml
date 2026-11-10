@@ -378,6 +378,7 @@
     <string name="cast_dlna_adaptive">Some TVs can\'t play this stream (HLS or DASH). If it doesn\'t start, try a page with an mp4 or webm file.</string>
     <string name="cast_failed">Couldn\'t cast to this device.</string>
     <string name="cast_youtube_unconfirmed">The TV didn\'t start this YouTube video.</string>
+    <string name="cast_rejected">The TV refused this cast.</string>
     <string name="cast_play">Play</string>
     <string name="cast_pause">Pause</string>
     <string name="cast_disconnect">Disconnect</string>
