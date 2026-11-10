@@ -73,6 +73,13 @@ private const val MAX_NAME_BYTES = 120
 private const val COPY_BUFFER_BYTES = 64 * 1024
 private const val HTML_SCAN_BYTES = 64 * 1024
 private const val HTML_NUL_SCAN_BYTES = 4 * 1024
+
+/**
+ * Longest preamble we will keep in front of the charset meta. The HTML prescan only looks at the first 1024
+ * bytes, and the meta itself needs room inside that window. A longer run of comments or whitespace inserts
+ * the metas right after the BOM instead: quirks mode, but the policy is still the first tag.
+ */
+private const val HTML_CHARSET_BUDGET = 900
 private const val FALLBACK_NAME = "document"
 private const val STAGING_DIR = "import-staging"
 
@@ -269,6 +276,42 @@ fun importedPageJavaScript(url: String): Boolean? {
 fun importScriptCorrection(url: String?, javascriptEnabled: Boolean): Boolean? {
     val want = importedPageJavaScript(url ?: return null) ?: return null
     return want.takeIf { it != javascriptEnabled }
+}
+
+/**
+ * What a commit that skipped `onLoadRequest` (Back, Forward, restore) should do with JavaScript.
+ * [Leave] is the steady state: applying it again must not reload, which is what stops a reload loop.
+ */
+sealed class HistoryScript {
+    data object Leave : HistoryScript()
+
+    /** An imported document. [reload] when [enabled] is not the session's current value. */
+    data class Force(val enabled: Boolean, val reload: Boolean) : HistoryScript()
+
+    /**
+     * A web URL reached from an import. The import overwrote the site's JavaScript setting, and Forward
+     * does not pass through `onLoadRequest`, so the site policy has to be put back. The caller reloads once
+     * when that changes the setting, then clears the "previous page was an import" flag before the reload.
+     */
+    data object RestoreSite : HistoryScript()
+}
+
+/**
+ * [previousForcedImportScript] is true when the page being left had its JavaScript forced because it was an
+ * import. A web URL then needs [HistoryScript.RestoreSite]. The same web URL with the flag already cleared is
+ * [HistoryScript.Leave], so the reload that applies the site policy does not reload again.
+ */
+fun scriptAfterHistoryCommit(
+    url: String?,
+    javascriptEnabled: Boolean,
+    previousForcedImportScript: Boolean,
+): HistoryScript {
+    if (url != null) {
+        val want = importedPageJavaScript(url)
+        if (want != null) return HistoryScript.Force(want, reload = want != javascriptEnabled)
+        if (previousForcedImportScript && isWebUrl(url)) return HistoryScript.RestoreSite
+    }
+    return HistoryScript.Leave
 }
 
 /**
@@ -723,14 +766,18 @@ private val POLICY_META: ByteArray = (
 
 private val DOCTYPE_TOKEN = "<!DOCTYPE".toByteArray(Charsets.US_ASCII)
 private val COMMENT_OPEN = "<!--".toByteArray(Charsets.US_ASCII)
+private val COMMENT_EMPTY = "<!-->".toByteArray(Charsets.US_ASCII)
+private val COMMENT_EMPTY_DASH = "<!--->".toByteArray(Charsets.US_ASCII)
 private val COMMENT_CLOSE = "-->".toByteArray(Charsets.US_ASCII)
+private val COMMENT_END_BANG = "--!>".toByteArray(Charsets.US_ASCII)
 
 /**
  * Writes [source] to [dest] with a charset meta and [IMPORT_CONTENT_SECURITY_POLICY] inserted after the BOM,
- * leading whitespace, comments and one optional doctype. Those cannot load a subresource, and a meta before
- * the doctype would put the page in quirks mode. The insertion point is searched only in the first
- * [HTML_SCAN_BYTES]. The rest is streamed. False when the bytes are not UTF-8, a NUL sits in the first
- * [HTML_NUL_SCAN_BYTES] (a BOM-less UTF-16 file), or no safe insertion point exists.
+ * leading whitespace, comments and one optional doctype, using HTML's own tokenization. A meta before the
+ * doctype would put the page in quirks mode, but a preamble longer than [HTML_CHARSET_BUDGET] inserts right
+ * after the BOM so the charset meta stays inside the first 1024 bytes. The insertion point is searched only
+ * in the first [HTML_SCAN_BYTES]. The rest is streamed. False when the bytes are not UTF-8 or a NUL sits in
+ * the first [HTML_NUL_SCAN_BYTES] (a BOM-less UTF-16 file).
  */
 private fun writeHtmlWithPolicy(source: File, dest: File): Boolean {
     FileInputStream(source).use { input ->
@@ -739,7 +786,7 @@ private fun writeHtmlWithPolicy(source: File, dest: File): Boolean {
         if (containsNul(scan, minOf(n, HTML_NUL_SCAN_BYTES))) return false
         val extra = if (n == scan.size) input.read() else -1
         val more = extra >= 0
-        val insertAt = skipHtmlPreamble(scan, n, more) ?: return false
+        val insertAt = skipHtmlPreamble(scan, n, more)
         val utf8 = Utf8Check()
         if (!utf8.feed(scan, 0, n, end = !more)) return false
         dest.outputStream().use { out ->
@@ -767,37 +814,76 @@ private fun copyValidated(input: InputStream, out: java.io.OutputStream, utf8: U
 }
 
 /**
- * Index where the policy metas may be inserted, or null when the preamble is not finished inside [length].
- * [fileContinues] means bytes exist past [length]; a doctype that would start past this window is refused
- * rather than having the meta land in front of it.
+ * Index where the policy metas may be inserted.
+ * [fileContinues] means bytes exist past [length]. Anything that is not a finished comment or a finished
+ * doctype stops the scan, and the metas go there. Inserting early is safe: a tag cannot precede them.
+ * Past [HTML_CHARSET_BUDGET] the metas go right after the BOM instead.
  */
-private fun skipHtmlPreamble(bytes: ByteArray, length: Int, fileContinues: Boolean): Int? {
-    var i = 0
-    if (length >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()) i = 3
+private fun skipHtmlPreamble(bytes: ByteArray, length: Int, fileContinues: Boolean): Int {
+    val bom = if (length >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()) 3 else 0
+    var i = bom
     var seenDoctype = false
     while (i < length) {
         if (isHtmlSpace(bytes[i])) {
             i++
             continue
         }
+        // <!--> and <!---> are complete empty comments. Treating them as the start of a longer comment
+        // swallows the tag that follows, and that tag opens the body before our meta is seen.
+        if (regionStartsWith(bytes, length, i, COMMENT_EMPTY_DASH)) {
+            i += COMMENT_EMPTY_DASH.size
+            continue
+        }
+        if (regionStartsWith(bytes, length, i, COMMENT_EMPTY)) {
+            i += COMMENT_EMPTY.size
+            continue
+        }
         if (regionStartsWith(bytes, length, i, COMMENT_OPEN)) {
-            val end = indexOfBytes(bytes, length, i + COMMENT_OPEN.size, COMMENT_CLOSE)
-            if (end < 0) return null
-            i = end + COMMENT_CLOSE.size
+            val end = commentEnd(bytes, length, i)
+            if (end < 0) return placeMeta(bom, i)
+            i = end
             continue
         }
         if (!seenDoctype && regionStartsWithIgnoreCase(bytes, length, i, DOCTYPE_TOKEN)) {
-            val end = skipDeclaration(bytes, length, i)
-            if (end < 0) return null
+            val end = doctypeEnd(bytes, length, i)
+            if (end < 0) return placeMeta(bom, i)
             seenDoctype = true
             i = end
             continue
         }
-        if (fileContinues && isPartialPreambleToken(bytes, length, i)) return null
-        return i
+        if (fileContinues && isPartialPreambleToken(bytes, length, i)) return placeMeta(bom, i)
+        return placeMeta(bom, i)
     }
-    if (fileContinues && !seenDoctype) return null
-    return i
+    return placeMeta(bom, i)
+}
+
+/** [at] when it still leaves the charset meta inside the prescan window, otherwise just after the BOM. */
+private fun placeMeta(bom: Int, at: Int): Int = if (at > HTML_CHARSET_BUDGET) bom else at
+
+/**
+ * Index just after a comment that opened at [openAt], or -1 when the comment is not safely skippable.
+ * A `>` before `-->` or `--!>` is ambiguous, so the caller inserts in front of the comment instead of
+ * burying the meta inside it. An unclosed comment is the same.
+ */
+private fun commentEnd(bytes: ByteArray, length: Int, openAt: Int): Int {
+    var i = openAt + COMMENT_OPEN.size
+    while (i < length) {
+        if (regionStartsWith(bytes, length, i, COMMENT_END_BANG)) return i + COMMENT_END_BANG.size
+        if (regionStartsWith(bytes, length, i, COMMENT_CLOSE)) return i + COMMENT_CLOSE.size
+        if (bytes[i] == '>'.code.toByte()) return -1
+        i++
+    }
+    return -1
+}
+
+/** Index just after the first `>` of a doctype, or -1 when [length] ends first. Quotes do not protect a `>`. */
+private fun doctypeEnd(bytes: ByteArray, length: Int, start: Int): Int {
+    var i = start + DOCTYPE_TOKEN.size
+    while (i < length) {
+        if (bytes[i] == '>'.code.toByte()) return i + 1
+        i++
+    }
+    return -1
 }
 
 private fun isPartialPreambleToken(bytes: ByteArray, length: Int, start: Int): Boolean {
@@ -835,40 +921,6 @@ private fun asciiLower(b: Byte): Byte {
 private fun isHtmlSpace(b: Byte): Boolean {
     val c = b.toInt() and 0xFF
     return c == 0x09 || c == 0x0A || c == 0x0C || c == 0x0D || c == 0x20
-}
-
-/** Index just after the next unquoted `>`, or -1 when [length] ends first. */
-private fun skipDeclaration(bytes: ByteArray, length: Int, start: Int): Int {
-    var quote = 0
-    var i = start
-    while (i < length) {
-        val c = bytes[i].toInt() and 0xFF
-        if (quote != 0) {
-            if (c == quote) quote = 0
-        } else when (c) {
-            '"'.code, '\''.code -> quote = c
-            '>'.code -> return i + 1
-        }
-        i++
-    }
-    return -1
-}
-
-private fun indexOfBytes(bytes: ByteArray, length: Int, from: Int, needle: ByteArray): Int {
-    val last = length - needle.size
-    var i = from
-    while (i <= last) {
-        var matches = true
-        for (k in needle.indices) {
-            if (bytes[i + k] != needle[k]) {
-                matches = false
-                break
-            }
-        }
-        if (matches) return i
-        i++
-    }
-    return -1
 }
 
 private fun containsNul(bytes: ByteArray, length: Int): Boolean {

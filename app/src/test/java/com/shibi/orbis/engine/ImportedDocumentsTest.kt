@@ -532,6 +532,67 @@ class ImportedDocumentsTest {
         assertNull(importScriptCorrection("https://example.com/", javascriptEnabled = true))
         assertNull(importScriptCorrection(null, javascriptEnabled = true))
     }
+
+    @Test
+    fun forwardFromAnImportRestoresTheWebsiteAndDoesNotReloadAgain() {
+        val html = "file:///data/user/0/com.shibi.orbis/cache/imports/11111111-1111-1111-1111-111111111111/page.html"
+        val pdf = "file:///data/user/0/com.shibi.orbis/cache/imports/11111111-1111-1111-1111-111111111111/a.pdf"
+        val site = "https://example.com/"
+        assertEquals(HistoryScript.Force(enabled = false, reload = true), scriptAfterHistoryCommit(html, javascriptEnabled = true, previousForcedImportScript = false))
+        assertEquals(HistoryScript.Force(enabled = true, reload = false), scriptAfterHistoryCommit(pdf, javascriptEnabled = true, previousForcedImportScript = true))
+        // Forward to the site while the import is still forcing the setting.
+        assertEquals(HistoryScript.RestoreSite, scriptAfterHistoryCommit(site, javascriptEnabled = false, previousForcedImportScript = true))
+        assertEquals(HistoryScript.RestoreSite, scriptAfterHistoryCommit(site, javascriptEnabled = true, previousForcedImportScript = true))
+        // The reload that applies site policy clears the flag first, so the same commit does not reload again.
+        assertEquals(HistoryScript.Leave, scriptAfterHistoryCommit(site, javascriptEnabled = true, previousForcedImportScript = false))
+        assertEquals(HistoryScript.Leave, scriptAfterHistoryCommit(site, javascriptEnabled = false, previousForcedImportScript = false))
+        assertEquals(HistoryScript.Leave, scriptAfterHistoryCommit("about:blank", javascriptEnabled = false, previousForcedImportScript = true))
+    }
+
+    @Test
+    fun emptyCommentsAndAQuotedDoctypeDoNotHideATagBeforeThePolicy() = runBlocking {
+        val cache = ImportedFileCache(tmp.root)
+        assertMetaBeforeTag(cache, "<!--><img src=\"file:///data/secret.png\"><!-- -->", "<!-->")
+        assertMetaBeforeTag(cache, "<!---><img src=\"file:///data/secret.png\">", "<!--->")
+        assertMetaBeforeTag(cache, "<!-- secret --!><img src=\"file:///data/secret.png\">", "<!-- secret --!>")
+        assertMetaBeforeTag(cache, "<!DOCTYPE html \"><img src=\"file:///data/secret.png>\">", "<!DOCTYPE html \">")
+        val ambiguous = cache.copyIn("gap.html", "text/html", null) {
+            ByteArrayInputStream("<!-- keep > this --><img src=\"file:///data/secret.png\">".toByteArray())
+        } as ImportResult.Ready
+        val gap = File(URI(ambiguous.url)).readText()
+        assertTrue(gap.indexOf("<meta charset=\"utf-8\">") < gap.indexOf("<!--"))
+        assertTrue(gap.indexOf("<meta charset=\"utf-8\">") < gap.indexOf("<img"))
+    }
+
+    @Test
+    fun aLongPreambleStillPutsTheCharsetMetaInsideThePrescan() = runBlocking {
+        val cache = ImportedFileCache(tmp.root)
+        val long = " ".repeat(2_000) + "<!DOCTYPE html><p>z</p>"
+        val ready = cache.copyIn("long.html", "text/html", null) { ByteArrayInputStream(long.toByteArray()) } as ImportResult.Ready
+        val text = File(URI(ready.url)).readText()
+        assertTrue(text.startsWith("<meta charset=\"utf-8\">"))
+        assertTrue(text.indexOf("<meta charset=\"utf-8\">") < 1_024)
+        assertTrue(text.indexOf("<!DOCTYPE html>") > text.indexOf(IMPORT_CONTENT_SECURITY_POLICY))
+
+        val withBom = "\uFEFF" + " ".repeat(2_000) + "<p>z</p>"
+        val bom = cache.copyIn("bom.html", "text/html", null) { ByteArrayInputStream(withBom.toByteArray(Charsets.UTF_8)) } as ImportResult.Ready
+        val bomText = File(URI(bom.url)).readText(Charsets.UTF_8)
+        assertTrue(bomText.startsWith("\uFEFF<meta charset=\"utf-8\">"))
+
+        val moderate = " ".repeat(400) + "<!DOCTYPE html><p>z</p>"
+        val kept = cache.copyIn("kept.html", "text/html", null) { ByteArrayInputStream(moderate.toByteArray()) } as ImportResult.Ready
+        val keptText = File(URI(kept.url)).readText()
+        assertTrue(keptText.startsWith(" ".repeat(400) + "<!DOCTYPE html>"))
+        assertTrue(keptText.indexOf("<!DOCTYPE html>") < keptText.indexOf("<meta charset=\"utf-8\">"))
+    }
+}
+
+private suspend fun assertMetaBeforeTag(cache: ImportedFileCache, body: String, prefix: String) {
+    val ready = cache.copyIn("t.html", "text/html", null) { ByteArrayInputStream(body.toByteArray()) } as ImportResult.Ready
+    val text = File(URI(ready.url)).readText()
+    assertTrue("body $body -> $text", text.startsWith(prefix))
+    assertTrue(text.indexOf(prefix) < text.indexOf("<meta charset=\"utf-8\">"))
+    assertTrue(text.indexOf("<meta charset=\"utf-8\">") < text.indexOf("<img"))
 }
 
 private fun assertPolicyBlocksFile(policy: String) {

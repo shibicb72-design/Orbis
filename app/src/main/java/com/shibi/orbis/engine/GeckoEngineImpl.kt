@@ -526,6 +526,13 @@ private class GeckoBrowserSession(
     /** `<cacheDir>/imports`. The only `file:` tree this session will load. */
     private val importRoot = File(appContext.cacheDir, IMPORT_CACHE_DIR)
 
+    /**
+     * True after an imported document forced this session's JavaScript. Forward to a website skips
+     * [onLoadRequest], so the site would otherwise keep the import's setting. Cleared once site policy is applied,
+     * before any reload, so that reload does not apply it again.
+     */
+    private var scriptForcedByImport = false
+
     private val queue = PromptQueue()
     override val prompts: StateFlow<SitePrompt?> = queue.head
 
@@ -628,8 +635,8 @@ private class GeckoBrowserSession(
                 // displayed, so showing its address would let a hostile page spoof the address bar.
                 if (url != null) {
                     _state.update { it.copy(url = url) }
-                    // Back/Forward commits without onLoadRequest, so an imported page would otherwise keep the
-                    // previous page's JavaScript setting. HTML must be off; PDF must stay on for pdf.js.
+                    // Back/Forward commits without onLoadRequest. An import forces JavaScript (HTML off, PDF on).
+                    // Forward back to a website has to restore that site's setting, or it stays off.
                     applyImportedScript(url, reloadIfChanged = true)
                 }
                 // Gecko hands every web page its tracking permission record; ALLOW means a stored (normal) exception.
@@ -748,8 +755,8 @@ private class GeckoBrowserSession(
     private fun progressDelegate() =
         object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) {
-                // History can land on an imported HTML page without onLoadRequest. Turn script off (or back on
-                // for a PDF) before the document runs, and reload once when the setting had to change.
+                // History can land here without onLoadRequest. An import forces script; a website reached from
+                // an import gets its site policy back. Either reloads once when the setting had to change.
                 applyImportedScript(url, reloadIfChanged = true)
                 // A new top-level page ends any dialog-spam lockout and invalidates the find highlight.
                 abuseGuard.onPageStart()
@@ -1941,8 +1948,10 @@ private class GeckoBrowserSession(
      * [onSubframeLoadRequest]; there is no hook for `<img>`, `<script>` or `<link>`. HTML was rewritten
      * with a CSP that denies those (`default-src 'none'`, no `file:` source) and JavaScript is turned off here,
      * before [loadUri], because [applySitePolicy] does nothing for a non-web URL. The same setting is applied
-     * again from [onPageStart] and [onLocationChange], which is what Back and Forward hit. PDF is not rewritten
-     * and keeps JavaScript so pdf.js can run. [onSubframeLoadRequest] denies every `file:` subframe. Private
+     * again from [onPageStart] and [onLocationChange], which is what Back and Forward hit. Forward from that
+     * page to a website restores [applySitePolicy] and reloads once if JavaScript changed; the flag is cleared
+     * first so the reload does not do it again. PDF is not rewritten and keeps JavaScript so pdf.js can run.
+     * [onSubframeLoadRequest] denies every `file:` subframe. Private
      * sessions never load these: a shared document opens in a normal tab.
      */
     override fun loadImportedFile(url: String) {
@@ -1957,16 +1966,28 @@ private class GeckoBrowserSession(
     }
 
     /**
-     * Script for an imported document. HTML off, PDF on. No-op when [url] is not an import.
-     * [reloadIfChanged] is for a commit that did not pass through [onLoadRequest]: the setting only takes
-     * effect on the next load, so a history navigation reloads once when it had the previous page's value.
+     * JavaScript for a commit that may have skipped [onLoadRequest]. An import forces HTML off and PDF on.
+     * A website reached from an import gets [applySitePolicy] back. [reloadIfChanged] reloads once when the
+     * value actually changes; [scriptForcedByImport] is cleared before that reload so it cannot loop.
      */
     private fun applyImportedScript(url: String, reloadIfChanged: Boolean = false) {
-        val correction = importScriptCorrection(url, session.settings.allowJavascript)
-        val js = importedPageJavaScript(url) ?: return
-        if (correction != null) session.settings.allowJavascript = correction
-        _state.update { it.copy(javaScriptOn = js) }
-        if (reloadIfChanged && correction != null && !closed && session.isOpen) session.reload()
+        when (val action = scriptAfterHistoryCommit(url, session.settings.allowJavascript, scriptForcedByImport)) {
+            HistoryScript.Leave -> Unit
+            is HistoryScript.Force -> {
+                scriptForcedByImport = true
+                if (session.settings.allowJavascript != action.enabled) session.settings.allowJavascript = action.enabled
+                _state.update { it.copy(javaScriptOn = action.enabled) }
+                if (reloadIfChanged && action.reload && !closed && session.isOpen) session.reload()
+            }
+            HistoryScript.RestoreSite -> {
+                val before = session.settings.allowJavascript
+                applySitePolicy(url)
+                val changed = session.settings.allowJavascript != before
+                // The flag is already clear when site policy applied. A missing policy leaves it set and
+                // does not reload, so the next commit can try again without spinning.
+                if (reloadIfChanged && changed && !scriptForcedByImport && !closed && session.isOpen) session.reload()
+            }
+        }
     }
 
     override fun setDesktopMode(enabled: Boolean) {
@@ -1993,6 +2014,7 @@ private class GeckoBrowserSession(
         val js = policy.javaScriptFor(url, isPrivate)
         if (session.settings.allowJavascript != js) session.settings.allowJavascript = js
         _state.update { it.copy(javaScriptOn = js) }
+        scriptForcedByImport = false
     }
 
     override fun printPage() {
