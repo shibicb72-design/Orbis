@@ -4,7 +4,6 @@
     <string name="clear_data_summary">Historial, cookies, caché, pestañas y más</string>
 
     <string name="clear_history">Historial de navegación</string>
-    <string name="clear_history_summary">Incluye las pausas publicitarias de YouTube evitadas y su tiempo ahorrado estimado.</string>
     <string name="clear_cookies">Cookies y datos de sitios</string>
     <string name="clear_cookies_summary">Cierra tu sesión en la mayoría de los sitios. Las páginas abiertas pueden seguir mostrándose hasta que las recargues. Una descarga en curso puede detenerse.</string>
     <string name="clear_cache">Imágenes y archivos en caché</string>

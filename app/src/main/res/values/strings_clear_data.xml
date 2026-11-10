@@ -4,7 +4,8 @@
     <string name="clear_data_summary">History, cookies, cache, tabs and more</string>
 
     <string name="clear_history">Browsing history</string>
-    <string name="clear_history_summary">Includes ad breaks avoided on YouTube and their estimated time saved.</string>
+    <!-- English only. Do not add translations for this. -->
+    <string name="clear_history_summary" translatable="false">Includes ad breaks avoided on YouTube and their estimated time saved.</string>
     <string name="clear_cookies">Cookies &amp; site data</string>
     <string name="clear_cookies_summary">Signs you out of most sites. Pages that are open may keep showing until you reload them. A download in progress may stop.</string>
     <string name="clear_cache">Cached images and files</string>

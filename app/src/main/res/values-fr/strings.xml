@@ -344,7 +344,7 @@
     <string name="stats_title">Votre vie privée avec Orbis</string>
     <string name="stats_week">7 jours</string>
     <string name="stats_all_time">Depuis le début</string>
-    <string name="stats_time_saved">Temps gagné (estimation, par requête)</string>
+    <string name="stats_time_saved">Temps gagné (estimation)</string>
     <string name="stats_data_saved">Données économisées (estimation)</string>
     <string name="stats_data_used">Données utilisées par Orbis</string>
     <string name="stats_hours">%1$d h</string>
@@ -363,27 +363,7 @@
     <string name="stats_since">Depuis le %1$s</string>
     <string name="stats_reset">Réinitialiser</string>
     <string name="stats_reset_title">Réinitialiser les statistiques ?</string>
-    <string name="stats_reset_body">Les compteurs repartent de zéro, y compris les coupures pub YouTube évitées. Rien d\'autre n\'est supprimé.</string>
-    <string name="stats_duration_zero">0 min</string>
-    <string name="stats_duration_hm">%1$d h %2$d min</string>
-    <string name="stats_duration_h">%1$d h</string>
-    <string name="stats_duration_ms">%1$d min %2$d s</string>
-    <string name="stats_duration_m">%1$d min</string>
-    <string name="stats_duration_s">%1$d s</string>
-    <string name="stats_yt_title">Coupures pub évitées (est.)</string>
-    <string name="stats_yt_time">Temps gagné estimé</string>
-    <string name="stats_yt_note">Environ %1$d secondes par coupure pub évitée, d\'après les coupures prévues pour la vidéo. Non ajouté au temps gagné (estimation, par requête) ci-dessus. Uniquement sur ce téléphone.</string>
-    <string name="stats_yt_recent">Vidéos récentes</string>
-    <plurals name="stats_yt_ads_blocked">
-        <item quantity="one">%1$s coupure pub évitée</item>
-        <item quantity="many">%1$s coupures pub évitées</item>
-        <item quantity="other">%1$s coupures pub évitées</item>
-    </plurals>
-    <plurals name="stats_yt_video_detail">
-        <item quantity="one">%1$s coupure pub évitée · %2$s</item>
-        <item quantity="many">%1$s coupures pub évitées · %2$s</item>
-        <item quantity="other">%1$s coupures pub évitées · %2$s</item>
-    </plurals>
+    <string name="stats_reset_body">Les compteurs repartent de zéro. Rien d\'autre n\'est supprimé.</string>
     <plurals name="stats_blocked_headline" tools:ignore="ImpliedQuantity">
         <item quantity="one">traqueur, publicité ou cookie bloqué</item>
         <item quantity="many">traqueurs, publicités et cookies bloqués</item>
