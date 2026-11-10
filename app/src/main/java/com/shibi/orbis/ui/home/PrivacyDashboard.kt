@@ -44,9 +44,13 @@ import androidx.compose.ui.unit.dp
 import com.shibi.orbis.R
 import com.shibi.orbis.stats.BlockKind
 import com.shibi.orbis.stats.StatsSummary
+import com.shibi.orbis.youtube.AVERAGE_YOUTUBE_AD_SECONDS
+import com.shibi.orbis.youtube.YoutubeAdSummary
+import com.shibi.orbis.youtube.formatEstimatedTimeSaved
 import java.text.NumberFormat
 
 internal const val PRIVACY_DASHBOARD_TAG = "privacy_dashboard"
+internal const val YOUTUBE_SAVINGS_TAG = "youtube_ad_savings"
 
 @StringRes
 private fun kindLabel(k: BlockKind): Int =
@@ -77,6 +81,7 @@ internal fun shortDuration(millis: Long): Pair<Long, Int> {
 internal fun PrivacyDashboard(
     week: StatsSummary,
     allTime: StatsSummary,
+    youtube: YoutubeAdSummary,
     uboActive: Boolean,
     onReset: () -> Unit,
     modifier: Modifier = Modifier,
@@ -135,6 +140,7 @@ internal fun PrivacyDashboard(
                     modifier = Modifier.weight(1f),
                 )
             }
+            YoutubeSavings(youtube, nf)
             // Breakdown.
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 BlockKind.entries.forEach { k ->
@@ -173,6 +179,70 @@ internal fun PrivacyDashboard(
                     Text(stringResource(R.string.stats_since, it), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                 } ?: Spacer(Modifier.weight(1f))
                 TextButton(onClick = onReset) { Text(stringResource(R.string.stats_reset)) }
+            }
+        }
+    }
+}
+
+/**
+ * YouTube ads skipped, and the estimated time that implies. Kept apart from [StatTile] "Time saved", which is about
+ * 50 ms per blocked request and is not changed by these numbers.
+ */
+@Composable
+private fun YoutubeSavings(youtube: YoutubeAdSummary, nf: java.text.NumberFormat) {
+    val ads = youtube.totalAds.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.fillMaxWidth().testTag(YOUTUBE_SAVINGS_TAG),
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                stringResource(R.string.stats_yt_title),
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.semantics { heading() },
+            )
+            Text(
+                pluralStringResource(R.plurals.stats_yt_ads_blocked, ads, nf.format(youtube.totalAds)),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                formatEstimatedTimeSaved(youtube.totalEstimatedSeconds),
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(stringResource(R.string.stats_yt_time), style = MaterialTheme.typography.bodyMedium)
+            Text(
+                stringResource(R.string.stats_yt_note, AVERAGE_YOUTUBE_AD_SECONDS),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (youtube.recent.isNotEmpty()) {
+                Text(stringResource(R.string.stats_yt_recent), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 4.dp))
+                youtube.recent.forEach { video ->
+                    val count = video.adCount.coerceAtMost(Int.MAX_VALUE)
+                    Column(Modifier.padding(top = 4.dp)) {
+                        Text(
+                            video.title?.takeIf { it.isNotBlank() } ?: video.videoId,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            pluralStringResource(
+                                R.plurals.stats_yt_video_detail,
+                                count,
+                                nf.format(video.adCount),
+                                formatEstimatedTimeSaved(video.estimatedSeconds),
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         }
     }

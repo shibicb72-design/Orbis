@@ -13,6 +13,10 @@ import androidx.core.content.FileProvider
 import com.shibi.orbis.debug.DebugLog
 import com.shibi.orbis.downloads.DownloadIntents
 import com.shibi.orbis.history.VisitTracker
+import com.shibi.orbis.youtube.CONTENT_BLOCKING_ERROR
+import com.shibi.orbis.youtube.YoutubeAdEvent
+import com.shibi.orbis.youtube.YoutubeAdObservation
+import com.shibi.orbis.youtube.mightReportYoutubeAd
 import java.io.File
 import java.io.InputStream
 import java.util.UUID
@@ -70,6 +74,9 @@ class GeckoEngineImpl(
     /** The built-in reader view extension (see ReaderExtensionHolder). */
     private val reader = ReaderExtensionHolder { debugLog.log("GeckoEngine", it) }
 
+    /** Notices blocked YouTube ad requests for the on-device time-saved estimate. Not installed in private tabs. */
+    private val youtubeAdObserver = YoutubeAdExtensionHolder(onEvent = { onYoutubeAdEvent }, log = { debugLog.log("GeckoEngine", it) })
+
     /** Sites with tracking protection turned off by the user (see TrackingExceptions). */
     private val trackingExceptions = TrackingExceptions()
 
@@ -113,6 +120,7 @@ class GeckoEngineImpl(
 
     override var onSelectionSearch: ((String, Boolean) -> Unit)? = null
     override var onContentBlocked: ((com.shibi.orbis.stats.BlockKind, String?, Boolean) -> Unit)? = null
+    override var onYoutubeAdEvent: ((YoutubeAdEvent) -> Unit)? = null
 
     @Volatile private var httpsOnlyNormal = false
     @Volatile private var httpsOnlyPrivate = true
@@ -275,6 +283,7 @@ class GeckoEngineImpl(
             )
             created.autocompleteStorageDelegate = loginStorageDelegate()
             reader.install(created)
+            youtubeAdObserver.install(created)
             // Without a prompt delegate, WebExtensionController.install() hangs forever.
             created.webExtensionController.setPromptDelegate(extensionHost.promptDelegate)
             runtime = created
@@ -455,6 +464,7 @@ class GeckoEngineImpl(
             onBlocked = { onContentBlocked },
             reader = reader,
             sitePolicy = { sitePolicy },
+            onYoutubeAd = { onYoutubeAdEvent },
             // A popup child inherits the opener's desktop/mobile choice and its privacy, and is never opened by us.
             newPopupChild = { opener ->
                 buildSession(SessionInit(desktopMode = opener.state.value.desktopMode, isPrivate = opener.isPrivate))
@@ -515,6 +525,7 @@ private class GeckoBrowserSession(
     private val onBlocked: () -> ((com.shibi.orbis.stats.BlockKind, String?, Boolean) -> Unit)?,
     private val reader: ReaderExtensionHolder,
     private val sitePolicy: () -> SitePolicy?,
+    private val onYoutubeAd: () -> ((YoutubeAdEvent) -> Unit)?,
     private val newPopupChild: (GeckoBrowserSession) -> GeckoBrowserSession,
 ) : BrowserSession {
     private val _state = MutableStateFlow(SessionState(desktopMode = initialDesktopMode))
@@ -575,8 +586,23 @@ private class GeckoBrowserSession(
             object : ContentBlocking.Delegate {
                 override fun onContentBlocked(session: GeckoSession, event: ContentBlocking.BlockEvent) {
                     if (!event.isBlocking) return
+                    val uri = event.uri
+                    if (mightReportYoutubeAd(_state.value.url, uri)) {
+                        onYoutubeAd()?.invoke(
+                            YoutubeAdEvent.Blocked(
+                                YoutubeAdObservation(
+                                    pageUrl = _state.value.url,
+                                    pageTitle = _state.value.title,
+                                    requestUrl = uri,
+                                    isPrivate = isPrivate,
+                                    error = CONTENT_BLOCKING_ERROR,
+                                    atMillis = System.currentTimeMillis(),
+                                ),
+                            ),
+                        )
+                    }
                     val kind = blockKindOf(event.antiTrackingCategory, event.cookieBehaviorCategory) ?: return
-                    onBlocked()?.invoke(kind, event.uri, isPrivate)
+                    onBlocked()?.invoke(kind, uri, isPrivate)
                 }
             }
     }

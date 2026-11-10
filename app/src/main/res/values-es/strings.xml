@@ -344,7 +344,7 @@
     <string name="stats_title">Tu privacidad con Orbis</string>
     <string name="stats_week">7 días</string>
     <string name="stats_all_time">Todo</string>
-    <string name="stats_time_saved">Tiempo ahorrado (estimado)</string>
+    <string name="stats_time_saved">Tiempo ahorrado (estimado, por solicitud)</string>
     <string name="stats_data_saved">Datos ahorrados (estimado)</string>
     <string name="stats_data_used">Datos usados por Orbis</string>
     <string name="stats_hours">%1$d h</string>
@@ -363,7 +363,21 @@
     <string name="stats_since">Contando desde %1$s</string>
     <string name="stats_reset">Restablecer</string>
     <string name="stats_reset_title">¿Restablecer las estadísticas de privacidad?</string>
-    <string name="stats_reset_body">Los contadores vuelven a cero. No se borra nada más.</string>
+    <string name="stats_reset_body">Los contadores vuelven a cero, incluidos los anuncios de YouTube omitidos. No se borra nada más.</string>
+    <string name="stats_yt_title">Anuncios de YouTube omitidos</string>
+    <string name="stats_yt_time">Tiempo ahorrado estimado</string>
+    <string name="stats_yt_note">Unos %1$d segundos por anuncio omitido. No se suma al tiempo ahorrado (estimado, por solicitud) de arriba. Solo en este teléfono.</string>
+    <string name="stats_yt_recent">Vídeos recientes</string>
+    <plurals name="stats_yt_ads_blocked">
+        <item quantity="one">%1$s anuncio omitido</item>
+        <item quantity="many">%1$s anuncios omitidos</item>
+        <item quantity="other">%1$s anuncios omitidos</item>
+    </plurals>
+    <plurals name="stats_yt_video_detail">
+        <item quantity="one">%1$s anuncio omitido · %2$s</item>
+        <item quantity="many">%1$s anuncios omitidos · %2$s</item>
+        <item quantity="other">%1$s anuncios omitidos · %2$s</item>
+    </plurals>
     <plurals name="stats_blocked_headline">
         <item quantity="one">rastreador, anuncio o cookie bloqueado</item>
         <item quantity="many">rastreadores, anuncios y cookies bloqueados</item>

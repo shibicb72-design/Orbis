@@ -343,7 +343,7 @@
     <string name="stats_title">Deine Privatsphäre mit Orbis</string>
     <string name="stats_week">7 Tage</string>
     <string name="stats_all_time">Gesamt</string>
-    <string name="stats_time_saved">Zeit gespart (geschätzt)</string>
+    <string name="stats_time_saved">Zeit gespart (geschätzt, pro Anfrage)</string>
     <string name="stats_data_saved">Daten gespart (geschätzt)</string>
     <string name="stats_data_used">Von Orbis genutzte Daten</string>
     <string name="stats_hours">%1$d Std.</string>
@@ -362,7 +362,19 @@
     <string name="stats_since">Gezählt seit %1$s</string>
     <string name="stats_reset">Zurücksetzen</string>
     <string name="stats_reset_title">Datenschutz-Statistik zurücksetzen?</string>
-    <string name="stats_reset_body">Die Zähler beginnen wieder bei null. Sonst wird nichts gelöscht.</string>
+    <string name="stats_reset_body">Die Zähler beginnen wieder bei null, einschließlich übersprungener YouTube-Werbung. Sonst wird nichts gelöscht.</string>
+    <string name="stats_yt_title">YouTube-Werbung übersprungen</string>
+    <string name="stats_yt_time">Geschätzte Zeitersparnis</string>
+    <string name="stats_yt_note">Etwa %1$d Sekunden pro übersprungener Werbung. Nicht in „Zeit gespart (geschätzt, pro Anfrage)“ oben enthalten. Nur auf diesem Telefon.</string>
+    <string name="stats_yt_recent">Neueste Videos</string>
+    <plurals name="stats_yt_ads_blocked">
+        <item quantity="one">%1$s Werbung übersprungen</item>
+        <item quantity="other">%1$s Werbeanzeigen übersprungen</item>
+    </plurals>
+    <plurals name="stats_yt_video_detail">
+        <item quantity="one">%1$s Werbung übersprungen · %2$s</item>
+        <item quantity="other">%1$s Werbeanzeigen übersprungen · %2$s</item>
+    </plurals>
     <plurals name="stats_blocked_headline">
         <item quantity="one">Tracker, Werbung oder Cookie blockiert</item>
         <item quantity="other">Tracker, Werbung und Cookies blockiert</item>

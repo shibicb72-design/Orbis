@@ -344,7 +344,7 @@
     <string name="stats_title">Votre vie privée avec Orbis</string>
     <string name="stats_week">7 jours</string>
     <string name="stats_all_time">Depuis le début</string>
-    <string name="stats_time_saved">Temps gagné (estimation)</string>
+    <string name="stats_time_saved">Temps gagné (estimation, par requête)</string>
     <string name="stats_data_saved">Données économisées (estimation)</string>
     <string name="stats_data_used">Données utilisées par Orbis</string>
     <string name="stats_hours">%1$d h</string>
@@ -363,7 +363,21 @@
     <string name="stats_since">Depuis le %1$s</string>
     <string name="stats_reset">Réinitialiser</string>
     <string name="stats_reset_title">Réinitialiser les statistiques ?</string>
-    <string name="stats_reset_body">Les compteurs repartent de zéro. Rien d\'autre n\'est supprimé.</string>
+    <string name="stats_reset_body">Les compteurs repartent de zéro, y compris les publicités YouTube ignorées. Rien d\'autre n\'est supprimé.</string>
+    <string name="stats_yt_title">Publicités YouTube ignorées</string>
+    <string name="stats_yt_time">Temps gagné estimé</string>
+    <string name="stats_yt_note">Environ %1$d secondes par publicité ignorée. Non ajouté au temps gagné (estimation, par requête) ci-dessus. Uniquement sur ce téléphone.</string>
+    <string name="stats_yt_recent">Vidéos récentes</string>
+    <plurals name="stats_yt_ads_blocked">
+        <item quantity="one">%1$s publicité ignorée</item>
+        <item quantity="many">%1$s publicités ignorées</item>
+        <item quantity="other">%1$s publicités ignorées</item>
+    </plurals>
+    <plurals name="stats_yt_video_detail">
+        <item quantity="one">%1$s publicité ignorée · %2$s</item>
+        <item quantity="many">%1$s publicités ignorées · %2$s</item>
+        <item quantity="other">%1$s publicités ignorées · %2$s</item>
+    </plurals>
     <plurals name="stats_blocked_headline" tools:ignore="ImpliedQuantity">
         <item quantity="one">traqueur, publicité ou cookie bloqué</item>
         <item quantity="many">traqueurs, publicités et cookies bloqués</item>

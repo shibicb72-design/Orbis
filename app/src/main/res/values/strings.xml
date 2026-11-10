@@ -18,7 +18,7 @@
         <item quantity="one">tracker, ad or cookie blocked</item>
         <item quantity="other">trackers, ads and cookies blocked</item>
     </plurals>
-    <string name="stats_time_saved">Time saved (estimate)</string>
+    <string name="stats_time_saved">Time saved (estimate, per request)</string>
     <string name="stats_data_saved">Data saved (estimate)</string>
     <string name="stats_data_used">Data used by Orbis</string>
     <string name="stats_hours">%1$d h</string>
@@ -37,7 +37,19 @@
     <string name="stats_since">Counting since %1$s</string>
     <string name="stats_reset">Reset</string>
     <string name="stats_reset_title">Reset privacy stats?</string>
-    <string name="stats_reset_body">The counts start again from zero. Nothing else is deleted.</string>
+    <string name="stats_reset_body">The counts start again from zero, including YouTube ads skipped. Nothing else is deleted.</string>
+    <string name="stats_yt_title">YouTube ads skipped</string>
+    <string name="stats_yt_time">Estimated time saved</string>
+    <string name="stats_yt_note">About %1$d seconds per skipped ad. Not added to Time saved (estimate, per request) above. On this phone only.</string>
+    <string name="stats_yt_recent">Recent videos</string>
+    <plurals name="stats_yt_ads_blocked">
+        <item quantity="one">%1$s ad skipped</item>
+        <item quantity="other">%1$s ads skipped</item>
+    </plurals>
+    <plurals name="stats_yt_video_detail">
+        <item quantity="one">%1$s ad skipped · %2$s</item>
+        <item quantity="other">%1$s ads skipped · %2$s</item>
+    </plurals>
     <string name="force_dark_title">Force dark on all websites</string>
     <string name="force_dark_summary">Darkens light pages that have no dark design. Pictures and videos keep their colours. Pages reload to change.</string>
     <string name="bookmarks_move">Move to folder</string>

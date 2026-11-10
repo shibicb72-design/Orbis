@@ -4,6 +4,7 @@
     <string name="clear_data_summary">Historique, cookies, cache, onglets et plus</string>
 
     <string name="clear_history">Historique de navigation</string>
+    <string name="clear_history_summary">Inclut les publicités YouTube ignorées et le temps gagné estimé.</string>
     <string name="clear_cookies">Cookies et données de site</string>
     <string name="clear_cookies_summary">Vous déconnecte de la plupart des sites. Les pages ouvertes peuvent rester affichées jusqu\'à ce que vous les actualisiez. Un téléchargement en cours peut s\'arrêter.</string>
     <string name="clear_cache">Images et fichiers en cache</string>
