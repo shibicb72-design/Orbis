@@ -46,10 +46,13 @@ import com.shibi.orbis.tabs.VisitSink
 import com.shibi.orbis.ubo.SharedPreferencesUboPrefs
 import com.shibi.orbis.ubo.UboOnboardingController
 import java.io.File
+import com.shibi.orbis.engine.ImportOpenQueue
+import com.shibi.orbis.engine.ImportedFileCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,6 +60,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 class OrbisApp : Application() {
     lateinit var container: AppContainer
         private set
+
+    /**
+     * Main-thread scope for the whole process. Shared-document copies use it so a rotation does not cancel them.
+     * Child processes never launch work on it (they return before [container] exists).
+     */
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     /** Keeps the process alive while downloads run. Null in Gecko child processes, like [container]. */
     var downloadForeground: DownloadForegroundController? = null
@@ -69,8 +78,10 @@ class OrbisApp : Application() {
         // Play delivers updates. Drop the GitHub checker's prefs.
         retireGithubUpdateChecker(this)
         val debugLog = DebugLog(filesDir)
-        // App-lifetime scope: installs must survive screens leaving composition.
-        val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val imports = ImportedFileCache(cacheDir)
+        val pendingImports = ImportOpenQueue()
+        // Files copied in from other apps: drop the ones older than a day. Young ones stay so an open tab can reload.
+        appScope.launch(Dispatchers.IO) { imports.deleteOlderThan() }
         val sitePermissions =
             SitePermissionDecisions(
                 store = FileSitePermissionStore(File(filesDir, "site_permissions.json")),
@@ -179,6 +190,12 @@ class OrbisApp : Application() {
                     downloadsRef?.forgetPrivate()
                     browserSettings.forgetPrivate()
                 },
+                releaseImport = { url ->
+                    appScope.launch(Dispatchers.IO) {
+                        runCatching { imports.deleteImport(url) }
+                            .onFailure { debugLog.log("Import", "not deleted") }
+                    }
+                },
             )
         // Selection menu > Search: a new tab (private for a private page) with the user's search engine.
         engine.onSelectionSearch = { text, isPrivate ->
@@ -235,6 +252,8 @@ class OrbisApp : Application() {
                 override fun clearHistory() {
                     history.clearAll()
                     tabs.forgetClosed()
+                    // Opened files are a record of what was viewed, same as history. The cache clear does this too.
+                    deleteImports()
                     // Video ids and titles from the YouTube estimate are browsing history, cleared with this category.
                     youtubeAds.clear()
                 }
@@ -252,8 +271,26 @@ class OrbisApp : Application() {
 
                 override fun hasPrivateTabs() = tabs.hasPrivateTabs
 
-                override suspend fun clearEngine(cookiesAndSiteData: Boolean, cache: Boolean) =
-                    engine.clearProfileData(cookiesAndSiteData, cache)
+                override suspend fun clearEngine(cookiesAndSiteData: Boolean, cache: Boolean): Boolean {
+                    // Documents opened from other apps live in the cache. Private tabs block this whole clear
+                    // before we get here, so this never runs while a private tab is open. History clears them too.
+                    if (cache) deleteImports()
+                    return engine.clearProfileData(cookiesAndSiteData, cache)
+                }
+
+                /**
+                 * Drops every imported document. The queue is cleared on this thread so a waiting tab is not opened
+                 * onto a file this delete removes. The files themselves go on the IO dispatcher: [clearHistory]
+                 * runs on the main thread and must not block there. The cache lock is not held during a provider
+                 * read, so the delete does not wait on another app.
+                 */
+                fun deleteImports() {
+                    pendingImports.clear()
+                    appScope.launch(Dispatchers.IO) {
+                        val removed = runCatching { imports.clearAll() }.isSuccess
+                        if (!removed) debugLog.log("Clear", "imported files not cleared")
+                    }
+                }
             }
         val clear =
             ClearController(
@@ -267,6 +304,8 @@ class OrbisApp : Application() {
                 ubo = ubo,
                 tabs = tabs,
                 downloads = downloads,
+                imports = imports,
+                pendingImports = pendingImports,
                 sitePermissions = sitePermissions,
                 bookmarks = bookmarks,
                 history = history,
@@ -338,6 +377,10 @@ class AppContainer(
     /** Owns every tab and session; outlives screens, so Settings never destroys a page. */
     val tabs: TabManager,
     val downloads: DownloadManager,
+    /** PDF and HTML files opened from other apps. Cleared with history and the cache, and trimmed at startup. */
+    val imports: ImportedFileCache,
+    /** Documents copied from other apps, waiting to be opened. Cleared with the files. */
+    val pendingImports: ImportOpenQueue,
     /** The user's camera, microphone and location answers; Settings lists and removes them. */
     val sitePermissions: SitePermissionDecisions,
     val bookmarks: BookmarkManager,

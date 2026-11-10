@@ -120,6 +120,28 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- PDF and HTML opened from another app (WhatsApp sends ACTION_VIEW with a content: URI and a MIME type).
+                 data attributes in one filter are not pairs. Every scheme matches every MIME type: the filter
+                 collects them into two lists and an intent matches when its scheme is in one and its type is in
+                 the other. Only content is listed, so file: is not claimed. A MIME type with no scheme would also
+                 match file: (the platform assumes content: and file: in that case). text/plain is intentionally
+                 absent. application/xhtml+xml is not claimed: a CSP meta in XHTML can be bypassed. DEFAULT is what
+                 the chooser requires. BROWSABLE is omitted so a web page cannot navigate here; an intent that also
+                 carries BROWSABLE will not match. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" android:mimeType="application/pdf" />
+                <data android:scheme="content" android:mimeType="text/html" />
+            </intent-filter>
+            <!-- Share sheet. SEND carries the MIME on the intent and the URI in EXTRA_STREAM, so this filter
+                 names types only (a scheme would require a data URI the share intent does not have). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="text/html" />
+            </intent-filter>
         </activity>
 
         <!-- Every web link from another app comes in here and is routed: Custom Tab or the browser. -->

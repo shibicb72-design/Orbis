@@ -37,12 +37,14 @@ private class FakeSession(val init: SessionInit) : BrowserSession {
     var closed = false
     val loads = mutableListOf<String>()
     val externalLoads = mutableListOf<String>()
+    val importLoads = mutableListOf<String>()
     var saved: String? = null
 
     override fun attachTo(contentView: View) = Unit
     override fun detachFrom(contentView: View) = Unit
     override fun loadUrl(url: String) { loads += url }
     override fun loadExternalUrl(url: String) { externalLoads += url }
+    override fun loadImportedFile(url: String) { importLoads += url }
     override fun setDesktopMode(enabled: Boolean) { _state.value = _state.value.copy(desktopMode = enabled) }
     override fun goBack() = false
     override fun goForward() = false
@@ -86,6 +88,7 @@ class TabManagerTest {
         store: MemoryStore = MemoryStore(),
         max: Int = MAX_TABS,
         visits: VisitSink = VisitSink.None,
+        releaseImport: (String) -> Unit = {},
     ): TabManager {
         val m = TabManager(
             factory = { init -> FakeSession(init).also { created += it } },
@@ -95,14 +98,20 @@ class TabManagerTest {
             io = dispatcher,
             maxTabs = max,
             visits = visits,
+            releaseImport = releaseImport,
         )
         m.restore()
         scheduler.advanceUntilIdle()
         return m
     }
 
-    private fun FakeSession.navigate(url: String, title: String? = null) {
-        _state.value = _state.value.copy(url = url, title = title)
+    private fun FakeSession.navigate(
+        url: String,
+        title: String? = null,
+        canGoBack: Boolean = false,
+        canGoForward: Boolean = false,
+    ) {
+        _state.value = _state.value.copy(url = url, title = title, canGoBack = canGoBack, canGoForward = canGoForward)
         scheduler.runCurrent()
     }
 
@@ -251,6 +260,66 @@ class TabManagerTest {
         m.openExternal("file:///sdcard/x.html")
         assertEquals(1, created.size)
         assertTrue(created[0].externalLoads.isEmpty())
+    }
+
+    @Test
+    fun openImportedReusesABlankNormalTabAndRefusesAnythingElse() {
+        val m = manager()
+        m.openSelected()
+        val url = "file:///data/user/0/com.shibi.orbis/cache/imports/11111111-1111-1111-1111-111111111111/notes.pdf"
+        m.openImported("javascript:alert(1)")
+        m.openImported("file:///sdcard/x.html")
+        m.openImported("https://example.com/a.pdf")
+        assertTrue(created[0].importLoads.isEmpty())
+        m.openImported(url)
+        assertEquals(1, m.tabs.value.size)
+        assertFalse(m.selected.value.isPrivate)
+        assertEquals(listOf(url), created[0].importLoads)
+        assertTrue(created[0].loads.isEmpty())
+        assertTrue(created[0].externalLoads.isEmpty())
+    }
+
+    @Test
+    fun closingTheTabDeletesTheImportAndBackHistoryKeepsIt() {
+        val released = mutableListOf<String>()
+        val m = manager(releaseImport = { released += it })
+        m.openSelected()
+        val url = "file:///data/user/0/com.shibi.orbis/cache/imports/11111111-1111-1111-1111-111111111111/notes.pdf"
+        assertTrue(m.openImported(url))
+        created.last().navigate(url)
+        created.last().navigate("https://example.com/", canGoBack = true)
+        assertTrue(released.isEmpty())
+        m.close(m.selected.value.id)
+        assertEquals(listOf(url), released)
+    }
+
+    @Test
+    fun anImportIsDeletedWhenHistoryCanNoLongerReachIt() {
+        val released = mutableListOf<String>()
+        val m = manager(releaseImport = { released += it })
+        m.openSelected()
+        val url = "file:///data/user/0/com.shibi.orbis/cache/imports/11111111-1111-1111-1111-111111111111/page.html"
+        assertTrue(m.openImported(url))
+        val session = created.last()
+        session.navigate(url)
+        session.navigate("https://example.com/", canGoBack = true)
+        assertTrue(released.isEmpty())
+        session.navigate("https://example.com/next", canGoBack = false, canGoForward = false)
+        assertEquals(listOf(url), released)
+    }
+
+    @Test
+    fun openImportedDoesNotHijackALoadedTab() {
+        val m = manager()
+        m.openSelected()
+        created[0].navigate("https://example.com/page", "Page")
+        val url = "file:///data/user/0/com.shibi.orbis/cache/imports/11111111-1111-1111-1111-111111111111/page.html"
+        m.openImported(url)
+        assertEquals(2, m.tabs.value.size)
+        assertEquals("https://example.com/page", m.tabs.value[0].url)
+        assertEquals(listOf(url), created[1].importLoads)
+        assertFalse(created[1].init.isPrivate)
+        assertTrue(created[0].importLoads.isEmpty())
     }
 
     @Test

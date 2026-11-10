@@ -12,7 +12,9 @@ import androidx.compose.material.icons.filled.Tune
 import com.shibi.orbis.engine.normalizeAddressInput
 import androidx.compose.material.icons.filled.VerticalSplit
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.rememberCoroutineScope
 import com.shibi.orbis.engine.PageCapture
 import androidx.compose.ui.graphics.asImageBitmap
@@ -32,6 +34,7 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.shibi.orbis.clear.ClearState
 import com.shibi.orbis.home.topSites
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material.icons.outlined.StarBorder
@@ -245,6 +248,8 @@ fun BrowserScreen(
     val context = LocalContext.current
     val ready by tabs.ready.collectAsStateWithLifecycle()
     val pendingUrl by container.pendingExternalUrl.collectAsStateWithLifecycle()
+    val pendingImport by container.pendingImports.head.collectAsStateWithLifecycle()
+    val clearState by container.clear.state.collectAsStateWithLifecycle()
 
     // Sessions are created here and nowhere earlier: BrowserScreen is only composed after the onboarding decision.
     LaunchedEffect(ready) {
@@ -254,6 +259,14 @@ fun BrowserScreen(
     LaunchedEffect(ready, pendingUrl) {
         val url = pendingUrl
         if (ready && url != null && container.pendingExternalUrl.compareAndSet(url, null)) tabs.openExternal(url)
+    }
+    // A PDF or HTML file copied from another app. Same wait as a link, and not while Clear browsing data is running.
+    // consume publishes the next queued file, so two shares that finish together both open.
+    LaunchedEffect(ready, pendingImport, clearState) {
+        val url = pendingImport
+        if (ready && clearState !is ClearState.Running && url != null && container.pendingImports.consume(url)) {
+            if (!tabs.openImported(url)) withContext(Dispatchers.IO) { container.imports.deleteImport(url) }
+        }
     }
     LaunchedEffect(tabs) {
         tabs.events.collect { event ->
