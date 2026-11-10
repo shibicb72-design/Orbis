@@ -116,6 +116,31 @@ class TabManagerTest {
     }
 
     @Test
+    fun exactlyOneTabIsSelectedAfterSwitchingAndRepeating() {
+        val m = manager()
+        val a = m.selected.value.id
+        val b = m.newTab()!!
+        val c = m.newTab()!!
+        val secret = m.newPrivateTab()!!
+        fun selectedIds() = m.tabs.value.filter { it.selected }.map { it.id }
+        m.select(a)
+        assertEquals(listOf(a), selectedIds())
+        m.select(b)
+        assertEquals(listOf(b), selectedIds())
+        m.select(c)
+        assertEquals(listOf(c), selectedIds())
+        // Choosing the tab that is already current leaves it selected.
+        m.select(c)
+        assertEquals(listOf(c), selectedIds())
+        m.select(secret)
+        assertEquals(listOf(secret), selectedIds())
+        m.select(secret)
+        assertEquals(listOf(secret), selectedIds())
+        m.select(a)
+        assertEquals(listOf(a), selectedIds())
+    }
+
+    @Test
     fun openSelectedCreatesSessionWithoutLoadingAnything() {
         val m = manager()
         m.openSelected()
