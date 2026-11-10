@@ -39,7 +39,10 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
-      - name: Assemble debug APK, run unit tests, and lint
+      - name: YouTube ad observer tests
+        run: node app/src/test/js/yt-ads.test.js
+
+      - name: Assemble debug APK, unit tests, and lint
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug testDebugUnitTest lintDebug --stacktrace

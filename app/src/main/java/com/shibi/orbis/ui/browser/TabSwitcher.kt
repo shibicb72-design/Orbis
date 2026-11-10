@@ -4,7 +4,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material.icons.filled.History
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.foundation.layout.size
@@ -14,9 +13,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -52,7 +52,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -190,7 +192,7 @@ internal fun TabSwitcher(
         snackbars?.let { SnackbarHost(it, Modifier.fillMaxWidth()) }
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 150.dp),
-            modifier = Modifier.weight(1f, fill = false),
+            modifier = Modifier.weight(1f, fill = false).selectableGroup(),
             state = gridState,
             // The last row (often the current tab, scrolled to) must clear the gesture/navigation bar.
             contentPadding = PaddingValues(
@@ -232,8 +234,9 @@ internal fun TabSwitcher(
                         )
                         .fillMaxWidth()
                         .testTag(tabRowTag(tab.id))
-                        .semantics { selected = tab.selected }
-                        .clickable { end(TabSheetOutcome.SELECTED) { onSelect(tab.id) } },
+                        .selectable(selected = tab.selected, role = Role.Tab) {
+                            end(TabSheetOutcome.SELECTED) { onSelect(tab.id) }
+                        },
                 ) {
                     Column {
                         Row(
@@ -257,6 +260,9 @@ internal fun TabSwitcher(
                                         style = MaterialTheme.typography.labelSmall,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
+                                        // The card already announces itself as the selected tab. The words stay
+                                        // visible. Clearing semantics keeps TalkBack from reading them again.
+                                        modifier = Modifier.clearAndSetSemantics { this[SemanticsProperties.TestTag] = CURRENT_TAB_LABEL_TAG },
                                     )
                                 }
                                 Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -306,6 +312,8 @@ private fun TabPreview(image: ImageBitmap?, letter: String, host: String?) {
         }
     }
 }
+
+internal const val CURRENT_TAB_LABEL_TAG = "current_tab_label"
 
 internal fun tabRowTag(id: Long) = "tab_row_$id"
 

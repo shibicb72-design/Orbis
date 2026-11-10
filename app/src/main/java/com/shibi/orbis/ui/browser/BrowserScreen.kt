@@ -1022,13 +1022,21 @@ private fun BrowserContent(
                             dashboard = container.privacyStats?.let { stats ->
                                 {
                                     val version by stats.version.collectAsStateWithLifecycle()
+                                    val savings = container.youtubeAdSavings
+                                    val ytVersion by remember(savings) {
+                                        savings?.version ?: kotlinx.coroutines.flow.MutableStateFlow(0)
+                                    }.collectAsStateWithLifecycle()
                                     val uboState by container.ubo.state.collectAsStateWithLifecycle()
                                     val week = remember(version) { stats.summary(7) }
                                     val all = remember(version) { stats.summary(null) }
+                                    val youtube = remember(ytVersion, savings) {
+                                        savings?.summary() ?: com.shibi.orbis.youtube.YoutubeAdSummary.EMPTY
+                                    }
                                     var confirmReset by remember { mutableStateOf(false) }
                                     com.shibi.orbis.ui.home.PrivacyDashboard(
                                         week = week,
                                         allTime = all,
+                                        youtube = youtube,
                                         uboActive = (uboState as? com.shibi.orbis.ubo.UboState.Installed)?.enabled == true,
                                         onReset = { confirmReset = true },
                                     )
@@ -1040,6 +1048,7 @@ private fun BrowserContent(
                                             confirmButton = {
                                                 TextButton(onClick = {
                                                     stats.reset()
+                                                    savings?.clear()
                                                     confirmReset = false
                                                 }) { Text(stringResource(R.string.stats_reset)) }
                                             },

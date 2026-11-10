@@ -13,6 +13,11 @@ import androidx.core.content.FileProvider
 import com.shibi.orbis.debug.DebugLog
 import com.shibi.orbis.downloads.DownloadIntents
 import com.shibi.orbis.history.VisitTracker
+import com.shibi.orbis.youtube.CONTENT_BLOCKING_ERROR
+import com.shibi.orbis.youtube.YoutubeAdEvent
+import com.shibi.orbis.youtube.YoutubeAdObservation
+import com.shibi.orbis.youtube.mightReportYoutubeAd
+import com.shibi.orbis.youtube.titleForSameVideo
 import java.io.File
 import java.io.InputStream
 import java.util.UUID
@@ -70,6 +75,9 @@ class GeckoEngineImpl(
     /** The built-in reader view extension (see ReaderExtensionHolder). */
     private val reader = ReaderExtensionHolder { debugLog.log("GeckoEngine", it) }
 
+    /** Notices blocked YouTube ad requests for the on-device time-saved estimate. Not installed in private tabs. */
+    private val youtubeAdObserver = YoutubeAdExtensionHolder(onEvent = { onYoutubeAdEvent }, log = { debugLog.log("GeckoEngine", it) })
+
     /** Sites with tracking protection turned off by the user (see TrackingExceptions). */
     private val trackingExceptions = TrackingExceptions()
 
@@ -113,6 +121,7 @@ class GeckoEngineImpl(
 
     override var onSelectionSearch: ((String, Boolean) -> Unit)? = null
     override var onContentBlocked: ((com.shibi.orbis.stats.BlockKind, String?, Boolean) -> Unit)? = null
+    override var onYoutubeAdEvent: ((YoutubeAdEvent) -> Unit)? = null
 
     @Volatile private var httpsOnlyNormal = false
     @Volatile private var httpsOnlyPrivate = true
@@ -275,6 +284,7 @@ class GeckoEngineImpl(
             )
             created.autocompleteStorageDelegate = loginStorageDelegate()
             reader.install(created)
+            youtubeAdObserver.install(created)
             // Without a prompt delegate, WebExtensionController.install() hangs forever.
             created.webExtensionController.setPromptDelegate(extensionHost.promptDelegate)
             runtime = created
@@ -455,6 +465,7 @@ class GeckoEngineImpl(
             onBlocked = { onContentBlocked },
             reader = reader,
             sitePolicy = { sitePolicy },
+            onYoutubeAd = { onYoutubeAdEvent },
             // A popup child inherits the opener's desktop/mobile choice and its privacy, and is never opened by us.
             newPopupChild = { opener ->
                 buildSession(SessionInit(desktopMode = opener.state.value.desktopMode, isPrivate = opener.isPrivate))
@@ -515,6 +526,7 @@ private class GeckoBrowserSession(
     private val onBlocked: () -> ((com.shibi.orbis.stats.BlockKind, String?, Boolean) -> Unit)?,
     private val reader: ReaderExtensionHolder,
     private val sitePolicy: () -> SitePolicy?,
+    private val onYoutubeAd: () -> ((YoutubeAdEvent) -> Unit)?,
     private val newPopupChild: (GeckoBrowserSession) -> GeckoBrowserSession,
 ) : BrowserSession {
     private val _state = MutableStateFlow(SessionState(desktopMode = initialDesktopMode))
@@ -560,6 +572,9 @@ private class GeckoBrowserSession(
     private var wantActive = false
 
     private var latestSessionState: GeckoSession.SessionState? = null
+
+    /** Page URL that [SessionState.title] belongs to. YouTube's SPA updates the address and the title separately. */
+    private var titleForUrl: String? = null
     private var findGeneration = 0
 
     /**
@@ -585,8 +600,23 @@ private class GeckoBrowserSession(
             object : ContentBlocking.Delegate {
                 override fun onContentBlocked(session: GeckoSession, event: ContentBlocking.BlockEvent) {
                     if (!event.isBlocking) return
+                    val uri = event.uri
+                    if (!isPrivate && mightReportYoutubeAd(_state.value.url, uri)) {
+                        onYoutubeAd()?.invoke(
+                            YoutubeAdEvent.Blocked(
+                                YoutubeAdObservation(
+                                    pageUrl = _state.value.url,
+                                    pageTitle = titleForSameVideo(_state.value.title, titleForUrl, _state.value.url),
+                                    requestUrl = uri,
+                                    isPrivate = false,
+                                    error = CONTENT_BLOCKING_ERROR,
+                                    atMillis = System.currentTimeMillis(),
+                                ),
+                            ),
+                        )
+                    }
                     val kind = blockKindOf(event.antiTrackingCategory, event.cookieBehaviorCategory) ?: return
-                    onBlocked()?.invoke(kind, event.uri, isPrivate)
+                    onBlocked()?.invoke(kind, uri, isPrivate)
                 }
             }
     }
@@ -1052,6 +1082,7 @@ private class GeckoBrowserSession(
     private fun contentDelegate() =
         object : GeckoSession.ContentDelegate {
             override fun onTitleChange(session: GeckoSession, title: String?) {
+                titleForUrl = _state.value.url
                 _state.update { it.copy(title = title) }
                 visits.onTitleChange(title)?.let { host?.onVisitTitle(this@GeckoBrowserSession, it.url, it.title) }
             }
