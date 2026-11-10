@@ -53,17 +53,16 @@ are written to an on-device error log that you can view in Settings; it is never
   <li><strong>Update check</strong>: only in copies of Orbis that were not installed from Google Play, and it can be turned off. Once a day
       Orbis asks GitHub for the latest release number. Nothing else is sent. Copies installed from Google Play do not do this.</li>
   <li><strong>Cast</strong>: when you choose Cast, the video or audio address (and, for YouTube, the video id) is sent only to the
-      TV or speaker you pick on your local network. Orbis does not upload it. The Google Cast SDK, which discovers Chromecast,
-      Google TV and Nest devices, also sends its own encrypted diagnostics to Google (discovery and session events, device
-      information and the app id). Google says those logs are not tied to you. You cannot turn that SDK collection off.
-      A YouTube video then plays in the TV's YouTube app, which shows its own ads and follows YouTube's privacy policy.</li>
+      TV or speaker you pick on your local network. Orbis sends nothing to Google or any server for Cast. Casting YouTube
+      opens it in the TV's YouTube app, which can show ads and is subject to YouTube's own terms on the TV.</li>
 </ul>
 
 <h2>Permissions</h2>
 <ul>
   <li><strong>Internet</strong> and <strong>network state</strong>: to load web pages.</li>
-  <li><strong>Wi-Fi state</strong> and <strong>Wi-Fi multicast</strong>: to find DLNA speakers and TVs on your local network when you use Cast.
-      Orbis does not scan Wi-Fi networks and does not use location for Cast.</li>
+  <li><strong>Wi-Fi state</strong>, <strong>Wi-Fi multicast</strong> and, on Android 13 and later, <strong>nearby Wi-Fi devices</strong>:
+      to find Chromecast and DLNA speakers and TVs on your local network when you use Cast. Nearby Wi-Fi is not used for
+      location. Orbis does not scan Wi-Fi networks for Cast, and the device list stays on your phone.</li>
   <li><strong>Camera</strong> and <strong>microphone</strong>: only when a website asks and you allow it, and the camera for the QR code
       scanner, which reads codes on your phone.</li>
   <li><strong>Location</strong> (approximate and precise): only when a website asks and you allow it. Orbis never uses location in the background.</li>

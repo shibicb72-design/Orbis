@@ -22,7 +22,8 @@ internal object LanBind {
         runCatching { network.bindSocket(socket) }
     }
 
-    private fun lanNetwork(context: Context): Network? {
+    /** Wi-Fi, or Ethernet when Wi-Fi is down. Discovery uses the same choice so a VPN is not scanned. */
+    internal fun lanNetwork(context: Context): Network? {
         val cm = context.applicationContext.getSystemService(ConnectivityManager::class.java) ?: return null
         fun find(transport: Int): Network? =
             cm.allNetworks.firstOrNull { network ->

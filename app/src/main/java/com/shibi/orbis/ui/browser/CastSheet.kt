@@ -87,7 +87,9 @@ internal fun CastSheet(
     val notice by coordinator.notice.collectAsStateWithLifecycle()
     val dlnaFormatNote by coordinator.dlnaFormatNote.collectAsStateWithLifecycle()
     val askNotifications = rememberNotificationPermissionRequest()
+    val askNearby = rememberCastNearbyPermission { coordinator.rediscover() }
     LaunchedEffect(session, pageUrl, tabId) {
+        askNearby()
         if (coordinator.playback.value != null) {
             coordinator.present(pageUrl, isPrivate, null, tabId)
         } else {
@@ -165,7 +167,7 @@ internal fun CastSheet(
                                 Text(device.name, style = MaterialTheme.typography.bodyLarge)
                                 Text(
                                     stringResource(
-                                        if (device.kind == CastDeviceKind.GOOGLE_CAST) R.string.cast_device_google else R.string.cast_device_dlna,
+                                        if (device.kind == CastDeviceKind.GOOGLE_CAST) R.string.cast_device_chromecast else R.string.cast_device_dlna,
                                     ),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -263,7 +265,7 @@ private fun noticeLabel(notice: CastNotice): String =
             CastNotice.NO_DEVICES -> R.string.cast_no_devices
             CastNotice.YOUTUBE_NEEDS_GOOGLE -> R.string.cast_youtube_need_google
             CastNotice.FAILED -> R.string.cast_failed
-            CastNotice.GOOGLE_UNAVAILABLE -> R.string.cast_google_unavailable
+            CastNotice.YOUTUBE_UNCONFIRMED -> R.string.cast_youtube_unconfirmed
         },
     )
 

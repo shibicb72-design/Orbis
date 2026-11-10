@@ -6,9 +6,12 @@ internal const val CONNECT_TIMEOUT_MS = 15_000L
 /** How long a page probe may stay unanswered before Cast continues with the address alone. */
 internal const val PROBE_TIMEOUT_MS = 1_500L
 
+private fun sticky(notice: CastNotice?): Boolean =
+    notice == CastNotice.FAILED || notice == CastNotice.YOUTUBE_NEEDS_GOOGLE || notice == CastNotice.YOUTUBE_UNCONFIRMED
+
 /**
  * Cast sheet transitions that do not touch the network. [CastCoordinator] performs the device work these decisions
- * name: a connect that outlives [CONNECT_TIMEOUT_MS] is failed and the route is unselected, a start that arrives after
+ * name: a connect that outlives [CONNECT_TIMEOUT_MS] is failed and the session is closed, a start that arrives after
  * the sheet has left Connecting is an orphan and is stopped, and a private tab closing drops the in-memory target.
  */
 internal class CastFlow {
@@ -51,17 +54,15 @@ internal class CastFlow {
         notice = CastNotice.NO_MEDIA
     }
 
-    fun showPicker(youtube: Boolean, searching: Boolean, googleUnavailable: Boolean) {
+    fun showPicker(youtube: Boolean, searching: Boolean) {
         phase = CastPhase.Picker(youtube = youtube, searching = searching)
-        notice = if (googleUnavailable) CastNotice.GOOGLE_UNAVAILABLE else null
+        notice = null
     }
 
     fun updateSearching(searching: Boolean, devicesEmpty: Boolean) {
         val current = phase as? CastPhase.Picker ?: return
         phase = current.copy(searching = searching && devicesEmpty)
-        if (!searching && devicesEmpty && notice != CastNotice.FAILED && notice != CastNotice.YOUTUBE_NEEDS_GOOGLE) {
-            notice = CastNotice.NO_DEVICES
-        }
+        if (!searching && devicesEmpty && !sticky(notice)) notice = CastNotice.NO_DEVICES
     }
 
     fun showNotice(value: CastNotice?) {
@@ -82,10 +83,11 @@ internal class CastFlow {
         return nowMs - connectStartedAt >= timeoutMs
     }
 
-    fun failConnect(generation: Int, youtube: Boolean) {
-        if (generation != connectGeneration || phase != CastPhase.Connecting) return
+    fun failConnect(generation: Int, youtube: Boolean, failure: CastNotice = CastNotice.FAILED): Boolean {
+        if (generation != connectGeneration || phase != CastPhase.Connecting) return false
         phase = CastPhase.Picker(youtube = youtube, searching = false)
-        notice = CastNotice.FAILED
+        notice = failure
+        return true
     }
 
     /**

@@ -15,9 +15,8 @@ import com.shibi.orbis.OrbisApp
 import com.shibi.orbis.R
 
 /**
- * Media notification for a DLNA session, and for a YouTube Cast session whose receiver does not publish standard media
- * status. A direct Google Cast playback uses the Cast SDK notification instead, so this one is not shown then.
- * A private tab is named only as a private tab: the page title is not put on the shade or the lock screen.
+ * Media notification for a Chromecast or DLNA session. A private tab is named only as a private tab: the page title is
+ * not put on the shade or the lock screen.
  */
 internal object CastNotifications {
     const val ACTION_SHOW = "com.shibi.orbis.cast.SHOW"

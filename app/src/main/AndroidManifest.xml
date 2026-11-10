@@ -4,9 +4,14 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- SSDP discovery of DLNA renderers. MulticastLock, not a Wi-Fi scan, so location and NEARBY_WIFI_DEVICES are not used. -->
+    <!-- SSDP for DLNA, and mDNS for Chromecast. MulticastLock only. Nearby Wi-Fi is required by NsdManager on
+         Android 13+ and is not used to derive location. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="tiramisu" />
 
     <!-- Asked at runtime only when a site requests them. No background location. -->
     <uses-permission android:name="android.permission.CAMERA" />
@@ -174,10 +179,6 @@
             android:name=".media.MediaPlaybackService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
-
-        <meta-data
-            android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
-            android:value="com.shibi.orbis.cast.OrbisCastOptionsProvider" />
 
         <receiver
             android:name=".cast.CastActionReceiver"

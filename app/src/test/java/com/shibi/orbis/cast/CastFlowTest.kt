@@ -11,7 +11,7 @@ class CastFlowTest {
     @Test
     fun connectTimesOutAndALateStartIsAnOrphan() {
         val flow = CastFlow()
-        flow.showPicker(youtube = false, searching = false, googleUnavailable = false)
+        flow.showPicker(youtube = false, searching = false)
         val generation = flow.beginConnect(0)
         assertFalse(flow.connectExpired(generation, CONNECT_TIMEOUT_MS - 1))
         assertTrue(flow.connectExpired(generation, CONNECT_TIMEOUT_MS))
@@ -24,7 +24,7 @@ class CastFlowTest {
     @Test
     fun pageChangeDuringConnectIsIgnoredSoTheStartStillBelongs() {
         val flow = CastFlow()
-        flow.showPicker(youtube = true, searching = true, googleUnavailable = false)
+        flow.showPicker(youtube = true, searching = true)
         val generation = flow.beginConnect(0)
         assertFalse(flow.present(hasPlayback = false))
         assertEquals(CastPhase.Connecting, flow.phase)
@@ -49,7 +49,7 @@ class CastFlowTest {
         val flow = CastFlow()
         flow.target = CastTarget.YouTube(YouTubeVideo("dQw4w9WgXcQ", "https://www.youtube.com/watch?v=dQw4w9WgXcQ", 0.0, "Song"))
         flow.rememberOrigin(tabId = 9, isPrivate = true)
-        flow.showPicker(youtube = true, searching = false, googleUnavailable = false)
+        flow.showPicker(youtube = true, searching = false)
         assertEquals(false, flow.privateTabClosed(9))
         assertNull(flow.target)
         assertNull(flow.privateOrigin)
