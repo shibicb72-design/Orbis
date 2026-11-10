@@ -18,7 +18,7 @@
         <item quantity="one">tracker, ad or cookie blocked</item>
         <item quantity="other">trackers, ads and cookies blocked</item>
     </plurals>
-    <string name="stats_time_saved">Time saved (estimate)</string>
+    <string name="stats_time_saved">Time saved (estimate, per request)</string>
     <string name="stats_data_saved">Data saved (estimate)</string>
     <string name="stats_data_used">Data used by Orbis</string>
     <string name="stats_hours">%1$d h</string>
@@ -37,7 +37,26 @@
     <string name="stats_since">Counting since %1$s</string>
     <string name="stats_reset">Reset</string>
     <string name="stats_reset_title">Reset privacy stats?</string>
-    <string name="stats_reset_body">The counts start again from zero. Nothing else is deleted.</string>
+    <string name="stats_reset_body">The counts start again from zero, including ad breaks avoided on YouTube. Nothing else is deleted.</string>
+    <!-- English only. Do not add translations for these. -->
+    <string name="stats_duration_zero" translatable="false">0 min</string>
+    <string name="stats_duration_hm" translatable="false">%1$d h %2$d min</string>
+    <string name="stats_duration_h" translatable="false">%1$d h</string>
+    <string name="stats_duration_ms" translatable="false">%1$d min %2$d s</string>
+    <string name="stats_duration_m" translatable="false">%1$d min</string>
+    <string name="stats_duration_s" translatable="false">%1$d s</string>
+    <string name="stats_yt_title" translatable="false">Ad breaks avoided (est.)</string>
+    <string name="stats_yt_time" translatable="false">Estimated time saved</string>
+    <string name="stats_yt_note" translatable="false">About %1$d seconds per ad break avoided, from breaks scheduled for the video. Not added to Time saved (estimate, per request) above. On this phone only.</string>
+    <string name="stats_yt_recent" translatable="false">Recent videos</string>
+    <plurals name="stats_yt_ads_blocked" translatable="false">
+        <item quantity="one">%1$s ad break avoided</item>
+        <item quantity="other">%1$s ad breaks avoided</item>
+    </plurals>
+    <plurals name="stats_yt_video_detail" translatable="false">
+        <item quantity="one">%1$s ad break avoided · %2$s</item>
+        <item quantity="other">%1$s ad breaks avoided · %2$s</item>
+    </plurals>
     <string name="force_dark_title">Force dark on all websites</string>
     <string name="force_dark_summary">Darkens light pages that have no dark design. Pictures and videos keep their colours. Pages reload to change.</string>
     <string name="bookmarks_move">Move to folder</string>
