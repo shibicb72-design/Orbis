@@ -143,6 +143,9 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="content" android:mimeType="application/pdf" />
                 <data android:scheme="content" android:mimeType="text/html" />
+                <!-- A .torrent from Files, Drive or a messenger. A .torrent sent as application/octet-stream is not
+                     claimed: that type is every file there is, and Orbis would appear for all of them. -->
+                <data android:scheme="content" android:mimeType="application/x-bittorrent" />
             </intent-filter>
             <!-- Share sheet. SEND carries the MIME on the intent and the URI in EXTRA_STREAM, so this filter
                  names types only (a scheme would require a data URI the share intent does not have). -->
@@ -151,6 +154,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/pdf" />
                 <data android:mimeType="text/html" />
+                <data android:mimeType="application/x-bittorrent" />
             </intent-filter>
         </activity>
 
@@ -167,6 +171,14 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="http" />
                 <data android:scheme="https" />
+            </intent-filter>
+            <!-- magnet: links tapped in another app or browser: offered in the torrent confirm sheet, never added
+                 without its Download tap. Only the link string is passed on. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="magnet" />
             </intent-filter>
         </activity>
 

@@ -57,4 +57,28 @@
     <string name="torrents_remove_done_title">Aus der Liste entfernen?</string>
     <string name="torrents_remove_done_body">Die Dateien bleiben in Download/Orbis/%1$s.</string>
     <string name="torrents_remove_done_body_private">Die gespeicherten Dateien bleiben in deinen Downloads.</string>
+
+    <!-- Torrent intake: the long-press row, the Magnet links setting and the confirm sheet. -->
+    <string name="torrents_menu_download">Mit Orbis herunterladen</string>
+    <string name="torrents_setting_magnets_title">Magnet-Links</string>
+    <string name="torrents_setting_magnets_orbis">Mit Orbis herunterladen</string>
+    <string name="torrents_setting_magnets_other_app">In einer anderen App öffnen</string>
+    <string name="torrents_sheet_title">Torrent herunterladen?</string>
+    <string name="torrents_sheet_unknown_file">Torrent-Datei</string>
+    <string name="torrents_sheet_unknown_magnet">Magnet-Link</string>
+    <plurals name="torrents_sheet_files">
+        <item quantity="one">%d Datei</item>
+        <item quantity="other">%d Dateien</item>
+    </plurals>
+    <string name="torrents_sheet_private">Aus einem privaten Tab: verschwindet aus der Liste, wenn das private Surfen endet</string>
+    <string name="torrents_sheet_ip_note">Torrent-Downloads verbinden sich direkt mit anderen Personen. Sie und die Tracker können deine IP-Adresse sehen. Orbis sendet sonst nichts.</string>
+    <string name="torrents_sheet_ip_reminder">Andere Teilnehmer sehen deine IP-Adresse</string>
+    <string name="torrents_sheet_download">Herunterladen</string>
+    <string name="torrents_sheet_reading">Torrent-Datei wird gelesen…</string>
+    <string name="torrents_sheet_too_large">Diese Torrent-Datei ist zu groß</string>
+    <string name="torrents_sheet_read_failed">Diese Torrent-Datei konnte nicht gelesen werden</string>
+    <string name="torrents_sheet_bad_magnet">Dieser Magnet-Link kann nicht verwendet werden</string>
+    <string name="torrents_added">Zu Downloads hinzugefügt</string>
+    <string name="torrents_added_view">Ansehen</string>
+    <string name="torrents_list_full">Die Torrent-Liste ist voll (%1$d). Entferne zuerst einige.</string>
 </resources>

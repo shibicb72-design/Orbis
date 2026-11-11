@@ -639,6 +639,58 @@ class TorrentManagerTest {
     }
 
     @Test
+    fun aFullListRefusesTheAdd() = runTest {
+        val s = setup(this)
+        repeat(TorrentLimits.MAX_ENTRIES) { assertNotNull(s.manager.add(TorrentSource.Magnet(magnet), isPrivate = it % 2 == 0)) }
+        assertNull(s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false))
+        assertNull(s.manager.add(TorrentSource.TorrentFile(ByteArray(10)), isPrivate = true))
+        assertEquals(TorrentLimits.MAX_ENTRIES, s.manager.entries.value.size)
+        assertEquals(2, s.logs.count { it == "add refused, list full" })
+    }
+
+    @Test
+    fun aRollbackAfterAReuseLeavesTheReusedCopy() = runTest {
+        val s = setup(this)
+        // movie.mp4 was already published by an earlier, interrupted attempt; en.srt fails this time.
+        s.existingCopies += "movie.mp4"
+        s.failPublishAt = 2
+        finishedTorrent(s)
+        assertEquals(TorrentErrorKind.PUBLISH_FAILED, s.only().errorKind)
+        assertTrue("the reused copy was not deleted", s.unpublished.isEmpty())
+        assertFalse(s.logs.any { it.startsWith("publish rolled back") })
+    }
+
+    @Test
+    fun aRollbackDeletesOnlyTheCopiesThisAttemptMade() = runTest {
+        val s = setup(this)
+        val third = files(secretName, listOf(secretName, "a") to 1L, listOf(secretName, "b") to 1L, listOf(secretName, "c") to 1L)
+        s.existingCopies += "a"
+        s.failPublishAt = 3
+        s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
+        advanceUntilIdle()
+        s.engine.emitMetadata(s.lastId(), third)
+        advanceUntilIdle()
+        File(s.only().saveDir, secretName).mkdirs()
+        listOf("a", "b", "c").forEach { File(s.only().saveDir, "$secretName/$it").writeText("x") }
+        s.engine.finish(s.lastId())
+        advanceUntilIdle()
+        // a was reused (kept), b was copied now (deleted again), c failed.
+        assertEquals(listOf("b"), s.published.map { it.name })
+        assertEquals(listOf(s.published.single().handle), s.unpublished)
+        assertTrue(s.logs.contains("publish rolled back 1"))
+    }
+
+    @Test
+    fun aHalfWrittenCopyIsDeletedBeforeCopyingAgain() = runTest {
+        val s = setup(this)
+        s.pendingCopies += "movie.mp4"
+        finishedTorrent(s)
+        assertEquals(TorrentStatus.COMPLETED, s.only().status)
+        assertEquals(listOf("movie.mp4"), s.pendingDeleted)
+        assertEquals(setOf("movie.mp4", "en.srt"), s.published.map { it.name }.toSet())
+    }
+
+    @Test
     fun aTorrentOfOnlyEmptyFilesCompletes() = runTest {
         val s = setup(this)
         s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
@@ -728,6 +780,28 @@ class TorrentManagerTest {
         val next = TorrentTestSetup(tmp.root, testScheduler).also { scopes += it.scope }
         next.manager.restore()
         advanceUntilIdle()
+        // Intake lines: a magnet offered to the sheet and an oversized response refused by the reader.
+        val intakeTabs =
+            com.shibi.orbis.tabs.TabManager({ error("no sessions") }, object : com.shibi.orbis.tabs.TabStore {
+                override fun load(): com.shibi.orbis.tabs.TabsSnapshot? = null
+                override fun save(snapshot: com.shibi.orbis.tabs.TabsSnapshot) = Unit
+            }, s.scope, {}, torrentLog = { s.logs += it })
+        intakeTabs.offerTorrentIntake(IntakeRequest.Magnet(magnet, isPrivate = false))
+        intakeTabs.offerTorrentIntake(IntakeRequest.Magnet(magnet, isPrivate = true))
+        val oversized =
+            object : com.shibi.orbis.engine.IncomingDownload {
+                override val url = "https://tracker.example.org/$secretName.torrent"
+                override val contentDisposition: String? = "attachment; filename=\"$secretName.torrent\""
+                override val contentType: String? = "application/x-bittorrent"
+                override val contentLength = TorrentLimits.MAX_TORRENT_FILE_BYTES + 1L
+                override fun openBody(): java.io.InputStream? = null
+                override fun discard() = Unit
+            }
+        val refused = kotlinx.coroutines.runBlocking { TorrentIntakeReader().readResponse(oversized) }
+        s.logs += IntakeLog.refused((refused as TorrentIntakeReader.Result.Failed).reason)
+        assertTrue(s.logs.contains("intake magnet false"))
+        assertTrue(s.logs.contains("intake busy"))
+        assertTrue(s.logs.contains("intake refused TOO_LARGE"))
         assertTrue(s.logs.any { it.startsWith("retry") })
         assertTrue(s.logs.any { it.startsWith("publish rolled back") })
         assertTrue(next.logs.any { it.startsWith("orphan payloads reaped") })
@@ -737,7 +811,8 @@ class TorrentManagerTest {
         val hex40 = Regex("[0-9a-fA-F]{40}")
         for (line in s.logs) {
             assertFalse(line, hex40.containsMatchIn(line))
-            assertFalse(line, line.contains("magnet", ignoreCase = true))
+            // "intake magnet" names the kind; a link itself would carry "magnet:".
+            assertFalse(line, line.contains("magnet:", ignoreCase = true))
             assertFalse(line, line.contains("btih", ignoreCase = true))
             assertFalse(line, line.contains(secretName, ignoreCase = true))
             assertFalse(line, line.contains("tracker", ignoreCase = true))

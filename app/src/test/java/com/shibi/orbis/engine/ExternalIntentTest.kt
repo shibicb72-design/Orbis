@@ -46,14 +46,19 @@ class ExternalIntentTest {
     }
 
     @Test
-    fun unresolvedMagnetIsStillLaunchedInsteadOfDeclaredMissing() {
-        val apps = ExternalApps(context)
-        val target = apps.forExternalScheme("magnet:?xt=urn:btih:abc123")
-        assertTrue(target != null)
-        assertFalse("nothing in this test handles magnet", target!!.resolvable)
-        assertTrue(target.intent != null)
-        // The phone can have uTorrent installed and still return null from resolveActivity.
-        assertEquals(ExternalOpenChoice.LAUNCH, externalOpenChoice(target.intent != null, target.resolvable))
+    fun anUnresolvedHandlerIsStillLaunchedInsteadOfDeclaredMissing() {
+        // The phone can have the app installed and still return null from resolveActivity (package visibility).
+        assertEquals(ExternalOpenChoice.LAUNCH, externalOpenChoice(hasIntent = true, resolvable = false))
+    }
+
+    @Test
+    fun aMagnetOnlyOrbisHandlesIsNeverSentBackToOrbis() {
+        // Orbis claims magnet: itself (LinkRouterActivity). With no other app, there is nothing to launch: the "no app"
+        // offer follows instead of Orbis opening its own link.
+        val target = ExternalApps(context).forExternalScheme("magnet:?xt=urn:btih:abc123")!!
+        assertFalse(target.resolvable)
+        assertNull(target.intent)
+        assertEquals(ExternalOpenChoice.MISS, externalOpenChoice(target.intent != null, target.resolvable))
         assertEquals(ExternalMiss.NoHandler, planExternalMiss(target.fallbackUrl, target.marketPackage))
     }
 

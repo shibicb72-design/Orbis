@@ -337,6 +337,8 @@ interface SitePolicy {
     fun javaScriptFor(url: String, isPrivate: Boolean): Boolean
     /** Offer to open web links in the app that handles them (Settings > Open links in apps). */
     fun offerAppsForLinks(): Boolean = true
+    /** Tapped magnet: links go to Orbis's torrent downloader instead of another app (Settings > Magnet links). */
+    fun magnetsToOrbis(): Boolean = false
 }
 
 /** The translator's view of a page. Language tags are BCP 47 ("en", "fr", "zh-Hans"); empty when unknown. */
@@ -392,6 +394,11 @@ interface SessionHost {
     fun onPageContextMenu(menu: PageContextMenu, session: BrowserSession) {}
     /** No installed app could open [url]. The UI offers to copy it. */
     fun onExternalAppMissing(url: String) {}
+    /**
+     * A tapped magnet: link for Orbis's own downloader (Settings > Magnet links). True when the host shows the torrent
+     * confirm sheet for it; false (the default, e.g. a Custom Tab) sends the link down the "open in another app" path.
+     */
+    fun onTorrentIntake(request: com.shibi.orbis.torrent.IntakeRequest, session: BrowserSession): Boolean = false
     /** The session's saved-state blob changed (history, scroll position...). */
     fun onSessionStateChanged(session: BrowserSession)
     /** A page was visited (a finished load, or a same-document navigation). [title] may still be empty. */

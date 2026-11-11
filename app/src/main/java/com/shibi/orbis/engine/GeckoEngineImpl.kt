@@ -925,6 +925,12 @@ private class GeckoBrowserSession(
             debugLog.log("GeckoSession", "external app link while one is pending: blocked")
             return deny
         }
+        // A magnet for Orbis's own downloader: the confirm sheet asks; the page stays where it is.
+        if (schemeOf(request.uri) == "magnet" && sitePolicy()?.magnetsToOrbis() == true &&
+            host?.onTorrentIntake(com.shibi.orbis.torrent.IntakeRequest.Magnet(request.uri, isPrivate), this) == true
+        ) {
+            return deny
+        }
         when (val route = routeExternalNavigation(request.uri, appContext.packageName)) {
             is ExternalNavigation.Web -> {
                 // An intent: link that is really an http(s) address stays in this tab. Never load the raw intent: URI.

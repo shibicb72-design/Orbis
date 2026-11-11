@@ -31,6 +31,8 @@ class BrowserSettingsTest {
         override var toolbarBottom: Boolean = false
         override var copyToDownloadFolder: Boolean = true
         override var forceDark: Boolean = false
+        override var magnetHandler: MagnetHandler = MagnetHandler.ORBIS
+        override var torrentIpNoteSeen: Boolean = false
     }
 
     @Test

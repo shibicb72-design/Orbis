@@ -57,4 +57,28 @@
     <string name="torrents_remove_done_title">Remove from the list?</string>
     <string name="torrents_remove_done_body">The files stay in Download/Orbis/%1$s.</string>
     <string name="torrents_remove_done_body_private">The saved files stay in your Downloads.</string>
+
+    <!-- Torrent intake: the long-press row, the Magnet links setting and the confirm sheet. -->
+    <string name="torrents_menu_download">Download with Orbis</string>
+    <string name="torrents_setting_magnets_title">Magnet links</string>
+    <string name="torrents_setting_magnets_orbis">Download with Orbis</string>
+    <string name="torrents_setting_magnets_other_app">Open in another app</string>
+    <string name="torrents_sheet_title">Download torrent?</string>
+    <string name="torrents_sheet_unknown_file">Torrent file</string>
+    <string name="torrents_sheet_unknown_magnet">Magnet link</string>
+    <plurals name="torrents_sheet_files">
+        <item quantity="one">%d file</item>
+        <item quantity="other">%d files</item>
+    </plurals>
+    <string name="torrents_sheet_private">From a private tab: kept out of the list when private browsing ends</string>
+    <string name="torrents_sheet_ip_note">Torrent downloads connect directly to other people. They, and the trackers, can see your IP address. Orbis sends nothing else.</string>
+    <string name="torrents_sheet_ip_reminder">Peers can see your IP address</string>
+    <string name="torrents_sheet_download">Download</string>
+    <string name="torrents_sheet_reading">Reading the torrent file…</string>
+    <string name="torrents_sheet_too_large">This torrent file is too large</string>
+    <string name="torrents_sheet_read_failed">This torrent file could not be read</string>
+    <string name="torrents_sheet_bad_magnet">This magnet link can\'t be used</string>
+    <string name="torrents_added">Added to Downloads</string>
+    <string name="torrents_added_view">View</string>
+    <string name="torrents_list_full">The torrent list is full (%1$d). Remove some first.</string>
 </resources>

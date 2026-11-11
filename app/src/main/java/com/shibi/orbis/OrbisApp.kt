@@ -197,6 +197,7 @@ class OrbisApp : Application() {
                 store = FileTabStore(File(filesDir, "tabs/tabs.json")),
                 scope = appScope,
                 log = { debugLog.log("Tabs", it) },
+                torrentLog = { debugLog.log(TorrentLog.TAG, it) },
                 visits = object : VisitSink {
                     override fun onVisit(url: String, title: String) = history.recordVisit(url, title)
 
@@ -255,10 +256,10 @@ class OrbisApp : Application() {
                 now = System::currentTimeMillis,
                 publisher =
                     object : TorrentPublisher {
-                        override fun publish(file: File, relativeDir: String, displayName: String): String? {
+                        override fun publish(file: File, relativeDir: String, displayName: String): TorrentPublisher.Published? {
                             val ext = displayName.substringAfterLast('.', "").lowercase()
                             val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
-                            return com.shibi.orbis.downloads.publishTorrentFile(this@OrbisApp, file, displayName, mime, relativeDir)?.toString()
+                            return com.shibi.orbis.downloads.publishTorrentFile(this@OrbisApp, file, displayName, mime, relativeDir)
                         }
 
                         override fun unpublish(handle: String) {
@@ -470,6 +471,13 @@ class AppContainer(
      * only exists after the onboarding decision, so an intent arriving earlier waits and causes no network load.
      */
     val pendingExternalUrl = MutableStateFlow<String?>(null)
+
+    /**
+     * A torrent another app handed over (a `content:` .torrent or a magnet: link). Set by MainActivity or
+     * LinkRouterActivity, taken by BrowserScreen into the confirm sheet once onboarding and Clear browsing data are done.
+     * Nothing is added before the sheet's Download tap.
+     */
+    val pendingTorrentIntake = MutableStateFlow<com.shibi.orbis.torrent.IntakeRequest?>(null)
 
     /** A download notification was tapped. Consumed by OrbisRoot, which navigates once, and only after onboarding. */
     val pendingShowDownloads = MutableStateFlow(false)

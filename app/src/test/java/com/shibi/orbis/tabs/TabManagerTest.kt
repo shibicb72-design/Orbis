@@ -642,4 +642,122 @@ class TabManagerTest {
         assertSame(m, outside.host)
         assertFalse(m.adoptSession(FakeSession(SessionInit(isPrivate = true))))
     }
+
+    // ---- torrent intake ----
+
+    private class TorrentDownload(
+        override val contentType: String? = "application/x-bittorrent",
+        override val url: String = "https://example.com/sintel.torrent",
+    ) : IncomingDownload {
+        var discards = 0
+        override val contentDisposition: String? = null
+        override val contentLength = 100L
+        override fun openBody(): InputStream? = null
+        override fun discard() { discards++ }
+    }
+
+    private fun torrentManager(torrentLogs: MutableList<String>): TabManager {
+        val m = TabManager(
+            factory = { init -> FakeSession(init).also { created += it } },
+            store = MemoryStore(),
+            scope = scope,
+            log = { logs += it },
+            io = dispatcher,
+            torrentLog = { torrentLogs += it },
+        )
+        m.restore()
+        scheduler.advanceUntilIdle()
+        return m
+    }
+
+    @Test
+    fun aTorrentResponseBecomesATorrentIntakeNotADownload() {
+        val intakeLogs = mutableListOf<String>()
+        val m = torrentManager(intakeLogs)
+        m.openSelected()
+        val d = TorrentDownload()
+        m.onDownload(d, created[0])
+        assertNull(m.pendingDownload.value)
+        val pending = m.pendingTorrentIntake.value!!
+        assertTrue(pending.request is com.shibi.orbis.torrent.IntakeRequest.TorrentResponse)
+        assertEquals(m.selected.value.id, pending.sourceTabId)
+        assertFalse(pending.request.isPrivate)
+        assertEquals(0, d.discards)
+        assertEquals(listOf("intake response false"), intakeLogs)
+        // A .torrent name with a generic type is one too; HTML never is.
+        m.resolveTorrentIntake(pending)
+        m.onDownload(TorrentDownload(contentType = "application/octet-stream"), created[0])
+        assertNotNull(m.pendingTorrentIntake.value)
+        m.resolveTorrentIntake(m.pendingTorrentIntake.value!!)
+        m.onDownload(TorrentDownload(contentType = "text/html"), created[0])
+        assertNull(m.pendingTorrentIntake.value)
+        assertNotNull(m.pendingDownload.value)
+    }
+
+    @Test
+    fun aSecondTorrentWhileOneIsPendingIsDropped() {
+        val intakeLogs = mutableListOf<String>()
+        val m = torrentManager(intakeLogs)
+        m.openSelected()
+        val first = TorrentDownload()
+        m.onDownload(first, created[0])
+        val pending = m.pendingTorrentIntake.value
+        val second = TorrentDownload()
+        m.onDownload(second, created[0])
+        assertEquals(1, second.discards)
+        val magnet = com.shibi.orbis.torrent.IntakeRequest.Magnet("magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10", isPrivate = false)
+        assertTrue(m.onTorrentIntake(magnet, created[0]))
+        assertFalse(m.offerTorrentIntake(magnet))
+        assertSame(pending, m.pendingTorrentIntake.value)
+        assertEquals(0, first.discards)
+        assertEquals(3, intakeLogs.count { it == "intake busy" })
+        // A plain download is not asked about while the torrent sheet is open either.
+        val file = FakeDownload()
+        m.onDownload(file, created[0])
+        assertTrue(file.discarded)
+        assertNull(m.pendingDownload.value)
+    }
+
+    @Test
+    fun closingTheSourceTabClearsTheIntakeAndDiscardsTheBody() {
+        val intakeLogs = mutableListOf<String>()
+        val m = torrentManager(intakeLogs)
+        m.openSelected()
+        val d = TorrentDownload()
+        m.onDownload(d, created[0])
+        m.close(m.selected.value.id)
+        assertNull(m.pendingTorrentIntake.value)
+        assertEquals(1, d.discards)
+        assertTrue("intake cancelled" in intakeLogs)
+        // An intake from another app has no source tab and survives tab changes.
+        val fromApp = com.shibi.orbis.torrent.IntakeRequest.TorrentUri("content://x/y")
+        assertTrue(m.offerTorrentIntake(fromApp))
+        m.newTab()
+        m.close(m.selected.value.id)
+        assertSame(fromApp, m.pendingTorrentIntake.value?.request)
+    }
+
+    @Test
+    fun theTabsPrivateFlagIsCarriedAndBackgroundTabsAreIgnored() {
+        val intakeLogs = mutableListOf<String>()
+        val m = torrentManager(intakeLogs)
+        m.openSelected()
+        m.newPrivateTab()
+        val private = created[1]
+        val d = TorrentDownload()
+        m.onDownload(d, private)
+        assertEquals(true, m.pendingTorrentIntake.value?.request?.isPrivate)
+        assertEquals(listOf("intake response true"), intakeLogs)
+        m.resolveTorrentIntake(m.pendingTorrentIntake.value!!)
+        // A background tab's magnet raises nothing, and does not fall through to another app either.
+        val magnet = com.shibi.orbis.torrent.IntakeRequest.Magnet("magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10", isPrivate = false)
+        assertTrue(m.onTorrentIntake(magnet, created[0]))
+        assertNull(m.pendingTorrentIntake.value)
+        // The long-press row offers the magnet in the tab's mode.
+        m.downloadTorrentLink(LinkMenuRequest("magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10", m.selected.value.id, isPrivate = true))
+        assertEquals(true, m.pendingTorrentIntake.value?.request?.isPrivate)
+        m.resolveTorrentIntake(m.pendingTorrentIntake.value!!)
+        m.downloadTorrentLink(LinkMenuRequest("https://example.com/", m.selected.value.id))
+        assertNull(m.pendingTorrentIntake.value)
+    }
 }
