@@ -113,6 +113,19 @@ class ProviderDeadlineTest {
     }
 
     @Test
+    fun poolsAreSeparate() = runBlocking {
+        val calls = (1..ProviderDeadline.MAX_THREADS).map { async { providerCall<String>(timeoutMs = 10_000) { hang() } } }
+        withTimeout(5_000) { while (ProviderDeadline.intents.aliveThreads() < ProviderDeadline.MAX_THREADS) delay(5) }
+        assertNull(providerCall { "intent" })
+        assertEquals("picked", providerCall(pool = ProviderDeadline.picked) { "picked" })
+        val own = ProviderPool(max = 1)
+        assertEquals("own", providerCall(pool = own) { "own" })
+        assertEquals(0, own.aliveThreads())
+        stuck.countDown()
+        assertTrue(calls.awaitAll().all { it == null })
+    }
+
+    @Test
     fun aLateStreamIsClosed() = runBlocking {
         val stream = TrackedStream()
         val late = CountDownLatch(1)

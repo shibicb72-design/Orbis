@@ -82,6 +82,6 @@ internal suspend fun importSharedDocument(
     if (ours) return ImportResult.Failed
     // The name query and the stream share one idle timeout, so a stuck provider fails the import
     // instead of holding the copy open until the process gives up. Both run on a provider thread that counts against
-    // ProviderDeadline.MAX_THREADS, and no dispatcher thread waits on them.
+    // ProviderDeadline.intents, and no dispatcher thread waits on them.
     return cache.readShared(mime, query = { openableColumns(resolver, uri) }, open = { openSharedDocument(resolver, uri) })
 }

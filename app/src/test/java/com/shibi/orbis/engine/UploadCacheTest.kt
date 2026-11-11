@@ -5,9 +5,13 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -365,7 +369,7 @@ class UploadCacheTest {
 
     @Test
     fun aSlowCopyThatKeepsSendingIsNotCutOff() = runBlocking {
-        val cache = hostileCache(idleTimeoutMs = 300)
+        val cache = hostileCache(idleTimeoutMs = 1_000)
         var sent = 0
         val trickle =
             object : UploadCache.Source {
@@ -385,7 +389,7 @@ class UploadCacheTest {
                         }
                     }
             }
-        // 8 x 150 ms is well past the idle window as a whole; no single gap is.
+        // 8 x 150 ms is past the idle window as a whole; no single gap comes near it.
         val out = cache.copy(listOf(trickle))
         assertEquals(8, out.single().readBytes().size)
     }
@@ -413,6 +417,65 @@ class UploadCacheTest {
         assertTrue(job.isCancelled)
         assertTrue(stream.closed.await(10, TimeUnit.SECONDS))
         assertTrue(rootChildren(cache).isEmpty())
+    }
+
+    @Test
+    fun aCancelBeforeTheWatchdogStartsStillClosesTheStream() = runBlocking {
+        // The watchdog's dispatcher is busy until after the cancel, so its body never runs: only the completion
+        // handler can close the stream that the copy is blocked on.
+        val busy = Executors.newSingleThreadExecutor()
+        val gate = CountDownLatch(1)
+        busy.execute { gate.await() }
+        try {
+            val cache =
+                UploadCache(
+                    tmp.newFolder("cache"),
+                    Dispatchers.IO,
+                    idleTimeoutMs = 60_000,
+                    watchdogDispatcher = busy.asCoroutineDispatcher(),
+                )
+            val stream = StalledStream()
+            val job =
+                launch(Dispatchers.Default) {
+                    cache.copy(
+                        listOf(
+                            object : UploadCache.Source {
+                                override val name = "big.bin"
+                                override val size: Long? = null
+
+                                override fun open(): InputStream = stream
+                            },
+                        ),
+                    )
+                }
+            withTimeout(10_000) { while (rootChildren(cache).isEmpty()) delay(5) }
+            job.cancel()
+            gate.countDown()
+            withTimeout(10_000) { job.join() }
+            assertTrue(job.isCancelled)
+            assertTrue(stream.closed.await(10, TimeUnit.SECONDS))
+            assertTrue(rootChildren(cache).isEmpty())
+        } finally {
+            gate.countDown()
+            busy.shutdownNow()
+        }
+    }
+
+    @Test
+    fun anUploadStillWorksWhenIntentCallsFillTheirPool() = runBlocking {
+        val held =
+            (1..ProviderDeadline.MAX_THREADS).map {
+                async(Dispatchers.IO) { providerCall<Unit>(timeoutMs = 10_000) { stuck.await() } }
+            }
+        withTimeout(5_000) { while (ProviderDeadline.intents.aliveThreads() < ProviderDeadline.MAX_THREADS) delay(5) }
+        // The intents pool is full: an intent-driven call gets nothing.
+        assertEquals(null, providerCall { "type" })
+        val out = newCache().copy(listOf(FakeSource("report", "hi".toByteArray(), extension = "pdf")))
+        assertEquals("report.pdf", out.single().name)
+        assertEquals("hi", out.single().readText())
+        stuck.countDown()
+        held.awaitAll()
+        Unit
     }
 
     // ---- clearAll / discard ----

@@ -645,9 +645,9 @@ class ImportedFileCache(
     private suspend fun <T> awaitProvider(scope: CoroutineScope, watchdog: ImportCopyWatchdog, block: () -> T): T? {
         if (watchdog.isTimedOut()) return null
         val future = CompletableFuture<T>()
-        // A thread stuck in a provider cannot be stopped, only abandoned: these share the provider-call cap, so a flood
-        // of shares from a hostile provider cannot create threads without bound. No slot: the import fails at once.
-        if (!ProviderDeadline.tryAcquire()) return null
+        // A thread stuck in a provider cannot be stopped, only abandoned: imports share ProviderDeadline.intents, so a
+        // flood of shares from a hostile provider cannot create threads without bound. No slot: the import fails at once.
+        if (!ProviderDeadline.intents.tryAcquire()) return null
         try {
             val worker = Thread({
                 try {
@@ -657,13 +657,13 @@ class ImportedFileCache(
                 } catch (t: Throwable) {
                     future.completeExceptionally(t)
                 } finally {
-                    ProviderDeadline.release()
+                    ProviderDeadline.intents.release()
                 }
             }, "import-provider")
             worker.isDaemon = true
             worker.start()
         } catch (t: Throwable) {
-            ProviderDeadline.release()
+            ProviderDeadline.intents.release()
             return null
         }
         try {

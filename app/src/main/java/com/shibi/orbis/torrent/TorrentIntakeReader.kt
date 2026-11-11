@@ -85,9 +85,9 @@ class TorrentIntakeReader(
      * enforces the limit. A hung or failed open fails the read; a stream that opens after the deadline is closed.
      */
     internal suspend fun readWithDeclaredSize(querySize: () -> Long?, open: () -> InputStream?): Result {
-        val declared = providerCall(providerTimeoutMs, log, querySize) ?: -1L
+        val declared = providerCall(providerTimeoutMs, log, block = querySize) ?: -1L
         if (declared > TorrentLimits.MAX_TORRENT_FILE_BYTES) return Result.Failed(IntakeRefusal.TOO_LARGE)
-        return read { providerCall(providerTimeoutMs, log, open) }
+        return read { providerCall(providerTimeoutMs, log, block = open) }
     }
 
     /**
