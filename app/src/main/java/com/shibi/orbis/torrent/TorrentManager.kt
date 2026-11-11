@@ -156,6 +156,8 @@ class TorrentManager(
             lock.withLock {
                 val loaded = withContext(io) { store.load() }
                 if (loaded.corrupt) log("index set aside")
+                // The clear ran before this index was set aside: the user asked for the set-aside copy to go too.
+                if (loaded.corrupt && clearedBeforeRestore) withContext(io) { store.deleteSetAside() }
                 // A list cleared before the index was read does not get its settled rows back; their state files and
                 // payloads are leftovers now, which deleteLeftovers removes.
                 val restored =
@@ -391,13 +393,14 @@ class TorrentManager(
      */
     fun clearSettled(): List<String> {
         val ids = _entries.value.filter { leavesOnClear(it) }.map { it.id }
-        locked { dropSettled() }
+        locked { dropSettled(ids.toSet()) }
         return ids
     }
 
-    private suspend fun dropSettled() {
+    /** Only rows that were settled when the user asked ([asked]): one that finished saving since then stays. */
+    private suspend fun dropSettled(asked: Set<String>) {
         if (!restored) clearedBeforeRestore = true
-        val gone = _entries.value.filter { leavesOnClear(it) }
+        val gone = _entries.value.filter { it.id in asked && leavesOnClear(it) }
         for (e in gone) {
             detach(e.id, deleteFiles = false)
             forgetMemory(e.id)

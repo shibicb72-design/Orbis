@@ -3,6 +3,7 @@ package com.shibi.orbis.torrent
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -1677,5 +1678,24 @@ class TorrentManagerTest {
         assertTrue(s.manager.forgetPrivate().isEmpty())
         advanceUntilIdle()
         assertFalse(kept.exists())
+    }
+
+    @Test
+    fun aTorrentStillSavingWhenClearIsTappedStays() = runTest {
+        val s = setup(this)
+        s.manager.restore()
+        var ids: List<String>? = null
+        // Tapped while the copy to Download/Orbis runs: the ids are taken while the row is PUBLISHING, and the copy's
+        // completion takes the lock before the clear does.
+        var tapped = false
+        s.onPublish = {
+            if (!tapped) s.scope.launch { ids = s.manager.clearSettled() }
+            tapped = true
+        }
+        val id = finishedTorrent(s)
+        advanceUntilIdle()
+        assertEquals(emptyList<String>(), ids)
+        assertEquals(TorrentStatus.COMPLETED, s.entry(id).status)
+        assertTrue(s.logs.contains("torrent list cleared 0"))
     }
 }

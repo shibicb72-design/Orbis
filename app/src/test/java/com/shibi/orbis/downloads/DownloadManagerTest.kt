@@ -1174,4 +1174,63 @@ class DownloadManagerTest {
         assertEquals(DownloadStatus.COMPLETED, m.byId(priv).status)
         assertEquals("p", File(dir, "${DownloadManager.PRIVATE_DIR}/p.txt").readText())
     }
+
+    // ---- Clear browsing data with private files (security PR 10, OD-3) ----
+
+    @Test
+    fun aClearedPrivateFileStillGoesWhenPrivateBrowsingEnds() = runTest {
+        val m = manager()
+        val priv = m.start(FakeDownload(contentDisposition = cd("p.txt"), body = { ChunkStream(bytes("p")) }), isPrivate = true)
+        advanceUntilIdle()
+        val file = File(dir, "${DownloadManager.PRIVATE_DIR}/p.txt")
+        assertTrue(file.isFile)
+
+        assertEquals(listOf(priv), m.clearIndex())
+        advanceUntilIdle()
+        assertTrue(m.entries.value.isEmpty())
+        // The clear deletes no file.
+        assertTrue(file.isFile)
+
+        assertTrue(m.forgetPrivate().isEmpty())
+        advanceUntilIdle()
+        assertFalse(file.exists())
+    }
+
+    @Test
+    fun aClearedPausedPrivateDownloadLosesItsPartFileWhenPrivateBrowsingEnds() = runTest {
+        val data = ByteArray(40) { it.toByte() }
+        lateinit var m: DownloadManager
+        var id = 0L
+        m = pausableManager { _, _, _, _ -> null }
+        val first = ChunkStream(data, chunk = 4, onRead = { n -> if (n == 3) m.pause(id) })
+        id = m.start(FakeDownload(contentDisposition = cd("p.bin"), contentLength = 40, body = { first }), isPrivate = true)
+        advanceUntilIdle()
+        assertEquals(DownloadStatus.PAUSED, m.byId(id).status)
+        val part = File(dir, "${DownloadManager.PRIVATE_DIR}/p.bin.part")
+        assertTrue(part.isFile)
+
+        assertEquals(listOf(id), m.clearIndex())
+        advanceUntilIdle()
+        assertTrue(part.isFile)
+
+        assertTrue(m.forgetPrivate().isEmpty())
+        advanceUntilIdle()
+        assertFalse(part.exists())
+        // Its reserved name is free again.
+        val again = m.start(FakeDownload(contentDisposition = cd("p.bin"), body = { ChunkStream(bytes("x")) }), isPrivate = true)
+        advanceUntilIdle()
+        assertEquals("p.bin", m.byId(again).fileName)
+    }
+
+    @Test
+    fun aClearedNormalFileStaysThroughTheEndOfPrivateBrowsing() = runTest {
+        val m = manager()
+        m.start(FakeDownload(contentDisposition = cd("n.txt"), body = { ChunkStream(bytes("n")) }))
+        advanceUntilIdle()
+        m.clearIndex()
+        advanceUntilIdle()
+        m.forgetPrivate()
+        advanceUntilIdle()
+        assertEquals("n", File(dir, "n.txt").readText())
+    }
 }
