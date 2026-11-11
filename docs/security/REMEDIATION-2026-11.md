@@ -21,7 +21,7 @@ Status values: `open` (nothing merged), `partial` (a first step is merged), `fix
 | F-09 | low | On Android 10 other apps can read and replace downloads and torrent payloads | `opus/sec2-storage-api29` | open | | |
 | F-10 | low | Debug builds use the production package name and a public signing key | `opus/sec2-debug-appid` | open | | |
 | F-11 | low | Torrent defaults reveal more than needed | `opus/sec2-torrent-exposure` | open | | |
-| F-12 | low | Calls into another app's provider have no timeout | `opus/sec2-provider-timeouts` | open | | |
+| F-12 | low | Calls into another app's provider have no timeout | `opus/sec2-provider-timeouts` | open (fix in #29: 3 s deadline on `getType` and the torrent size query, at most 8 provider threads) | #29 | none needed (no UI; `ProviderDeadlineTest`, `TorrentIntakeReaderTest`) |
 | F-13 | info | Password store hardening | `opus/sec2-passwords` | open | | |
 | F-14 | info | Lock icon follows the URL scheme (HTTPS-only already defaults to all tabs) | `opus/sec2-security-indicator` | open | | |
 | F-15 | info | Android 10/11 overlay and task-hijack protections are not set | `opus/sec2-overlay-tapguard` | open | | |
