@@ -1,18 +1,20 @@
 package com.shibi.orbis.downloads
 
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.net.Uri
 import android.provider.MediaStore
 import java.io.File
 
 /**
  * Puts a copy of a finished download in the phone's public Download folder (Files app, other apps), through
- * MediaStore: no storage permission is needed. Blocking IO: call off the main thread. Returns false on any failure;
- * the file in Orbis's own folder is untouched either way. [subPath] (already sanitised, '/'-separated, e.g.
- * "Orbis/Sintel") puts it in a folder below Download.
+ * MediaStore: no storage permission is needed. Blocking IO: call off the main thread. Returns the copy's content URI,
+ * or null on any failure (its own half-written row is deleted again); the file in Orbis's own folder is untouched
+ * either way. [subPath] (already sanitised, '/'-separated, e.g. "Orbis/Sintel") puts it in a folder below Download.
  */
-internal fun copyToPublicDownloads(context: Context, file: File, displayName: String, mimeType: String, subPath: String? = null): Boolean {
-    if (!file.isFile) return false
+internal fun copyToPublicDownloads(context: Context, file: File, displayName: String, mimeType: String, subPath: String? = null): Uri? {
+    if (!file.isFile) return null
     val resolver = context.contentResolver
     val values =
         ContentValues().apply {
@@ -21,17 +23,71 @@ internal fun copyToPublicDownloads(context: Context, file: File, displayName: St
             put(MediaStore.Downloads.RELATIVE_PATH, publicRelativePath(subPath))
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
-    val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-    val uri = runCatching { resolver.insert(collection, values) }.getOrNull() ?: return false
+    val uri = runCatching { resolver.insert(downloadsCollection(), values) }.getOrNull() ?: return null
     return try {
         resolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } } ?: throw IllegalStateException("no stream")
         resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
-        true
+        uri
     } catch (e: Exception) {
         runCatching { resolver.delete(uri, null, null) }
-        false
+        null
     }
 }
+
+/**
+ * One file of a finished torrent into Download/<subPath>. A finished copy this app already made of the same file
+ * (same folder, name and size: a publish cut short by a killed process) is reused instead of copied again, so a
+ * restart never leaves "name (1)" duplicates. Blocking IO.
+ */
+internal fun publishTorrentFile(context: Context, file: File, displayName: String, mimeType: String, subPath: String): Uri? {
+    val collection = downloadsCollection()
+    val existing =
+        runCatching {
+            context.contentResolver.query(
+                collection,
+                arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.SIZE),
+                "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND ${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.OWNER_PACKAGE_NAME} = ?",
+                arrayOf(publicRelativePath(subPath) + "/", displayName, context.packageName),
+                null,
+            )?.use { c ->
+                var found: Uri? = null
+                while (found == null && c.moveToNext()) {
+                    if (c.getLong(1) == file.length()) found = ContentUris.withAppendedId(collection, c.getLong(0))
+                }
+                found
+            }
+        }.getOrNull()
+    return existing ?: copyToPublicDownloads(context, file, displayName, mimeType, subPath)
+}
+
+/** Deletes a copy this app made (app-owned rows need no permission). Blocking IO; false when it could not. */
+internal fun deletePublished(context: Context, uri: Uri): Boolean = runCatching { context.contentResolver.delete(uri, null, null) > 0 }.getOrDefault(false)
+
+/** MediaStore selection for every copy this app made below [relativeDir] (e.g. "Download/Orbis/Sintel"). */
+internal class PublishedSelection(val selection: String, val args: Array<String>) {
+    override fun toString(): String = "PublishedSelection(args=${args.size})"
+}
+
+/**
+ * Pure. The folder is a bound argument (never concatenated into the SQL), with LIKE's wildcards escaped so a name
+ * holding '%' or '_' matches only itself.
+ */
+internal fun publishedSelection(relativeDir: String, packageName: String): PublishedSelection {
+    val dir = relativeDir.trim('/')
+    val escaped =
+        buildString {
+            for (ch in dir) {
+                if (ch == '\\' || ch == '%' || ch == '_') append('\\')
+                append(ch)
+            }
+        }
+    return PublishedSelection(
+        "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? ESCAPE '\\' AND ${MediaStore.MediaColumns.OWNER_PACKAGE_NAME} = ?",
+        arrayOf("$escaped/%", packageName),
+    )
+}
+
+internal fun downloadsCollection(): Uri = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
 
 /** "Download" or "Download/<subPath>": MediaStore's RELATIVE_PATH for [copyToPublicDownloads]. */
 internal fun publicRelativePath(subPath: String?): String =

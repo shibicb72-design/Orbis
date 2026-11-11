@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="licences_title">Licencias de código abierto</string>
+    <string name="licences_back">Atrás</string>
+    <string name="licences_version">Versión %1$s</string>
+    <string name="licences_unavailable">No se pudo cargar el texto de la licencia.</string>
+    <string name="licence_bsd_3">Licencia BSD de 3 cláusulas</string>
+    <string name="licence_mit">Licencia MIT</string>
+    <string name="licence_bsl">Boost Software License 1.0</string>
+    <string name="licence_apache">Licencia Apache 2.0</string>
+    <string name="licence_mpl">Mozilla Public License 2.0</string>
+    <string name="licence_note_torrent">Descargas de torrents</string>
+    <string name="licence_note_libtorrent4j">Parte de libtorrent4j</string>
+    <string name="licence_note_browser">Motor del navegador</string>
+    <string name="licence_note_reader">Vista de lectura</string>
+    <string name="licence_note_framework">Base de la app e interfaz</string>
+    <string name="licence_note_qr">Lector de códigos QR</string>
+</resources>

@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.combine
 import com.shibi.orbis.settings.HttpsOnlyMode
 import com.shibi.orbis.settings.AppTheme
 import android.content.Context
+import androidx.core.net.toUri
 import android.os.Environment
 import android.os.SystemClock
 import android.webkit.MimeTypeMap
@@ -26,6 +27,8 @@ import com.shibi.orbis.torrent.TorrentDirs
 import com.shibi.orbis.torrent.TorrentForegroundController
 import com.shibi.orbis.torrent.TorrentLog
 import com.shibi.orbis.torrent.TorrentManager
+import com.shibi.orbis.torrent.TorrentNotifications
+import com.shibi.orbis.torrent.TorrentPublisher
 import com.shibi.orbis.torrent.TorrentSettings
 import com.shibi.orbis.torrent.TorrentStore
 import com.shibi.orbis.engine.AndroidPermissionBroker
@@ -205,8 +208,9 @@ class OrbisApp : Application() {
                     // The private entries leave the list; their result notifications must not stay in the shade.
                     downloadsRef?.let { DownloadNotifications.cancelResults(this@OrbisApp, it.forgetPrivate()) }
                     browserSettings.forgetPrivate()
-                    // Private torrents leave the list and their partial files are deleted.
-                    torrentsRef?.forgetPrivate()
+                    // Private torrents leave the list and their partial files are deleted; their result notifications
+                    // go too (the paused one follows the list by itself).
+                    torrentsRef?.let { TorrentNotifications.cancelResults(this@OrbisApp, it.forgetPrivate()) }
                 },
                 releaseImport = { url ->
                     appScope.launch(Dispatchers.IO) {
@@ -249,11 +253,18 @@ class OrbisApp : Application() {
                 settings = MutableStateFlow(TorrentSettings()),
                 network = AndroidTorrentNetwork(this),
                 now = System::currentTimeMillis,
-                publisher = { file, dir, name ->
-                    val ext = name.substringAfterLast('.', "").lowercase()
-                    val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
-                    com.shibi.orbis.downloads.copyToPublicDownloads(this, file, name, mime, dir)
-                },
+                publisher =
+                    object : TorrentPublisher {
+                        override fun publish(file: File, relativeDir: String, displayName: String): String? {
+                            val ext = displayName.substringAfterLast('.', "").lowercase()
+                            val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
+                            return com.shibi.orbis.downloads.publishTorrentFile(this@OrbisApp, file, displayName, mime, relativeDir)?.toString()
+                        }
+
+                        override fun unpublish(handle: String) {
+                            if (!com.shibi.orbis.downloads.deletePublished(this@OrbisApp, handle.toUri())) torrentLog("unpublish failed")
+                        }
+                    },
             )
         torrentsRef = torrents
         // Finished downloads also go to the phone's Download folder (setting; never a private tab's). Only downloads
@@ -272,7 +283,7 @@ class OrbisApp : Application() {
                 if (fresh.isEmpty() || !browserSettings.copyToDownloadFolder.value) return@collect
                 launch(Dispatchers.IO) {
                     for (e in fresh) {
-                        val ok = com.shibi.orbis.downloads.copyToPublicDownloads(this@OrbisApp, File(e.filePath!!), e.fileName, e.mimeType)
+                        val ok = com.shibi.orbis.downloads.copyToPublicDownloads(this@OrbisApp, File(e.filePath!!), e.fileName, e.mimeType) != null
                         debugLog.log("Downloads", if (ok) "copied to Download folder" else "copy to Download folder failed")
                     }
                 }

@@ -18,7 +18,8 @@ import com.shibi.orbis.OrbisApp
  *
  * - ACTION_START (and the debug add) call startForeground first, always, then may stop again.
  * - Only this service stops itself (stopSelfResult with the newest start id). Nobody calls stopService.
- * - PAUSE / RESUME / CANCEL come from the notification (startService), so they owe no startForeground.
+ * - PAUSE / RESUME / CANCEL come from the notifications (startService), so they owe no startForeground. RESUME
+ *   without an id resumes every torrent paused by the user or the timeout.
  * - Android 15+ calls onTimeout for dataSync: resume data is saved, everything pauses, the service stops at once.
  */
 class TorrentService : Service() {
@@ -42,7 +43,7 @@ class TorrentService : Service() {
             ACTION_DEBUG_ADD -> {
                 // Came through startForegroundService (adb), so it owes startForeground like ACTION_START.
                 if (handleStart(startId) && BuildConfig.DEBUG) {
-                    intent.getStringExtra(EXTRA_MAGNET)?.let { controller()?.debugAdd(it) }
+                    intent.getStringExtra(EXTRA_MAGNET)?.let { controller()?.debugAdd(it, intent.getBooleanExtra(EXTRA_PRIVATE, false)) }
                 }
             }
             else -> handleStart(startId)
@@ -91,7 +92,7 @@ class TorrentService : Service() {
         if (controller != null) {
             when (intent.action) {
                 ACTION_PAUSE -> controller.pause(id)
-                ACTION_RESUME -> if (id != null) controller.resume(id)
+                ACTION_RESUME -> controller.resume(id)
                 ACTION_CANCEL -> if (id != null) controller.cancel(id)
             }
         }
@@ -168,13 +169,16 @@ class TorrentService : Service() {
         const val ACTION_CANCEL = "com.shibi.orbis.torrent.CANCEL"
 
         /**
-         * Debug builds only (BuildConfig.DEBUG): adds [EXTRA_MAGNET] as a normal torrent, for emulator checks. The
-         * service is not exported, so the shell needs root (`adb root`, then
-         * `adb shell am start-foreground-service -n com.shibi.orbis/.torrent.TorrentService -a <this> --es magnet '<uri>'`).
+         * Debug builds only (BuildConfig.DEBUG): adds [EXTRA_MAGNET] as a normal torrent (a private one with
+         * `--ez private true`), for emulator checks. The service is not exported, so the shell needs root (`adb root`,
+         * then `adb shell am start-foreground-service -n com.shibi.orbis/.torrent.TorrentService -a <this> --es magnet '<uri>'`).
          */
         const val ACTION_DEBUG_ADD = "com.shibi.orbis.torrent.DEBUG_ADD"
         const val EXTRA_ID = "id"
         const val EXTRA_MAGNET = "magnet"
+
+        /** Debug add only: the torrent is added as if from a private tab. */
+        const val EXTRA_PRIVATE = "private"
         private const val WAKE_LOCK_TAG = "orbis:torrent"
         private const val WAKE_LOCK_TIMEOUT_MS = 10 * 60 * 1000L
         private const val WAKE_LOCK_RENEW_MS = 60 * 1000L

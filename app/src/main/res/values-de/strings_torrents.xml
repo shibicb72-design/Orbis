@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Torrent notification (the torrent screens come in a later change). -->
+    <!-- Torrent notifications. -->
     <string name="torrents_notif_channel_name">Torrents</string>
     <string name="torrents_notif_channel_description">Fortschritt von Torrent-Downloads</string>
     <string name="torrents_notif_starting">Torrent wird gestartet</string>
@@ -8,7 +8,7 @@
     <string name="torrents_notif_private">Privater Download</string>
     <string name="torrents_notif_private_many">Private Downloads (%d)</string>
     <string name="torrents_notif_fetching">Torrent-Infos werden abgerufen</string>
-    <string name="torrents_notif_progress">%1$d %% · %2$s/s</string>
+    <string name="torrents_notif_progress">%1$d %% · %2$s/s</string>
     <string name="torrents_notif_public_text">Torrents werden heruntergeladen</string>
     <plurals name="torrents_notif_many_title">
         <item quantity="one">%d Torrent</item>
@@ -17,4 +17,44 @@
     <string name="torrents_pause">Pausieren</string>
     <string name="torrents_pause_all">Alle pausieren</string>
     <string name="torrents_cancel">Abbrechen</string>
+    <string name="torrents_resume">Fortsetzen</string>
+    <string name="torrents_notif_paused">Torrent pausiert</string>
+    <string name="torrents_notif_paused_many">Torrents pausiert (%d)</string>
+    <string name="torrents_notif_private_paused">Privater Download pausiert</string>
+    <string name="torrents_notif_paused_timeout">Von Android pausiert. Tippe auf Fortsetzen, um weiterzumachen.</string>
+    <string name="torrents_notif_public_paused">Downloads pausiert</string>
+
+    <!-- Torrent rows in the Downloads list. -->
+    <string name="torrents_private_title">Privater Download</string>
+    <string name="torrents_state_fetching">Torrent-Infos werden abgerufen</string>
+    <string name="torrents_state_downloading">Wird heruntergeladen</string>
+    <string name="torrents_state_checking">Dateien werden geprüft</string>
+    <string name="torrents_state_seeding">Wird geteilt</string>
+    <string name="torrents_state_paused">Pausiert</string>
+    <string name="torrents_state_queued">Wartet auf einen freien Platz</string>
+    <string name="torrents_state_paused_timeout">Von Android pausiert, tippe auf Fortsetzen</string>
+    <string name="torrents_state_waiting_wifi">Wartet auf WLAN</string>
+    <string name="torrents_state_publishing">Wird in Downloads gespeichert</string>
+    <string name="torrents_state_saved">Gespeichert in Download/Orbis/%1$s</string>
+    <string name="torrents_state_saved_private">In deinen Downloads gespeichert</string>
+    <string name="torrents_failed_no_space">Nicht genug Speicherplatz</string>
+    <string name="torrents_failed_file">Die Dateien konnten nicht geschrieben werden</string>
+    <string name="torrents_failed_load">Der Torrent konnte nicht geladen werden</string>
+    <string name="torrents_failed_unsafe">Dieser Torrent wurde aus Sicherheitsgründen abgelehnt</string>
+    <string name="torrents_failed_missing">Der Torrent konnte nicht wiederhergestellt werden</string>
+    <string name="torrents_failed_publish">Speichern in Downloads fehlgeschlagen</string>
+    <string name="torrents_stats_speed">%1$s/s</string>
+    <plurals name="torrents_stats_peers">
+        <item quantity="one">%d Peer</item>
+        <item quantity="other">%d Peers</item>
+    </plurals>
+    <string name="torrents_stats_eta">noch %1$s</string>
+    <string name="torrents_retry">Wiederholen</string>
+    <string name="torrents_remove">Entfernen</string>
+    <string name="torrents_remove_title">Diesen Torrent entfernen?</string>
+    <string name="torrents_remove_body">Die bisher heruntergeladenen %1$s werden gelöscht.</string>
+    <string name="torrents_remove_body_nothing">Es wurde noch nichts heruntergeladen.</string>
+    <string name="torrents_remove_done_title">Aus der Liste entfernen?</string>
+    <string name="torrents_remove_done_body">Die Dateien bleiben in Download/Orbis/%1$s.</string>
+    <string name="torrents_remove_done_body_private">Die gespeicherten Dateien bleiben in deinen Downloads.</string>
 </resources>

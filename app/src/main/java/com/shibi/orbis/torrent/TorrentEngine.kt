@@ -40,6 +40,12 @@ interface TorrentEngine {
     /** Flushes what was written and returns the resume data; null when the torrent is unknown or the save failed. */
     suspend fun saveResumeData(id: EngineId): ByteArray?
 
+    /**
+     * The file list of a stored .torrent (as [TorrentEvent.MetadataReceived.torrentFile] gave it), without adding it.
+     * Null when it does not parse. Works with the session stopped.
+     */
+    suspend fun readFiles(torrentFile: ByteArray): TorrentFiles?
+
     /** Bytes per second; 0 is unlimited. */
     fun setLimits(downBps: Int, upBps: Int)
 

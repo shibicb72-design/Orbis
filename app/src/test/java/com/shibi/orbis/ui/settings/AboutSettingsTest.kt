@@ -30,6 +30,7 @@ class AboutSettingsTest {
     @Test
     fun aboutShowsOnlyTheVersionAndOpensTheListing() {
         var opened = 0
+        var licences = 0
         rule.setContent {
             MaterialTheme {
                 SettingsScreen(
@@ -51,6 +52,7 @@ class AboutSettingsTest {
                     onOpenClearData = {},
                     versionName = "0.5.0",
                     onOpenPlayListing = { opened++ },
+                    onOpenLicences = { licences++ },
                 )
             }
         }
@@ -59,6 +61,10 @@ class AboutSettingsTest {
         rule.onAllNodesWithText("Could not check for updates. Try again later.").assertCountEquals(0)
         rule.onAllNodesWithText("Tap to check for updates").assertCountEquals(0)
         rule.onNodeWithText("Orbis 0.5.0").performScrollTo().performClick()
+        assertEquals(1, opened)
+        assertEquals(0, licences)
+        rule.onNodeWithText("Open-source licences").performScrollTo().performClick()
+        assertEquals(1, licences)
         assertEquals(1, opened)
     }
 }

@@ -146,6 +146,8 @@ fun SettingsScreen(
     versionName: String? = null,
     /** About row tap. Null opens the Play listing (market://, then https). */
     onOpenPlayListing: (() -> Unit)? = null,
+    /** About > Open-source licences. */
+    onOpenLicences: () -> Unit = {},
 ) {
     var themeDialogOpen by remember { mutableStateOf(false) }
     var httpsDialogOpen by remember { mutableStateOf(false) }
@@ -449,6 +451,11 @@ fun SettingsScreen(
                         val open = onOpenPlayListing
                         if (open != null) open() else openPlayListing(context)
                     },
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsItem(
+                    headlineContent = { Text(stringResource(R.string.licences_title)) },
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenLicences),
                 )
             }
         }

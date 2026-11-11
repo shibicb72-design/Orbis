@@ -26,6 +26,12 @@ class TorrentForegroundController(
     private var latestEntries: List<TorrentEntry> = emptyList()
     private var doneSum = 0L
     private var trailing: Job? = null
+    private val settled = TorrentSettledTracker()
+
+    /** Paused from the notification or by Android's timeout: they get the "paused" notification with Resume. */
+    private var pausedIds: Set<String> = emptySet()
+    private var pausedByTimeout = false
+    private var pausedModel: TorrentPausedModel? = null
 
     fun start() {
         scope.launch { torrents.entries.collect { onEntries(it) } }
@@ -42,14 +48,27 @@ class TorrentForegroundController(
 
     private fun onEntries(entries: List<TorrentEntry>) {
         latestEntries = entries
+        settled.update(entries).forEach { TorrentNotifications.postResult(context, it) }
         val active = entries.filter { it.status.isActive }
         val m = TorrentNotificationModel.from(entries)
+        // The ongoing notification comes back: the paused one has done its job.
+        if (m != null && model == null && pausedIds.isNotEmpty()) pausedIds = emptySet()
         model = m
+        updatePaused(entries)
         val sum = active.sumOf { it.doneBytes.coerceAtLeast(0L) }
         if (sum > doneSum) service?.renewWakeLock()
         doneSum = sum
         execute(policy.onActive(active.map { it.id }.toSet(), m))
         scheduleTrailing()
+    }
+
+    /** Posts, replaces or cancels the paused notification; it follows the list (resume, remove, private browsing end). */
+    private fun updatePaused(entries: List<TorrentEntry>) {
+        val p = if (pausedIds.isEmpty()) null else TorrentPausedModel.from(entries, pausedIds, pausedByTimeout)
+        if (p == null) pausedIds = emptySet()
+        if (p == pausedModel) return
+        pausedModel = p
+        if (p != null) TorrentNotifications.postPaused(context, p) else TorrentNotifications.cancelPaused(context)
     }
 
     private fun scheduleTrailing() {
@@ -98,22 +117,38 @@ class TorrentForegroundController(
 
     internal fun isRunning(): Boolean = policy.state == TorrentFgState.RUNNING
 
-    /** No id: every active torrent. */
+    /** From the notification. No id: every active torrent. The paused notification then carries Resume. */
     internal fun pause(id: String?) {
-        if (id != null) {
-            torrents.pause(id)
-        } else {
-            latestEntries.filter { it.status.isActive }.forEach { torrents.pause(it.id) }
-        }
+        val ids = if (id != null) listOf(id) else latestEntries.filter { it.status.isActive || it.status == TorrentStatus.WAITING_FOR_WIFI }.map { it.id }
+        ids.forEach { torrents.pause(it) }
+        notePaused(ids, byTimeout = false)
     }
 
-    internal fun resume(id: String) = torrents.resume(id)
+    /** From the paused notification. No id: every torrent paused by the user or the timeout (never a queued one). */
+    internal fun resume(id: String?) {
+        val ids =
+            if (id != null) {
+                listOf(id)
+            } else {
+                latestEntries.filter { it.status == TorrentStatus.PAUSED && (it.pauseReason == PauseReason.USER || it.pauseReason == PauseReason.TIMEOUT) }.map { it.id }
+            }
+        ids.forEach { torrents.resume(it) }
+        pausedIds = emptySet()
+        updatePaused(latestEntries)
+    }
 
     internal fun cancel(id: String) = torrents.remove(id, deleteFiles = true)
 
+    private fun notePaused(ids: List<String>, byTimeout: Boolean) {
+        if (ids.isEmpty()) return
+        pausedIds = pausedIds + ids
+        pausedByTimeout = byTimeout || (pausedByTimeout && pausedModel != null)
+        // Posted once the list shows them paused (the pause runs on the manager's lock).
+    }
+
     /** Debug builds only (the service checks BuildConfig.DEBUG). */
-    internal fun debugAdd(magnet: String) {
-        torrents.add(TorrentSource.Magnet(magnet), isPrivate = false)
+    internal fun debugAdd(magnet: String, isPrivate: Boolean) {
+        torrents.add(TorrentSource.Magnet(magnet), isPrivate = isPrivate)
         log("debug add")
     }
 
@@ -131,6 +166,7 @@ class TorrentForegroundController(
     internal fun onTimeout(s: TorrentService) {
         log("service timed out")
         if (service === s) service = null
+        notePaused(latestEntries.filter { it.status.wantsToRun || it.status == TorrentStatus.WAITING_FOR_WIFI }.map { it.id }, byTimeout = true)
         torrents.onTimeout()
         policy.onTimeout()
     }
