@@ -132,7 +132,7 @@ class FakeTorrentEngine : TorrentEngine {
 
     private fun applyDiscovery(id: EngineId) {
         val s = sessionDiscovery
-        val d = TorrentDiscovery.of(s.dht, s.pex, s.lsd, isPrivate = id in privateIds)
+        val d = TorrentDiscovery.of(s.dht, s.pex, s.lsd, trackersOnly = id in privateIds)
         discovery[id] = d
         discoveryLog += id to d
     }

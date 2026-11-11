@@ -86,7 +86,7 @@ fun DownloadConfirmDialog(pending: PendingDownload, onConfirm: () -> Unit, onCan
                 }
                 if (pending.isPrivate) {
                     Text(
-                        stringResource(R.string.browser_download_private_note),
+                        stringResource(R.string.browser_download_private_note_deleted),
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 8.dp),
                     )

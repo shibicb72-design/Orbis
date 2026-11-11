@@ -70,7 +70,6 @@
         <item quantity="one">%d file</item>
         <item quantity="other">%d files</item>
     </plurals>
-    <string name="torrents_sheet_private">From a private tab: kept out of the list when private browsing ends</string>
     <string name="torrents_sheet_ip_note">Torrent downloads connect directly to other people. They, and the trackers, can see your IP address. Orbis sends nothing else.</string>
     <string name="torrents_sheet_ip_reminder">Peers can see your IP address</string>
     <string name="torrents_sheet_download">Download</string>

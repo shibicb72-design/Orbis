@@ -192,10 +192,10 @@ class TorrentSettingsStoreTest {
     }
 
     @Test
-    fun aPrivateTorrentNeverGetsLocalPeers() {
-        assertEquals(TorrentDiscovery(dht = true, pex = true, lsd = false), TorrentDiscovery.of(dht = true, pex = true, lsd = true, isPrivate = true))
-        assertEquals(TorrentDiscovery(dht = true, pex = true, lsd = true), TorrentDiscovery.of(dht = true, pex = true, lsd = true, isPrivate = false))
-        assertEquals(TorrentDiscovery(dht = false, pex = false, lsd = false), TorrentDiscovery.of(dht = false, pex = false, lsd = false, isPrivate = false))
+    fun aPrivateTorrentUsesTrackersOnly() {
+        assertEquals(TorrentDiscovery(dht = false, pex = false, lsd = false), TorrentDiscovery.of(dht = true, pex = true, lsd = true, trackersOnly = true))
+        assertEquals(TorrentDiscovery(dht = true, pex = true, lsd = true), TorrentDiscovery.of(dht = true, pex = true, lsd = true, trackersOnly = false))
+        assertEquals(TorrentDiscovery(dht = false, pex = false, lsd = false), TorrentDiscovery.of(dht = false, pex = false, lsd = false, trackersOnly = false))
     }
 
     /** nextInt(bound) always gives [value]. */
