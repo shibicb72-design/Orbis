@@ -7,7 +7,8 @@ internal const val CAST_MAX_MESSAGE_BYTES = 256 * 1024
 
 /**
  * One CASTV2 message. [protocolVersion] is the enum value from the Cast channel protobuf (0 = CASTV2_1_0).
- * Binary payloads are not used; a binary frame decodes with an empty [payloadUtf8].
+ * A string frame carries [payloadUtf8]; a binary frame (only the deviceauth namespace uses one) carries [payloadBinary]
+ * and decodes with an empty [payloadUtf8].
  */
 internal data class CastMessage(
     val sourceId: String,
@@ -16,10 +17,26 @@ internal data class CastMessage(
     val payloadUtf8: String,
     val protocolVersion: Int = 0,
     val payloadType: Int = PAYLOAD_STRING,
+    val payloadBinary: ByteArray = NO_BYTES,
 ) {
+    override fun equals(other: Any?): Boolean =
+        other is CastMessage &&
+            sourceId == other.sourceId &&
+            destinationId == other.destinationId &&
+            namespace == other.namespace &&
+            payloadUtf8 == other.payloadUtf8 &&
+            protocolVersion == other.protocolVersion &&
+            payloadType == other.payloadType &&
+            payloadBinary.contentEquals(other.payloadBinary)
+
+    override fun hashCode(): Int =
+        listOf(sourceId, destinationId, namespace, payloadUtf8, protocolVersion, payloadType).hashCode() * 31 +
+            payloadBinary.contentHashCode()
+
     companion object {
         const val PAYLOAD_STRING = 0
         const val PAYLOAD_BINARY = 1
+        val NO_BYTES = ByteArray(0)
     }
 }
 
@@ -32,6 +49,7 @@ internal fun encodeCastMessage(message: CastMessage): ByteArray {
     writeStringField(4, message.namespace, out)
     writeVarintField(5, message.payloadType, out)
     if (message.payloadType == CastMessage.PAYLOAD_STRING) writeStringField(6, message.payloadUtf8, out)
+    if (message.payloadType == CastMessage.PAYLOAD_BINARY) writeBytesField(7, message.payloadBinary, out)
     return out.toByteArray()
 }
 
@@ -57,6 +75,7 @@ internal fun decodeCastMessage(body: ByteArray): CastMessage? {
     var destination: String? = null
     var namespace: String? = null
     var payload = ""
+    var binary = CastMessage.NO_BYTES
     var protocol = -1
     var payloadType = -1
     while (index < body.size) {
@@ -87,12 +106,12 @@ internal fun decodeCastMessage(body: ByteArray): CastMessage? {
                 if (length.value < 0 || index + length.value > body.size) return null
                 val slice = body.copyOfRange(index, index + length.value)
                 index += length.value
-                val text = String(slice, Charsets.UTF_8)
                 when (field) {
-                    2 -> source = text
-                    3 -> destination = text
-                    4 -> namespace = text
-                    6 -> payload = text
+                    2 -> source = String(slice, Charsets.UTF_8)
+                    3 -> destination = String(slice, Charsets.UTF_8)
+                    4 -> namespace = String(slice, Charsets.UTF_8)
+                    6 -> payload = String(slice, Charsets.UTF_8)
+                    7 -> binary = slice
                 }
             }
             else -> return null
@@ -107,6 +126,7 @@ internal fun decodeCastMessage(body: ByteArray): CastMessage? {
         payloadUtf8 = if (payloadType == CastMessage.PAYLOAD_STRING) payload else "",
         protocolVersion = protocol,
         payloadType = payloadType,
+        payloadBinary = if (payloadType == CastMessage.PAYLOAD_BINARY) binary else CastMessage.NO_BYTES,
     )
 }
 
@@ -133,15 +153,18 @@ internal fun castFrameLength(framed: ByteArray, offset: Int = 0): Int? {
     return length
 }
 
-private class Varint(val value: Int, val next: Int)
+internal class Varint(val value: Int, val next: Int)
 
-private fun writeVarintField(field: Int, value: Int, out: ByteArrayOutputStream) {
+internal fun writeVarintField(field: Int, value: Int, out: ByteArrayOutputStream) {
     writeVarint((field shl 3) or 0, out)
     writeVarint(value, out)
 }
 
 private fun writeStringField(field: Int, value: String, out: ByteArrayOutputStream) {
-    val bytes = value.toByteArray(Charsets.UTF_8)
+    writeBytesField(field, value.toByteArray(Charsets.UTF_8), out)
+}
+
+internal fun writeBytesField(field: Int, bytes: ByteArray, out: ByteArrayOutputStream) {
     writeVarint((field shl 3) or 2, out)
     writeVarint(bytes.size, out)
     out.write(bytes)
@@ -156,7 +179,7 @@ private fun writeVarint(value: Int, out: ByteArrayOutputStream) {
     out.write(rest and 0x7F)
 }
 
-private fun readVarint(bytes: ByteArray, start: Int): Varint? {
+internal fun readVarint(bytes: ByteArray, start: Int): Varint? {
     var result = 0
     var shift = 0
     var index = start

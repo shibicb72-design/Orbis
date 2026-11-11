@@ -29,7 +29,8 @@ internal data class CastLinkStatus(
 /**
  * One Chromecast session over CASTV2, plus the mDNS list that feeds the sheet.
  * The TLS trust decision exists only for this socket and only after the address has been checked to be a private LAN
- * host. It is not installed as the process trust manager.
+ * host. It is not installed as the process trust manager. The TV is identified by its deviceauth key, pinned per device
+ * (see [openCastSocket]).
  * [log] receives secret-free "Cast" lines (see CastLogging.kt).
  */
 internal class ChromecastHub(context: Context, private val log: (String) -> Unit = {}) {
@@ -49,6 +50,7 @@ internal class ChromecastHub(context: Context, private val log: (String) -> Unit
             Thread(runnable, "orbis-cast-lounge").apply { isDaemon = true }
         }
     private val loungeClient = LoungeClient(HttpsLoungeTransport(), log)
+    private val pins = CastPins(PrefsCastPinStore(appContext))
     private var live: Live? = null
     private var generation = 0
 
@@ -85,16 +87,24 @@ internal class ChromecastHub(context: Context, private val log: (String) -> Unit
         Thread({
             if (!isCurrent(epoch)) return@Thread
             val connectStart = System.currentTimeMillis()
-            val socket = openCastSocket(device.address) { LanBind.bind(appContext, it) }
+            val opened = openCastSocket(device.address, device.id, pins) { LanBind.bind(appContext, it) }
             val connectMs = System.currentTimeMillis() - connectStart
-            if (socket == null) {
-                log("connect dev=$dev failed lan=${isLocalLanAddress(device.address)} ms=$connectMs")
-            } else {
-                log("connect dev=$dev tls=ok ms=$connectMs")
+            when (opened) {
+                CastSocketOpen.Untrusted -> log("connect dev=$dev untrusted")
+                CastSocketOpen.AuthFailed -> log("connect dev=$dev deviceauth failed")
+                CastSocketOpen.AuthNone -> log("connect dev=$dev deviceauth none")
+                CastSocketOpen.Failed -> log("connect dev=$dev failed lan=${isLocalLanAddress(device.address)} ms=$connectMs")
+                is CastSocketOpen.Opened ->
+                    log(
+                        "connect dev=$dev tls=ok deviceauth=ok${if (opened.legacy) " legacy" else ""} " +
+                            "pin=${opened.pin.name.lowercase()} ms=$connectMs",
+                    )
             }
+            val socket = (opened as? CastSocketOpen.Opened)?.socket
             if (socket == null || !isCurrent(epoch)) {
                 runCatching { socket?.close() }
-                if (isCurrent(epoch)) main.post { onFailed(CastFailure.GENERIC) }
+                val reason = if (opened == CastSocketOpen.Untrusted) CastFailure.UNTRUSTED else CastFailure.GENERIC
+                if (isCurrent(epoch)) main.post { onFailed(reason) }
                 return@Thread
             }
             val session = Live(epoch, device, goal, machine, socket, inbox)
@@ -179,6 +189,12 @@ internal class ChromecastHub(context: Context, private val log: (String) -> Unit
     }
 
     fun hasSession(): Boolean = synchronized(this) { live != null }
+
+    /** Drops the identity-key pin for [deviceId]. The next cast to it pins the key it proves then. */
+    fun forgetPin(deviceId: String) {
+        pins.forget(deviceId)
+        log("pin forgotten dev=${deviceTag(deviceId)}")
+    }
 
     private fun command(block: (CastSession) -> List<CastEffect>) {
         val session = synchronized(this) { live } ?: return
@@ -345,30 +361,64 @@ internal sealed interface Read {
 /** Once any byte of a frame has arrived, the rest must finish within this long or the session closes. */
 internal const val CAST_FRAME_DEADLINE_MS = 5_000L
 
+internal sealed interface CastSocketOpen {
+    /** [pin] is [CastPins.Verdict.PINNED] or [CastPins.Verdict.MATCHED]. [legacy]: see [DeviceIdentity.legacy]. */
+    data class Opened(val socket: SSLSocket, val pin: CastPins.Verdict, val legacy: Boolean) : CastSocketOpen
+    /** The device proved an identity key other than the one pinned for its id. */
+    data object Untrusted : CastSocketOpen
+    /** The deviceauth reply was an AuthError, malformed, or its signature or nonce did not check out. */
+    data object AuthFailed : CastSocketOpen
+    /** No deviceauth reply within [DEVICE_AUTH_TIMEOUT_MS], or the TV closed the socket first. */
+    data object AuthNone : CastSocketOpen
+    data object Failed : CastSocketOpen
+}
+
 /**
- * TLS to a discovered LAN host on the Cast port. The trust manager accepts the device certificate for this socket
- * only. [bind] attaches the socket to Wi-Fi before connect. Returns null for any address that is not a private LAN host.
+ * TLS to a discovered LAN host on the Cast port, then device authentication before anything else is sent. TLS accepts
+ * any non-empty chain for this socket only: the receiver's TLS leaf is self-signed and regenerated every day or two. The
+ * receiver then signs a fresh nonce || that leaf's DER with its device key; the device certificate's public key is
+ * pinned for [deviceId] on first use and must match on later connections (see [CastPins]). [bind] attaches the socket
+ * to Wi-Fi before connect. Fails for any address that is not a private LAN host.
  */
-internal fun openCastSocket(address: InetAddress, bind: (Socket) -> Unit): SSLSocket? {
-    if (!isLocalLanAddress(address)) return null
+internal fun openCastSocket(address: InetAddress, deviceId: String, pins: CastPins, bind: (Socket) -> Unit): CastSocketOpen {
+    if (!isLocalLanAddress(address)) return CastSocketOpen.Failed
     var socket: SSLSocket? = null
-    return try {
+    var outcome: CastSocketOpen = CastSocketOpen.Failed
+    try {
+        val random = SecureRandom()
         val context = SSLContext.getInstance("TLS")
-        context.init(null, arrayOf(LanCastTrust()), SecureRandom())
-        socket = context.socketFactory.createSocket() as SSLSocket
-        bind(socket)
-        socket.connect(InetSocketAddress(address, CAST_PORT), 4_000)
-        val protocols = socket.supportedProtocols.filter { it == "TLSv1.2" || it == "TLSv1.3" }
-        if (protocols.isNotEmpty()) socket.enabledProtocols = protocols.toTypedArray()
-        socket.soTimeout = 4_000
-        socket.keepAlive = true
-        socket.startHandshake()
-        socket.soTimeout = 400
-        socket
+        context.init(null, arrayOf(LanCastTrust()), random)
+        val opening = context.socketFactory.createSocket() as SSLSocket
+        socket = opening
+        bind(opening)
+        opening.connect(InetSocketAddress(address, CAST_PORT), 4_000)
+        val protocols = opening.supportedProtocols.filter { it == "TLSv1.2" || it == "TLSv1.3" }
+        if (protocols.isNotEmpty()) opening.enabledProtocols = protocols.toTypedArray()
+        opening.soTimeout = 4_000
+        opening.keepAlive = true
+        opening.startHandshake()
+        val tlsLeafDer = opening.session.peerCertificates.first().encoded
+        opening.soTimeout = 400
+        val nonce = ByteArray(DEVICE_AUTH_NONCE_BYTES).also(random::nextBytes)
+        opening.outputStream.write(frameCastMessage(deviceAuthChallengeMessage(nonce)))
+        opening.outputStream.flush()
+        val reply = awaitDeviceAuthReply(opening.inputStream)
+        val identity = reply?.let { verifyDeviceAuth(it, nonce, tlsLeafDer) }
+        outcome =
+            when {
+                reply == null -> CastSocketOpen.AuthNone
+                identity == null -> CastSocketOpen.AuthFailed
+                else ->
+                    when (val verdict = pins.check(deviceId, identity.spki)) {
+                        CastPins.Verdict.CHANGED -> CastSocketOpen.Untrusted
+                        else -> CastSocketOpen.Opened(opening, verdict, identity.legacy)
+                    }
+            }
     } catch (_: Exception) {
-        runCatching { socket?.close() }
-        null
+        outcome = CastSocketOpen.Failed
     }
+    if (outcome !is CastSocketOpen.Opened) runCatching { socket?.close() }
+    return outcome
 }
 
 /**
@@ -444,7 +494,10 @@ private fun dialHost(address: InetAddress): String? {
     return if (raw.contains(':')) "[${raw.substringBefore('%')}]" else raw
 }
 
-/** Trusts the peer certificate of one Cast socket. Not installed on the default SSL context. */
+/**
+ * Accepts any non-empty chain for one Cast socket; the TV is authenticated afterwards by deviceauth. Not installed on
+ * the default SSL context.
+ */
 private class LanCastTrust : X509TrustManager {
     override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {
         throw CertificateException("Cast does not authenticate this phone to the TV")

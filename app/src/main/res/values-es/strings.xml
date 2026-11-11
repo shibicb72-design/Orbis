@@ -381,6 +381,8 @@
     <string name="cast_failed">No se ha podido enviar a este dispositivo.</string>
     <string name="cast_youtube_unconfirmed">El televisor no inició este vídeo de YouTube.</string>
     <string name="cast_rejected">El televisor ha rechazado este envío.</string>
+    <string name="cast_untrusted">La clave de identidad de este televisor ha cambiado desde la última vez que enviaste contenido a él. Puede que sea otro dispositivo.</string>
+    <string name="cast_forget_tv">Olvidar este televisor</string>
     <string name="cast_play">Reproducir</string>
     <string name="cast_pause">Pausa</string>
     <string name="cast_disconnect">Desconectar</string>

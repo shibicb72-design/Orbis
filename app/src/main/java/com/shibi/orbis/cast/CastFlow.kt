@@ -10,7 +10,8 @@ private fun sticky(notice: CastNotice?): Boolean =
     notice == CastNotice.FAILED ||
         notice == CastNotice.YOUTUBE_NEEDS_GOOGLE ||
         notice == CastNotice.YOUTUBE_UNCONFIRMED ||
-        notice == CastNotice.REJECTED
+        notice == CastNotice.REJECTED ||
+        notice == CastNotice.UNTRUSTED
 
 /**
  * Cast sheet transitions that do not touch the network. [CastCoordinator] performs the device work these decisions
