@@ -74,7 +74,8 @@ internal class ChromecastHub(context: Context, private val log: (String) -> Unit
         goal: CastGoal,
         onReady: () -> Unit,
         onFailed: (CastFailure) -> Unit,
-        onNeedsTrust: (CastPins.Reason, CastPins.Ticket) -> Unit,
+        /** Gets the reason, the ticket, and the friendly name that was checked (as read when connecting). */
+        onNeedsTrust: (CastPins.Reason, CastPins.Ticket, String) -> Unit,
     ) {
         val device = devices().firstOrNull { it.id == deviceId }
         if (device == null) {
@@ -107,7 +108,7 @@ internal class ChromecastHub(context: Context, private val log: (String) -> Unit
                 runCatching { socket?.close() }
                 if (isCurrent(epoch)) {
                     if (opened is CastSocketOpen.NeedsTrust) {
-                        main.post { onNeedsTrust(opened.reason, opened.ticket) }
+                        main.post { onNeedsTrust(opened.reason, opened.ticket, device.name) }
                     } else {
                         main.post { onFailed(CastFailure.GENERIC) }
                     }

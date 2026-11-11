@@ -83,6 +83,11 @@ internal fun jsonDepthWithin(text: String, max: Int = CAST_JSON_MAX_DEPTH): Bool
                 if (depth > max) return false
             }
             c == ']' || c == '}' -> if (depth > 0) depth -= 1
+            // `JSONTokener.readObject` accepts `=>` and `:>` as the key separator: the '>' is not a literal.
+            (c == ':' || c == '=') && i + 1 < n && text[i + 1] == '>' -> {
+                i += 2
+                continue
+            }
             c in LITERAL_END -> Unit
             else -> {
                 // An unquoted literal runs to the next delimiter; a quote inside it does not open a string.

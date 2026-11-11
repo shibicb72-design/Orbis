@@ -207,7 +207,7 @@ class CastCoordinator(
                             goal = CastGoal.Media(chosen.media, shownTitle, if (privateTab) null else chosen.media.poster),
                             onReady = { main.post { started(CastDeviceKind.GOOGLE_CAST, generation, onLocalPause) } },
                             onFailed = { reason -> main.post { failAttempt(generation, reason) } },
-                            onNeedsTrust = { reason, ticket -> main.post { needsTrust(generation, item, reason, ticket, onLocalPause) } },
+                            onNeedsTrust = { reason, ticket, name -> main.post { needsTrust(generation, item.id, name, reason, ticket, onLocalPause) } },
                         )
                     CastDeviceKind.DLNA -> {
                         val renderer = dlnaById[item.id]
@@ -239,7 +239,7 @@ class CastCoordinator(
                     goal = CastGoal.YouTube(chosen.video),
                     onReady = { main.post { started(CastDeviceKind.GOOGLE_CAST, generation, onLocalPause) } },
                     onFailed = { reason -> main.post { failAttempt(generation, reason) } },
-                    onNeedsTrust = { reason, ticket -> main.post { needsTrust(generation, item, reason, ticket, onLocalPause) } },
+                    onNeedsTrust = { reason, ticket, name -> main.post { needsTrust(generation, item.id, name, reason, ticket, onLocalPause) } },
                 )
             CastTarget.None -> failAttempt(generation)
         }
@@ -293,6 +293,7 @@ class CastCoordinator(
 
     fun disconnect() {
         connectWatch?.cancel()
+        chromecast.cancelTrust()
         poll?.cancel()
         poll = null
         val kind = activeKind
@@ -479,13 +480,14 @@ class CastCoordinator(
      */
     private fun needsTrust(
         generation: Int,
-        item: CastDeviceItem,
+        deviceId: String,
+        checkedName: String,
         reason: CastPins.Reason,
         ticket: CastPins.Ticket,
         onLocalPause: () -> Unit,
     ) {
         connectWatch?.cancel()
-        if (!flow.needsTrust(generation, youtube, PendingTrust(item.id, item.name, reason, ticket))) return
+        if (!flow.needsTrust(generation, youtube, PendingTrust(deviceId, checkedName, reason, ticket))) return
         chromecast.cancelTrust()
         trustLocalPause = onLocalPause
         connectingKind = null
@@ -509,6 +511,8 @@ class CastCoordinator(
                 else -> CastNotice.FAILED
             }
         if (!flow.failConnect(generation, youtube, notice)) return
+        // An approval belongs to the reconnect that just failed; it must not stay live for its full two minutes.
+        chromecast.cancelTrust()
         log("session failed reason=$reason gen=$generation ms=${System.currentTimeMillis() - connectStartedAt}")
         connectingKind = null
         _dlnaFormatNote.value = false

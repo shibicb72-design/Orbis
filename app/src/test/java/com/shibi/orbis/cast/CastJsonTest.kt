@@ -44,6 +44,18 @@ class CastJsonTest {
     }
 
     @Test
+    fun theArrowKeySeparatorsDoNotHideTheNesting() {
+        // The tokener skips a '>' after ':' or '=', so the quote after it opens a real string.
+        val arrow = "{a=>\"[\",b:" + "[".repeat(100_000) + "\""
+        assertFalse(jsonDepthWithin(arrow))
+        assertNull(parseJsonObject(arrow))
+        val colonArrow = "{a:>\"[\",b:" + "[".repeat(100_000) + "\""
+        assertFalse(jsonDepthWithin(colonArrow))
+        assertNull(parseJsonObject(colonArrow))
+        assertTrue(jsonDepthWithin("{a=>\"[\",b:>[1,2]}"))
+    }
+
+    @Test
     fun bracketsInsideStringsAreNotCountedButRealOnesAre() {
         val nested = "[ \"]\" ".repeat(100) + "]".repeat(100)
         assertNull(parseJsonArray(nested))

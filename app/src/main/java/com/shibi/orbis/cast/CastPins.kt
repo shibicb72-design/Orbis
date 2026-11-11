@@ -83,7 +83,8 @@ internal fun castNameKey(name: String): String {
  * pinned: receivers regenerate it every day or two. The store holds hashes only, never a name or id. Clear browsing
  * data does not touch it.
  *
- * Records: `p2:<keyFp>:<nameHash>` -> `<idHash>:<lastUsedMs>`. Older releases stored `sha256(id)` -> `keyFp` (a key
+ * Records: `p2:<keyFp>:<nameHash>` -> `<idHash>:<use>`, where `use` is a counter that grows with each use (not a
+ * time: the file survives Clear browsing data and private-tab casts touch it too). Older releases stored `sha256(id)` -> `keyFp` (a key
  * of exactly 64 hex characters); such an entry is migrated the first time its device proves the same key.
  */
 internal class CastPins(private val store: CastPinStore) {
@@ -122,7 +123,7 @@ internal class CastPins(private val store: CastPinStore) {
 
     private class Approval(val ticket: Ticket, val approvedMs: Long)
 
-    private class Record(val key: String, val keyFp: String, val nameHash: String, val idHash: String, val lastUsedMs: Long)
+    private class Record(val key: String, val keyFp: String, val nameHash: String, val idHash: String, val use: Long)
 
     private var approval: Approval? = null
 
@@ -135,7 +136,7 @@ internal class CastPins(private val store: CastPinStore) {
 
         // 1. This key is trusted under this name.
         if (records.any { same(it.keyFp, keyFp) && same(it.nameHash, nameHash) }) {
-            store.put(recordKey(keyFp, nameHash), "$idHash:$nowMs")
+            store.put(recordKey(keyFp, nameHash), "$idHash:${nextUse(records)}")
             return Verdict.MATCHED
         }
 
@@ -149,7 +150,7 @@ internal class CastPins(private val store: CastPinStore) {
             if (pending.ticket.reason == Reason.RENAMED) {
                 records.filter { same(it.keyFp, keyFp) }.forEach { store.remove(it.key) }
             }
-            store.put(recordKey(keyFp, nameHash), "$idHash:$nowMs")
+            store.put(recordKey(keyFp, nameHash), "$idHash:${nextUse(records)}")
             approval = null
             evict()
             return Verdict.PINNED
@@ -158,7 +159,7 @@ internal class CastPins(private val store: CastPinStore) {
         // 3. An entry from before names were pinned, for this id, holding this key: the device just proved it.
         val legacy = store.get(idHash)
         if (legacy != null && same(legacy, keyFp)) {
-            store.put(recordKey(keyFp, nameHash), "$idHash:$nowMs")
+            store.put(recordKey(keyFp, nameHash), "$idHash:${nextUse(records)}")
             store.remove(idHash)
             evict()
             return Verdict.MATCHED
@@ -196,10 +197,13 @@ internal class CastPins(private val store: CastPinStore) {
             Record(key, parts[0], parts[1], fields[0], fields[1].toLongOrNull() ?: 0L)
         }
 
+    /** One more than the highest use counter stored, so the record just used sorts last for eviction. */
+    private fun nextUse(records: List<Record>): Long = (records.maxOfOrNull { it.use } ?: 0L) + 1
+
     private fun evict() {
         val records = records()
         if (records.size <= CAST_PIN_MAX_RECORDS) return
-        records.sortedBy { it.lastUsedMs }.take(records.size - CAST_PIN_MAX_RECORDS).forEach { store.remove(it.key) }
+        records.sortedBy { it.use }.take(records.size - CAST_PIN_MAX_RECORDS).forEach { store.remove(it.key) }
     }
 
     private fun recordKey(keyFp: String, nameHash: String): String = "$RECORD_PREFIX$keyFp:$nameHash"

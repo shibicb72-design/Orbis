@@ -87,9 +87,24 @@ class CastPinsTest {
     fun theSameKeyAndNameWithANewIdMatchesAndTheIdIsUpdated() {
         trust("tv-1", "Living Room", KEY_A)
         assertEquals(CastPins.Verdict.MATCHED, pins.check("tv-1-after-reset", "Living Room", KEY_A, 7_000))
-        assertEquals(sha256Hex("tv-1-after-reset") + ":7000", store.map.values.single())
+        assertEquals(sha256Hex("tv-1-after-reset") + ":2", store.map.values.single())
         // The stored id is now the new one: the old id with another key and name is first use, not a key change.
         assertEquals(CastPins.Reason.FIRST_USE, needs(pins.check("tv-1", "Kitchen", KEY_B, 8_000)).reason)
+    }
+
+    @Test
+    fun theStoreKeepsAUseCounterNotTheTime() {
+        val now = 1_762_000_000_123L
+        val ask = needs(pins.check("tv-1", "Living Room", KEY_A, now))
+        pins.approve(ask.ticket, now)
+        assertEquals(CastPins.Verdict.PINNED, pins.check("tv-1", "Living Room", KEY_A, now + 5))
+        assertEquals(sha256Hex("tv-1") + ":1", store.map.values.single())
+        assertEquals(CastPins.Verdict.MATCHED, pins.check("tv-1", "Living Room", KEY_A, now + 60_000))
+        assertEquals(sha256Hex("tv-1") + ":2", store.map.values.single())
+        // A second TV gets the next number; nothing stored resembles a timestamp.
+        trust("tv-2", "Bedroom", KEY_B, now + 120_000)
+        assertEquals(listOf(2L, 3L), store.map.values.map { it.substringAfter(':').toLong() }.sorted())
+        store.map.values.forEach { assertFalse(it, it.contains(now.toString().take(6))) }
     }
 
     @Test

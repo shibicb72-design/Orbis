@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!--
+        Owner rule: new strings are English only; es, fr and de are not edited any more. Two keys that English no
+        longer has stay in those files untouched; only those two are excused from ExtraTranslation.
+    -->
+    <issue id="ExtraTranslation">
+        <ignore regexp="&quot;cast_(untrusted|forget_tv)&quot;" />
+    </issue>
+</lint>
