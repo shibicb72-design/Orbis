@@ -16,10 +16,12 @@ import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
 import com.shibi.orbis.downloads.DownloadNotifications
 import com.shibi.orbis.engine.ImportResult
+import com.shibi.orbis.engine.ProviderDeadline
 import com.shibi.orbis.engine.externalUrlFrom
 import com.shibi.orbis.engine.importSharedDocument
 import com.shibi.orbis.engine.importedMime
 import com.shibi.orbis.engine.mimeForSharedDocument
+import com.shibi.orbis.engine.providerCall
 import com.shibi.orbis.engine.schemeOf
 import com.shibi.orbis.engine.sharedDocumentRequest
 import com.shibi.orbis.engine.streamUriFrom
@@ -202,8 +204,10 @@ class MainActivity : ComponentActivity() {
         } ?: return
         if (schemeOf(raw) != "content") return
         val resolver = contentResolver
+        val providerLog = providerLog()
         app.appScope.launch {
-            val queried = withContext(Dispatchers.IO) { runCatching { resolver.getType(Uri.parse(raw)) }.getOrNull() }
+            // Null (timed out, failed or no type) means "type unknown": nothing opens.
+            val queried = providerCall(log = providerLog) { resolver.getType(Uri.parse(raw)) }
             val mime = mimeForSharedDocument(null, queried) ?: return@launch
             val resolved = sharedDocumentRequest(incoming.action, incoming.dataString, mime, stream) ?: return@launch
             openCopiedDocument(resolved.uri, resolved.mime)
@@ -225,12 +229,14 @@ class MainActivity : ComponentActivity() {
         val pm = packageManager
         val resolver = contentResolver
         val log = TorrentLog.sink(app.container.debugLog)
+        val providerLog = providerLog()
         app.appScope.launch {
+            // A VIEW without a type names its file only: the provider's type is the one that counts. Null (timed out,
+            // failed or no type) means "type unknown", which check() treats as not a torrent.
+            val type = explicit ?: data?.takeIf { action == Intent.ACTION_VIEW && schemeOf(it) == "content" }
+                ?.let { providerCall(log = providerLog) { resolver.getType(Uri.parse(it)) } }
             val check =
                 withContext(Dispatchers.IO) {
-                    // A VIEW without a type names its file only: the provider's type is the one that counts.
-                    val type = explicit ?: data?.takeIf { action == Intent.ACTION_VIEW && schemeOf(it) == "content" }
-                        ?.let { runCatching { resolver.getType(Uri.parse(it)) }.getOrNull() }
                     // The authority as ContentResolver will read it, for the same URI check() picks.
                     val picked = if (action == Intent.ACTION_VIEW) data else stream
                     val platformAuthority = picked?.let { runCatching { Uri.parse(it).authority }.getOrNull() }
@@ -244,6 +250,11 @@ class MainActivity : ComponentActivity() {
                 TorrentIntake.Check.NotTorrent -> Unit
             }
         }
+    }
+
+    private fun providerLog(): (String) -> Unit {
+        val debugLog = app.container.debugLog
+        return { debugLog.log(ProviderDeadline.LOG_TAG, it) }
     }
 
     private fun openCopiedDocument(uriString: String, mime: String) {

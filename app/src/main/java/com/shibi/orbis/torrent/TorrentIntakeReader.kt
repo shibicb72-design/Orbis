@@ -4,6 +4,8 @@ import android.content.ContentResolver
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.shibi.orbis.engine.IncomingDownload
+import com.shibi.orbis.engine.ProviderDeadline
+import com.shibi.orbis.engine.providerCall
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.util.concurrent.atomic.AtomicLong
@@ -30,6 +32,8 @@ class TorrentIntakeReader(
     private val io: CoroutineDispatcher = Dispatchers.IO,
     private val idleTimeoutMs: Long = IDLE_TIMEOUT_MS,
     private val overallTimeoutMs: Long = OVERALL_TIMEOUT_MS,
+    private val providerTimeoutMs: Long = ProviderDeadline.DEFAULT_TIMEOUT_MS,
+    private val log: (String) -> Unit = {},
 ) {
     sealed interface Result {
         class Ok(val bytes: ByteArray) : Result {
@@ -63,18 +67,25 @@ class TorrentIntakeReader(
         }
     }
 
-    suspend fun readUri(resolver: ContentResolver, uri: Uri): Result {
-        val declared =
-            withContext(io) {
-                runCatching {
-                    resolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
-                        val i = c.getColumnIndex(OpenableColumns.SIZE)
-                        if (i >= 0 && c.moveToFirst() && !c.isNull(i)) c.getLong(i) else -1L
-                    }
-                }.getOrNull() ?: -1L
-            }
+    suspend fun readUri(resolver: ContentResolver, uri: Uri): Result =
+        readWithDeclaredSize(
+            querySize = {
+                resolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
+                    val i = c.getColumnIndex(OpenableColumns.SIZE)
+                    if (i >= 0 && c.moveToFirst() && !c.isNull(i)) c.getLong(i) else -1L
+                }
+            },
+            open = { resolver.openInputStream(uri) },
+        )
+
+    /**
+     * The size query is a provider call with its own deadline: a hung or failed query means "size unknown" (-1), and
+     * the capped read with its watchdog still enforces the limit.
+     */
+    internal suspend fun readWithDeclaredSize(querySize: () -> Long?, open: () -> InputStream?): Result {
+        val declared = providerCall(providerTimeoutMs, log, querySize) ?: -1L
         if (declared > TorrentLimits.MAX_TORRENT_FILE_BYTES) return Result.Failed(IntakeRefusal.TOO_LARGE)
-        return read { resolver.openInputStream(uri) }
+        return read(open)
     }
 
     /**
