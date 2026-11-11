@@ -120,6 +120,8 @@ class ProviderDeadlineTest {
         assertEquals("picked", providerCall(pool = ProviderDeadline.picked) { "picked" })
         val own = ProviderPool(max = 1)
         assertEquals("own", providerCall(pool = own) { "own" })
+        // The worker counts itself out in its finally, just after handing back the value, so wait for it.
+        withTimeout(5_000) { while (own.aliveThreads() != 0) delay(5) }
         assertEquals(0, own.aliveThreads())
         stuck.countDown()
         assertTrue(calls.awaitAll().all { it == null })
