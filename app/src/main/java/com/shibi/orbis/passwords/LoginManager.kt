@@ -43,6 +43,14 @@ class LoginManager(
 
     var loaded = false
         private set
+
+    private val _loadFailed = MutableStateFlow(false)
+
+    /**
+     * True after a [load] failed, false after one succeeded. While true the user may give up on the store with
+     * [resetUnreadableStore]; nothing does that on its own, since a Keystore error can pass.
+     */
+    val loadFailed: StateFlow<Boolean> = _loadFailed.asStateFlow()
     private var loading = false
     private val writes = Channel<List<SavedLogin>>(Channel.CONFLATED)
     private var writerStarted = false
@@ -54,20 +62,47 @@ class LoginManager(
     fun load() {
         if (loaded || loading) return
         loading = true
+        scope.launch { read() }
+    }
+
+    private suspend fun read() {
+        try {
+            val stored = withContext(io) { store.load() }
+            _logins.value = stored
+            loaded = true
+            _loadFailed.value = false
+            log("logins loaded ${stored.size}")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            _loadFailed.value = true
+            log("logins load failed: ${e.javaClass.simpleName}")
+        } finally {
+            loading = false
+        }
+    }
+
+    /**
+     * The user's way out when the store stays unreadable ([loadFailed]): every saved login is given up. The store forgets
+     * its key and sets the file aside ([LoginStore.setAside]), then loads again, empty. Only ever called from an explicit
+     * user action. Returns false (and does nothing) unless the last load failed and no load is running.
+     */
+    fun resetUnreadableStore(): Boolean {
+        if (loaded || loading || !_loadFailed.value) return false
+        loading = true
         scope.launch {
             try {
-                val stored = withContext(io) { store.load() }
-                _logins.value = stored
-                loaded = true
-                log("logins loaded ${stored.size}")
+                withContext(io) { store.setAside() }
+                log("logins store reset")
             } catch (e: CancellationException) {
+                loading = false
                 throw e
             } catch (e: Exception) {
-                log("logins load failed: ${e.javaClass.simpleName}")
-            } finally {
-                loading = false
+                log("logins reset failed: ${e.javaClass.simpleName}")
             }
+            read()
         }
+        return true
     }
 
     private fun persist() {

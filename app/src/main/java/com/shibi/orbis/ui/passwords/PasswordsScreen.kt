@@ -75,6 +75,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.StateFlow
 
 internal const val PASSWORDS_UNLOCK_TAG = "passwords_unlock"
+internal const val PASSWORDS_RESET_TAG = "passwords_reset"
+internal const val PASSWORDS_RESET_CONFIRM_TAG = "passwords_reset_confirm"
 
 /** Largest CSV accepted for import. */
 private const val MAX_IMPORT_BYTES = 4 * 1024 * 1024
@@ -89,7 +91,8 @@ internal fun filterLogins(logins: List<SavedLogin>, query: String): List<SavedLo
 /**
  * Settings > Passwords. The list, passwords and export are behind the screen lock (fingerprint or PIN/pattern/password
  * through Android's own prompt); unlocking lasts until the app leaves the screen (ON_STOP). Without a screen lock
- * nothing is shown. The caller protects the window (FLAG_SECURE) while this screen is up.
+ * nothing is shown. The caller protects the window (FLAG_SECURE) while this screen is up. When the saved logins stay
+ * unreadable ([LoginManager.loadFailed]), the unlocked screen offers to reset them, after a confirmation.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -108,6 +111,7 @@ fun PasswordsScreen(
     val logins by manager.logins.collectAsStateWithLifecycle()
     val never by manager.neverSave.collectAsStateWithLifecycle()
     val offerSave by offerSaveFlow.collectAsStateWithLifecycle()
+    val loadFailed by manager.loadFailed.collectAsStateWithLifecycle()
     var unlocked by remember { mutableStateOf(startUnlocked) }
     // Leaving the app (Home, Recents, another app) locks the list again: a phone handed over later must ask first.
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -120,6 +124,7 @@ fun PasswordsScreen(
     var menu by remember { mutableStateOf(false) }
     var confirmExport by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<SavedLogin?>(null) }
+    var confirmReset by remember { mutableStateOf(false) }
     val deviceSecure = remember { context.getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true }
 
     val importLauncher =
@@ -212,6 +217,15 @@ fun PasswordsScreen(
                         ) { Text(stringResource(R.string.passwords_unlock)) }
                     }
 
+                loadFailed ->
+                    Column(Modifier.padding(16.dp)) {
+                        Text(stringResource(R.string.passwords_unreadable))
+                        Button(
+                            onClick = { confirmReset = true },
+                            modifier = Modifier.padding(top = 12.dp).testTag(PASSWORDS_RESET_TAG),
+                        ) { Text(stringResource(R.string.passwords_reset)) }
+                    }
+
                 else -> {
                     OutlinedTextField(
                         value = query,
@@ -266,6 +280,23 @@ fun PasswordsScreen(
                 }) { Text(stringResource(R.string.passwords_export)) }
             },
             dismissButton = { TextButton(onClick = { confirmExport = false }) { Text(stringResource(R.string.prompt_cancel)) } },
+        )
+    }
+    if (confirmReset) {
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text(stringResource(R.string.passwords_reset)) },
+            text = { Text(stringResource(R.string.passwords_reset_warning)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmReset = false
+                        manager.resetUnreadableStore()
+                    },
+                    modifier = Modifier.testTag(PASSWORDS_RESET_CONFIRM_TAG),
+                ) { Text(stringResource(R.string.passwords_reset_confirm)) }
+            },
+            dismissButton = { TextButton(onClick = { confirmReset = false }) { Text(stringResource(R.string.prompt_cancel)) } },
         )
     }
     deleting?.let { login ->

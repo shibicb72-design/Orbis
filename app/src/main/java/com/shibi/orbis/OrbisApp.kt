@@ -14,6 +14,7 @@ import com.shibi.orbis.bookmarks.FileBookmarkStore
 import com.shibi.orbis.clear.BrowsingDataClearer
 import com.shibi.orbis.clear.ClearController
 import com.shibi.orbis.clear.ClearTargets
+import com.shibi.orbis.clear.clearSavedLogins
 import com.shibi.orbis.debug.DebugLog
 import com.shibi.orbis.downloads.DownloadForegroundController
 import com.shibi.orbis.downloads.DownloadManager
@@ -271,7 +272,7 @@ class OrbisApp : Application() {
 
                 override fun clearBookmarks() = bookmarks.clearAll()
 
-                override fun clearPasswords() = logins.clearAll()
+                override fun clearPasswords() = clearSavedLogins(logins)
 
                 override fun hasPrivateTabs() = tabs.hasPrivateTabs
 

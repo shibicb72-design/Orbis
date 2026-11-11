@@ -173,6 +173,10 @@
     <string name="passwords_never_title">Nunca guardadas</string>
     <string name="passwords_never_remove">Quitar %1$s de Nunca guardadas</string>
     <string name="passwords_search_hint">Buscar contraseñas</string>
+    <string name="passwords_unreadable">Ahora mismo no se pueden leer las contraseñas guardadas.</string>
+    <string name="passwords_reset">Restablecer contraseñas guardadas</string>
+    <string name="passwords_reset_warning">Se perderán todas las contraseñas guardadas en este teléfono. No se puede deshacer.</string>
+    <string name="passwords_reset_confirm">Restablecer</string>
     <string name="menu_tracking_protection">Protección contra rastreo</string>
     <string name="text_size_title">Tamaño del texto</string>
     <string name="text_size_percent">%1$d%%</string>

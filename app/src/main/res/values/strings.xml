@@ -218,6 +218,10 @@
     <string name="passwords_never_title">Never saved</string>
     <string name="passwords_never_remove">Remove %1$s from Never saved</string>
     <string name="passwords_search_hint">Search passwords</string>
+    <string name="passwords_unreadable">Saved passwords can\'t be read right now.</string>
+    <string name="passwords_reset">Reset saved passwords</string>
+    <string name="passwords_reset_warning">All saved passwords on this phone will be lost. This can\'t be undone.</string>
+    <string name="passwords_reset_confirm">Reset</string>
     <string name="menu_tracking_protection">Tracking protection</string>
     <string name="text_size_title">Text size</string>
     <string name="text_size_percent">%1$d%%</string>

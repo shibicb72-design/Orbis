@@ -1,5 +1,11 @@
 package com.shibi.orbis.passwords
 
+import com.shibi.orbis.clear.BrowsingDataClearer
+import com.shibi.orbis.clear.ClearCategory
+import com.shibi.orbis.clear.ClearOutcome
+import com.shibi.orbis.clear.ClearSelection
+import com.shibi.orbis.clear.ClearTargets
+import com.shibi.orbis.clear.clearSavedLogins
 import com.shibi.orbis.engine.EngineLogin
 import com.shibi.orbis.storage.AtomicTextFile
 import com.shibi.orbis.ui.passwords.filterLogins
@@ -9,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import org.junit.After
@@ -26,11 +33,17 @@ import org.robolectric.annotation.Config
 
 private class MemLoginStore(var data: List<SavedLogin> = emptyList()) : LoginStore {
     var saves = 0
+    var asides = 0
     override fun load() = data
 
     override fun save(items: List<SavedLogin>) {
         saves++
         data = items
+    }
+
+    override fun setAside() {
+        asides++
+        data = emptyList()
     }
 }
 
@@ -43,6 +56,8 @@ private class FlipCrypto : LoginCrypto {
     override fun encrypt(plain: ByteArray) = plain.map { (it.toInt() xor 0x5A).toByte() }.toByteArray()
 
     override fun decrypt(sealed: ByteArray) = encrypt(sealed)
+
+    override fun reset() {}
 }
 
 /** [FlipCrypto] whose first [failures] decrypts throw what the Android Keystore throws when it is briefly unavailable. */
@@ -58,7 +73,45 @@ private class FlakyKeystoreCrypto(var failures: Int = 1) : LoginCrypto {
         }
         return ok.decrypt(sealed)
     }
+
+    override fun reset() {}
 }
+
+/**
+ * A Keystore key that stays unusable: every encrypt and decrypt throws [KeyStoreException] until [reset] (deleting the
+ * alias) gives a fresh key, after which it works like [FlipCrypto].
+ */
+private class BrokenKeyCrypto : LoginCrypto {
+    private val ok = FlipCrypto()
+    var resets = 0
+
+    override fun encrypt(plain: ByteArray): ByteArray {
+        if (resets == 0) throw KeyStoreException("key unusable")
+        return ok.encrypt(plain)
+    }
+
+    override fun decrypt(sealed: ByteArray): ByteArray {
+        if (resets == 0) throw KeyStoreException("key unusable")
+        return ok.decrypt(sealed)
+    }
+
+    override fun reset() {
+        resets++
+    }
+}
+
+/** Clear browsing data targets where only Passwords does anything, wired like the app. */
+private class LoginsOnlyTargets(private val logins: LoginManager) : ClearTargets {
+    override fun clearHistory() {}
+    override fun closeNormalTabs() {}
+    override fun clearDownloadsList() {}
+    override fun clearBookmarks() {}
+    override fun clearPasswords() = clearSavedLogins(logins)
+    override fun hasPrivateTabs() = false
+    override suspend fun clearEngine(cookiesAndSiteData: Boolean, cache: Boolean) = true
+}
+
+private val PASSWORDS_ONLY = ClearSelection(history = false, cookiesAndSiteData = false, cache = false, passwords = true)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -280,5 +333,95 @@ class PasswordsTest {
     @Test(expected = IllegalStateException::class)
     fun clearAllIsRefusedBeforeLoad() {
         LoginManager(MemLoginStore(), MemNever(), scope, log = {}, now = { clock }, io = dispatcher).clearAll()
+    }
+
+    // ---- unreadable store: the user's way out ----
+
+    /** A file sealed with the old key, and a manager whose key stays unusable, after one failed load. */
+    private fun unreadable(logs: MutableList<String> = mutableListOf()): Triple<File, BrokenKeyCrypto, LoginManager> {
+        val file = File(tmp.root, "logins/logins.enc")
+        FileLoginStore(AtomicTextFile(file), FlipCrypto()).save(listOf(SavedLogin("g", "https://a.test", username = "alice", password = "hunter2")))
+        val crypto = BrokenKeyCrypto()
+        val m = LoginManager(FileLoginStore(AtomicTextFile(file), crypto), MemNever(), scope, log = { logs += it }, now = { clock }, io = dispatcher)
+        m.load()
+        scheduler.advanceUntilIdle()
+        return Triple(file, crypto, m)
+    }
+
+    @Test
+    fun aStoreThatStaysUnreadableIsReportedAndNeverResetOnItsOwn() {
+        val (file, crypto, m) = unreadable()
+        val before = file.readText()
+        repeat(3) {
+            m.load()
+            scheduler.advanceUntilIdle()
+        }
+        assertFalse(m.loaded)
+        assertTrue(m.loadFailed.value)
+        assertFalse(m.save("https://b.test", "bob", "pw"))
+        assertEquals("no reset without the user", 0, crypto.resets)
+        assertEquals("file untouched", before, file.readText())
+        assertFalse(File(file.parentFile, "logins.enc.corrupt").exists())
+    }
+
+    @Test
+    fun resetUnreadableStoreSetsTheFileAsideResetsTheKeyAndSavingWorksAgain() {
+        val logs = mutableListOf<String>()
+        val (file, crypto, m) = unreadable(logs)
+        assertTrue(m.resetUnreadableStore())
+        scheduler.advanceUntilIdle()
+        assertEquals(1, crypto.resets)
+        assertFalse(file.exists())
+        assertTrue(File(file.parentFile, "logins.enc.corrupt").exists())
+        assertTrue(m.loaded)
+        assertFalse(m.loadFailed.value)
+        assertTrue(m.logins.value.isEmpty())
+        assertEquals(listOf("logins load failed: KeyStoreException", "logins store reset", "logins loaded 0"), logs)
+        assertTrue(m.save("https://b.test", "bob", "pw"))
+        scheduler.advanceUntilIdle()
+        assertEquals(listOf("bob"), FileLoginStore(AtomicTextFile(file), FlipCrypto()).load().map { it.username })
+        assertFalse("nothing to reset once loaded", m.resetUnreadableStore())
+        assertEquals(1, crypto.resets)
+    }
+
+    @Test
+    fun resetIsRefusedUnlessTheLastLoadFailed() {
+        val store = MemLoginStore(listOf(SavedLogin("g1", "https://a.test", username = "u", password = "p")))
+        val m = LoginManager(store, MemNever(), scope, log = {}, now = { clock }, io = dispatcher)
+        assertFalse("before any load", m.resetUnreadableStore())
+        m.load()
+        assertFalse("load running", m.resetUnreadableStore())
+        scheduler.advanceUntilIdle()
+        assertFalse(m.loadFailed.value)
+        assertFalse("loaded", m.resetUnreadableStore())
+        scheduler.advanceUntilIdle()
+        assertEquals(0, store.asides)
+        assertEquals(1, m.logins.value.size)
+    }
+
+    @Test
+    fun clearBrowsingDataPasswordsResetsAStoreThatStaysUnreadable() {
+        val (file, crypto, m) = unreadable()
+        val outcome = runBlocking { BrowsingDataClearer(LoginsOnlyTargets(m)).run(PASSWORDS_ONLY) }
+        assertEquals(ClearOutcome.Done, outcome)
+        scheduler.advanceUntilIdle()
+        assertEquals(1, crypto.resets)
+        assertFalse(file.exists())
+        assertTrue(m.loaded)
+        assertTrue(m.save("https://b.test", "bob", "pw"))
+    }
+
+    @Test
+    fun clearBrowsingDataPasswordsStillEmptiesALoadedStoreAndFailsWhileLoading() {
+        val store = MemLoginStore(listOf(SavedLogin("g1", "https://a.test", username = "u", password = "p")))
+        val m = manager(store)
+        assertEquals(ClearOutcome.Done, runBlocking { BrowsingDataClearer(LoginsOnlyTargets(m)).run(PASSWORDS_ONLY) })
+        scheduler.advanceUntilIdle()
+        assertTrue(store.data.isEmpty())
+        assertEquals(0, store.asides)
+        val loading = LoginManager(MemLoginStore(), MemNever(), scope, log = {}, now = { clock }, io = dispatcher)
+        loading.load()
+        val outcome = runBlocking { BrowsingDataClearer(LoginsOnlyTargets(loading)).run(PASSWORDS_ONLY) }
+        assertEquals(ClearOutcome.Incomplete(setOf(ClearCategory.PASSWORDS), emptySet()), outcome)
     }
 }

@@ -173,6 +173,10 @@
     <string name="passwords_never_title">Jamais enregistrés</string>
     <string name="passwords_never_remove">Retirer %1$s de Jamais enregistrés</string>
     <string name="passwords_search_hint">Rechercher des mots de passe</string>
+    <string name="passwords_unreadable">Les mots de passe enregistrés ne peuvent pas être lus pour le moment.</string>
+    <string name="passwords_reset">Réinitialiser les mots de passe enregistrés</string>
+    <string name="passwords_reset_warning">Tous les mots de passe enregistrés sur ce téléphone seront perdus. Cette action est irréversible.</string>
+    <string name="passwords_reset_confirm">Réinitialiser</string>
     <string name="menu_tracking_protection">Protection contre le pistage</string>
     <string name="text_size_title">Taille du texte</string>
     <string name="text_size_percent">%1$d %%</string>

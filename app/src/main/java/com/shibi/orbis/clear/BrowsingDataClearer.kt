@@ -1,5 +1,6 @@
 package com.shibi.orbis.clear
 
+import com.shibi.orbis.passwords.LoginManager
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -61,12 +62,28 @@ interface ClearTargets {
     fun clearDownloadsList()
     fun clearBookmarks()
 
-    /** Deletes every saved login. Throws when the encrypted store is not loaded yet, so the outcome names it. */
+    /**
+     * Deletes every saved login ([clearSavedLogins]). Throws when the encrypted store is not loaded yet, so the outcome
+     * names it.
+     */
     fun clearPasswords() {}
     fun hasPrivateTabs(): Boolean
 
     /** True only when the engine confirmed the clear. Must not be called while a private tab is open. */
     suspend fun clearEngine(cookiesAndSiteData: Boolean, cache: Boolean): Boolean
+}
+
+/**
+ * Clear browsing data > Passwords. A loaded store is emptied. A store whose last load failed is reset instead
+ * ([LoginManager.resetUnreadableStore]): the user asked to delete every saved login, so this is the second way out of a
+ * store that stays unreadable. Throws while a load is still running (or before the first one), so the outcome names it.
+ */
+fun clearSavedLogins(logins: LoginManager) {
+    if (!logins.loaded && logins.loadFailed.value) {
+        check(logins.resetUnreadableStore()) { "logins still loading" }
+    } else {
+        logins.clearAll()
+    }
 }
 
 sealed interface ClearOutcome {

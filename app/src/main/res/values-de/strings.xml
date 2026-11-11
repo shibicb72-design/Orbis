@@ -172,6 +172,10 @@
     <string name="passwords_never_title">Nie gespeichert</string>
     <string name="passwords_never_remove">%1$s aus „Nie gespeichert“ entfernen</string>
     <string name="passwords_search_hint">Passwörter suchen</string>
+    <string name="passwords_unreadable">Gespeicherte Passwörter können gerade nicht gelesen werden.</string>
+    <string name="passwords_reset">Gespeicherte Passwörter zurücksetzen</string>
+    <string name="passwords_reset_warning">Alle auf diesem Telefon gespeicherten Passwörter gehen verloren. Das kann nicht rückgängig gemacht werden.</string>
+    <string name="passwords_reset_confirm">Zurücksetzen</string>
     <string name="menu_tracking_protection">Tracking-Schutz</string>
     <string name="text_size_title">Textgröße</string>
     <string name="text_size_percent">%1$d %%</string>
