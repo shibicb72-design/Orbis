@@ -20,11 +20,12 @@ class LicenceEntry(val name: String, val version: String?, val licence: LicenceK
 
 /**
  * Everything the app ships with its licence. Versions follow gradle/libs.versions.toml (a test checks that); the
- * libtorrent, Boost and OpenSSL versions are the ones built into libtorrent4j 2.1.0-39 (its release notes and
- * swig/android-build/Dockerfile: libtorrent master at 2.1.0, Boost 1.90.0, OpenSSL 3.5.5).
+ * libtorrent, Boost and OpenSSL versions are the ones in our libtorrent4j.so (native/libtorrent4j/build.env and
+ * versions.env: libtorrent 2.1.0 at commit 24a3adf, Boost 1.90.0, OpenSSL [OPENSSL_VERSION]; a test checks OpenSSL).
  */
 object Licences {
     const val LIBTORRENT4J_VERSION = "2.1.0-39"
+    const val OPENSSL_VERSION = "3.5.9"
     const val ANDROID_COMPONENTS_VERSION = "160.0"
     const val ZXING_VERSION = "3.5.4"
 
@@ -33,7 +34,7 @@ object Licences {
             LicenceEntry("libtorrent", "2.1.0", LicenceKind.BSD_3_CLAUSE, LicenceNote.INSIDE_LIBTORRENT4J),
             LicenceEntry("libtorrent4j", LIBTORRENT4J_VERSION, LicenceKind.MIT, LicenceNote.TORRENT_ENGINE),
             LicenceEntry("Boost", "1.90.0", LicenceKind.BSL_1_0, LicenceNote.INSIDE_LIBTORRENT4J),
-            LicenceEntry("OpenSSL", "3.5.5", LicenceKind.APACHE_2_0, LicenceNote.INSIDE_LIBTORRENT4J),
+            LicenceEntry("OpenSSL", OPENSSL_VERSION, LicenceKind.APACHE_2_0, LicenceNote.INSIDE_LIBTORRENT4J),
             LicenceEntry("GeckoView / Android Components", ANDROID_COMPONENTS_VERSION, LicenceKind.MPL_2_0, LicenceNote.BROWSER_ENGINE),
             LicenceEntry("Readability", null, LicenceKind.APACHE_2_0, LicenceNote.READER_VIEW),
             LicenceEntry("AndroidX / Kotlin", null, LicenceKind.APACHE_2_0, LicenceNote.APP_FRAMEWORK),

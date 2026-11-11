@@ -1,0 +1,93 @@
+{
+  "abi": "x86_64",
+  "baseline_comparison": {
+    "abi": "x86_64",
+    "exported_ours": 7328,
+    "exported_upstream": 7328,
+    "failures": [],
+    "imported_ours": 272,
+    "imported_upstream": 272,
+    "jni_symbols_ours": 3659,
+    "jni_symbols_upstream": 3659,
+    "needed_ours": [
+      "libdl.so",
+      "libm.so",
+      "libc.so"
+    ],
+    "needed_upstream": [
+      "libdl.so",
+      "libm.so",
+      "libc.so"
+    ],
+    "ours_sha256": "9634a939ee35b4dd66850645dbbc6ff9bafdc56877a547010f00e5ea1a019bf1",
+    "ours_size": 16374728,
+    "size_change": "+0.10%",
+    "upstream_jar_url": "https://repo1.maven.org/maven2/org/libtorrent4j/libtorrent4j-android-x86_64/2.1.0-39/libtorrent4j-android-x86_64-2.1.0-39.jar",
+    "upstream_size": 16358808,
+    "upstream_so_sha256": "5c48c09033912792451ebe8d0c495b9655ce44c921bed8c78b2e08a7c1d6a399"
+  },
+  "build_env": {
+    "BOOST_SHA256": "5e93d582aff26868d581a52ae78c7d8edf3f3064742c6e77901a1f18a437eea9",
+    "BOOST_URL": "https://archives.boost.io/release/1.90.0/source/boost_1_90_0.tar.gz",
+    "BOOST_VERSION": "1.90.0",
+    "LIBTORRENT4J_COMMIT": "da7d2403f06a0939bc2c51a88e67a6c4a85512ef",
+    "LIBTORRENT4J_REPO": "https://github.com/aldenml/libtorrent4j",
+    "LIBTORRENT_COMMIT": "24a3adf35d3e689bde700371337aad61b160bafa",
+    "LIBTORRENT_VERSION": "2.1.0.0",
+    "NDK_SHA1": "87e2bb7e9be5d6a1c6cdf5ec40dd4e0c6d07c30b",
+    "NDK_SHA256": "4abbbcdc842f3d4879206e9695d52709603e52dd68d3c1fff04b3b5e7a308ecf",
+    "NDK_SIZE": "783549481",
+    "NDK_URL": "https://dl.google.com/android/repository/android-ndk-r29-linux.zip",
+    "NDK_VERSION": "r29",
+    "OPENSSL_NO_OPTS": "no-deprecated no-shared no-makedepend no-static-engine no-stdio no-posix-io no-threads no-ui-console no-zlib no-zlib-dynamic -fno-strict-aliasing -fvisibility=hidden -O3",
+    "OPENSSL_SHA256": "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a",
+    "OPENSSL_SOURCE_DATE_EPOCH": "1790640000",
+    "OPENSSL_URL": "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz",
+    "OPENSSL_VERSION": "3.5.9",
+    "RUNNER": "ubuntu-24.04",
+    "UPSTREAM_JAR_SHA256_arm64-v8a": "59aa4c32c0dc62c95e24c2e3fdf805624625a1f8214e2442fae492e381ecbbdc",
+    "UPSTREAM_JAR_SHA256_armeabi-v7a": "914157778f514661aabe4d3e72451c1d3004401ce6659407ab7ce94a3f273fbc",
+    "UPSTREAM_JAR_SHA256_x86_64": "07ed97a0cbffbd8573a838e42549aa139b04d00ae2769eeef1a6a5402aba0cf3",
+    "UPSTREAM_JAR_VERSION": "2.1.0-39",
+    "UPSTREAM_SO_SHA256_arm64-v8a": "6428158f8e012f048f85eb790317e55cf8557ba4018d53e543e86dd9c25cef2f",
+    "UPSTREAM_SO_SHA256_armeabi-v7a": "f8fbe9f7ba3703092d05bbd8ea39b75227cbd3b84c43aeefa5798464e018863c",
+    "UPSTREAM_SO_SHA256_x86_64": "5c48c09033912792451ebe8d0c495b9655ce44c921bed8c78b2e08a7c1d6a399"
+  },
+  "file": "libtorrent4j.so",
+  "libtorrent_strings": [
+    "2.1.0.0"
+  ],
+  "openssl_strings": [
+    "3.5.9 29 Sep 2026"
+  ],
+  "repeat": "1",
+  "runner": {
+    "image_os": "ubuntu24",
+    "image_version": "20261101.360.1",
+    "label": "ubuntu-24.04"
+  },
+  "sha256": "9634a939ee35b4dd66850645dbbc6ff9bafdc56877a547010f00e5ea1a019bf1",
+  "size": 16374728,
+  "submodules": [
+    "24a3adf35d3e689bde700371337aad61b160bafa swig/deps/libtorrent (v2.0.11-674-g24a3adf35)",
+    "a57d4d36923c5fafa9698e14be16b8bc2913700a swig/deps/libtorrent/deps/asio-gnutls (heads/master)",
+    "21cdb11346ac01313dcdde4beeaf9bceb8f97b67 swig/deps/libtorrent/deps/json (remotes/origin/master)",
+    "a4d3211da33bc1114ae50d2dd12f4186b67aaba4 swig/deps/libtorrent/deps/libdatachannel (v0.24.1-2-ga4d3211d)",
+    "55f93686c01528224f448c19128836e7df245f72 swig/deps/libtorrent/deps/libdatachannel/deps/json (55f93686)",
+    "5948a4162d37bc213d6051b67ee2876ccc5a99a6 swig/deps/libtorrent/deps/libdatachannel/deps/libjuice (v1.7.0)",
+    "ee1a77c9f9dc02c42bda9901038c500c5efe4cfa swig/deps/libtorrent/deps/libdatachannel/deps/libsrtp (ee1a77c)",
+    "94899e0b926ac1b0f4750bfbd495167b4a6ae9ef swig/deps/libtorrent/deps/libdatachannel/deps/plog (94899e0)",
+    "fec583d54493f879d2ae44a743423bf8a04371ab swig/deps/libtorrent/deps/libdatachannel/deps/usrsctp (heads/master)",
+    "105cce59972f925a33aa6b1c3109e4cd3caf583d swig/deps/libtorrent/deps/try_signal (heads/master)",
+    "94dc46cccb6fec42072cb193b8a92a1dc84efca0 swig/deps/libtorrent/simulation/libsimulator (remotes/origin/set_option-38-g94dc46c)"
+  ],
+  "workflow": {
+    "commit": "629c992f834d20aa02af7f2d43b2ef65c272a08d",
+    "event": "workflow_dispatch",
+    "head_commit": "629c992f834d20aa02af7f2d43b2ef65c272a08d",
+    "ref": "refs/heads/main",
+    "repository": "shibicb72-design/Orbis",
+    "run_attempt": "1",
+    "run_id": "43070920772"
+  }
+}

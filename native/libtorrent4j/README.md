@@ -13,7 +13,9 @@ upstream release.
 | `build.env` | Every input, pinned: libtorrent4j commit, libtorrent submodule commit, OpenSSL, Boost, NDK (URL and published checksum each), runner label, upstream baseline hashes. |
 | `build.sh` | Builds one ABI: fetches the pinned commit, asserts the submodule commit, downloads and hash-checks each archive, then runs the steps of upstream's `android.yml` job for that ABI. |
 | `buildinfo.py` | Writes `BUILDINFO.json` per build and the hash table of a run. |
-| `versions.env` | What the app bundles today (read by the daily Engine currency check). |
+| `versions.env` | What the app bundles today, and the workflow run it came from (read by the daily Engine currency check and by Android CI). |
+| `CHECKSUMS.sha256` | SHA-256 of every file under `app/src/main/jniLibs/`, with the run id and commit in the header. The Gradle task `verifyTorrentNatives` checks it before every build: a changed, missing or extra file fails it. |
+| `BUILDINFO-<abi>.json` | The shipped run's `BUILDINFO.json` for each ABI, unmodified. |
 
 The workflow is `.github/workflows/torrent-natives.yml`. It builds arm64-v8a, armeabi-v7a and x86_64, each twice,
 and for every build checks the version strings (`scripts/check_torrent_natives.py`), compares the library with
@@ -40,8 +42,15 @@ committed library.
    two builds of each ABI are byte-identical.
 4. Merge the PR. Then run the workflow on `main` (Actions > Torrent natives > Run workflow, branch `main`). Ship
    only that run's repeat-1 artifacts, after checking the run is green and `BUILDINFO.json` says
-   `workflow_dispatch`, `refs/heads/main` and a commit on `main` (see "Rule"). Shipping is a separate PR: copy the
-   files into `app/src/main/jniLibs/` and record their hashes; see `docs/security/NATIVE-VERSIONS.md`.
+   `workflow_dispatch`, `refs/heads/main` and a commit on `main` (see "Rule"). Shipping is a separate PR:
+   - `gh run download <run-id>` into a new, empty directory; check each `.so` against its `.sha256`, the run's
+     summary table and the other repeat.
+   - Copy each repeat-1 `libtorrent4j.so` to `app/src/main/jniLibs/<abi>/` and its `BUILDINFO.json` to
+     `BUILDINFO-<abi>.json` here, unmodified.
+   - Rewrite `CHECKSUMS.sha256` (hashes and header: run id, commit) and `versions.env` (`OPENSSL_VERSION`,
+     `RUN_ID`), and the OpenSSL version in `app/.../about/Licences.kt` (`LicencesTest` checks it).
+   - Update `docs/security/NATIVE-VERSIONS.md`. Android CI then checks the version strings in every APK and the
+     bundle.
 
 Only OpenSSL changes in such an update. The libtorrent4j commit, the libtorrent commit, Boost and the NDK stay
 upstream's unless a separate, reviewed change moves them.

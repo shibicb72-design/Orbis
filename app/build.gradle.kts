@@ -1,3 +1,4 @@
+import java.security.MessageDigest
 import java.util.Properties
 
 plugins {
@@ -125,6 +126,54 @@ android {
     }
 }
 
+// Torrent natives: src/main/jniLibs/<abi>/libtorrent4j.so are the unmodified artifacts of one Torrent natives workflow
+// run on main (native/libtorrent4j/README.md). Before every build, each file under src/main/jniLibs is hashed and
+// compared with native/libtorrent4j/CHECKSUMS.sha256; a changed byte, a missing file or an extra file fails the build.
+val verifyTorrentNatives = tasks.register("verifyTorrentNatives") {
+    group = "verification"
+    description = "Checks src/main/jniLibs against native/libtorrent4j/CHECKSUMS.sha256."
+    val repoRoot = rootProject.layout.projectDirectory.asFile
+    val jniLibs = layout.projectDirectory.dir("src/main/jniLibs").asFile
+    val checksums = rootProject.layout.projectDirectory.file("native/libtorrent4j/CHECKSUMS.sha256").asFile
+    inputs.file(checksums)
+    inputs.files(jniLibs)
+    doLast {
+        val hexSha256 = Regex("[0-9a-f]{64}")
+        val expected = mutableMapOf<String, String>()
+        checksums.readLines().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }.forEach { line ->
+            val parts = line.split(Regex("\\s+"), limit = 2)
+            if (parts.size != 2 || !hexSha256.matches(parts[0])) throw GradleException("Bad line in $checksums: $line")
+            val path = parts[1].removePrefix("*")
+            if (expected.put(path, parts[0]) != null) throw GradleException("Duplicate path in $checksums: $path")
+        }
+        val actual = jniLibs.walkTopDown().filter { it.isFile }.associate { file ->
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(1 shl 16)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    digest.update(buffer, 0, read)
+                }
+            }
+            file.relativeTo(repoRoot).invariantSeparatorsPath to digest.digest().joinToString("") { "%02x".format(it) }
+        }
+        val problems = buildList {
+            (expected.keys - actual.keys).sorted().forEach { add("missing: $it") }
+            (actual.keys - expected.keys).sorted().forEach { add("not in CHECKSUMS.sha256: $it") }
+            expected.keys.intersect(actual.keys).sorted().filter { expected[it] != actual[it] }
+                .forEach { add("SHA-256 mismatch: $it is ${actual[it]}, expected ${expected[it]}") }
+        }
+        if (problems.isNotEmpty()) {
+            throw GradleException(
+                "Torrent natives do not match native/libtorrent4j/CHECKSUMS.sha256:\n" + problems.joinToString("\n"),
+            )
+        }
+        logger.lifecycle("Torrent natives: ${actual.size} files match CHECKSUMS.sha256")
+    }
+}
+tasks.named("preBuild") { dependsOn(verifyTorrentNatives) }
+
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
@@ -157,10 +206,8 @@ dependencies {
     implementation(libs.zxing.core)
     implementation(libs.androidx.browser)
     // Torrents: only torrent/Libtorrent4jEngine.kt may touch it; the native library loads only while a torrent is active.
+    // The Java API comes from Maven Central; libtorrent4j.so is ours (src/main/jniLibs, see verifyTorrentNatives).
     implementation(libs.libtorrent4j.core)
-    implementation(libs.libtorrent4j.android.arm64)
-    implementation(libs.libtorrent4j.android.arm)
-    implementation(libs.libtorrent4j.android.x64)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)

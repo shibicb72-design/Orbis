@@ -52,4 +52,12 @@ class LicencesTest {
         assertEquals(version("mozillaAc"), Licences.ANDROID_COMPONENTS_VERSION)
         assertEquals(version("zxing"), Licences.ZXING_VERSION)
     }
+
+    @Test
+    fun theOpenSslVersionShownIsTheBundledOne() {
+        val env = File("../native/libtorrent4j/versions.env").readText()
+        val bundled = Regex("""(?m)^OPENSSL_VERSION=(\S+)""").find(env)!!.groupValues[1]
+        assertEquals(bundled, Licences.OPENSSL_VERSION)
+        assertEquals(bundled, Licences.entries.single { it.name == "OpenSSL" }.version)
+    }
 }

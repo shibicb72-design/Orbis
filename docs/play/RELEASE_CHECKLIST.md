@@ -18,6 +18,10 @@ gradlew.bat :app:assembleR8check    # the same shrunk build, own app id, debug-s
 ```
 - Bump `versionCode` (must grow every upload) and `versionName` in `app/build.gradle.kts`.
 - Smoke test the r8check APK: first run, a page, tabs, settings, uBlock Origin install, passwords, a download.
+- After `bundleRelease`, run
+  `python scripts/check_torrent_natives.py app/build/outputs/bundle/release/app-release.aab --min-openssl <version>
+  --libtorrent 2.1.0.0 --abis arm64-v8a,armeabi-v7a,x86_64` (`<version>` is `OPENSSL_VERSION` in
+  `native/libtorrent4j/versions.env`); it must pass before upload.
 
 ## 3. Play Console (Owner)
 - [ ] Developer account: https://play.google.com/console (one-time US$25 registration fee, identity verification).
@@ -45,8 +49,9 @@ gradlew.bat :app:assembleR8check    # the same shrunk build, own app id, debug-s
   workflow (`.github/workflows/engine-currency.yml`) goes red when one is out.
 - Bump = PR 1's recipe (#24): change the `mozillaAc` / `geckoview` pair in `gradle/libs.versions.toml`, regenerate
   verification metadata, CI, smoke test H-D11, release.
-- OpenSSL: when the workflow reports a newer 3.5.x, rebuild the torrent natives (see
-  `docs/security/NATIVE-VERSIONS.md`) and release.
+- OpenSSL: when the workflow reports a newer 3.5.x, rebuild the torrent natives and release. The torrent natives
+  are built by `.github/workflows/torrent-natives.yml`; to update OpenSSL change `build.env`, run the workflow,
+  commit the artifacts and `CHECKSUMS.sha256` (`docs/security/NATIVE-VERSIONS.md`, `native/libtorrent4j/README.md`).
 - Before every release: run the Engine currency workflow by hand (Actions > Engine currency > Run workflow, or
   `gh workflow run engine-currency.yml --ref main`); it must be green.
 - GitHub turns scheduled workflows off in a public repository after 60 days with no repository activity. If the
