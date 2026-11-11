@@ -1146,7 +1146,7 @@ private fun BrowserContent(
             }
         SiteSettingsSheet(
             host = hostOfUrl(state.url).orEmpty(),
-            secure = state.url.startsWith("https://"),
+            secure = showsLock(state),
             isPrivate = s0.isPrivate,
             trackingOn = state.trackingProtectionOff != true,
             javaScriptOn = state.javaScriptOn,

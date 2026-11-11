@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Report 16 KB page-size readiness of the native libraries in APKs.
+"""Report 16 KB page-size readiness of the native libraries in APKs, or of bare .so files.
 
-For every lib/<abi>/*.so entry it checks:
+For every lib/<abi>/*.so entry of an APK (or every bare .so given) it checks:
   * ELF: each PT_LOAD segment has p_align >= 16384 and congruent offset/vaddr.
     This is what decides whether the library loads on a 16 KB-page device.
   * Zip: an uncompressed (stored) .so must start on a 16 KB boundary in the APK.
     Compressed entries are extracted on install, so zip alignment does not apply.
+    (A bare .so has no zip entry; only the ELF check applies.)
 
 It never fails the build unless --strict is given. Unaligned libraries are
 printed as GitHub Actions ::warning:: lines so they show on the run summary.
 
-Usage: check_16kb_alignment.py [--strict] APK [APK ...]
+Usage: check_16kb_alignment.py [--strict] APK_OR_SO [APK_OR_SO ...]
 """
 
 import struct
@@ -54,6 +55,25 @@ def zip_data_offset(apk_path, info):
     return info.header_offset + 30 + name_len + extra_len
 
 
+def elf_aligned(segments):
+    return bool(segments) and all(
+        align >= PAGE and (offset % PAGE) == (vaddr % PAGE) for offset, vaddr, align in segments)
+
+
+def check_so(so_path):
+    """Return (rows, unaligned_count) for one bare ELF shared library."""
+    with open(so_path, "rb") as f:
+        segments = list(load_segments(f.read()))
+    min_align = min((a for _, _, a in segments), default=0)
+    elf_ok = elf_aligned(segments)
+    return [(so_path, min_align, elf_ok, "bare .so (no zip entry)", elf_ok)], 0 if elf_ok else 1
+
+
+def is_elf(path):
+    with open(path, "rb") as f:
+        return f.read(4) == b"ELF"
+
+
 def check_apk(apk_path):
     """Return (rows, unaligned_count) for one APK."""
     rows = []
@@ -63,8 +83,7 @@ def check_apk(apk_path):
         for info in sorted(libs, key=lambda i: i.filename):
             segments = list(load_segments(apk.read(info)))
             min_align = min((a for _, _, a in segments), default=0)
-            elf_ok = bool(segments) and all(
-                align >= PAGE and (offset % PAGE) == (vaddr % PAGE) for offset, vaddr, align in segments)
+            elf_ok = elf_aligned(segments)
             if info.compress_type == zipfile.ZIP_STORED:
                 zip_ok = zip_data_offset(apk_path, info) % PAGE == 0
                 zip_note = "stored, 16 KB aligned" if zip_ok else "stored, NOT 16 KB aligned"
@@ -86,7 +105,7 @@ def main(argv):
         return 2
     total_unaligned = 0
     for apk_path in apks:
-        rows, unaligned = check_apk(apk_path)
+        rows, unaligned = check_so(apk_path) if is_elf(apk_path) else check_apk(apk_path)
         total_unaligned += unaligned
         print(f"== {apk_path}: {len(rows)} native libraries")
         for name, min_align, elf_ok, zip_note, ok in rows:

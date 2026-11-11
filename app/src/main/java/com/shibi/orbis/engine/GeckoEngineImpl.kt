@@ -128,7 +128,8 @@ class GeckoEngineImpl(
     override var onContentBlocked: ((com.shibi.orbis.stats.BlockKind, String?, Boolean) -> Unit)? = null
     override var onYoutubeAdEvent: ((YoutubeAdEvent) -> Unit)? = null
 
-    @Volatile private var httpsOnlyNormal = false
+    // Matches the setting's default (HttpsOnlyMode.ALL) before the setting flow delivers.
+    @Volatile private var httpsOnlyNormal = true
     @Volatile private var httpsOnlyPrivate = true
     @Volatile private var websiteDark: Boolean? = null
     @Volatile private var sitePolicy: SitePolicy? = null
@@ -677,7 +678,7 @@ private class GeckoBrowserSession(
                 // displayed, so showing its address would let a hostile page spoof the address bar.
                 if (url != null) {
                     importLeaveAllowed = false
-                    _state.update { it.copy(url = url) }
+                    _state.update { it.afterLocationChange(url) }
                     // Back/Forward commits without onLoadRequest. An import forces JavaScript (HTML off, PDF on).
                     // Forward back to a website has to restore that site's setting, or it stays off.
                     applyImportedScript(url, reloadIfChanged = true)
@@ -848,6 +849,24 @@ private class GeckoBrowserSession(
 
             override fun onProgressChange(session: GeckoSession, progress: Int) {
                 _state.update { it.copy(progress = progress) }
+            }
+
+            // The lock follows this report, never the URL scheme. Expected after the location change, and again when
+            // mixed content changes the page's state; that ordering is to be confirmed on a device by H-D21.
+            // mixedModeActive cannot be CONTENT_LOADED today: security.mixed_content.block_active_content is at its
+            // default (true), so Gecko blocks mixed scripts and the page stays secure. The check guards a pref change.
+            override fun onSecurityChange(
+                session: GeckoSession,
+                securityInfo: GeckoSession.ProgressDelegate.SecurityInformation,
+            ) {
+                _state.update {
+                    it.afterSecurityChange(
+                        connectionSecure = securityInfo.isSecure,
+                        certificateException = securityInfo.isException,
+                        mixedActiveLoaded =
+                            securityInfo.mixedModeActive == GeckoSession.ProgressDelegate.SecurityInformation.CONTENT_LOADED,
+                    )
+                }
             }
 
             override fun onSessionStateChange(session: GeckoSession, sessionState: GeckoSession.SessionState) {
