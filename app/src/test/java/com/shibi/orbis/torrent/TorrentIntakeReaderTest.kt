@@ -1,6 +1,7 @@
 package com.shibi.orbis.torrent
 
 import com.shibi.orbis.engine.IncomingDownload
+import com.shibi.orbis.engine.ProviderDeadline
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.io.InputStream
@@ -128,6 +129,55 @@ class TorrentIntakeReaderTest {
         val empty = FakeDownload({ ByteArrayInputStream(ByteArray(0)) })
         assertEquals(IntakeRefusal.READ_FAILED, (reader.readResponse(empty) as TorrentIntakeReader.Result.Failed).reason)
         assertEquals(1, empty.discards)
+    }
+
+    @Test
+    fun aSizeQueryThatHangsStillLetsASmallTorrentBeRead() = runBlocking {
+        val hung = CountDownLatch(1)
+        val logged = mutableListOf<String>()
+        val quick =
+            TorrentIntakeReader(
+                Dispatchers.IO,
+                idleTimeoutMs = 300,
+                overallTimeoutMs = 5_000,
+                providerTimeoutMs = 200,
+                log = { synchronized(logged) { logged += it } },
+            )
+        try {
+            val started = System.nanoTime()
+            val r =
+                quick.readWithDeclaredSize(
+                    querySize = {
+                        hung.await()
+                        cap + 1L
+                    },
+                    open = { ByteArrayInputStream(ByteArray(100) { 3 }) },
+                ) as TorrentIntakeReader.Result.Ok
+            val ms = (System.nanoTime() - started) / 1_000_000
+            assertEquals(100, r.bytes.size)
+            assertTrue("took $ms ms", ms < 3_000)
+            assertEquals(listOf(ProviderDeadline.TIMEOUT_LOG), synchronized(logged) { logged.toList() })
+        } finally {
+            hung.countDown()
+        }
+    }
+
+    @Test
+    fun aDeclaredUriSizeOverTheCapIsRefusedBeforeOpening() = runBlocking {
+        val r =
+            reader.readWithDeclaredSize(querySize = { cap + 1L }, open = { error("must not open") })
+                as TorrentIntakeReader.Result.Failed
+        assertEquals(IntakeRefusal.TOO_LARGE, r.reason)
+    }
+
+    @Test
+    fun aFailedSizeQueryMeansUnknownAndTheCapStillHolds() = runBlocking {
+        val r =
+            reader.readWithDeclaredSize(
+                querySize = { throw SecurityException("no grant") },
+                open = { ByteArrayInputStream(ByteArray(cap + 1)) },
+            ) as TorrentIntakeReader.Result.Failed
+        assertEquals(IntakeRefusal.TOO_LARGE, r.reason)
     }
 
     @Test

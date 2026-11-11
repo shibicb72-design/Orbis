@@ -1305,7 +1305,7 @@ private fun BrowserContent(
 
     pendingTorrent?.let { pending ->
         val torrentLog = remember(container) { TorrentLog.sink(container.debugLog) }
-        val reader = remember { TorrentIntakeReader() }
+        val reader = remember(torrentLog) { TorrentIntakeReader(log = torrentLog) }
         val resolver = androidContext.contentResolver
         val addedMessage = stringResource(R.string.torrents_added)
         val viewLabel = stringResource(R.string.torrents_added_view)
