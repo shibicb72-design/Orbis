@@ -47,10 +47,12 @@ downloads, with pause, resume and progress in a notification. When a torrent is 
 `Download/Orbis/<name>` and the private working copy is deleted.
 
 Defaults: download over Wi-Fi only, stop seeding when finished (nothing is uploaded once the download is done),
-DHT, peer exchange and local peer discovery on, UPnP and NAT-PMP off, no speed limits, no seeding ratio.
+DHT and peer exchange on, local peer discovery off (a private tab's torrents never use it), UPnP and NAT-PMP off, no
+speed limits, no seeding ratio. The engine listens on a random port picked once per install and sends libtorrent's
+own client name, not "Orbis".
 
-Privacy: peers, trackers, DHT bootstrap nodes and (with local peer discovery) devices on the same network can see the
-phone's IP address, as for any peer-to-peer download. Nothing is sent to the developers. A private tab's torrents
+Privacy: peers, trackers, DHT bootstrap nodes and (if you turn local peer discovery on) devices on the same network
+can see the phone's IP address, as for any peer-to-peer download. Nothing is sent to the developers. A private tab's torrents
 are never written to the torrent list on disk and leave the list when private browsing ends (one that finished and
 was still seeding is saved to Download/Orbis first, like a private file download). A private torrent that is still
 seeding when the app's process dies is removed unsaved at the next start, because nothing about it is written to disk.

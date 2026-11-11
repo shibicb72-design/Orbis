@@ -6,6 +6,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TorrentSettingsStoreTest {
@@ -31,7 +32,9 @@ class TorrentSettingsStoreTest {
         assertEquals(TorrentSettings(), s)
         assertEquals(true, s.wifiOnly)
         assertEquals(true, s.stopSeeding)
-        assertEquals(true, s.dht && s.pex && s.lsd)
+        assertEquals(true, s.dht && s.pex)
+        // OD-2: local peers off by default.
+        assertFalse(s.lsd)
         assertEquals(0, s.downBps)
         assertEquals(0, s.upBps)
         assertNull(s.seedRatioLimit)
@@ -63,6 +66,7 @@ class TorrentSettingsStoreTest {
                 "lsd" to false,
                 "down_bps" to 512_000,
                 "up_bps" to 64_000,
+                "schema" to 2,
             ),
             prefs.map,
         )
@@ -110,6 +114,93 @@ class TorrentSettingsStoreTest {
         store.update { it.copy(dht = false) }
         assertEquals(2, prefs.writes)
         assertEquals(listOf(TorrentSettings(), TorrentSettings(wifiOnly = false), TorrentSettings(wifiOnly = false, dht = false)), seen)
+    }
+
+    @Test
+    fun anOlderFilesLocalPeersOnIsTheOldDefaultAndTurnsOff() {
+        // Before schema 2 every change wrote every key, so "lsd" = true there was the old default, not a choice.
+        val old = MapPrefs(hashMapOf("wifi_only" to false, "dht" to true, "pex" to true, "lsd" to true))
+        val s = TorrentSettingsStore(old).settings.value
+        assertFalse(s.lsd)
+        assertFalse(s.wifiOnly)
+        assertFalse(old.map.containsKey("lsd"))
+        assertEquals(2, old.map["schema"])
+        // Migrated once: turned on again by the user, it stays on.
+        TorrentSettingsStore(old).update { it.copy(lsd = true) }
+        assertTrue(TorrentSettingsStore(old).settings.value.lsd)
+        assertTrue(TorrentSettingsStore(old).settings.value.lsd)
+    }
+
+    @Test
+    fun anOlderFilesLocalPeersOffWasAChoiceAndStays() {
+        val old = MapPrefs(hashMapOf("lsd" to false, "dht" to false))
+        assertEquals(TorrentSettings(dht = false, lsd = false), TorrentSettingsStore(old).settings.value)
+        assertEquals(0, old.writes)
+        // A fresh install writes nothing either until something changes.
+        val fresh = MapPrefs()
+        TorrentSettingsStore(fresh)
+        assertEquals(0, fresh.writes)
+        // Turned on in this version, it survives the next start (the schema is written with it).
+        TorrentSettingsStore(fresh).update { it.copy(lsd = true) }
+        assertTrue(TorrentSettingsStore(fresh).settings.value.lsd)
+    }
+
+    @Test
+    fun theListenPortIsPickedOnceInTheDynamicRangeAndKept() {
+        val prefs = MapPrefs()
+        val store = TorrentSettingsStore(prefs)
+        assertFalse("nothing before first use", prefs.map.containsKey("listen_port"))
+        val port = store.listenPort()
+        assertTrue(port in 49152..65535)
+        assertEquals(port, prefs.map["listen_port"])
+        assertEquals(port, store.listenPort())
+        assertEquals(port, TorrentSettingsStore(prefs).listenPort())
+        assertEquals(1, prefs.writes)
+        // Settings changes leave it alone.
+        store.update { it.copy(wifiOnly = false) }
+        assertEquals(port, TorrentSettingsStore(prefs).listenPort())
+        // The ends of the range are reachable and nothing outside it is picked.
+        assertEquals(49152, TorrentSettingsStore(MapPrefs(), FixedRandom(0)).listenPort())
+        assertEquals(65535, TorrentSettingsStore(MapPrefs(), FixedRandom(65535 - 49152)).listenPort())
+    }
+
+    @Test
+    fun aStoredListenPortOutsideTheRangeIsReplaced() {
+        for (bad in listOf(0, -1, 6881, 49151, 65536, Int.MAX_VALUE)) {
+            val prefs = MapPrefs(hashMapOf("listen_port" to bad))
+            val port = TorrentSettingsStore(prefs, FixedRandom(7)).listenPort()
+            assertEquals(49152 + 7, port)
+            assertEquals(port, prefs.map["listen_port"])
+            assertEquals(port, TorrentSettingsStore(prefs).listenPort())
+        }
+        // A value of the wrong type reads as absent and is replaced too.
+        val wrongType = MapPrefs(hashMapOf("listen_port" to "6881"))
+        assertEquals(49152 + 7, TorrentSettingsStore(wrongType, FixedRandom(7)).listenPort())
+        // A good one is kept.
+        assertEquals(50000, TorrentSettingsStore(MapPrefs(hashMapOf("listen_port" to 50000)), FixedRandom(7)).listenPort())
+    }
+
+    @Test
+    fun theEngineSettingsCarryThePortAndTheChoices() {
+        val e = TorrentSettings(dht = false, lsd = true, downBps = 1000).engine(50123)
+        assertEquals(50123, e.listenPort)
+        assertFalse(e.dht)
+        assertTrue(e.pex)
+        assertTrue(e.lsd)
+        assertEquals(1000, e.downBps)
+        assertFalse(TorrentSettings().engine(50123).lsd)
+    }
+
+    @Test
+    fun aPrivateTorrentNeverGetsLocalPeers() {
+        assertEquals(TorrentDiscovery(dht = true, pex = true, lsd = false), TorrentDiscovery.of(dht = true, pex = true, lsd = true, isPrivate = true))
+        assertEquals(TorrentDiscovery(dht = true, pex = true, lsd = true), TorrentDiscovery.of(dht = true, pex = true, lsd = true, isPrivate = false))
+        assertEquals(TorrentDiscovery(dht = false, pex = false, lsd = false), TorrentDiscovery.of(dht = false, pex = false, lsd = false, isPrivate = false))
+    }
+
+    /** nextInt(bound) always gives [value]. */
+    private class FixedRandom(private val value: Int) : java.util.Random() {
+        override fun nextInt(bound: Int): Int = value.also { check(it in 0 until bound) }
     }
 
     @Test

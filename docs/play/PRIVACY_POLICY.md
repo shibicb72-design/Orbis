@@ -30,14 +30,14 @@ browsing data; the estimate is cleared with browsing history.
   nothing to Google or any server for Cast. Casting YouTube opens it in the TV's YouTube app, which can show ads and
   is subject to YouTube's own terms on the TV.
 - **Torrent downloads** (only after you confirm a magnet link or .torrent file): Orbis connects directly to the other
-  people sharing that torrent, to its trackers, to DHT bootstrap nodes and, through local peer discovery, to devices
-  on your network. All of them can see your IP address, and pieces of the file are exchanged with the other people.
+  people sharing that torrent, to its trackers, to DHT bootstrap nodes and, only if you turn local peer discovery on
+  (it is off by default and never used for a private tab's torrents), to devices on your network. All of them can see your IP address, and pieces of the file are exchanged with the other people.
   Nothing else is sent: there is no account and no analytics. A torrent from a private tab is never written to the
   torrent list on disk and leaves the list when private browsing ends.
   One that finished and was still seeding is saved to your Downloads first, like a private file download.
   Seeding (uploading pieces of a finished torrent to other people) happens only if you turn off "Stop seeding when
-  finished" in Settings > Torrents; by default nothing is uploaded after a download is finished. DHT, peer exchange
-  and local peer discovery can each be turned off there too. Speed limits and "Wi-Fi only" are settings on your
+  finished" in Settings > Torrents; by default nothing is uploaded after a download is finished. DHT and peer
+  exchange can each be turned off there too, and local peer discovery turned on. Speed limits and "Wi-Fi only" are settings on your
   phone and send nothing.
 
 ## Permissions
