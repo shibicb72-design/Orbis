@@ -42,8 +42,13 @@ class LicencesScreenTest {
         rule.onNodeWithText("libtorrent").performClick()
         // The text is read on the IO dispatcher.
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Redistribution and use", substring = true).fetchSemanticsNodes().isNotEmpty() }
-        val text = rule.onNodeWithText("Redistribution and use", substring = true).fetchSemanticsNode().config
+        // The route.h notice inside the file says it too, in its own preformatted block.
+        val text = rule.onNodeWithText("Redistribution and use in source and binary forms, with or without modification", substring = true).fetchSemanticsNode().config
         val shown = text[androidx.compose.ui.semantics.SemanticsProperties.Text].joinToString("") { it.text }
-        assertTrue(shown.startsWith("Copyright"))
+        // Reflowed for the screen: the sentence is one paragraph, no longer broken at the asset's 72 columns.
+        assertTrue(shown.startsWith("Redistribution and use in source and binary forms, with or without modification, are permitted"))
+        rule.onNodeWithText("Copyright (c) 2003-2020, Arvid Norberg\nAll rights reserved.").assertExists()
+        // Each condition is one wrapped bullet, not a preformatted block cut off at the right edge.
+        rule.onNodeWithText("Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.").assertExists()
     }
 }

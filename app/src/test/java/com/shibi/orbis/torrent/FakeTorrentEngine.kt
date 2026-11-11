@@ -133,9 +133,11 @@ class FakeTorrentEngine : TorrentEngine {
         downBps: Long = 1000,
         peers: Int = 3,
         etaSeconds: Long? = null,
+        upBps: Long = 0,
+        ratio: Float = 0f,
     ) {
         _snapshots.update {
-            it + (id to TorrentSnapshot(state, total, done, downBps, 0, peers, 1, etaSeconds, 0f, hasMetadata = total > 0))
+            it + (id to TorrentSnapshot(state, total, done, downBps, upBps, peers, 1, etaSeconds, ratio, hasMetadata = total > 0))
         }
     }
 

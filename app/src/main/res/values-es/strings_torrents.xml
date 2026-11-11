@@ -84,4 +84,46 @@
     <string name="torrents_added">Añadido a Descargas</string>
     <string name="torrents_added_view">Ver</string>
     <string name="torrents_list_full">La lista de torrents está llena (%1$d). Elimina algunos primero.</string>
+
+    <!-- Settings > Torrents, seeding rows. -->
+    <string name="torrents_state_seeding_limit">Compartiendo, se detiene en la proporción %1$s</string>
+    <string name="torrents_stats_ratio">proporción %1$s</string>
+    <string name="torrents_stop_seeding">Dejar de compartir</string>
+    <string name="torrents_remove_seeding_body">Los archivos están terminados, pero aún no se han guardado en Download/Orbis/%1$s.</string>
+    <string name="torrents_remove_seeding_body_private">Los archivos están terminados, pero aún no se han guardado en tus descargas.</string>
+    <string name="torrents_remove_save">Guardar y quitar</string>
+    <string name="torrents_remove_delete">Eliminar</string>
+    <string name="torrents_settings_title">Torrents</string>
+    <string name="torrents_settings_row_summary">Solo Wi-Fi, velocidad, compartir, enlaces magnet</string>
+    <string name="torrents_settings_section_network">Red</string>
+    <string name="torrents_settings_wifi_only">Descargar solo con Wi-Fi</string>
+    <string name="torrents_settings_wifi_only_summary">Se pausa con datos móviles y continúa con Wi-Fi</string>
+    <string name="torrents_settings_down_limit">Límite de velocidad de descarga</string>
+    <string name="torrents_settings_up_limit">Límite de velocidad de subida</string>
+    <string name="torrents_settings_no_limit">Sin límite</string>
+    <string name="torrents_settings_kbps">%1$d KB/s</string>
+    <string name="torrents_settings_limit_field">KB/s (0 para sin límite)</string>
+    <string name="torrents_settings_limit_error">Introduce un número de 0 a 1.000.000</string>
+    <string name="torrents_settings_section_seeding">Compartir</string>
+    <string name="torrents_settings_stop_seeding">Dejar de compartir al terminar</string>
+    <string name="torrents_settings_stop_seeding_summary">Los archivos se guardan en Descargas en cuanto están completos. Desactivado: Orbis sigue compartiendo los archivos terminados con otros hasta que lo detengas.</string>
+    <string name="torrents_settings_ratio">Detener en la proporción</string>
+    <string name="torrents_settings_ratio_summary">Lo subido dividido entre lo descargado. 1.0 significa devolver tanto como recibiste.</string>
+    <string name="torrents_settings_ratio_field">Proporción</string>
+    <string name="torrents_settings_ratio_error">Introduce una proporción de 0.1 a 100</string>
+    <string name="torrents_settings_ratio_none">Sin límite</string>
+    <string name="torrents_settings_section_peers">Pares</string>
+    <string name="torrents_settings_dht">DHT</string>
+    <string name="torrents_settings_dht_summary">Encontrar pares sin un tracker</string>
+    <string name="torrents_settings_pex">Intercambio de pares</string>
+    <string name="torrents_settings_pex_summary">Conocer pares a través de otros pares</string>
+    <string name="torrents_settings_lsd">Pares locales</string>
+    <string name="torrents_settings_lsd_summary">Encontrar pares en tu red Wi-Fi; ellos pueden ver este teléfono</string>
+    <string name="torrents_settings_section_links">Enlaces</string>
+    <string name="torrents_settings_section_privacy">Privacidad</string>
+    <string name="torrents_settings_ip_title">Cómo comparten los torrents tu dirección IP</string>
+    <string name="torrents_settings_ip_more">DHT, el intercambio de pares y los pares locales encuentran más personas con las que conectar, y cada una de ellas también ve tu dirección IP. Si compartir está activado, Orbis sigue subiendo datos a otros cuando la descarga ha terminado.</string>
+    <string name="torrents_settings_ip_reset">Mostrar la nota antes de la próxima descarga</string>
+    <string name="torrents_settings_save">Guardar</string>
+    <string name="torrents_settings_close">Cerrar</string>
 </resources>

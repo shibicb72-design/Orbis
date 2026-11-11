@@ -15,4 +15,5 @@
     <string name="licence_note_reader">Reader view</string>
     <string name="licence_note_framework">App framework and interface</string>
     <string name="licence_note_qr">QR code scanner</string>
+    <string name="licences_preformatted">Some parts keep their original layout: scroll them sideways.</string>
 </resources>

@@ -49,7 +49,7 @@ class TorrentRowModelTest {
                 e(TorrentStatus.FETCHING_METADATA, total = -1) to (RowState.Fetching to pauseRemove),
                 e(TorrentStatus.DOWNLOADING) to (RowState.Downloading to pauseRemove),
                 e(TorrentStatus.CHECKING) to (RowState.Checking to pauseRemove),
-                e(TorrentStatus.SEEDING) to (RowState.Seeding to pauseRemove),
+                e(TorrentStatus.SEEDING) to (RowState.Seeding(ratio = 0f, limit = null) to setOf(RowAction.PAUSE, RowAction.STOP_SEEDING, RowAction.REMOVE)),
                 e(TorrentStatus.WAITING_FOR_WIFI) to (RowState.WaitingWifi to pauseRemove),
                 e(TorrentStatus.PAUSED, PauseReason.USER) to (RowState.PausedUser to resumeRemove),
                 e(TorrentStatus.PAUSED, null) to (RowState.PausedUser to resumeRemove),
@@ -129,5 +129,23 @@ class TorrentRowModelTest {
         assertNull(p.peers)
         assertNull(p.etaSeconds)
         assertEquals(-1L, model(e(TorrentStatus.FETCHING_METADATA, total = -1)).totalBytes)
+    }
+
+    @Test
+    fun aSeedingRowCarriesItsRatioAndCanStopSeeding() {
+        val seeding = e(TorrentStatus.SEEDING, done = 100).copy(ratio = 1.257f)
+        val m = TorrentRowModel.from(seeding, seedRatioLimit = 2f)!!
+        assertEquals(RowState.Seeding(ratio = 1.257f, limit = 2f), m.state)
+        assertTrue(RowAction.STOP_SEEDING in m.actions)
+        assertTrue(RowAction.PAUSE in m.actions)
+        assertEquals("1.26", TorrentRowModel.ratioText((m.state as RowState.Seeding).ratio))
+        assertEquals("2.0", TorrentRowModel.limitText(2f))
+        // No limit: the row says plain "Seeding".
+        assertNull((model(seeding).state as RowState.Seeding).limit)
+        // A broken ratio from the engine never shows as NaN.
+        assertEquals(0f, (model(seeding.copy(ratio = Float.NaN)).state as RowState.Seeding).ratio)
+        // Only seeding rows offer it.
+        assertFalse(RowAction.STOP_SEEDING in model(e(TorrentStatus.DOWNLOADING)).actions)
+        assertFalse(RowAction.STOP_SEEDING in model(e(TorrentStatus.COMPLETED)).actions)
     }
 }

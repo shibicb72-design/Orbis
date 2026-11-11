@@ -74,7 +74,8 @@ class TorrentManager(
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher,
     private val log: (String) -> Unit,
-    private val settings: StateFlow<TorrentSettings>,
+    /** Settings > Torrents; every change is applied at once (limits, discovery, Wi-Fi only, seeding). */
+    val settings: StateFlow<TorrentSettings>,
     private val network: TorrentNetwork,
     private val now: () -> Long,
     private val publisher: TorrentPublisher,
@@ -106,6 +107,12 @@ class TorrentManager(
     /** Resume data of private entries: memory only. */
     private val privateResume = HashMap<String, ByteArray>()
     private val plans = HashMap<String, TorrentPaths.Plan>()
+
+    /** Finished in this process with "stop seeding" off: they run as SEEDING again after a pause. */
+    private val seeded = HashSet<String>()
+
+    /** "Save and remove" on a seeding torrent: the row leaves the list once its copy is in Download/Orbis. */
+    private val removeAfterPublish = HashSet<String>()
     private var engineRunning = false
     private var appliedSettings: TorrentSettings? = null
     private var lastCheckpoint = 0L
@@ -192,9 +199,22 @@ class TorrentManager(
         persist()
     }
 
-    /** Takes the torrent off the list. [deleteFiles]: its payload goes too; otherwise it stays in the torrents folder. */
+    /**
+     * Takes the torrent off the list. [deleteFiles]: its payload goes too; otherwise it stays in the torrents folder.
+     * A finished torrent that is not saved yet (seeding, or finished and paused or waiting for Wi-Fi): without
+     * [deleteFiles] it is saved to Download/Orbis first
+     * ("Save and remove") and leaves the list when the copy is done.
+     */
     fun remove(id: String, deleteFiles: Boolean) = locked {
         val e = find(id) ?: return@locked
+        if (finishedUnsaved(e) && !deleteFiles) {
+            removeAfterPublish += id
+            finishAndPublish(id)
+            log("removed ${e.status.name}, publishing")
+            persist()
+            reconcile()
+            return@locked
+        }
         detach(id, deleteFiles)
         _entries.update { list -> list.filterNot { it.id == id } }
         forgetMemory(id)
@@ -235,9 +255,18 @@ class TorrentManager(
         }
     }
 
+    /** "Stop seeding" on a seeding row: it leaves the session and is saved to Download/Orbis now. */
+    fun stopSeeding(id: String) = locked {
+        if (!finishSeeding(id)) return@locked
+        log("stop seeding USER")
+        persist()
+        reconcile()
+    }
+
     /**
-     * Private browsing ended: every private torrent leaves the list and its partial files are deleted. Returns the
-     * ids that leave, so their notifications can go too.
+     * Private browsing ended: every private torrent leaves the list and its partial files are deleted. A seeding one
+     * is finished: it is saved to Download/Orbis like a private file download, then its payload is deleted. Returns
+     * the ids that leave, so their notifications can go too.
      */
     fun forgetPrivate(): List<String> {
         val ids = _entries.value.filter { it.isPrivate }.map { it.id }
@@ -248,15 +277,23 @@ class TorrentManager(
     private fun dropPrivate() = locked {
         val gone = _entries.value.filter { it.isPrivate }
         if (gone.isEmpty()) return@locked
+        // Seeding, or finished and paused / waiting for Wi-Fi / stopped by Android: the files are complete.
+        val seeding = gone.filter { finishedUnsaved(it) }
+        val saved = seeding.map { it.id }.toSet()
         for (e in gone) {
-            detach(e.id, deleteFiles = true)
+            val seeds = e.id in saved
+            // A finished torrent's files are complete: flushed, kept for the copy, published after it left the list.
+            if (seeds) attached[e.id]?.let { checkpoint(e.id, it) }
+            detach(e.id, deleteFiles = !seeds)
+            if (seeds) launchPublish(e.id, captured = e.copy(status = TorrentStatus.PUBLISHING), capturedPlan = plans[e.id])
             forgetMemory(e.id)
         }
         _entries.update { list -> list.filterNot { it.isPrivate } }
         withContext(io) {
-            // One still publishing finishes its copy first; the publish job deletes its payload afterwards.
-            gone.filter { it.status != TorrentStatus.PUBLISHING }.forEach { deletePayload(File(it.saveDir)) }
+            // One still publishing (or seeding) finishes its copy first; the publish job deletes its payload afterwards.
+            gone.filter { it.status != TorrentStatus.PUBLISHING && it.id !in saved }.forEach { deletePayload(File(it.saveDir)) }
         }
+        if (seeding.isNotEmpty()) log("seeding dropped, publishing ${seeding.size}")
         log("private torrents dropped ${gone.size}")
         reconcile()
     }
@@ -357,19 +394,49 @@ class TorrentManager(
 
     private suspend fun onFinished(entry: TorrentEntry, a: Attached) {
         if (!settings.value.stopSeeding) {
-            set(entry.id) { it.copy(status = TorrentStatus.SEEDING, doneBytes = it.totalBytes.coerceAtLeast(it.doneBytes)) }
+            // Seeds from its private copy until the ratio is reached or the user stops it; nothing is published yet.
+            seeded += entry.id
+            // One paused as its last piece landed stays paused; it seeds when resumed.
+            set(entry.id) {
+                it.copy(
+                    status = if (it.status == TorrentStatus.PAUSED) TorrentStatus.PAUSED else TorrentStatus.SEEDING,
+                    doneBytes = it.totalBytes.coerceAtLeast(it.doneBytes),
+                    etaSeconds = null,
+                )
+            }
             checkpoint(entry.id, a)
+            log("finished, seeding")
             persist()
+            reconcile()
             return
         }
-        // Flushes what libtorrent still holds, so the copy reads complete files.
-        checkpoint(entry.id, a)
-        detach(entry.id, deleteFiles = false)
-        set(entry.id) { it.copy(status = TorrentStatus.PUBLISHING, doneBytes = it.totalBytes.coerceAtLeast(it.doneBytes), downBps = 0, upBps = 0, peers = 0, seeds = 0, etaSeconds = null) }
+        finishAndPublish(entry.id)
         log("finished")
         persist()
         reconcile()
-        launchPublish(entry.id)
+    }
+
+    /**
+     * The finish path: resume data is flushed (so the copy reads complete files), the torrent leaves the session with
+     * its files kept, and they are copied to Download/Orbis. The caller persists and reconciles.
+     */
+    private suspend fun finishAndPublish(id: String) {
+        attached[id]?.let { checkpoint(id, it) }
+        detach(id, deleteFiles = false)
+        seeded.remove(id)
+        set(id) { it.copy(status = TorrentStatus.PUBLISHING, doneBytes = it.totalBytes.coerceAtLeast(it.doneBytes), downBps = 0, upBps = 0, peers = 0, seeds = 0, etaSeconds = null) }
+        launchPublish(id)
+    }
+
+    /** Finished but not saved yet; [seeded] also knows one whose live byte count lags. */
+    private fun finishedUnsaved(e: TorrentEntry): Boolean =
+        e.finishedUnsaved || (e.id in seeded && e.status != TorrentStatus.PUBLISHING && e.status != TorrentStatus.COMPLETED && e.status != TorrentStatus.FAILED)
+
+    /** A SEEDING torrent takes the finish path. False when [id] is not seeding (gone, paused, already saving). */
+    private suspend fun finishSeeding(id: String): Boolean {
+        if (find(id)?.status != TorrentStatus.SEEDING) return false
+        finishAndPublish(id)
+        return true
     }
 
     private suspend fun fail(id: String, kind: TorrentErrorKind) {
@@ -419,7 +486,25 @@ class TorrentManager(
                     peers = snap.peers,
                     seeds = snap.seeds,
                     etaSeconds = snap.etaSeconds,
+                    ratio = snap.ratio,
                 )
+            }
+        }
+        val s = settings.value
+        val limit = s.seedRatioLimit
+        if (!s.stopSeeding && limit != null) {
+            val reached = _entries.value.filter { it.id in updates && it.status == TorrentStatus.SEEDING && it.ratio >= limit }.map { it.id }
+            if (reached.isNotEmpty()) {
+                scope.launch {
+                    lock.withLock {
+                        var n = 0
+                        for (id in reached) if (finishSeeding(id)) n++
+                        if (n == 0) return@withLock
+                        repeat(n) { log("stop seeding RATIO") }
+                        persist()
+                        reconcile()
+                    }
+                }
             }
         }
         val t = now()
@@ -445,6 +530,16 @@ class TorrentManager(
      */
     private suspend fun reconcile() {
         val s = settings.value
+        if (s.stopSeeding) {
+            // "Stop seeding when finished" is on (just turned on, or a seeding torrent came back from a pause or a
+            // restart): every seeding torrent is saved now, so the setting means what it says.
+            val seeding = _entries.value.filter { it.status == TorrentStatus.SEEDING }.map { it.id }
+            if (seeding.isNotEmpty()) {
+                seeding.forEach { finishAndPublish(it) }
+                log("stop seeding SETTING ${seeding.size}")
+                persist()
+            }
+        }
         val netOk = !s.wifiOnly || network.kind.value == NetworkKind.WIFI_OR_ETHERNET
         _entries.update { list ->
             list.map { e ->
@@ -488,6 +583,7 @@ class TorrentManager(
             engine.setLimits(s.downBps, s.upBps)
             engine.setDiscovery(s.dht, s.pex, s.lsd)
             appliedSettings = s
+            log("settings applied")
         }
         for (e in run) {
             val a = attached[e.id] ?: attach(e) ?: continue
@@ -559,10 +655,14 @@ class TorrentManager(
 
     // ---- publishing ----
 
-    private fun launchPublish(id: String) {
+    /**
+     * Copies [id]'s files to Download/Orbis. [captured]: the entry as it was when it left the list in the same locked
+     * step (a seeding private torrent at the end of private browsing), with its [capturedPlan].
+     */
+    private fun launchPublish(id: String, captured: TorrentEntry? = null, capturedPlan: TorrentPaths.Plan? = null) {
         scope.launch {
-            val entry = lock.withLock { find(id) } ?: return@launch
-            val plan = lock.withLock { plans[id] } ?: storedPlan(entry)
+            val entry = captured ?: lock.withLock { find(id) } ?: return@launch
+            val plan = capturedPlan ?: lock.withLock { plans[id] } ?: storedPlan(entry)
             val saveDir = File(entry.saveDir)
             val ok = withContext(io) { publishFiles(saveDir, entry.displayName, plan) }
             lock.withLock {
@@ -572,16 +672,22 @@ class TorrentManager(
                     withContext(io) { if (ok) deletePayload(saveDir) }
                     return@withLock
                 }
+                val thenRemove = removeAfterPublish.remove(id)
                 if (ok) {
                     withContext(io) {
                         deletePayload(saveDir)
                         store.deleteState(id)
                     }
                     plans.remove(id)
-                    set(id) { it.copy(status = TorrentStatus.COMPLETED, publishedPath = "Download/Orbis/${it.displayName}") }
-                    log("published")
+                    if (thenRemove) {
+                        _entries.update { list -> list.filterNot { it.id == id } }
+                        log("published, removed")
+                    } else {
+                        set(id) { it.copy(status = TorrentStatus.COMPLETED, publishedPath = "Download/Orbis/${it.displayName}") }
+                        log("published")
+                    }
                 } else {
-                    // The payload stays so nothing finished is lost; Retry copies it again.
+                    // The payload stays so nothing finished is lost; Retry copies it again (the row stays for that).
                     set(id) { it.copy(status = TorrentStatus.FAILED, errorKind = TorrentErrorKind.PUBLISH_FAILED) }
                     log("publish failed")
                 }
@@ -728,6 +834,8 @@ class TorrentManager(
         sources.remove(id)
         privateResume.remove(id)
         plans.remove(id)
+        seeded.remove(id)
+        removeAfterPublish.remove(id)
     }
 
     private fun find(id: String): TorrentEntry? = _entries.value.firstOrNull { it.id == id }
@@ -736,7 +844,12 @@ class TorrentManager(
         _entries.update { list -> list.map { if (it.id == id) change(it) else it } }
     }
 
-    private fun runningStatus(e: TorrentEntry): TorrentStatus = if (e.hasMetadata) TorrentStatus.DOWNLOADING else TorrentStatus.FETCHING_METADATA
+    private fun runningStatus(e: TorrentEntry): TorrentStatus =
+        when {
+            e.id in seeded -> TorrentStatus.SEEDING
+            e.hasMetadata -> TorrentStatus.DOWNLOADING
+            else -> TorrentStatus.FETCHING_METADATA
+        }
 
     private fun newId(): String {
         val bytes = ByteArray(16)

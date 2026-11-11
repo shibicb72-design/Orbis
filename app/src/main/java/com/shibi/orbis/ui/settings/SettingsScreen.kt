@@ -149,24 +149,12 @@ fun SettingsScreen(
     onOpenPlayListing: (() -> Unit)? = null,
     /** About > Open-source licences. */
     onOpenLicences: () -> Unit = {},
+    /** Browsing > Torrents (Wi-Fi only, speed limits, seeding, peers, magnet links). */
+    onOpenTorrents: () -> Unit = {},
 ) {
     var themeDialogOpen by remember { mutableStateOf(false) }
     var httpsDialogOpen by remember { mutableStateOf(false) }
-    var magnetDialogOpen by remember { mutableStateOf(false) }
     if (site != null) {
-        val magnets by site.magnetHandler.collectAsStateWithLifecycle()
-        if (magnetDialogOpen) {
-            ChoiceDialog(
-                title = R.string.torrents_setting_magnets_title,
-                options = MagnetHandler.entries.map { it to magnetHandlerLabel(it) },
-                selected = magnets,
-                onSelect = {
-                    site.setMagnetHandler(it)
-                    magnetDialogOpen = false
-                },
-                onDismiss = { magnetDialogOpen = false },
-            )
-        }
         val theme by site.appTheme.collectAsStateWithLifecycle()
         val https by site.httpsOnly.collectAsStateWithLifecycle()
         if (themeDialogOpen) {
@@ -362,14 +350,13 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth().toggleable(value = openInApps, role = Role.Switch, onValueChange = site::setOpenLinksInApps),
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    val magnets by site.magnetHandler.collectAsStateWithLifecycle()
-                    SettingsItem(
-                        headlineContent = { Text(stringResource(R.string.torrents_setting_magnets_title)) },
-                        supportingContent = { Text(stringResource(magnetHandlerLabel(magnets))) },
-                        modifier = Modifier.fillMaxWidth().clickable { magnetDialogOpen = true },
-                    )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
+                SettingsItem(
+                    headlineContent = { Text(stringResource(R.string.torrents_settings_title)) },
+                    supportingContent = { Text(stringResource(R.string.torrents_settings_row_summary)) },
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenTorrents),
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.homepage_title)) },
                     supportingContent = { Text(homepage ?: stringResource(R.string.homepage_start_page)) },
@@ -493,7 +480,7 @@ private fun themeLabel(t: AppTheme): Int =
     }
 
 @StringRes
-private fun magnetHandlerLabel(h: MagnetHandler): Int =
+internal fun magnetHandlerLabel(h: MagnetHandler): Int =
     when (h) {
         MagnetHandler.ORBIS -> R.string.torrents_setting_magnets_orbis
         MagnetHandler.OTHER_APP -> R.string.torrents_setting_magnets_other_app
@@ -509,7 +496,7 @@ private fun httpsOnlyLabel(m: HttpsOnlyMode): Int =
 
 /** A single-choice dialog of radio rows. */
 @Composable
-private fun <T> ChoiceDialog(
+internal fun <T> ChoiceDialog(
     @StringRes title: Int,
     options: List<Pair<T, Int>>,
     selected: T,
@@ -545,7 +532,7 @@ private fun <T> ChoiceDialog(
 }
 
 @Composable
-private fun SettingsSection(@StringRes title: Int, content: @Composable () -> Unit) {
+internal fun SettingsSection(@StringRes title: Int, content: @Composable () -> Unit) {
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
         Text(
             stringResource(title),
@@ -562,7 +549,7 @@ private fun SettingsSection(@StringRes title: Int, content: @Composable () -> Un
 }
 
 @Composable
-private fun SettingsItem(
+internal fun SettingsItem(
     headlineContent: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     supportingContent: (@Composable () -> Unit)? = null,

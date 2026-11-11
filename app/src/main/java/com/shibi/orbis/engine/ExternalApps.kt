@@ -1,6 +1,7 @@
 package com.shibi.orbis.engine
 
 import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -158,6 +159,31 @@ internal fun routeExternalNavigation(uri: String, ownPackage: String): ExternalN
     return ExternalNavigation.App(intent, fallback, marketPackage)
 }
 
+/** Who gets a magnet: link that is not for Orbis's own downloader. */
+internal sealed interface HandoffPlan {
+    /** No other app: the "no app can open this link / copy it" offer. */
+    data object None : HandoffPlan
+
+    /** Exactly one other app: it is named in the prompt and opened directly. */
+    data class One(val packageName: String) : HandoffPlan
+
+    /** Several: the system chooser, with Orbis left out of it when [excludeOwn]. */
+    data class Several(val excludeOwn: Boolean) : HandoffPlan
+}
+
+/**
+ * [handlers]: the packages that can open the link (one per activity, repeats allowed). Orbis itself never counts: it
+ * claims magnet: from other apps, and a link it was told to hand off must not come back to it.
+ */
+internal fun pickExternalHandlers(handlers: List<String>, ownPackage: String): HandoffPlan {
+    val others = handlers.distinct().filter { it != ownPackage }
+    return when (others.size) {
+        0 -> HandoffPlan.None
+        1 -> HandoffPlan.One(others[0])
+        else -> HandoffPlan.Several(excludeOwn = ownPackage in handlers)
+    }
+}
+
 /** An app that can open a link. [label] is null when the system would ask the user to pick one. */
 internal data class AppTarget(
     val intent: Intent?,
@@ -182,6 +208,8 @@ internal class ExternalApps(private val context: Context) {
 
     fun targetFor(app: ExternalNavigation.App): AppTarget {
         val intent = app.intent
+        // magnet: is visible through <queries>, so the list of handlers is complete: Orbis is left out of it.
+        if (intent != null && intent.data?.scheme?.lowercase() == "magnet") return magnetTarget(app, intent)
         val resolved = intent?.let { runCatching { pm.resolveActivity(it, PackageManager.MATCH_DEFAULT_ONLY) }.getOrNull() }
         val own = resolved?.activityInfo?.packageName == context.packageName
         return AppTarget(
@@ -193,6 +221,30 @@ internal class ExternalApps(private val context: Context) {
             marketPackage = app.marketPackage,
             resolvable = resolved != null && !own,
         )
+    }
+
+    /**
+     * A magnet: link for another app ("Open in another app", or a Custom Tab): one other handler is opened directly,
+     * several get the system chooser without Orbis, none gets the "no app" offer. Never Orbis itself.
+     */
+    private fun magnetTarget(app: ExternalNavigation.App, intent: Intent): AppTarget {
+        val found = runCatching { pm.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY) }.getOrNull().orEmpty()
+        val own = context.packageName
+        return when (val plan = pickExternalHandlers(found.map { it.activityInfo.packageName }, own)) {
+            HandoffPlan.None -> AppTarget(null, null, app.fallbackUrl, app.marketPackage, resolvable = false)
+            is HandoffPlan.One -> {
+                intent.setPackage(plan.packageName)
+                AppTarget(intent, labelOf(found.first { it.activityInfo.packageName == plan.packageName }), app.fallbackUrl, app.marketPackage, resolvable = true)
+            }
+            is HandoffPlan.Several -> {
+                val ownComponents =
+                    found.filter { it.activityInfo.packageName == own }.map { ComponentName(own, it.activityInfo.name) }
+                        .ifEmpty { listOf(ComponentName(context, com.shibi.orbis.LinkRouterActivity::class.java)) }
+                val chooser = Intent.createChooser(intent, null)
+                chooser.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, ownComponents.toTypedArray())
+                AppTarget(chooser, null, app.fallbackUrl, app.marketPackage, resolvable = true)
+            }
+        }
     }
 
     /** A web link that an installed app (not a browser, not Orbis) opens, or null. */

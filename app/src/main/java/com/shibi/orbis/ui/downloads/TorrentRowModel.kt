@@ -13,7 +13,8 @@ sealed interface RowState {
 
     data object Checking : RowState
 
-    data object Seeding : RowState
+    /** Finished, sharing with others until [limit] (null: until the user stops it). */
+    data class Seeding(val ratio: Float, val limit: Float?) : RowState
 
     data object PausedUser : RowState
 
@@ -30,7 +31,7 @@ sealed interface RowState {
     data class Failed(val kind: TorrentErrorKind) : RowState
 }
 
-enum class RowAction { PAUSE, RESUME, RETRY, OPEN, REMOVE }
+enum class RowAction { PAUSE, RESUME, RETRY, OPEN, STOP_SEEDING, REMOVE }
 
 /**
  * What one torrent row shows, from its [TorrentEntry]. Pure (no Android), so every state is unit tested.
@@ -64,10 +65,13 @@ class TorrentRowModel(
     companion object {
         private val RETRYABLE = setOf(TorrentErrorKind.NO_SPACE, TorrentErrorKind.FILE_ERROR, TorrentErrorKind.ENGINE_ERROR, TorrentErrorKind.PUBLISH_FAILED)
 
-        /** Null for a REMOVED entry (never listed). */
-        fun from(e: TorrentEntry): TorrentRowModel? {
-            val state = stateOf(e) ?: return null
-            val running = state == RowState.Fetching || state == RowState.Downloading || state == RowState.Seeding || state == RowState.Checking
+        /**
+         * Null for a REMOVED entry (never listed). [seedRatioLimit]: the "Stop at ratio" setting, which applies only
+         * while "Stop seeding when finished" is off (pass null then).
+         */
+        fun from(e: TorrentEntry, seedRatioLimit: Float? = null): TorrentRowModel? {
+            val state = stateOf(e, seedRatioLimit) ?: return null
+            val running = state == RowState.Fetching || state == RowState.Downloading || state is RowState.Seeding || state == RowState.Checking
             val percent =
                 when {
                     state == RowState.Checking || state == RowState.Publishing || state == RowState.Fetching -> null
@@ -82,7 +86,7 @@ class TorrentRowModel(
                 doneBytes = e.doneBytes.coerceAtLeast(0L),
                 totalBytes = if (e.totalBytes > 0) e.totalBytes else -1L,
                 percent = percent,
-                speedBps = if (!running) 0L else if (state == RowState.Seeding) e.upBps.coerceAtLeast(0L) else e.downBps.coerceAtLeast(0L),
+                speedBps = if (!running) 0L else if (state is RowState.Seeding) e.upBps.coerceAtLeast(0L) else e.downBps.coerceAtLeast(0L),
                 peers = if (running && state != RowState.Checking) e.peers.coerceAtLeast(0) else null,
                 seeds = if (running && state != RowState.Checking) e.seeds.coerceAtLeast(0) else null,
                 etaSeconds = if (state == RowState.Downloading) e.etaSeconds?.takeIf { it >= 0 } else null,
@@ -91,12 +95,12 @@ class TorrentRowModel(
             )
         }
 
-        private fun stateOf(e: TorrentEntry): RowState? =
+        private fun stateOf(e: TorrentEntry, seedRatioLimit: Float?): RowState? =
             when (e.status) {
                 TorrentStatus.FETCHING_METADATA -> RowState.Fetching
                 TorrentStatus.DOWNLOADING -> RowState.Downloading
                 TorrentStatus.CHECKING -> RowState.Checking
-                TorrentStatus.SEEDING -> RowState.Seeding
+                TorrentStatus.SEEDING -> RowState.Seeding(ratio = e.ratio.takeIf { it.isFinite() && it >= 0f } ?: 0f, limit = seedRatioLimit)
                 TorrentStatus.PAUSED ->
                     when (e.pauseReason) {
                         PauseReason.QUEUED -> RowState.PausedQueued
@@ -112,12 +116,19 @@ class TorrentRowModel(
 
         private fun actionsOf(state: RowState): Set<RowAction> =
             when (state) {
-                RowState.Fetching, RowState.Downloading, RowState.Checking, RowState.Seeding, RowState.WaitingWifi -> setOf(RowAction.PAUSE, RowAction.REMOVE)
+                RowState.Fetching, RowState.Downloading, RowState.Checking, RowState.WaitingWifi -> setOf(RowAction.PAUSE, RowAction.REMOVE)
+                is RowState.Seeding -> setOf(RowAction.PAUSE, RowAction.STOP_SEEDING, RowAction.REMOVE)
                 RowState.PausedUser, RowState.PausedQueued, RowState.PausedTimeout -> setOf(RowAction.RESUME, RowAction.REMOVE)
                 // A copy in flight must finish first.
                 RowState.Publishing -> emptySet()
                 RowState.Completed -> setOf(RowAction.OPEN, RowAction.REMOVE)
                 is RowState.Failed -> if (state.kind in RETRYABLE) setOf(RowAction.RETRY, RowAction.REMOVE) else setOf(RowAction.REMOVE)
             }
+
+        /** "ratio 1.25": two decimals, like other torrent apps, so a slow rise is visible. */
+        fun ratioText(ratio: Float): String = String.format(java.util.Locale.ROOT, "%.2f", ratio)
+
+        /** The ratio limit with its one decimal: "1.0". */
+        fun limitText(limit: Float): String = String.format(java.util.Locale.ROOT, "%.1f", limit)
     }
 }

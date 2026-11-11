@@ -55,6 +55,7 @@ import com.shibi.orbis.downloads.DownloadStatus
 import com.shibi.orbis.torrent.TorrentEntry
 import com.shibi.orbis.torrent.TorrentErrorKind
 import com.shibi.orbis.torrent.TorrentManager
+import com.shibi.orbis.torrent.TorrentSettings
 import com.shibi.orbis.torrent.TorrentStatus
 import com.shibi.orbis.ui.OrbisEmptyState
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -92,10 +93,14 @@ fun DownloadsScreen(
     val entries by manager.entries.collectAsStateWithLifecycle()
     val noTorrents = remember { MutableStateFlow<List<TorrentEntry>>(emptyList()) }
     val torrentEntries by (torrents?.entries ?: noTorrents).collectAsStateWithLifecycle()
+    val noSettings = remember { MutableStateFlow(TorrentSettings()) }
+    val torrentSettings by (torrents?.settings ?: noSettings).collectAsStateWithLifecycle()
+    // The ratio limit applies only while "Stop seeding when finished" is off.
+    val ratioLimit = torrentSettings.seedRatioLimit.takeIf { !torrentSettings.stopSeeding }
     val rows =
-        remember(entries, torrentEntries) {
+        remember(entries, torrentEntries, ratioLimit) {
             val files = entries.map { ListRow.File(it) }
-            val tors = torrentEntries.mapNotNull { e -> TorrentRowModel.from(e)?.let { ListRow.Torrent(e, it) } }
+            val tors = torrentEntries.mapNotNull { e -> TorrentRowModel.from(e, ratioLimit)?.let { ListRow.Torrent(e, it) } }
             (files + tors).sortedByDescending { it.time }
         }
     val context = LocalContext.current
@@ -165,6 +170,7 @@ fun DownloadsScreen(
                             onPause = { t.pause(entry.id) },
                             onResume = { t.resume(entry.id) },
                             onRetry = { t.retry(entry.id) },
+                            onStopSeeding = { t.stopSeeding(entry.id) },
                             onOpen = {
                                 scope.launch {
                                     val result =
@@ -238,11 +244,42 @@ fun DownloadsScreen(
 /**
  * An unfinished torrent has no usable files outside the app (they are published only when it finishes), so removing
  * it deletes what was downloaded. A completed one only leaves the list: its files stay in Download/Orbis/<name>.
+ * A finished one that is not saved yet (seeding, or paused or waiting for Wi-Fi after it finished): "Save and remove"
+ * copies it to Download/Orbis first, "Delete" does not.
  */
 @Composable
 private fun RemoveTorrentDialog(entry: TorrentEntry, onRemove: (deleteFiles: Boolean) -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val onSurface = MaterialTheme.colorScheme.onSurface
+    if (entry.finishedUnsaved) {
+        val buttons = ButtonDefaults.textButtonColors(contentColor = onSurface)
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = onSurface,
+            textContentColor = onSurface,
+            title = { Text(stringResource(R.string.torrents_remove_title)) },
+            text = {
+                Text(
+                    if (entry.isPrivate) {
+                        stringResource(R.string.torrents_remove_seeding_body_private)
+                    } else {
+                        stringResource(R.string.torrents_remove_seeding_body, entry.displayName)
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { onRemove(false) }, colors = buttons) { Text(stringResource(R.string.torrents_remove_save)) }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { onRemove(true) }, colors = buttons) { Text(stringResource(R.string.torrents_remove_delete)) }
+                    TextButton(onClick = onDismiss, colors = buttons) { Text(stringResource(R.string.torrents_cancel)) }
+                }
+            },
+        )
+        return
+    }
     val completed = entry.status == TorrentStatus.COMPLETED
     val title = stringResource(if (completed) R.string.torrents_remove_done_title else R.string.torrents_remove_title)
     val body =
@@ -281,6 +318,7 @@ private fun TorrentRow(
     onRetry: () -> Unit,
     onOpen: () -> Unit,
     onRemove: () -> Unit,
+    onStopSeeding: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
@@ -337,6 +375,9 @@ private fun TorrentRow(
                 if (RowAction.PAUSE in model.actions) {
                     TextButton(onClick = onPause, colors = textButton) { Text(stringResource(R.string.torrents_pause)) }
                 }
+                if (RowAction.STOP_SEEDING in model.actions) {
+                    TextButton(onClick = onStopSeeding, colors = textButton) { Text(stringResource(R.string.torrents_stop_seeding)) }
+                }
                 if (RowAction.RESUME in model.actions) {
                     TextButton(onClick = onResume, colors = textButton) { Text(stringResource(R.string.torrents_resume)) }
                 }
@@ -364,7 +405,9 @@ private fun stateText(model: TorrentRowModel): String =
         RowState.Fetching -> stringResource(R.string.torrents_state_fetching)
         RowState.Downloading -> stringResource(R.string.torrents_state_downloading)
         RowState.Checking -> stringResource(R.string.torrents_state_checking)
-        RowState.Seeding -> stringResource(R.string.torrents_state_seeding)
+        is RowState.Seeding ->
+            s.limit?.let { stringResource(R.string.torrents_state_seeding_limit, TorrentRowModel.limitText(it)) }
+                ?: stringResource(R.string.torrents_state_seeding)
         RowState.PausedUser -> stringResource(R.string.torrents_state_paused)
         RowState.PausedQueued -> stringResource(R.string.torrents_state_queued)
         RowState.PausedTimeout -> stringResource(R.string.torrents_state_paused_timeout)
@@ -385,15 +428,20 @@ private fun stateText(model: TorrentRowModel): String =
             )
     }
 
-/** "<done> of <total> · <speed>/s · <n> peers · <eta> left", each part left out when unknown. */
+/**
+ * "<done> of <total> · <speed>/s · <n> peers · <eta> left", each part left out when unknown. Seeding:
+ * "<total> · ratio x.xx · <upload speed>/s · <n> peers".
+ */
 private fun statsText(context: android.content.Context, model: TorrentRowModel): String {
     val parts = ArrayList<String>(4)
     val done = Formatter.formatShortFileSize(context, model.doneBytes)
+    val seeding = model.state as? RowState.Seeding
     when {
-        model.totalBytes > 0 && model.state == RowState.Completed -> parts += Formatter.formatShortFileSize(context, model.totalBytes)
+        model.totalBytes > 0 && (model.state == RowState.Completed || seeding != null) -> parts += Formatter.formatShortFileSize(context, model.totalBytes)
         model.totalBytes > 0 -> parts += context.getString(R.string.downloads_progress_known, done, Formatter.formatShortFileSize(context, model.totalBytes))
         model.doneBytes > 0 -> parts += context.getString(R.string.downloads_progress_unknown, done)
     }
+    if (seeding != null) parts += context.getString(R.string.torrents_stats_ratio, TorrentRowModel.ratioText(seeding.ratio))
     if (model.speedBps > 0) parts += context.getString(R.string.torrents_stats_speed, Formatter.formatShortFileSize(context, model.speedBps))
     model.peers?.let { parts += context.resources.getQuantityString(R.plurals.torrents_stats_peers, it, it) }
     model.etaSeconds?.let { parts += context.getString(R.string.torrents_stats_eta, DateUtils.formatElapsedTime(it)) }

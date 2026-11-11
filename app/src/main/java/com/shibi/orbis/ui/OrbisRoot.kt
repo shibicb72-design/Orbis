@@ -26,6 +26,7 @@ import com.shibi.orbis.ui.settings.DebugLogScreen
 import com.shibi.orbis.ui.settings.LicencesScreen
 import com.shibi.orbis.ui.settings.SettingsScreen
 import com.shibi.orbis.ui.settings.SitePermissionsScreen
+import com.shibi.orbis.ui.settings.TorrentSettingsScreen
 import com.shibi.orbis.ui.settings.UboOnboardingScreen
 import com.shibi.orbis.ui.settings.UboSettingsScreen
 import com.shibi.orbis.ui.passwords.PasswordsScreen
@@ -46,6 +47,7 @@ private object Routes {
     const val ClearData = "settings/clear_data"
     const val Passwords = "settings/passwords"
     const val Licences = "settings/licences"
+    const val Torrents = "settings/torrents"
     const val QrScan = "qr_scan"
 }
 
@@ -207,7 +209,17 @@ fun OrbisRoot(container: AppContainer) {
                 onOpenPasswords = { nav.navigate(Routes.Passwords) },
                 site = container.browserSettings,
                 onOpenLicences = { nav.navigate(Routes.Licences) },
+                onOpenTorrents = { nav.navigate(Routes.Torrents) },
             )
+        }
+        composable(Routes.Torrents) {
+            val store = container.torrentSettings
+            if (store == null) {
+                // No torrent support in this process: nothing to show.
+                LaunchedEffect(Unit) { nav.popBackStack() }
+            } else {
+                TorrentSettingsScreen(store = store, browser = container.browserSettings, onBack = { nav.popBackStack() })
+            }
         }
         composable(Routes.Licences) {
             LicencesScreen(onBack = { nav.popBackStack() })

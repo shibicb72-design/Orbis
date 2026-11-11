@@ -34,6 +34,11 @@ browsing data; the estimate is cleared with browsing history.
   on your network. All of them can see your IP address, and pieces of the file are exchanged with the other people.
   Nothing else is sent: there is no account and no analytics. A torrent from a private tab is never written to the
   torrent list on disk and leaves the list when private browsing ends.
+  One that finished and was still seeding is saved to your Downloads first, like a private file download.
+  Seeding (uploading pieces of a finished torrent to other people) happens only if you turn off "Stop seeding when
+  finished" in Settings > Torrents; by default nothing is uploaded after a download is finished. DHT, peer exchange
+  and local peer discovery can each be turned off there too. Speed limits and "Wi-Fi only" are settings on your
+  phone and send nothing.
 
 ## Permissions
 Camera, microphone and location are only used when a website asks and you allow it (and the camera for the QR

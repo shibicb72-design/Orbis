@@ -29,7 +29,6 @@ import com.shibi.orbis.torrent.TorrentLog
 import com.shibi.orbis.torrent.TorrentManager
 import com.shibi.orbis.torrent.TorrentNotifications
 import com.shibi.orbis.torrent.TorrentPublisher
-import com.shibi.orbis.torrent.TorrentSettings
 import com.shibi.orbis.torrent.TorrentStore
 import com.shibi.orbis.engine.AndroidPermissionBroker
 import com.shibi.orbis.engine.BrowserEngine
@@ -242,6 +241,11 @@ class OrbisApp : Application() {
         // Torrents: restore() below only reads the index; the native engine starts with the first active torrent.
         val torrentLog = TorrentLog.sink(debugLog)
         val torrentStore = TorrentStore(File(filesDir, "torrents"))
+        // Settings > Torrents: app-wide, never in the torrent index. The manager applies every change at once.
+        val torrentSettings =
+            com.shibi.orbis.torrent.TorrentSettingsStore(
+                getSharedPreferences(com.shibi.orbis.torrent.SharedPreferencesTorrentPrefs.FILE_NAME, MODE_PRIVATE),
+            )
         val torrents =
             TorrentManager(
                 engine = Libtorrent4jEngine("Orbis/" + BuildConfig.VERSION_NAME, torrentStore.sessionFile, torrentLog),
@@ -250,8 +254,7 @@ class OrbisApp : Application() {
                 scope = appScope,
                 io = Dispatchers.IO,
                 log = torrentLog,
-                // Settings UI comes later: the owner's defaults (Wi-Fi only, stop seeding, DHT/PeX/LSD on, no limits).
-                settings = MutableStateFlow(TorrentSettings()),
+                settings = torrentSettings.settings,
                 network = AndroidTorrentNetwork(this),
                 now = System::currentTimeMillis,
                 publisher =
@@ -388,6 +391,7 @@ class OrbisApp : Application() {
         container.privacyStats = stats
         container.youtubeAdSavings = youtubeAds
         container.torrents = torrents
+        container.torrentSettings = torrentSettings
         engine.onContentBlocked = { kind, uri, isPrivate -> stats.recordBlocked(kind, uri, isPrivate) }
         appScope.launch {
             val uid = android.os.Process.myUid()
@@ -442,6 +446,8 @@ class AppContainer(
     var youtubeAdSavings: com.shibi.orbis.youtube.YoutubeAdSavings? = null,
     /** Torrent downloads; set by the app after creation. */
     var torrents: com.shibi.orbis.torrent.TorrentManager? = null,
+    /** Settings > Torrents; set by the app after creation. */
+    var torrentSettings: com.shibi.orbis.torrent.TorrentSettingsStore? = null,
     val engine: BrowserEngine,
     val ubo: UboOnboardingController,
     /** Owns every tab and session; outlives screens, so Settings never destroys a page. */
