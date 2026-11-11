@@ -338,7 +338,7 @@ fun scriptAfterHistoryCommit(
  * Whether a subframe may load [url]. Every `file:` URL is refused.
  *
  * This is the whole of what GeckoView can gate below the top-level document. `<img>`, `<script>` and stylesheets
- * never arrive here (no such callback on `NavigationDelegate` or `ContentDelegate` in GeckoView 159), and bug
+ * never arrive here (no such callback on `NavigationDelegate` or `ContentDelegate` in GeckoView 160), and bug
  * 1684947 means Gecko will fetch a `file:` subresource from the app data directory. Those are stopped by
  * [IMPORT_CONTENT_SECURITY_POLICY], which is written into the imported HTML before it is shown.
  * XHTML is not imported: a late `head`, a non-XHTML default namespace, or `<?xml-stylesheet?>` can bypass a meta.

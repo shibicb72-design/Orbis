@@ -25,7 +25,7 @@ class LicenceEntry(val name: String, val version: String?, val licence: LicenceK
  */
 object Licences {
     const val LIBTORRENT4J_VERSION = "2.1.0-39"
-    const val ANDROID_COMPONENTS_VERSION = "159.0.1"
+    const val ANDROID_COMPONENTS_VERSION = "160.0"
     const val ZXING_VERSION = "3.5.4"
 
     val entries: List<LicenceEntry> =
