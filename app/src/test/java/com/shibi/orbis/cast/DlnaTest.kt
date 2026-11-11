@@ -214,10 +214,32 @@ class DlnaTest {
         assertNull(redirectTarget("http://192.168.1.20/device.xml", "http://127.0.0.1/local.xml"))
         assertNull(redirectTarget("http://192.168.1.20/device.xml", "https://192.168.1.20/x"))
         assertNull(redirectTarget("http://192.168.1.20/device.xml", null))
+        assertNull(redirectTarget("http://192.168.1.20/device.xml", "http://192.168.1.21/desc.xml"))
         assertEquals(
-            "http://192.168.1.21/desc.xml",
-            redirectTarget("http://192.168.1.20/device.xml", "http://192.168.1.21/desc.xml"),
+            "http://192.168.1.20:8200/desc.xml",
+            redirectTarget("http://192.168.1.20/device.xml", "http://192.168.1.20:8200/desc.xml"),
         )
+        assertEquals("http://192.168.1.20/other.xml", redirectTarget("http://192.168.1.20/device.xml", "/other.xml"))
+    }
+
+    @Test
+    fun controlUrlMustStayOnTheDescriptionsIpHost() {
+        assertNull(resolveControlUrl("http://10.0.0.5:49152/desc.xml", "http://10.0.0.1/ctl"))
+        assertNull(resolveControlUrl("http://10.0.0.5:49152/desc.xml", "http://router.local/ctl"))
+        assertNull(resolveControlUrl("http://tv.local:49152/desc.xml", "/ctl"))
+        assertNull(resolveControlUrl("http://10.0.0.5:49152/desc.xml", "file:///etc/hosts"))
+        assertEquals(
+            "http://10.0.0.5:49152/upnp/control/AVTransport1",
+            resolveControlUrl("http://10.0.0.5:49152/desc.xml", "/upnp/control/AVTransport1"),
+        )
+        assertEquals("http://10.0.0.5:8080/ctl", resolveControlUrl("http://10.0.0.5:49152/desc.xml", "http://10.0.0.5:8080/ctl"))
+        assertEquals("http://[fe80::1]:49152/ctl", resolveControlUrl("http://[fe80::1]:49152/desc.xml", "/ctl"))
+        val xml =
+            "<root><device><friendlyName>TV</friendlyName><serviceList><service>" +
+                "<serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType>" +
+                "<controlURL>http://192.168.1.1/cgi-bin/ctl</controlURL>" +
+                "</service></serviceList></device></root>"
+        assertNull(parseDlnaDescription(xml, "http://192.168.1.20:8200/device.xml"))
     }
 
     @Test

@@ -13,6 +13,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.shibi.orbis.R
 
+/**
+ * Whether the microphone is offered. Never in a private tab: the recognizer app (Google, Samsung) may upload the
+ * audio whatever Orbis asks, so private browsing does not offer it at all (review S-07).
+ */
+internal fun voiceAllowed(isPrivate: Boolean, hasRecognizer: Boolean): Boolean = hasRecognizer && !isPrivate
+
 /** True when the phone has a speech recognizer (Google, Samsung or another) that Orbis can ask. */
 internal fun voiceSearchAvailable(context: Context): Boolean =
     runCatching {

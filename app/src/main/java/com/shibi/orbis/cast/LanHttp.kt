@@ -12,7 +12,7 @@ internal data class LanExchange(val code: Int, val headers: Map<String, String>,
 /**
  * HTTP/1.1 over a raw socket, and only to a local address.
  * The app forbids cleartext on the platform HTTP stack; DLNA descriptions and SOAP are plain HTTP on the LAN, so they
- * go through a socket that never leaves the local network. Redirects that leave the LAN are refused.
+ * go through a socket that never leaves the local network. Redirects to another host are refused.
  */
 internal fun lanExchange(
     method: String,
@@ -33,8 +33,8 @@ internal fun lanExchange(
 }
 
 /**
- * The single local http URL a redirect may follow, or null when [location] is missing, loops, or leaves the LAN
- * (including loopback).
+ * The single local http URL a redirect may follow, or null when [location] is missing, loops, leaves the current
+ * host, or leaves the LAN (including loopback).
  */
 internal fun redirectTarget(currentUrl: String, location: String?): String? {
     if (location.isNullOrBlank()) return null
@@ -45,6 +45,9 @@ internal fun redirectTarget(currentUrl: String, location: String?): String? {
             return null
         }
     if (resolved == currentUrl) return null
+    // A redirect may change the path or port, never the device.
+    val host = uriHost(resolved) ?: return null
+    if (!sameHost(host, uriHost(currentUrl))) return null
     if (localTarget(resolved) == null) return null
     return resolved
 }

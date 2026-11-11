@@ -236,6 +236,26 @@ fun isImportLoadUrl(url: String): Boolean {
     return name.substring(dot + 1).lowercase(Locale.ROOT) in IMPORT_EXTENSIONS
 }
 
+/**
+ * True when a top-level load must be refused because an imported document is trying to leave for the web on its own,
+ * e.g. `<meta http-equiv="refresh" content="0;url=https://...">`, which the import CSP cannot stop. [committedUrl] is
+ * the page the tab shows now. A link the user tapped ([hasUserGesture]), an address the app itself loads
+ * ([isDirectNavigation]: typed, bookmark, reload) and a redirect of such a load that has not committed yet
+ * ([redirectOfAllowedLoad]) are allowed, as is any target that is not http(s). A redirect on its own is not enough:
+ * Gecko may report a short meta refresh as one.
+ */
+fun blocksImportAutoNavigation(
+    committedUrl: String?,
+    targetUrl: String,
+    hasUserGesture: Boolean,
+    isDirectNavigation: Boolean,
+    redirectOfAllowedLoad: Boolean,
+): Boolean {
+    if (hasUserGesture || isDirectNavigation || redirectOfAllowedLoad) return false
+    if (committedUrl == null || !isImportLoadUrl(committedUrl)) return false
+    return isWebUrl(targetUrl)
+}
+
 /** A `.` or `..` path segment. A file name that merely contains two dots is not one. */
 private fun hasDotPathSegment(path: String): Boolean = path.split('/').any { it == "." || it == ".." }
 

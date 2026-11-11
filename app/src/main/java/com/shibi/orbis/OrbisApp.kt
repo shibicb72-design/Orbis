@@ -229,7 +229,7 @@ class OrbisApp : Application() {
                 log = { debugLog.log("Downloads", it) },
                 now = System::currentTimeMillis,
                 extensionForMime = { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) },
-                fetchFrom = { url, from, isPrivate -> engine.fetchFrom(url, from, isPrivate) },
+                fetchFrom = { url, from, isPrivate, ifRange -> engine.fetchFrom(url, from, isPrivate, ifRange) },
                 // Still running when private browsing ended: it never gets a result notification; cancel any anyway.
                 onPrivateDropped = { id -> DownloadNotifications.cancelResults(this@OrbisApp, listOf(id)) },
             )
@@ -387,7 +387,7 @@ class OrbisApp : Application() {
             }
         }
         runCatching { engine.warmUp() }
-            .onFailure { debugLog.log("OrbisApp", "engine warmUp failed: ${it.message}") }
+            .onFailure { debugLog.log("OrbisApp", "engine warmUp failed: ${it.javaClass.simpleName}") }
         // Both lists are read before any tab can load a page; changes made before they arrive are replayed on top.
         bookmarks.load()
         history.load()

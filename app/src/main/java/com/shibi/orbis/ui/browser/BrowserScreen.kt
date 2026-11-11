@@ -844,7 +844,7 @@ private fun BrowserContent(
                         focusRequests = addressFocusRequests,
                         bridge = addressBridge,
                         onSwipe = { step -> swipeTargetTab(tabList, selectedTab.id, step)?.let(tabs::select) },
-                        onVoice = if (hasVoice) voiceSearch else null,
+                        onVoice = if (voiceAllowed(selectedTab.isPrivate, hasVoice)) voiceSearch else null,
                     )
                     if (!twoRow) tabsAndMenu()
                 }
@@ -1044,7 +1044,7 @@ private fun BrowserContent(
                             topSites = sites,
                             bookmarks = bookmarkList,
                             onSearch = { addressFocusRequests++ },
-                            onVoice = if (hasVoice) voiceSearch else null,
+                            onVoice = if (voiceAllowed(selectedTab.isPrivate, hasVoice)) voiceSearch else null,
                             dashboard = container.privacyStats?.let { stats ->
                                 {
                                     val version by stats.version.collectAsStateWithLifecycle()

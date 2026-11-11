@@ -1,6 +1,7 @@
 package com.shibi.orbis.ui.browser
 
 import androidx.activity.compose.BackHandler
+import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -177,7 +179,23 @@ internal fun CastSheet(
                     shape = MaterialTheme.shapes.medium,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(noticeLabel(item), modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
+                    Column(Modifier.padding(12.dp)) {
+                        Text(stringResource(castNoticeText(item)), style = MaterialTheme.typography.bodyMedium)
+                        if (castNoticeOffersForget(item)) {
+                            // The buttons take the container's content colour so they stay readable on errorContainer.
+                            val buttonColors = ButtonDefaults.textButtonColors(contentColor = LocalContentColor.current)
+                            Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(onClick = coordinator::dismissNotice, colors = buttonColors) {
+                                    Text(stringResource(R.string.prompt_cancel))
+                                }
+                                TextButton(
+                                    onClick = coordinator::forgetUntrustedDevice,
+                                    colors = buttonColors,
+                                    modifier = Modifier.testTag(CAST_FORGET_TV_TAG),
+                                ) { Text(stringResource(R.string.cast_forget_tv)) }
+                            }
+                        }
+                    }
                 }
             }
             when (val current = phase) {
@@ -297,18 +315,22 @@ private fun CastControls(playback: com.shibi.orbis.cast.CastPlayback, coordinato
     )
 }
 
-@Composable
-private fun noticeLabel(notice: CastNotice): String =
-    stringResource(
-        when (notice) {
-            CastNotice.NO_MEDIA -> R.string.cast_no_media
-            CastNotice.NO_DEVICES -> R.string.cast_no_devices
-            CastNotice.YOUTUBE_NEEDS_GOOGLE -> R.string.cast_youtube_need_google
-            CastNotice.FAILED -> R.string.cast_failed
-            CastNotice.YOUTUBE_UNCONFIRMED -> R.string.cast_youtube_unconfirmed
-            CastNotice.REJECTED -> R.string.cast_rejected
-        },
-    )
+internal const val CAST_FORGET_TV_TAG = "cast_forget_tv"
+
+@StringRes
+internal fun castNoticeText(notice: CastNotice): Int =
+    when (notice) {
+        CastNotice.NO_MEDIA -> R.string.cast_no_media
+        CastNotice.NO_DEVICES -> R.string.cast_no_devices
+        CastNotice.YOUTUBE_NEEDS_GOOGLE -> R.string.cast_youtube_need_google
+        CastNotice.FAILED -> R.string.cast_failed
+        CastNotice.YOUTUBE_UNCONFIRMED -> R.string.cast_youtube_unconfirmed
+        CastNotice.REJECTED -> R.string.cast_rejected
+        CastNotice.UNTRUSTED -> R.string.cast_untrusted
+    }
+
+/** Only a changed identity key offers "Forget this TV" and "Cancel". */
+internal fun castNoticeOffersForget(notice: CastNotice): Boolean = notice == CastNotice.UNTRUSTED
 
 private fun clock(seconds: Double): String {
     val total = seconds.toLong().coerceAtLeast(0)
