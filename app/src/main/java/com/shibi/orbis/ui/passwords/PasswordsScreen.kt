@@ -116,18 +116,28 @@ fun PasswordsScreen(
     val offerSave by offerSaveFlow.collectAsStateWithLifecycle()
     val loadFailed by manager.loadFailed.collectAsStateWithLifecycle()
     var unlocked by remember { mutableStateOf(startUnlocked) }
-    // Leaving the app (Home, Recents, another app) locks the list again: a phone handed over later must ask first.
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) unlocked = false }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
     var query by remember { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
     var confirmExport by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<SavedLogin?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
+    // Leaving the app (Home, Recents, another app) locks the list again: a phone handed over later must ask first.
+    // Every open menu and confirmation goes with it, so none can act on the relocked screen.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer =
+            LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_STOP) {
+                    unlocked = false
+                    menu = false
+                    confirmExport = false
+                    deleting = null
+                    confirmReset = false
+                }
+            }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val deviceSecure = remember { context.getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true }
 
     val importLauncher =
@@ -266,7 +276,8 @@ fun PasswordsScreen(
         }
     }
 
-    if (confirmExport) {
+    // The confirmations exist only while unlocked; each action checks again when it is tapped.
+    if (unlocked && confirmExport) {
         AlertDialog(
             onDismissRequest = { confirmExport = false },
             title = { Text(stringResource(R.string.passwords_export)) },
@@ -274,13 +285,13 @@ fun PasswordsScreen(
             confirmButton = {
                 TextButton(onClick = {
                     confirmExport = false
-                    runCatching { exportLauncher.launch("orbis-passwords.csv") }
+                    if (unlocked) runCatching { exportLauncher.launch("orbis-passwords.csv") }
                 }) { Text(stringResource(R.string.passwords_export)) }
             },
             dismissButton = { TextButton(onClick = { confirmExport = false }) { Text(stringResource(R.string.prompt_cancel)) } },
         )
     }
-    if (confirmReset) {
+    if (unlocked && confirmReset) {
         AlertDialog(
             onDismissRequest = { confirmReset = false },
             title = { Text(stringResource(R.string.passwords_reset)) },
@@ -289,7 +300,7 @@ fun PasswordsScreen(
                 TextButton(
                     onClick = {
                         confirmReset = false
-                        manager.resetUnreadableStore()
+                        if (unlocked) manager.resetUnreadableStore()
                     },
                     modifier = Modifier.testTag(PASSWORDS_RESET_CONFIRM_TAG),
                 ) { Text(stringResource(R.string.passwords_reset_confirm)) }
@@ -297,13 +308,13 @@ fun PasswordsScreen(
             dismissButton = { TextButton(onClick = { confirmReset = false }) { Text(stringResource(R.string.prompt_cancel)) } },
         )
     }
-    deleting?.let { login ->
+    deleting?.takeIf { unlocked }?.let { login ->
         AlertDialog(
             onDismissRequest = { deleting = null },
             text = { Text(stringResource(R.string.passwords_delete_confirm, login.host)) },
             confirmButton = {
                 TextButton(onClick = {
-                    manager.delete(login.guid)
+                    if (unlocked) manager.delete(login.guid)
                     deleting = null
                 }) { Text(stringResource(R.string.passwords_delete)) }
             },

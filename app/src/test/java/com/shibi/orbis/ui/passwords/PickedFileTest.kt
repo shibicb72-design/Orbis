@@ -7,7 +7,12 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -45,8 +50,10 @@ class PickedFileTest {
 
     private inner class HangingOutput : OutputStream() {
         val closed = CountDownLatch(1)
+        val writing = CountDownLatch(1)
 
         override fun write(b: Int) {
+            writing.countDown()
             closed.await()
             throw IOException("closed")
         }
@@ -113,6 +120,16 @@ class PickedFileTest {
         val out = HangingOutput()
         assertFalse(writePickedBytes({ out }, "a,b\n".toByteArray(), transferTimeoutMs = 200, pool = pool))
         assertTrue("closed", out.closed.await(10, TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun aCancelledWriteClosesTheStream() = runBlocking {
+        val out = HangingOutput()
+        val writing = async(start = CoroutineStart.UNDISPATCHED) { writePickedBytes({ out }, "a,b".toByteArray(), pool = pool) }
+        // Default (long) deadlines: only the cancel can end this write.
+        withTimeout(10_000) { while (out.writing.count > 0) delay(10) }
+        writing.cancelAndJoin()
+        assertTrue("closed after the cancel", out.closed.await(10, TimeUnit.SECONDS))
     }
 
     @Test

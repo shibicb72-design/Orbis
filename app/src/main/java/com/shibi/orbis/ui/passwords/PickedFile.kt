@@ -50,13 +50,17 @@ internal suspend fun writePickedBytes(
     pool: ProviderPool = ProviderDeadline.picked,
 ): Boolean {
     val output = providerCall(openTimeoutMs, pool = pool, block = open) ?: return false
-    val written =
-        providerCall(transferTimeoutMs, pool = pool) {
-            output.use { it.write(bytes) }
-            true
-        } == true
-    // After a timeout or failure the stream may still be open; closing a closed stream does nothing.
-    if (!written) closeOffThread(output, pool)
+    var written = false
+    try {
+        written =
+            providerCall(transferTimeoutMs, pool = pool) {
+                output.use { it.write(bytes) }
+                true
+            } == true
+    } finally {
+        // After a timeout, a failure or a cancel the stream may still be open; closing a closed stream does nothing.
+        if (!written) closeOffThread(output, pool)
+    }
     return written
 }
 

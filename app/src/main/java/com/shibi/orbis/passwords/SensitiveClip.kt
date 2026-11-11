@@ -110,8 +110,10 @@ class SensitiveClip(
             ClipVerdict.NONE, ClipVerdict.WAIT -> Unit
             ClipVerdict.FORGET -> synchronized(this) { if (pending === current) pending = null }
             ClipVerdict.CLEAR -> {
-                runCatching { clipboard.clearPrimaryClip() }
-                synchronized(this) { if (pending === current) pending = null }
+                // Kept when the clear failed, so the next check tries again.
+                if (runCatching { clipboard.clearPrimaryClip() }.isSuccess) {
+                    synchronized(this) { if (pending === current) pending = null }
+                }
             }
         }
     }
