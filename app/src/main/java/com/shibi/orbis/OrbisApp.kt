@@ -188,7 +188,8 @@ class OrbisApp : Application() {
                 onPrivateBrowsingEnded = {
                     engine.clearPrivateData()
                     // Created just below; private browsing cannot end before then (no session exists yet).
-                    downloadsRef?.forgetPrivate()
+                    // The private entries leave the list; their result notifications must not stay in the shade.
+                    downloadsRef?.let { DownloadNotifications.cancelResults(this@OrbisApp, it.forgetPrivate()) }
                     browserSettings.forgetPrivate()
                 },
                 releaseImport = { url ->
@@ -213,6 +214,8 @@ class OrbisApp : Application() {
                 now = System::currentTimeMillis,
                 extensionForMime = { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) },
                 fetchFrom = { url, from, isPrivate -> engine.fetchFrom(url, from, isPrivate) },
+                // Still running when private browsing ended: it never gets a result notification; cancel any anyway.
+                onPrivateDropped = { id -> DownloadNotifications.cancelResults(this@OrbisApp, listOf(id)) },
             )
         downloadsRef = downloads
         // Finished downloads also go to the phone's Download folder (setting; never a private tab's). Only downloads

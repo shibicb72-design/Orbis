@@ -42,6 +42,7 @@ object DownloadNotifications {
         val title =
             when {
                 model == null -> context.getString(R.string.downloads_notif_starting)
+                model.isSingle && model.isPrivate -> context.getString(R.string.downloads_notif_private)
                 model.isSingle -> model.name ?: context.getString(R.string.downloads_notif_running)
                 else -> context.resources.getQuantityString(R.plurals.downloads_notif_many_title, model.count, model.count)
             }
@@ -73,12 +74,21 @@ object DownloadNotifications {
         // The service may never have started (start refused), and it is what normally creates the channel.
         ensureChannel(context)
         val completed = entry.status == DownloadStatus.COMPLETED
-        val title = context.getString(if (completed) R.string.downloads_notif_done else R.string.downloads_status_failed)
+        val content = DownloadResultContent.from(entry)
+        val title =
+            context.getString(
+                when (content.title) {
+                    DownloadResultTitle.DONE -> R.string.downloads_notif_done
+                    DownloadResultTitle.FAILED -> R.string.downloads_status_failed
+                    DownloadResultTitle.PRIVATE_DONE -> R.string.downloads_notif_private_done
+                    DownloadResultTitle.PRIVATE_FAILED -> R.string.downloads_notif_private_failed
+                },
+            )
         val notification =
             NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(if (completed) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
                 .setContentTitle(title)
-                .setContentText(entry.fileName)
+                .setContentText(content.text)
                 .setAutoCancel(true)
                 .setOnlyAlertOnce(true)
                 .setCategory(NotificationCompat.CATEGORY_STATUS)
@@ -90,7 +100,7 @@ object DownloadNotifications {
         runCatching { NotificationManagerCompat.from(context).notify(resultId(entry.id), notification) }
     }
 
-    /** Removes the result notifications of cleared downloads: they name the file. */
+    /** Removes the result notifications of cleared downloads (they name the file) and of private ones that left the list. */
     fun cancelResults(context: Context, downloadIds: List<Long>) {
         runCatching {
             val manager = NotificationManagerCompat.from(context)

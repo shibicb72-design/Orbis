@@ -15,7 +15,11 @@ class DownloadNotificationModelTest {
         received: Long = 0,
         total: Long = 100,
         status: DownloadStatus = DownloadStatus.IN_PROGRESS,
-    ) = DownloadEntry(id, name, "application/octet-stream", "example.com", total, received, status, null, 1_700_000_000_000L + id)
+        isPrivate: Boolean = false,
+    ) = DownloadEntry(
+        id, name, "application/octet-stream", if (isPrivate) null else "example.com", total, received, status, null,
+        1_700_000_000_000L + id, isPrivate = isPrivate,
+    )
 
     @Test
     fun noActiveGivesNoModel() {
@@ -128,6 +132,59 @@ class DownloadNotificationModelTest {
         assertFalse(a == b)
         assertFalse(a.sameStructure(renamed))
         assertFalse(a.sameStructure(two))
+    }
+
+    @Test
+    fun aSinglePrivateDownloadHasNoName() {
+        val m = DownloadNotificationModel.from(listOf(entry(5, name = "secret-report.pdf", received = 30, isPrivate = true)))!!
+        assertTrue(m.isSingle)
+        assertTrue(m.isPrivate)
+        assertNull(m.name)
+        assertEquals(30, m.percent)
+        assertArrayEquals(longArrayOf(5), m.ids)
+        assertFalse(m.toString().contains("secret"))
+    }
+
+    @Test
+    fun aSingleNormalDownloadIsNotPrivate() {
+        val m = DownloadNotificationModel.from(listOf(entry(5, name = "movie.mp4")))!!
+        assertFalse(m.isPrivate)
+        assertEquals("movie.mp4", m.name)
+    }
+
+    @Test
+    fun privateAndNormalTogetherShowNoName() {
+        val m = DownloadNotificationModel.from(listOf(entry(1, name = "secret.pdf", isPrivate = true), entry(2, name = "n.txt")))!!
+        assertEquals(2, m.count)
+        assertNull(m.name)
+    }
+
+    @Test
+    fun privateFlagIsPartOfTheStructure() {
+        val normal = DownloadNotificationModel(longArrayOf(1), 1, null, 10)
+        val private = DownloadNotificationModel(longArrayOf(1), 1, null, 10, isPrivate = true)
+        assertFalse(normal.sameStructure(private))
+    }
+
+    @Test
+    fun resultOfANormalDownloadNamesTheFile() {
+        val done = DownloadResultContent.from(entry(1, name = "movie.mp4", status = DownloadStatus.COMPLETED))
+        assertEquals(DownloadResultTitle.DONE, done.title)
+        assertEquals("movie.mp4", done.text)
+        val failed = DownloadResultContent.from(entry(1, name = "movie.mp4", status = DownloadStatus.FAILED))
+        assertEquals(DownloadResultTitle.FAILED, failed.title)
+        assertEquals("movie.mp4", failed.text)
+    }
+
+    @Test
+    fun resultOfAPrivateDownloadIsGeneric() {
+        val done = DownloadResultContent.from(entry(1, name = "secret-report.pdf", status = DownloadStatus.COMPLETED, isPrivate = true))
+        assertEquals(DownloadResultTitle.PRIVATE_DONE, done.title)
+        assertNull(done.text)
+        val failed = DownloadResultContent.from(entry(1, name = "secret-report.pdf", status = DownloadStatus.FAILED, isPrivate = true))
+        assertEquals(DownloadResultTitle.PRIVATE_FAILED, failed.title)
+        assertNull(failed.text)
+        assertFalse(done.toString().contains("secret"))
     }
 
     @Test

@@ -33,4 +33,7 @@
     <string name="downloads_notif_public_text">Téléchargement de fichiers</string>
     <string name="downloads_notif_done">Téléchargement terminé</string>
     <string name="downloads_notif_done_public">Un téléchargement est terminé</string>
+    <string name="downloads_notif_private">Téléchargement privé</string>
+    <string name="downloads_notif_private_done">Téléchargement privé terminé</string>
+    <string name="downloads_notif_private_failed">Échec du téléchargement privé</string>
 </resources>

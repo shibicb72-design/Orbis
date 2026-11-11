@@ -12,8 +12,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -244,6 +246,57 @@ class DownloadManagerTest {
         waitUntil("private download settled and left") { m.entries.value.isEmpty() }
         assertEquals("slow", File(dir, "slow.txt").readText())
         scope.cancel()
+    }
+
+    @Test
+    fun aPrivateDownloadDroppedOnFinishIsReportedAndNeverSeenSettled() = runTest {
+        val io = StandardTestDispatcher(testScheduler)
+        val job = SupervisorJob().also { scopeJobs += it }
+        val dropped = CopyOnWriteArrayList<Long>()
+        lateinit var m: DownloadManager
+        // Private browsing ends while the body is being read.
+        val stream = ChunkStream(bytes("secret"), chunk = 2) { n -> if (n == 1) assertTrue(m.forgetPrivate().isEmpty()) }
+        m =
+            DownloadManager(
+                { dir }, store, CoroutineScope(io + job), io, { logs += it }, { tick += tickStep; tick },
+                onPrivateDropped = { dropped += it },
+            )
+        val seen = CopyOnWriteArrayList<DownloadStatus>()
+        val tracker = DownloadSettledTracker()
+        val reported = CopyOnWriteArrayList<Long>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            m.entries.collect { list ->
+                list.forEach { seen += it.status }
+                tracker.update(list).forEach { reported += it.id }
+            }
+        }
+        val priv = m.start(FakeDownload(contentDisposition = cd("secret-report.pdf"), contentLength = 6, body = { stream }), isPrivate = true)
+        advanceUntilIdle()
+
+        assertEquals(listOf(priv), dropped)
+        assertTrue(m.entries.value.isEmpty())
+        assertFalse("never listed as settled: $seen", DownloadStatus.COMPLETED in seen)
+        assertTrue("no result notification would be posted", reported.isEmpty())
+        assertEquals("secret", File(dir, "secret-report.pdf").readText())
+    }
+
+    @Test
+    fun aNormalOrAlreadySettledPrivateDownloadIsNotReportedAsDropped() = runTest {
+        val io = StandardTestDispatcher(testScheduler)
+        val job = SupervisorJob().also { scopeJobs += it }
+        val dropped = CopyOnWriteArrayList<Long>()
+        val m =
+            DownloadManager(
+                { dir }, store, CoroutineScope(io + job), io, { logs += it }, { tick += tickStep; tick },
+                onPrivateDropped = { dropped += it },
+            )
+        m.start(FakeDownload(contentDisposition = cd("n.txt"), body = { ChunkStream(bytes("n")) }))
+        val priv = m.start(FakeDownload(contentDisposition = cd("p.txt"), body = { ChunkStream(bytes("p")) }), isPrivate = true)
+        advanceUntilIdle()
+        // Settled before private browsing ended: returned for cancelling by forgetPrivate, not by the callback.
+        assertEquals(listOf(priv), m.forgetPrivate())
+        advanceUntilIdle()
+        assertTrue(dropped.isEmpty())
     }
 
     @Test

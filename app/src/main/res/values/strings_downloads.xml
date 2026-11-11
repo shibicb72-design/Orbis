@@ -32,4 +32,7 @@
     <string name="downloads_notif_public_text">Downloading files</string>
     <string name="downloads_notif_done">Download complete</string>
     <string name="downloads_notif_done_public">A download finished</string>
+    <string name="downloads_notif_private">Private download</string>
+    <string name="downloads_notif_private_done">Private download complete</string>
+    <string name="downloads_notif_private_failed">Private download failed</string>
 </resources>
