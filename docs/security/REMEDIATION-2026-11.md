@@ -23,7 +23,7 @@ Status values: `open` (nothing merged), `partial` (a first step is merged), `fix
 | F-11 | low | Torrent defaults reveal more than needed | `opus/sec2-torrent-exposure` | open | | |
 | F-12 | low | Calls into another app's provider have no timeout | `opus/sec2-provider-timeouts` | open (fix in #29: 3 s deadline on `getType` and the torrent size query, at most 8 provider threads) | #29 | none needed (no UI; `ProviderDeadlineTest`, `TorrentIntakeReaderTest`) |
 | F-13 | info | Password store hardening | `opus/sec2-passwords` | open | | |
-| F-14 | info | Lock icon follows the URL scheme (HTTPS-only already defaults to all tabs) | `opus/sec2-security-indicator` | open (fix in this PR: the lock follows Gecko's `onSecurityChange` report, not the scheme; no lock before the report, with mixed active content or a certificate exception; engine HTTPS-only initialiser matches the default) | | pending H-D21 (`SecurityIndicatorTest`, `CustomTabLockComposeTest`) |
+| F-14 | info | Lock icon follows the URL scheme (HTTPS-only already defaults to all tabs) | `opus/sec2-security-indicator` | open (fix in #31: the lock follows Gecko's `onSecurityChange` report, not the scheme; no lock before the report, with mixed active content or a certificate exception; engine HTTPS-only initialiser matches the default) | #31 | pending H-D21 (`SecurityIndicatorTest`, `CustomTabLockComposeTest`) |
 | F-15 | info | Android 10/11 overlay and task-hijack protections are not set | `opus/sec2-overlay-tapguard` | open | | |
 | S-09 gap | low | Imported documents may navigate to non-web schemes | `opus/sec2-local-content-gates` | open | #27 | pending H-D1, H-D14 |
 
