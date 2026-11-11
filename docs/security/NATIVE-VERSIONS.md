@@ -29,9 +29,21 @@ submodule's `version.hpp` defines `LIBTORRENT_VERSION "2.1.0.0"`, which matches.
 
 Between 3.5.5 and 3.5.9 OpenSSL rated two advisories High (OpenSSL's own labels; CVSS scores not verified):
 CVE-2026-45447 (use-after-free in `PKCS7_verify()`, fixed in 3.5.7) and CVE-2026-84782 (DTLS handshake
-retransmission reads a stale buffer offset, fixed in 3.5.9). Neither is shown to be reachable through libtorrent.
-(Upstream's `swig/Jamfile` builds with `<webtorrent>on`; whether that path runs DTLS through this OpenSSL is not
-verified.) This update is upkeep of a network-facing library, not the fix of a known exploitable hole.
+retransmission reads a stale buffer offset, fixed in 3.5.9).
+
+What is known about reaching them:
+- Both upstream's library and ours contain libdatachannel's OpenSSL DTLS transport (the string
+  `Initializing DTLS transport (OpenSSL)`), `rtc_signaling` and `websocket_tracker_connection`. Upstream's
+  `swig/Jamfile` builds with `<webtorrent>on`.
+- libtorrent at `24a3adf` hands `ws://` and `wss://` tracker URLs to that code when built with WebTorrent support
+  (`src/tracker_manager.cpp:310-311`, `protocol == "ws" || protocol == "wss"` under `TORRENT_USE_RTC`).
+- Orbis does not filter tracker URLs by scheme.
+- So a torrent or magnet link that names a WebSocket tracker can lead the engine into DTLS handshakes with remote
+  peers through this OpenSSL. Whether the conditions of CVE-2026-84782 are met there is not verified, and it was not
+  exercised on a device. Whether `PKCS7_verify()` (CVE-2026-45447) is reachable is not checked.
+
+This update is upkeep of a network-facing library. One of the two High advisories is in code that is compiled in
+and that a torrent can route traffic to; neither is shown to be exploitable in Orbis.
 
 ## Plan
 
@@ -76,13 +88,18 @@ Upstream: `aldenml/libtorrent4j` `.github/workflows/android.yml` at `da7d240`, j
 | `env` `BOOST_DOT_VERSION 1.90.0`, `NDK_VERSION r29`, `OPENSSL_VERSION 3.5.5`, `OPENSSL_NO_OPTS` | `build.env`: same Boost, NDK and `OPENSSL_NO_OPTS`; `OPENSSL_VERSION=3.5.9` | (a) OpenSSL 3.5.5 -> 3.5.9 |
 | setup boost: `wget` from archives.boost.io, `tar xzf`, `mv`, `./bootstrap.sh` | `curl` (HTTPS only) from the same URL, SHA-256 check, then the same commands | (b) checksum check; `curl --proto =https` instead of `wget -nv` |
 | setup ndk: `wget` from dl.google.com, `unzip -qq`, `mv` | same URL, size + SHA-1 + SHA-256 check, same commands | (b) |
-| setup openssl: `wget https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz`; `CC`/`AR`/`LD`/`RANLIB` from the NDK; `./Configure <target> ${OPENSSL_NO_OPTS} <abi flags> -fPIC --prefix=...`; `make`; `make install_sw`; x86_64: `mv openssl/lib64 openssl/lib` | same environment, same `Configure` line per ABI, same `make` calls, same `lib64` move; tarball from the GitHub release | (a), (b); the tarball URL is OpenSSL's GitHub release (byte-identical to the www.openssl.org file, checked 2026-11-11) |
+| setup openssl: `wget https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz`; `CC`/`AR`/`LD`/`RANLIB` from the NDK; `./Configure <target> ${OPENSSL_NO_OPTS} <abi flags> -fPIC --prefix=...`; `make`; `make install_sw`; x86_64: `mv openssl/lib64 openssl/lib` | same environment plus `SOURCE_DATE_EPOCH=${OPENSSL_SOURCE_DATE_EPOCH}`, same `Configure` line per ABI, same `make` calls, same `lib64` move; tarball from the GitHub release | (a), (b), (f); the tarball URL is OpenSSL's GitHub release (byte-identical to the www.openssl.org file, checked 2026-11-11) |
 | build: exports `ANDROID_TOOLCHAIN`, `BOOST_ROOT`, `OPENSSL_ROOT`, `LIBTORRENT_ROOT`, `CXX`, `CC`, `AR`, `LD`, `RANLIB`; `cd swig`; `b2 -j2 --user-config=config/android-<x>-config.jam variant=release toolset=<t> target-os=android location=bin/release/android/<abi>` | same exports, same `b2` line | none. Upstream's `alias ranlib=...` line is left out: aliases are not expanded in a non-interactive shell, so it does nothing there either |
 | strip: `llvm-objcopy --only-keep-debug`, then `llvm-strip --strip-unneeded -x` (`-g` added for arm) | same commands and flags per ABI | none |
 | dependencies: `llvm-readelf -d` | same, saved to the log | none |
 | `upload-artifact@v4`: `.so` and `.so.debug`, 5 days | upload `.so`, `.so.sha256`, `BUILDINFO.json` | (e). The `.so.debug` file is produced but not uploaded |
 | (none) | version strings, upstream comparison, 16 KB check (64-bit), `BUILDINFO.json`, summary table | (e) added checks |
 | x86-b2 job | not built | (c) |
+
+(f) `SOURCE_DATE_EPOCH` is exported in the OpenSSL step only (not for `b2`). OpenSSL 3.5.9's `util/mkbuildinf.pl`
+takes the embedded `built on:` time from it (`gmtime($ENV{'SOURCE_DATE_EPOCH'} // time())`). The value,
+`OPENSSL_SOURCE_DATE_EPOCH=1790640000`, is 2026-09-29T00:00:00Z, the 3.5.9 release date. It changes that one
+string and no upstream file.
 
 Upstream hides the OpenSSL `make` output (`&> /dev/null`); ours writes it to a log file and prints its tail on a
 failure. That affects logging only. Compiler flags, `b2` arguments, NDK, Boost and API level (28) are upstream's;
@@ -97,16 +114,24 @@ Not proven: that upstream's Maven jars were produced by this `android.yml` (like
   version string, not below the minimum, and `libtorrent/2.1.0.0`.
 - `scripts/compare_torrent_natives.py --abi <abi>`: downloads upstream's native jar for the ABI from Maven Central,
   checks the jar SHA-256 and the inner `.so` SHA-256 against `build.env`, then requires the same exported
-  `Java_org_libtorrent4j_swig_*` set, the same `JNI_OnLoad` presence, the same ELF class, machine and `DT_NEEDED`
-  list. The size difference is reported only.
+  `Java_org_libtorrent4j_swig_*` set, the same `JNI_OnLoad` presence, the same full exported dynamic symbol set
+  (name, binding, type, visibility), the same imported symbol set, and the same ELF class, machine and
+  `DT_NEEDED` list. The size difference is reported only.
+- `buildinfo.py summary --require-identical` (summary job): every ABI's two builds must be byte-identical.
 - `scripts/check_16kb_alignment.py --strict` on arm64-v8a and x86_64.
 
-### How to re-run
+### How to re-run, and which runs may be shipped
 
 Actions > Torrent natives > Run workflow, on the branch or commit to check. Each artifact
 `libtorrent4j-<abi>-<repeat>` holds the `.so`, its `.sha256` and `BUILDINFO.json` (the `build.env` values, hash,
 size, version strings, comparison result, submodule commits, run id, commit, runner image version). The run summary
 has all hashes in one table and says, per ABI, whether repeat 1 and 2 are byte-identical.
+
+Shipped natives come only from a `workflow_dispatch` run on `main` in which every job is green. Check each
+`BUILDINFO.json`: `workflow.event` is `workflow_dispatch`, `workflow.ref` is `refs/heads/main`, and
+`workflow.commit` is a commit on `main`. Never ship artifacts from a `pull_request` run. The repository is public,
+and a pull request from a fork runs its own `build.sh` and uploads artifacts with the same names into a run of this
+repository.
 
 ### Result of the first run (PR #28, run 43052679812, runner image ubuntu24 20261101.360.1)
 

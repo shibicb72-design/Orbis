@@ -2,7 +2,9 @@
 """BUILDINFO.json for one torrent natives build, and the run summary across builds.
 
   buildinfo.py write --abi ABI --repeat N --so FILE --versions FILE --compare FILE --submodules FILE --out FILE
-  buildinfo.py summary DIR        (DIR holds one sub-directory per artifact, each with a BUILDINFO.json)
+  buildinfo.py summary [--require-identical] DIR
+      DIR holds one sub-directory per artifact, each with a BUILDINFO.json. With --require-identical it exits 1
+      unless every ABI has at least two builds and all of them have the same SHA-256.
 
 Used by .github/workflows/torrent-natives.yml. Python 3 standard library only.
 """
@@ -75,7 +77,15 @@ def write(args):
     return 0
 
 
-def summary_lines(infos):
+def all_identical(infos):
+    """True when every ABI has at least two builds and they all share one SHA-256 (pure)."""
+    by_abi = {}
+    for info in infos:
+        by_abi.setdefault(info["abi"], []).append(info["sha256"])
+    return bool(by_abi) and all(len(h) >= 2 and len(set(h)) == 1 for h in by_abi.values())
+
+
+def summary_lines(infos, required=False):
     """Markdown lines for the job summary from a list of BUILDINFO dicts (pure)."""
     lines = ["## Torrent natives", "",
              "| ABI | repeat | SHA-256 | size | OpenSSL | libtorrent | JNI symbols (ours/upstream) | size vs upstream "
@@ -90,7 +100,8 @@ def summary_lines(infos):
             cmp_.get("jni_symbols_upstream", "?"), cmp_.get("size_change", "?"),
             "FAIL: " + "; ".join(cmp_["failures"]) if cmp_.get("failures") else "same JNI set, ELF, DT_NEEDED"))
         by_abi.setdefault(info["abi"], []).append(info["sha256"])
-    lines += ["", "Reproducibility (reported, not failed):", ""]
+    lines += ["", "Reproducibility (%s):" % ("required: every ABI's repeats must be byte-identical" if required
+                                           else "reported, not failed"), ""]
     for abi in sorted(by_abi):
         hashes = by_abi[abi]
         if len(hashes) < 2:
@@ -108,9 +119,15 @@ def summary_lines(infos):
 
 def summary(args):
     infos = [read_json(p) for p in sorted(glob.glob(os.path.join(args.dir, "*", "BUILDINFO.json")))]
-    for line in summary_lines(infos):
+    for line in summary_lines(infos, args.require_identical):
         print(line)
-    return 0 if infos else 1
+    if not infos:
+        print("FAIL: no BUILDINFO.json found")
+        return 1
+    if args.require_identical and not all_identical(infos):
+        print("FAIL: repeat builds are not byte-identical (or a build is missing)")
+        return 1
+    return 0
 
 
 def main(argv=None):
@@ -120,6 +137,7 @@ def main(argv=None):
     for name in ("abi", "repeat", "so", "versions", "compare", "submodules", "out"):
         w.add_argument("--" + name, required=True)
     s = sub.add_parser("summary")
+    s.add_argument("--require-identical", action="store_true")
     s.add_argument("dir")
     args = parser.parse_args(argv)
     return write(args) if args.command == "write" else summary(args)

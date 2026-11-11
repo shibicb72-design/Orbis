@@ -132,10 +132,24 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(failures, [])
         self.assertTrue(any("same set" in line for line in lines))
 
-    def test_non_jni_export_difference_is_reported_only(self):
+    def test_extra_non_jni_export_fails(self):
         ours = make_elf(True, EM_AARCH64, UPSTREAM_SYMBOLS + [("SSL_new_ex", True, GLOBAL, DEFAULT)], NEEDED)
+        lines, failures = self.run_compare(ours)
+        self.assertEqual(failures, ["exported dynamic symbol sets differ"])
+        self.assertTrue(any("only in ours:     ('SSL_new_ex'" in line for line in lines))
+
+    def test_export_binding_change_fails(self):
+        symbols = [(n, d, WEAK if n == "SSL_new" else b, v) for n, d, b, v in UPSTREAM_SYMBOLS]
+        _, failures = self.run_compare(make_elf(True, EM_AARCH64, symbols, NEEDED))
+        self.assertEqual(failures, ["exported dynamic symbol sets differ"])
+
+    def test_imported_set_difference_fails(self):
+        ours = make_elf(True, EM_AARCH64, UPSTREAM_SYMBOLS + [("getrandom", False, GLOBAL, DEFAULT)], NEEDED)
         _, failures = self.run_compare(ours)
-        self.assertEqual(failures, [])
+        self.assertEqual(failures, ["imported (undefined) symbol sets differ"])
+
+    def test_reads_imported(self):
+        self.assertEqual(ctn.read_elf(FIXTURE_64)["imported"], {"memcpy"})
 
     def test_missing_jni_symbol_fails(self):
         ours = make_elf(True, EM_AARCH64, UPSTREAM_SYMBOLS[1:], NEEDED)

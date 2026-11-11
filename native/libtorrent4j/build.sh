@@ -37,6 +37,7 @@ OPENSSL_VERSION="$(env_get OPENSSL_VERSION)"
 OPENSSL_URL="$(env_get OPENSSL_URL)"
 OPENSSL_SHA256="$(env_get OPENSSL_SHA256)"
 OPENSSL_NO_OPTS="$(env_get OPENSSL_NO_OPTS)"
+OPENSSL_SOURCE_DATE_EPOCH="$(env_get OPENSSL_SOURCE_DATE_EPOCH)"
 BOOST_VERSION="$(env_get BOOST_VERSION)"
 BOOST_URL="$(env_get BOOST_URL)"
 BOOST_SHA256="$(env_get BOOST_SHA256)"
@@ -165,6 +166,9 @@ echo "== setup openssl ${OPENSSL_VERSION} (${OPENSSL_TARGET})"
   export AR="${TOOLCHAIN}/bin/llvm-ar"
   export LD="${TOOLCHAIN}/bin/ld"
   export RANLIB="${TOOLCHAIN}/bin/llvm-ranlib"
+  # Not in upstream (difference f): fixes OpenSSL's embedded "built on" time so two builds give the same bytes.
+  # Set in this subshell only; the b2 step does not see it.
+  export SOURCE_DATE_EPOCH="${OPENSSL_SOURCE_DATE_EPOCH}"
   tar xzf "${DL}/openssl.tar.gz"
   cd "openssl-${OPENSSL_VERSION}"
   # Word splitting of the option strings is intended (upstream passes them unquoted).

@@ -120,5 +120,8 @@ jobs:
           pattern: libtorrent4j-*
           path: ${{ runner.temp }}/artifacts
 
-      - name: Hash table
-        run: python3 -I native/libtorrent4j/buildinfo.py summary "$RUNNER_TEMP/artifacts" | tee -a "$GITHUB_STEP_SUMMARY"
+      # shell: bash runs with -eo pipefail, so the script's exit code is not hidden by tee.
+      - name: Hash table (repeats must be byte-identical)
+        shell: bash
+        run: |
+          python3 -I native/libtorrent4j/buildinfo.py summary --require-identical "$RUNNER_TEMP/artifacts"             | tee -a "$GITHUB_STEP_SUMMARY"

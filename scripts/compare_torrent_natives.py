@@ -9,6 +9,8 @@ Then, reading the ELF dynamic symbol table directly (no binutils):
   * the set of exported Java_org_libtorrent4j_swig_* symbols must be identical (the Java jar from Maven Central
     and our library must fit together); a difference fails,
   * JNI_OnLoad must be exported by both or by neither; a difference fails,
+  * the full exported dynamic symbol set (name, binding, type, visibility) and the imported (undefined) symbol
+    set must be identical; a difference fails (only OpenSSL changes, so neither should move),
   * ELF class, machine and the DT_NEEDED list must be identical; a difference fails,
   * the file size difference is reported as a percentage (no threshold).
 
@@ -66,6 +68,7 @@ def read_elf(data):
     """Dynamic linking facts of an ELF image.
 
     Returns a dict: class (32 or 64), machine (e_machine), exported (set of exported dynamic symbol names),
+    exported_full (set of (name, binding, type, visibility)), imported (set of undefined symbol names),
     needed (DT_NEEDED list, in order), soname (or None).
     """
     if len(data) < 52 or data[:4] != b"\x7fELF" or data[4] not in (1, 2) or data[5] not in (1, 2):
@@ -106,15 +109,23 @@ def read_elf(data):
         _t, offset, size, link = dynsyms[0]
         strtab = blob(link)
         exported = set()
+        exported_full = set()
+        imported = set()
         for pos in range(offset, offset + size - sym_size + 1, sym_size):
             fields = struct.unpack_from(sym_fmt, data, pos)
             if is64:
                 st_name, st_info, st_other, st_shndx = fields[0], fields[1], fields[2], fields[3]
             else:
                 st_name, st_info, st_other, st_shndx = fields[0], fields[3], fields[4], fields[5]
-            if (st_name and st_shndx != SHN_UNDEF and (st_info >> 4) in EXPORTED_BINDS
-                    and (st_other & 3) in EXPORTED_VISIBILITIES):
-                exported.add(_cstr(strtab, st_name))
+            if not st_name:
+                continue
+            bind, kind, vis = st_info >> 4, st_info & 0xF, st_other & 3
+            if st_shndx == SHN_UNDEF:
+                imported.add(_cstr(strtab, st_name))
+            elif bind in EXPORTED_BINDS and vis in EXPORTED_VISIBILITIES:
+                name = _cstr(strtab, st_name)
+                exported.add(name)
+                exported_full.add((name, bind, kind, vis))
 
         _t, offset, size, link = dynamics[0]
         strtab = blob(link)
@@ -130,8 +141,8 @@ def read_elf(data):
                 soname = _cstr(strtab, value)
     except struct.error as exc:
         raise CompareError("truncated ELF file") from exc
-    return {"class": 64 if is64 else 32, "machine": machine, "exported": exported, "needed": needed,
-            "soname": soname}
+    return {"class": 64 if is64 else 32, "machine": machine, "exported": exported, "exported_full": exported_full,
+            "imported": imported, "needed": needed, "soname": soname}
 
 
 def jni_symbols(exported):
@@ -174,8 +185,19 @@ def compare(ours, upstream, ours_size, upstream_size, limit=20):
     if ours_onload != up_onload:
         failures.append("JNI_OnLoad present in one library only")
 
-    lines.append("exported     ours %d upstream %d dynamic symbols (reported only)" % (
-        len(ours["exported"]), len(upstream["exported"])))
+    for key, label, message in (("exported_full", "exported", "exported dynamic symbol sets differ"),
+                                ("imported", "imported", "imported (undefined) symbol sets differ")):
+        only_ours = sorted(ours[key] - upstream[key])
+        only_up = sorted(upstream[key] - ours[key])
+        same = not (only_ours or only_up)
+        lines.append("%-12s ours %d upstream %d, only in ours %d, only in upstream %d %s" % (
+            label, len(ours[key]), len(upstream[key]), len(only_ours), len(only_up), "same set" if same else "DIFF"))
+        for item in only_ours[:limit]:
+            lines.append("  only in ours:     %s" % (item,))
+        for item in only_up[:limit]:
+            lines.append("  only in upstream: %s" % (item,))
+        if not same:
+            failures.append(message)
     lines.append("size         ours %d upstream %d bytes, %s" % (ours_size, upstream_size, size_change(ours_size, upstream_size)))
     return lines, failures
 
@@ -292,6 +314,8 @@ def main(argv=None):
             "size_change": size_change(len(ours_so), len(upstream_so)),
             "jni_symbols_ours": len(jni_symbols(ours["exported"])),
             "jni_symbols_upstream": len(jni_symbols(upstream["exported"])),
+            "exported_ours": len(ours["exported_full"]), "exported_upstream": len(upstream["exported_full"]),
+            "imported_ours": len(ours["imported"]), "imported_upstream": len(upstream["imported"]),
             "needed_ours": ours["needed"], "needed_upstream": upstream["needed"],
             "failures": failures,
         }
