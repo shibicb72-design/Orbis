@@ -133,18 +133,19 @@ Shipped natives come only from a `workflow_dispatch` run on `main` in which ever
 and a pull request from a fork runs its own `build.sh` and uploads artifacts with the same names into a run of this
 repository.
 
-### Result of the first run (PR #28, run 43052679812, runner image ubuntu24 20261101.360.1)
+### Result (PR #28, run 43064341148 at `8dae273`, runner image ubuntu24 20261101.360.1)
 
-| ABI | SHA-256 (repeat 1) | SHA-256 (repeat 2) | size | upstream size | JNI symbols ours / upstream |
-|---|---|---|---|---|---|
-| arm64-v8a | `6a324a1370f446f4da31c64e8fb99a23a2df5b8f332e36c418c7c29a7bd07bc4` | `7658792623f0f6cb9256b658c88214f3336732bc15015dac145bfe18aa380278` | 15900928 | 15883152 (+0.11%) | 3659 / 3659 |
-| armeabi-v7a | `43b2e91af79b4f76f55bc5be7de4a93bff867862233172f0c1c4a16bb6683bdf` | `5e98ff8f807ae2df1d181552845d9b95ab81084d65911b9044e63b949c8208da` | 13751940 | 13734884 (+0.12%) | 3659 / 3659 |
-| x86_64 | `43d0c92e83af173dc2a70672c4fe79c7b2c2a674f041bd4b2b0da7156be0048b` | `2e5859da1c0736287e0345b91224cd9b389e16ac69d3692644790da187f365c6` | 16374728 | 16358808 (+0.10%) | 3659 / 3659 |
+| ABI | SHA-256 (repeat 1 = repeat 2) | size | upstream size | JNI / exported / imported symbols, ours = upstream |
+|---|---|---|---|---|
+| arm64-v8a | `ba9096e45f9da3f9c75cd38f8d7f501b5788ddb23f64caef56c7b9ec480e0801` | 15900928 | 15883152 (+0.11%) | 3659 / 7303 / 275 |
+| armeabi-v7a | `f0578398073c79a7ec25182b9f2eefac395cb26425ed33eacf534210924becb2` | 13751940 | 13734884 (+0.12%) | 3659 / 7248 / 265 |
+| x86_64 | `9634a939ee35b4dd66850645dbbc6ff9bafdc56877a547010f00e5ea1a019bf1` | 16374728 | 16358808 (+0.10%) | 3659 / 7328 / 272 |
 
-Every library contains exactly one OpenSSL string, `OpenSSL 3.5.9 29 Sep 2026`, and `libtorrent/2.1.0.0`. The
-JNI symbol sets, `JNI_OnLoad` (absent in both), ELF class and machine, and `DT_NEEDED` (`libdl.so`, `libm.so`,
-`libc.so`) equal upstream's for all three ABIs. The two 64-bit libraries pass the strict 16 KB check. These hashes
-are of a PR build; PR 7 ships the artifacts of a run on main, whose hashes will differ (see below).
+Every library contains exactly one OpenSSL string, `OpenSSL 3.5.9 29 Sep 2026`, `built on: Tue Sep 29 00:00:00
+2026 UTC` and `libtorrent/2.1.0.0`. The JNI symbol sets, the full exported and imported symbol sets,
+`JNI_OnLoad` (absent in both), ELF class and machine, and `DT_NEEDED` (`libdl.so`, `libm.so`, `libc.so`) equal
+upstream's for all three ABIs. The two 64-bit libraries pass the strict 16 KB check. These are the artifacts of a
+`pull_request` run and must not be shipped; PR 7 ships those of a `workflow_dispatch` run on `main`.
 
 Where upstream's binaries came from: the released `.so` files embed source paths under
 `/home/runner/work/libtorrent4j/libtorrent4j/` (`boost/`, `android-ndk/`, `openssl-…`, `swig/`) and OpenSSL
@@ -158,14 +159,13 @@ The inputs are pinned and hash-checked and the runner label is fixed, so anyone 
 same commit. The runner image is not pinned by digest (GitHub updates `ubuntu-24.04` in place); `BUILDINFO.json`
 records its version.
 
-Two runs are **not** byte-identical. Within each ABI the two builds have the same size and the same section layout;
-they differ in `.note.gnu.build-id` and in parts of `.rodata`, `.text`, `.data.rel.ro` and `.data`. One input
-certainly varies: OpenSSL embeds its build time (`built on: Wed Nov 11 15:55:00 2026 UTC` in one build,
-`15:54:55` in the other), and a changed string moves merged constants and the code that refers to them. Whether that
-is the only cause is not verified. Our libraries also embed different source paths from upstream's
-(`/home/runner/work/_temp/lt4j/src/…`), which does not change behaviour.
+Before `SOURCE_DATE_EPOCH` was set (runs 43052679812 and 43054692624), the two builds of each ABI had the same
+size and section layout but different bytes. The varying input was OpenSSL's embedded build time
+(`built on: ... 15:55:00` vs `15:54:55`): the string moved merged constants, and the references to them changed.
+With the epoch fixed (difference f), the two builds of every ABI, on separate runners, are byte-identical (run
+43064341148), and the workflow now fails if they are not (`buildinfo.py summary --require-identical`).
 
-So the guarantee is: "built by this workflow run from these pinned inputs", checked by SHA-256 against that run's
-artifact and job summary. It is not "anyone gets the same bytes". OpenSSL reads `SOURCE_DATE_EPOCH` for the build
-time (not verified for this version); setting it would be a difference from upstream's steps and needs a review
-decision before it is added.
+So the guarantee is: the same commit gives the same bytes on the same runner image, and every shipped file is
+checked by SHA-256 against the artifact and job summary of the `workflow_dispatch` run on `main` that built it.
+Whether a newer runner image gives the same bytes is not tested. Our libraries embed different source paths from
+upstream's (`/home/runner/work/_temp/lt4j/src/…`), which does not change behaviour.
