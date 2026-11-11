@@ -330,7 +330,7 @@ internal fun CastTrustQuestion(
     val warning = prompt.reason == CastTrustReason.KEY_CHANGED
     // Drawn inside the Cast sheet, so both belong to the sheet's own window. Cancel is never delayed.
     ObscuredTouchFilter()
-    val tapGuard = rememberTapGuard()
+    val tapGuard = rememberTapGuard(prompt)
     val confirm = { if (tapGuard()) onConfirm() }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(

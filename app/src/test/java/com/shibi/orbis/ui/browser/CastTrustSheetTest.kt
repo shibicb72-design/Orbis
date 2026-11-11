@@ -145,7 +145,7 @@ class CastTrustSheetTest {
         rule.onNodeWithTag(CAST_TRUST_CONFIRM_TAG).performClick()
         rule.waitForIdle()
         assertEquals(0, confirms)
-        passTapGuard()
+        rule.passTapGuard()
         rule.onNodeWithTag(CAST_TRUST_CONFIRM_TAG).performClick()
         rule.waitForIdle()
         assertEquals(1, confirms)

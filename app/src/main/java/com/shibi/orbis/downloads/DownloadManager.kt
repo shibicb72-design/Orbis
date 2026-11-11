@@ -7,6 +7,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -129,6 +130,16 @@ class DownloadManager(
                         if (f.absolutePath !in owned) deleteOwned(f)
                     }
                 }
+                // Private browsing ended with the process: its files go too (OD-3). Only files; the folders there are
+                // private torrents kept inside Orbis, which the torrent manager cleans.
+                runCatching {
+                    var n = 0
+                    privateDir().listFiles { f -> Files.isRegularFile(f.toPath(), LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(f.toPath()) }?.forEach { f ->
+                        deleteOwned(f)
+                        n++
+                    }
+                    if (n > 0) log("private download leftovers deleted $n")
+                }
             }
             // Merge rather than replace: a download may already have started while the index was loading. Everything
             // stored is settled by now, so a list cleared in the meantime must not get it back. The flag is read inside
@@ -143,7 +154,7 @@ class DownloadManager(
 
     /**
      * Starts [download]. A private tab's download ([isPrivate]) carries no source host, is never written to the index
-     * file, and is dropped from the list by [forgetPrivate]; its file is kept like any other.
+     * file, is saved in [privateDir], and is dropped from the list, its file deleted, by [forgetPrivate].
      */
     fun start(download: IncomingDownload, isPrivate: Boolean = false): Long {
         val id = nextId.incrementAndGet()
@@ -265,7 +276,7 @@ class DownloadManager(
      * A clear made before [restore] has read the stored index also drops what it then reads.
      */
     fun clearIndex(): List<Long> {
-        dropOnFinish.clear()
+        // Private downloads still waiting to settle keep their pending drop: their files are deleted when they do.
         indexCleared.set(true)
         var removed = emptyList<Long>()
         _entries.update { list ->
@@ -282,19 +293,30 @@ class DownloadManager(
     private val dropOnFinish: MutableSet<Long> = ConcurrentHashMap.newKeySet()
 
     /**
-     * Private browsing ended: every private entry leaves the list (so no private file name stays visible). Files are
-     * kept. A private download still running finishes first and then leaves. Returns the ids removed now.
+     * Private browsing ended: every private entry leaves the list (so no private file name stays visible) and its
+     * file is deleted (OD-3): finished, paused or still running. A private download still running settles first, then
+     * leaves and its file goes. Returns the ids removed now.
      */
     fun forgetPrivate(): List<Long> {
-        var removed = emptyList<Long>()
+        var gone = emptyList<DownloadEntry>()
         _entries.update { list ->
-            val (gone, keep) = list.partition { it.isPrivate && it.status != DownloadStatus.IN_PROGRESS && !active.containsKey(it.id) }
+            val (leave, keep) = list.partition { it.isPrivate && it.status != DownloadStatus.IN_PROGRESS && !active.containsKey(it.id) }
             list.filter { it.isPrivate && (it.status == DownloadStatus.IN_PROGRESS || active.containsKey(it.id)) }.forEach { dropOnFinish += it.id }
-            removed = gone.map { it.id }
+            gone = leave
             keep
         }
-        if (removed.isNotEmpty()) log("private downloads left the list")
-        return removed
+        if (gone.isEmpty()) return emptyList()
+        // A paused one holds only its part file and reserved name.
+        val paused = gone.mapNotNull { e -> pausedDownloads.remove(e.id) }
+        scope.launch(io) {
+            for (p in paused) {
+                deleteOwned(p.reservation.partFile)
+                release(p.reservation)
+            }
+            gone.filter { it.status == DownloadStatus.COMPLETED }.forEach { e -> e.filePath?.let { deleteOwned(File(it)) } }
+        }
+        log("private downloads left the list")
+        return gone.map { it.id }
     }
 
     // ---- copy job ----
@@ -310,7 +332,7 @@ class DownloadManager(
         var expected = a.total
         var validator = a.download.validator
         try {
-            val d = dir()
+            val d = if (a.isPrivate) privateDir() else dir()
             if (!d.isDirectory && !d.mkdirs() && !d.isDirectory) throw IOException("downloads directory unavailable")
             val resumed = a.resumeFrom
             if (a.total > 0) {
@@ -421,8 +443,15 @@ class DownloadManager(
                 }
             }
         }
-        // Deleted while it was finishing: do not leave an orphan behind.
-        if (!stillListed && status == DownloadStatus.COMPLETED) r?.finalFile?.delete()
+        // Deleted while it was finishing: do not leave an orphan behind. One dropped with private browsing goes too.
+        if ((!stillListed || dropped) && status == DownloadStatus.COMPLETED) r?.finalFile?.delete()
+        if (dropped) {
+            // Paused just as private browsing ended: its part file goes.
+            pausedDownloads.remove(a.id)?.let { p ->
+                p.reservation.partFile.delete()
+                release(p.reservation)
+            }
+        }
         if (dropped) dropOnFinish.remove(a.id)
         saveNow()
         log("download ${status.name.lowercase()}")
@@ -518,10 +547,21 @@ class DownloadManager(
     private fun sorted(list: List<DownloadEntry>): List<DownloadEntry> =
         list.sortedWith(compareByDescending<DownloadEntry> { it.startedAt }.thenByDescending { it.id })
 
-    private companion object {
-        const val BUFFER_SIZE = 32 * 1024
-        const val PROGRESS_INTERVAL_MS = 250L
-        const val MAX_NAME_ATTEMPTS = 1000
+    /**
+     * Where private downloads are saved: a folder of the downloads directory, so leftovers are easy to find. Its name
+     * shows up in Open and Share URIs, so it says nothing about private browsing.
+     */
+    fun privateDir(): File = File(dir(), PRIVATE_DIR)
+
+    companion object {
+        /**
+         * Below the downloads directory. Private torrents kept inside Orbis live here too, as folders. Neutral, and a
+         * name no download can get (DownloadFileNames.sanitize trims leading dots), so a normal download never blocks it.
+         */
+        const val PRIVATE_DIR = ".s"
+        private const val BUFFER_SIZE = 32 * 1024
+        private const val PROGRESS_INTERVAL_MS = 250L
+        private const val MAX_NAME_ATTEMPTS = 1000
     }
 }
 

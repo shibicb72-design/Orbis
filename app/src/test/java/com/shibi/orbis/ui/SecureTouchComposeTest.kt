@@ -1,8 +1,8 @@
 package com.shibi.orbis.ui
 
 import android.view.View
-import android.view.ViewTreeObserver
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import com.shibi.orbis.engine.PromptQueue
 import com.shibi.orbis.engine.SitePermissionAnswer
 import com.shibi.orbis.engine.SitePermissionKind
 import com.shibi.orbis.engine.SitePrompt
@@ -27,7 +28,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.time.Duration
 import org.robolectric.shadows.ShadowDialog
+import org.robolectric.shadows.ShadowSystemClock
 
 /**
  * F-15 (device item 6): a confirm button ignores a tap that comes at once (a second tap of a double tap on the page
@@ -52,12 +55,14 @@ class SecureTouchComposeTest {
         val model = TorrentConfirmModel.of(IntakeRequest.Magnet(magnet, isPrivate = false), TorrentBody.Reading, ipNoteSeen = true)
         rule.setContent { MaterialTheme { TorrentConfirmSheet(model, onDownload = { downloads++ }, onCancel = { cancels++ }) } }
         rule.waitForIdle()
+        focusDialogs()
     }
 
     private fun showPermissionPrompt() {
         val prompt = SitePrompt.SitePermission("https://example.com", null, listOf(SitePermissionKind.CAMERA)) { answers += it }
         rule.setContent { MaterialTheme { SitePromptDialog(prompt) } }
         rule.waitForIdle()
+        focusDialogs()
     }
 
     @Test
@@ -66,7 +71,7 @@ class SecureTouchComposeTest {
         rule.onNodeWithText("Download").performClick()
         rule.waitForIdle()
         assertEquals(0, downloads)
-        passTapGuard()
+        rule.passTapGuard()
         rule.onNodeWithText("Download").performClick()
         rule.waitForIdle()
         assertEquals(1, downloads)
@@ -94,7 +99,7 @@ class SecureTouchComposeTest {
         rule.onNodeWithText("Allow").performClick()
         rule.waitForIdle()
         assertTrue(answers.isEmpty())
-        passTapGuard()
+        rule.passTapGuard()
         rule.onNodeWithText("Allow").performClick()
         rule.waitForIdle()
         assertEquals(listOf(SitePermissionAnswer(allow = true, remember = false)), answers)
@@ -114,28 +119,75 @@ class SecureTouchComposeTest {
         assertTrue(ShadowDialog.getLatestDialog().window!!.decorView.filterTouchesWhenObscured)
     }
 
+    /**
+     * A page queues two permission requests. The dialog window stays up while the second replaces the first, so the
+     * second must start its own delay: a double tap on Allow answers only the first.
+     */
+    @Test
+    fun aQueuedPromptDoesNotInheritAGuardThatAlreadyPassed() {
+        val queue = PromptQueue()
+        val first = ArrayList<SitePermissionAnswer?>()
+        val second = ArrayList<SitePermissionAnswer?>()
+        queue.add(SitePrompt.SitePermission("https://example.com", null, listOf(SitePermissionKind.CAMERA)) { first += it })
+        queue.add(SitePrompt.SitePermission("https://example.com", null, listOf(SitePermissionKind.MICROPHONE)) { second += it })
+        rule.setContent {
+            MaterialTheme {
+                val head by queue.head.collectAsState()
+                head?.let { SitePromptDialog(it) }
+            }
+        }
+        rule.waitForIdle()
+        rule.passTapGuard()
+        rule.onNodeWithText("Allow").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("Allow").performClick()
+        rule.waitForIdle()
+        assertEquals(1, first.size)
+        assertTrue("the second prompt is not answered by the double tap", second.isEmpty())
+        assertEquals(1, queue.size)
+        rule.passTapGuard()
+        rule.onNodeWithText("Allow").performClick()
+        rule.waitForIdle()
+        assertEquals(listOf(SitePermissionAnswer(allow = true, remember = false)), second)
+        assertEquals(0, queue.size)
+    }
+
     @Test
     fun regainingFocusStartsTheDelayAgain() {
         showPermissionPrompt()
-        passTapGuard()
+        rule.passTapGuard()
         val decor = ShadowDialog.getLatestDialog().window!!.decorView
         windowFocus(decor, false)
         windowFocus(decor, true)
         rule.onNodeWithText("Allow").performClick()
         rule.waitForIdle()
         assertTrue(answers.isEmpty())
-        passTapGuard()
+        rule.passTapGuard()
         rule.onNodeWithText("Allow").performClick()
         rule.waitForIdle()
         assertEquals(1, answers.size)
     }
 
-    /** What the window's ViewRootImpl does when the window loses or gains focus (Compose listens on the tree observer). */
+    @Test
+    fun noTapCountsWhileTheDialogWindowHasNoFocus() {
+        showPermissionPrompt()
+        rule.passTapGuard()
+        val decor = ShadowDialog.getLatestDialog().window!!.decorView
+        windowFocus(decor, false)
+        ShadowSystemClock.advanceBy(Duration.ofMillis(2_000))
+        rule.onNodeWithText("Allow").performClick()
+        rule.waitForIdle()
+        assertTrue(answers.isEmpty())
+    }
+
+    /** As on a device, the new window has focus, so what holds a tap back below is the delay alone. */
+    private fun focusDialogs() {
+        for (dialog in ShadowDialog.getShownDialogs()) setWindowFocus(dialog.window!!.decorView, true)
+        rule.waitForIdle()
+    }
+
     private fun windowFocus(decor: View, focused: Boolean) {
-        ViewTreeObserver::class.java
-            .getDeclaredMethod("dispatchOnWindowFocusChange", Boolean::class.javaPrimitiveType)
-            .apply { isAccessible = true }
-            .invoke(decor.viewTreeObserver, focused)
+        setWindowFocus(decor, focused)
         rule.waitForIdle()
     }
 

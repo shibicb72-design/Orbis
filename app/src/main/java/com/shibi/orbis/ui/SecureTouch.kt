@@ -37,44 +37,53 @@ fun ObscuredTouchFilter() {
 }
 
 /**
- * A confirm button's tap guard: the returned function says whether a tap may act now. False until [delayMs] after the
- * first composition (uptime clock), and false again for [delayMs] each time the window regains focus. The button stays
- * enabled and looks the same either way; its onClick just does nothing while this says no. Cancel is never guarded.
+ * A confirm button's tap guard: the returned function says whether a tap may act now. False while the window does not
+ * have focus, until [delayMs] after the first composition with these [keys] (uptime clock), and again for [delayMs]
+ * each time the window regains focus. Pass the identity of what is being confirmed as [keys]: a dialog window can stay
+ * up while its content changes to the next prompt, and the next prompt must not inherit a guard that already passed.
+ * The button stays enabled and looks the same either way; its onClick just does nothing while this says no. Cancel is
+ * never guarded.
  */
 @Composable
-fun rememberTapGuard(delayMs: Long = TAP_GUARD_DELAY_MS): () -> Boolean {
-    val times = remember { GuardTimes(shownAtMs = SystemClock.uptimeMillis()) }
+fun rememberTapGuard(vararg keys: Any?, delayMs: Long = TAP_GUARD_DELAY_MS): () -> Boolean {
+    val times = remember(*keys) { GuardTimes(shownAtMs = SystemClock.uptimeMillis()) }
     val windowInfo = LocalWindowInfo.current
-    LaunchedEffect(windowInfo) {
+    LaunchedEffect(windowInfo, times) {
         var wasFocused = windowInfo.isWindowFocused
         snapshotFlow { windowInfo.isWindowFocused }.collect { focused ->
             if (focused && !wasFocused) times.focusGainedAtMs = SystemClock.uptimeMillis()
             wasFocused = focused
         }
     }
-    return remember(times, delayMs) { { tapAllowed(times.shownAtMs, times.focusGainedAtMs, SystemClock.uptimeMillis(), delayMs) } }
+    return remember(times, windowInfo, delayMs) {
+        { tapAllowed(times.shownAtMs, times.focusGainedAtMs, windowInfo.isWindowFocused, SystemClock.uptimeMillis(), delayMs) }
+    }
 }
 
 /**
  * A dialog's positive [TextButton] behind [rememberTapGuard]. Compose it inside the dialog (its confirm slot), so the
- * guard watches the dialog's own window focus.
+ * guard watches the dialog's own window focus. [guardKey] is the identity of what is being confirmed (see
+ * [rememberTapGuard]).
  */
 @Composable
 fun GuardedTextButton(
+    guardKey: Any?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     colors: ButtonColors = ButtonDefaults.textButtonColors(),
     content: @Composable RowScope.() -> Unit,
 ) {
-    val tapGuard = rememberTapGuard()
+    val tapGuard = rememberTapGuard(guardKey)
     TextButton(onClick = { if (tapGuard()) onClick() }, modifier = modifier, colors = colors, content = content)
 }
 
 /**
- * The rule behind [rememberTapGuard]: a tap counts once [delayMs] have passed since the button was shown and since the
- * window last regained focus ([focusGainedAtMs] null when it never did). A clock that went backwards counts as "too soon".
+ * The rule behind [rememberTapGuard]: a tap counts only while the window has focus, and once [delayMs] have passed
+ * since the button was shown and since the window last regained focus ([focusGainedAtMs] null when it never did). A
+ * clock that went backwards counts as "too soon".
  */
-fun tapAllowed(shownAtMs: Long, focusGainedAtMs: Long?, nowMs: Long, delayMs: Long): Boolean {
+fun tapAllowed(shownAtMs: Long, focusGainedAtMs: Long?, windowFocused: Boolean, nowMs: Long, delayMs: Long): Boolean {
+    if (!windowFocused) return false
     if (nowMs - shownAtMs < delayMs) return false
     return focusGainedAtMs == null || nowMs - focusGainedAtMs >= delayMs
 }

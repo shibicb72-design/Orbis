@@ -22,7 +22,9 @@ interface TorrentEngine {
      * or symlink for it. A torrent with metadata (a .torrent, or resume data that carries it) is added paused and
      * announced with [TorrentEvent.MetadataReceived]; a magnet without metadata runs to fetch it and is paused when it
      * arrives. Nothing is written until the caller has checked the file list and called [approveFiles] (and [resume]).
-     * [isPrivate]: started from a private tab; it never uses local peer discovery (see [TorrentDiscovery.of]).
+     * [isPrivate]: started from a private tab; it uses its trackers only (see [TorrentDiscovery.of]), and while one
+     * is in the session no local peer discovery runs at all (nothing announced, nothing answered). WebSocket trackers
+     * are dropped from every source ([TorrentTrackers]).
      */
     fun add(source: TorrentSource, saveDir: java.io.File, resumeData: ByteArray?, isPrivate: Boolean): EngineId
 
@@ -50,7 +52,7 @@ interface TorrentEngine {
     /** Bytes per second; 0 is unlimited. */
     fun setLimits(downBps: Int, upBps: Int)
 
-    /** Applies to every torrent, through [TorrentDiscovery.of]: a private one stays off local peer discovery. */
+    /** Applies to every torrent, through [TorrentDiscovery.of]: a private one stays on trackers only. */
     fun setDiscovery(dht: Boolean, pex: Boolean, lsd: Boolean)
 
     fun pauseAll()
@@ -83,12 +85,39 @@ data class EngineSettings(
 /** Which peer sources one torrent uses. */
 data class TorrentDiscovery(val dht: Boolean, val pex: Boolean, val lsd: Boolean) {
     companion object {
+        /** Trackers only: no DHT, no peer exchange, no local peers. */
+        val TRACKERS_ONLY = TorrentDiscovery(dht = false, pex = false, lsd = false)
+
         /**
-         * The settings, except that a torrent from a private tab never uses local peer discovery: it would announce
-         * on the local network what is being downloaded. DHT and peer exchange follow the settings (a magnet finds
-         * its peers through them).
+         * The settings for a normal torrent. A torrent from a private tab uses its trackers only: DHT would announce
+         * its info hash to thousands of strangers, peer exchange tells peers which other swarms' peers we know, and
+         * local peer discovery announces it to the local network. A private-tab magnet without a tracker therefore
+         * finds no peers; that is the price of keeping a private download out of the DHT.
+         * [trackersOnly] is also set by the engine for a BEP 27 private torrent (private=1 in its info dictionary).
          */
-        fun of(dht: Boolean, pex: Boolean, lsd: Boolean, isPrivate: Boolean): TorrentDiscovery = TorrentDiscovery(dht, pex, lsd && !isPrivate)
+        fun of(dht: Boolean, pex: Boolean, lsd: Boolean, trackersOnly: Boolean): TorrentDiscovery =
+            if (trackersOnly) TRACKERS_ONLY else TorrentDiscovery(dht, pex, lsd)
+    }
+}
+
+/** What the whole session runs, beside each torrent's own [TorrentDiscovery]. */
+data class SessionDiscovery(val dht: Boolean, val lsd: Boolean) {
+    companion object {
+        /**
+         * Local peer discovery only while no private-tab torrent is in the session: libtorrent adds a peer announced
+         * on the local network to any torrent that is not BEP 27 private (session_impl.cpp, on_lsd_peer), whatever
+         * the torrent's DISABLE_LSD flag, and then connects to it. The DHT node not while every torrent in the
+         * session is from a private tab: none of them uses it, and running it tells strangers that this address runs
+         * a torrent client.
+         *
+         * An empty session keeps what it had ([previous], never more than the settings allow): the last private-tab
+         * torrent leaving must not start the DHT node just before the session stops, and a normal session must not
+         * stop its DHT node at zero torrents (session.dat would lose its DHT table). Null [previous]: the settings.
+         */
+        fun of(dht: Boolean, lsd: Boolean, privateTorrents: Int, torrents: Int, previous: SessionDiscovery? = null): SessionDiscovery {
+            if (torrents == 0 && previous != null) return SessionDiscovery(dht = previous.dht && dht, lsd = previous.lsd && lsd)
+            return SessionDiscovery(dht = dht && (privateTorrents == 0 || torrents > privateTorrents), lsd = lsd && privateTorrents == 0)
+        }
     }
 }
 

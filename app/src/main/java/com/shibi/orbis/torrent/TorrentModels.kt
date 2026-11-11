@@ -46,6 +46,11 @@ data class TorrentEntry(
     val pauseReason: PauseReason? = null,
     val hasMetadata: Boolean = false,
     // ---- live, not persisted ----
+    /**
+     * A finished private torrent kept inside Orbis (absolute path below [TorrentDirs.keepRoot]) instead of being
+     * published. Memory only, like every private entry; deleted when private browsing ends unless the user saved it.
+     */
+    val keptDir: String? = null,
     val downBps: Long = 0,
     val upBps: Long = 0,
     val peers: Int = 0,
@@ -59,7 +64,8 @@ data class TorrentEntry(
 
     /**
      * Finished but not saved to Download/Orbis yet: seeding, or a finished torrent that is paused (by the user or
-     * Android) or waiting for Wi-Fi. Removing it without deleting, or the end of private browsing, saves it first.
+     * Android) or waiting for Wi-Fi. Removing it without deleting ("Save and remove") saves it first; the end of
+     * private browsing deletes a private one (OD-3).
      */
     val finishedUnsaved: Boolean
         get() = status !in UNSAVED_EXCLUDED && (status == TorrentStatus.SEEDING || isFinished)

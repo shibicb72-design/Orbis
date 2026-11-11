@@ -14,6 +14,7 @@ import com.shibi.orbis.passwords.NeverSavePrefs
 import com.shibi.orbis.passwords.SavedLogin
 import com.shibi.orbis.settings.AppTheme
 import com.shibi.orbis.ui.browser.ComposeActivityRegistration
+import com.shibi.orbis.ui.passTapGuard
 import com.shibi.orbis.ui.theme.OrbisTheme
 import java.security.KeyStoreException
 import kotlinx.coroutines.CoroutineScope
@@ -123,6 +124,8 @@ class PasswordsResetComposeTest {
         assertEquals("cancel does not reset", 0, store.asides)
 
         rule.onNodeWithTag(PASSWORDS_RESET_TAG).performClick()
+        rule.waitForIdle()
+        rule.passTapGuard()
         rule.onNodeWithTag(PASSWORDS_RESET_CONFIRM_TAG).performClick()
         scheduler.advanceUntilIdle()
         assertEquals(1, store.asides)

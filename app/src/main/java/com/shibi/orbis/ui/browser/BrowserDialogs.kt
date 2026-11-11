@@ -89,14 +89,14 @@ fun DownloadConfirmDialog(pending: PendingDownload, onConfirm: () -> Unit, onCan
                 }
                 if (pending.isPrivate) {
                     Text(
-                        stringResource(R.string.browser_download_private_note),
+                        stringResource(R.string.browser_download_private_note_deleted),
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 8.dp),
                     )
                 }
             }
         },
-        confirmButton = { GuardedTextButton(onClick = onConfirm) { Text(stringResource(R.string.browser_download_start)) } },
+        confirmButton = { GuardedTextButton(guardKey = pending, onClick = onConfirm) { Text(stringResource(R.string.browser_download_start)) } },
         dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.prompt_cancel)) } },
         containerColor = MaterialTheme.colorScheme.surface,
         titleContentColor = MaterialTheme.colorScheme.onSurface,

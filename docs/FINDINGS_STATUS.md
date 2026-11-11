@@ -11,7 +11,7 @@ Orbis is now tested with unit/Compose tests plus direct adb checks on the prove_
 | R2303-06 | No FLAG_SECURE / Recents protection for private tabs | Fixed earlier; device: screenshots black while any private tab is open, normal after close |
 | R2303-07 | Private address bar without no-personalized-learning | Fixed earlier; covered by PrivateFieldComposeTest and AddressBarPolicyTest |
 | R2303-09 | History/cookie clear does not reset open tabs | Accepted as is (same as Chrome), user decision 2026-11-08 |
-| R2303-10 | Private download names stay in the normal Downloads list | Being fixed in session 2 (hidden and removed from the list when private tabs close; files kept) |
+| R2303-10 | Private download names stay in the normal Downloads list | Fixed (removed from the list when private tabs close); since security PR 9 (#35, OD-3) their files are deleted then too |
 | R1144-01, 04, 05 | Harness merge provenance, driver notes, gate re-derivation | Obsolete (harness retired) |
 | R1144-02 | No positive control that a pending address is shown while loading | Closed: device check 2026-11-08 (/hang load shows the target, Stop reverts) + BrowserAddressBarComposeTest |
 | R1144-03 | Bookmark clear leaves bookmarks.json.corrupt | Fixed in 6e0d99d (clear-all deletes the set-aside copy) |

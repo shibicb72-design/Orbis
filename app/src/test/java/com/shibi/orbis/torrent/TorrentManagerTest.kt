@@ -959,7 +959,7 @@ class TorrentManagerTest {
     }
 
     @Test
-    fun aPrivateSeedingTorrentIsSavedWhenPrivateBrowsingEnds() = runTest {
+    fun aPrivateSeedingTorrentIsDeletedWhenPrivateBrowsingEnds() = runTest {
         val s = setup(this)
         s.settings.value = keepSeeding
         val id = seedingTorrent(s, isPrivate = true)
@@ -969,10 +969,12 @@ class TorrentManagerTest {
         assertEquals(listOf(id), s.manager.forgetPrivate())
         advanceUntilIdle()
         assertTrue(s.manager.entries.value.isEmpty())
-        assertEquals(setOf("movie.mp4", "en.srt"), s.published.map { it.name }.toSet())
-        assertTrue(s.engine.removed.contains(eid to false))
-        assertFalse("private payload deleted after the copy", dir.exists())
-        assertTrue(s.logs.contains("seeding dropped, publishing 1"))
+        // OD-3: never saved, so nothing of it stays.
+        assertTrue(s.published.isEmpty())
+        assertTrue(s.engine.removed.contains(eid to true))
+        assertFalse(dir.exists())
+        assertTrue(s.keepRoot.listFiles().orEmpty().isEmpty())
+        assertTrue(s.logs.contains("seeding dropped, deleted 1"))
         assertTrue(s.store.load().entries.isEmpty())
         assertFalse(s.engine.started)
     }
@@ -1060,8 +1062,8 @@ class TorrentManagerTest {
         val normal = s.engine.added.single { !it.isPrivate }.id
         val priv = s.engine.added.single { it.isPrivate }.id
         assertEquals(TorrentDiscovery(dht = true, pex = true, lsd = true), s.engine.discovery[normal])
-        // DHT and peer exchange follow the settings (a magnet finds its peers through them); local peers never.
-        assertEquals(TorrentDiscovery(dht = true, pex = true, lsd = false), s.engine.discovery[priv])
+        // Trackers only: no DHT, no peer exchange, no local peers.
+        assertEquals(TorrentDiscovery.TRACKERS_ONLY, s.engine.discovery[priv])
 
         // Off and on again, with other changes in between: every change reaches both torrents, none turns local
         // peers on for the private one.
@@ -1073,8 +1075,7 @@ class TorrentManagerTest {
         advanceUntilIdle()
         val privateChanges = s.engine.discoveryLog.filter { it.first == priv }.map { it.second }
         assertEquals(4, privateChanges.size)
-        assertTrue(privateChanges.none { it.lsd })
-        assertEquals(TorrentDiscovery(dht = true, pex = false, lsd = false), s.engine.discovery[priv])
+        assertTrue(privateChanges.all { it == TorrentDiscovery.TRACKERS_ONLY })
         assertEquals(TorrentDiscovery(dht = true, pex = false, lsd = true), s.engine.discovery[normal])
     }
 
@@ -1114,8 +1115,8 @@ class TorrentManagerTest {
         assertTrue(s.published.isEmpty())
     }
 
-    /** A private torrent, finished with stop seeding off, then knocked out of SEEDING by [knock]: saved, not deleted. */
-    private fun TestScope.privateFinishedIsSavedAtTheEnd(knock: (TorrentTestSetup, String) -> Unit, expected: TorrentStatus) {
+    /** A private torrent, finished with stop seeding off, then knocked out of SEEDING by [knock]: deleted (OD-3). */
+    private fun TestScope.privateFinishedIsDeletedAtTheEnd(knock: (TorrentTestSetup, String) -> Unit, expected: TorrentStatus) {
         val s = setup(this)
         s.settings.value = keepSeeding
         val id = seedingTorrent(s, isPrivate = true)
@@ -1128,29 +1129,29 @@ class TorrentManagerTest {
         assertEquals(listOf(id), s.manager.forgetPrivate())
         advanceUntilIdle()
         assertTrue(s.manager.entries.value.isEmpty())
-        assertEquals(setOf("movie.mp4", "en.srt"), s.published.map { it.name }.toSet())
-        assertEquals("movie123", s.published.first { it.name == "movie.mp4" }.content)
-        assertFalse("private payload deleted after the copy", dir.exists())
-        assertTrue(s.logs.contains("seeding dropped, publishing 1"))
+        assertTrue(s.published.isEmpty())
+        assertFalse(dir.exists())
+        assertTrue(s.keepRoot.listFiles().orEmpty().isEmpty())
+        assertTrue(s.logs.contains("seeding dropped, deleted 1"))
     }
 
     @Test
-    fun aPausedFinishedPrivateTorrentIsSavedWhenPrivateBrowsingEnds() = runTest {
-        privateFinishedIsSavedAtTheEnd({ s, id -> s.manager.pause(id) }, TorrentStatus.PAUSED)
+    fun aPausedFinishedPrivateTorrentIsDeletedWhenPrivateBrowsingEnds() = runTest {
+        privateFinishedIsDeletedAtTheEnd({ s, id -> s.manager.pause(id) }, TorrentStatus.PAUSED)
     }
 
     @Test
-    fun aFinishedPrivateTorrentWaitingForWifiIsSavedWhenPrivateBrowsingEnds() = runTest {
-        privateFinishedIsSavedAtTheEnd({ s, _ -> s.network.kind.value = NetworkKind.OTHER }, TorrentStatus.WAITING_FOR_WIFI)
+    fun aFinishedPrivateTorrentWaitingForWifiIsDeletedWhenPrivateBrowsingEnds() = runTest {
+        privateFinishedIsDeletedAtTheEnd({ s, _ -> s.network.kind.value = NetworkKind.OTHER }, TorrentStatus.WAITING_FOR_WIFI)
     }
 
     @Test
-    fun aFinishedPrivateTorrentStoppedByAndroidIsSavedWhenPrivateBrowsingEnds() = runTest {
-        privateFinishedIsSavedAtTheEnd({ s, _ -> s.manager.onTimeout() }, TorrentStatus.PAUSED)
+    fun aFinishedPrivateTorrentStoppedByAndroidIsDeletedWhenPrivateBrowsingEnds() = runTest {
+        privateFinishedIsDeletedAtTheEnd({ s, _ -> s.manager.onTimeout() }, TorrentStatus.PAUSED)
     }
 
     @Test
-    fun aTorrentThatFinishedWhilePausedIsPublishedAtPrivateEnd() = runTest {
+    fun aPrivateTorrentThatFinishedWhilePausedIsDeletedAtPrivateEnd() = runTest {
         val s = setup(this)
         s.settings.value = keepSeeding
         val priv = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = true)!!
@@ -1170,8 +1171,9 @@ class TorrentManagerTest {
         s.manager.forgetPrivate()
         advanceUntilIdle()
         assertTrue(s.manager.entries.value.none { it.id == priv })
-        assertEquals(setOf("movie.mp4", "en.srt"), s.published.map { it.name }.toSet())
-        assertTrue(s.engine.removed.contains(eid to false))
+        assertTrue(s.published.isEmpty())
+        assertTrue(s.engine.removed.contains(eid to true))
+        assertFalse(File(s.payloadRoot, "${TorrentDirs.PRIVATE_DIR}/$priv").exists())
     }
 
     @Test
@@ -1207,5 +1209,276 @@ class TorrentManagerTest {
         assertTrue(s.manager.entries.value.isEmpty())
         assertEquals(2, s.published.size)
         assertTrue(s.logs.contains("removed PAUSED, publishing"))
+    }
+
+    // ---- private torrents kept inside Orbis (security PR 9, F-06; OD-3) ----
+
+    /** A private torrent that finished with stop seeding on: kept inside Orbis. */
+    private fun TestScope.keptTorrent(s: TorrentTestSetup): String {
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = true)!!
+        advanceUntilIdle()
+        val eid = s.lastId()
+        s.engine.emitMetadata(eid, sintelFiles)
+        advanceUntilIdle()
+        writePayload(s.entry(id))
+        s.engine.finish(eid)
+        advanceUntilIdle()
+        return id
+    }
+
+    @Test
+    fun aFinishedPrivateTorrentIsKeptInsideOrbisNotPublished() = runTest {
+        val s = setup(this)
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = true)!!
+        advanceUntilIdle()
+        val eid = s.lastId()
+        s.engine.emitMetadata(eid, sintelFiles)
+        advanceUntilIdle()
+        val payload = File(s.entry(id).saveDir)
+        writePayload(s.entry(id))
+        s.engine.finish(eid)
+        advanceUntilIdle()
+        assertTrue("nothing goes to MediaStore", s.published.isEmpty())
+        val e = s.entry(id)
+        assertEquals(TorrentStatus.COMPLETED, e.status)
+        assertNull(e.publishedPath)
+        val kept = File(s.keepRoot, secretName)
+        assertEquals(kept.absolutePath, e.keptDir)
+        // The publish layout: no top folder of the torrent's own, the declared sizes.
+        assertEquals("movie123", File(kept, "movie.mp4").readText())
+        assertEquals("su", File(kept, "sub/en.srt").readText())
+        assertEquals(setOf("movie.mp4", "sub"), kept.list()!!.toSet())
+        assertFalse("payload folder gone", payload.exists())
+        assertTrue(s.engine.removed.contains(eid to false))
+        assertTrue(s.logs.contains("kept"))
+        assertTrue(s.store.load().entries.isEmpty())
+        assertFalse(s.engine.started)
+    }
+
+    @Test
+    fun aKeptFolderNameThatIsTakenGetsACounter() = runTest {
+        val s = setup(this)
+        File(s.keepRoot, secretName).mkdirs()
+        val id = keptTorrent(s)
+        assertEquals(File(s.keepRoot, "$secretName (1)").absolutePath, s.entry(id).keptDir)
+        assertTrue(File(s.keepRoot, "$secretName (1)/movie.mp4").isFile)
+        assertTrue(File(s.keepRoot, secretName).list()!!.isEmpty())
+    }
+
+    @Test
+    fun aFileOfTheWrongSizeFailsTheKeepAndLeavesNothingKept() = runTest {
+        val s = setup(this)
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = true)!!
+        advanceUntilIdle()
+        s.engine.emitMetadata(s.lastId(), sintelFiles)
+        advanceUntilIdle()
+        writePayload(s.entry(id))
+        File(s.entry(id).saveDir, "$secretName/movie.mp4").writeText("short")
+        s.engine.finish(s.lastId())
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.FAILED, s.entry(id).status)
+        assertEquals(TorrentErrorKind.PUBLISH_FAILED, s.entry(id).errorKind)
+        assertNull(s.entry(id).keptDir)
+        assertTrue(s.keepRoot.listFiles().orEmpty().isEmpty())
+        assertTrue("payload untouched for Retry", File(s.entry(id).saveDir, "$secretName/sub/en.srt").isFile)
+        assertTrue(s.logs.contains("keep failed"))
+        assertTrue(s.published.isEmpty())
+    }
+
+    @Test
+    fun aSymlinkInThePayloadFailsTheKeep() = runTest {
+        val s = setup(this)
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = true)!!
+        advanceUntilIdle()
+        s.engine.emitMetadata(s.lastId(), sintelFiles)
+        advanceUntilIdle()
+        writePayload(s.entry(id))
+        val outside = File(tmp.root, "outside.bin").apply { writeText("movie123") }
+        val link = File(s.entry(id).saveDir, "$secretName/movie.mp4")
+        link.delete()
+        val made = runCatching { java.nio.file.Files.createSymbolicLink(link.toPath(), outside.toPath()) }.isSuccess
+        org.junit.Assume.assumeTrue("symlinks need privileges on this OS", made)
+        s.engine.finish(s.lastId())
+        advanceUntilIdle()
+        assertEquals(TorrentErrorKind.PUBLISH_FAILED, s.entry(id).errorKind)
+        assertTrue(s.keepRoot.listFiles().orEmpty().isEmpty())
+        assertTrue(outside.isFile)
+    }
+
+    @Test
+    fun retryAfterAFailedKeepKeepsAgain() = runTest {
+        val s = setup(this)
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = true)!!
+        advanceUntilIdle()
+        s.engine.emitMetadata(s.lastId(), sintelFiles)
+        advanceUntilIdle()
+        writePayload(s.entry(id))
+        File(s.entry(id).saveDir, "$secretName/movie.mp4").writeText("short")
+        s.engine.finish(s.lastId())
+        advanceUntilIdle()
+        File(s.entry(id).saveDir, "$secretName/movie.mp4").writeText("movie123")
+        s.manager.retry(id)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.COMPLETED, s.entry(id).status)
+        assertEquals(File(s.keepRoot, secretName).absolutePath, s.entry(id).keptDir)
+        assertTrue(s.published.isEmpty())
+    }
+
+    @Test
+    fun saveToDownloadsPublishesTheSamePathsAsANormalTorrentAndDeletesTheKeptCopy() = runTest {
+        val s = setup(this)
+        val id = keptTorrent(s)
+        val kept = File(s.entry(id).keptDir!!)
+        s.manager.saveKept(id)
+        advanceUntilIdle()
+        val targets = s.published.map { it.dir to it.name }.toSet()
+        assertEquals(setOf("Orbis/$secretName" to "movie.mp4", "Orbis/$secretName/sub" to "en.srt"), targets)
+        assertEquals("movie123", s.published.first { it.name == "movie.mp4" }.content)
+        assertFalse(kept.exists())
+        val e = s.entry(id)
+        assertEquals(TorrentStatus.COMPLETED, e.status)
+        assertNull(e.keptDir)
+        assertEquals("Download/Orbis/$secretName", e.publishedPath)
+        assertTrue(s.logs.contains("kept saved"))
+        // Saved: the end of private browsing takes the row, not the copy.
+        s.manager.forgetPrivate()
+        advanceUntilIdle()
+        assertTrue(s.manager.entries.value.isEmpty())
+        assertTrue(s.unpublished.isEmpty())
+    }
+
+    @Test
+    fun aFailedSaveToDownloadsLeavesTheKeptFilesAsTheyWere() = runTest {
+        val s = setup(this)
+        val id = keptTorrent(s)
+        val kept = File(s.entry(id).keptDir!!)
+        s.failPublishAt = 2
+        s.manager.saveKept(id)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.COMPLETED, s.entry(id).status)
+        assertEquals(kept.absolutePath, s.entry(id).keptDir)
+        assertEquals("movie123", File(kept, "movie.mp4").readText())
+        assertEquals("su", File(kept, "sub/en.srt").readText())
+        // The first copy was rolled back.
+        assertEquals(1, s.unpublished.size)
+        assertTrue(s.logs.contains("kept save failed"))
+    }
+
+    @Test
+    fun saveToDownloadsIsOnlyForAKeptRow() = runTest {
+        val s = setup(this)
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = true)!!
+        advanceUntilIdle()
+        s.manager.saveKept(id)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.FETCHING_METADATA, s.entry(id).status)
+        assertTrue(s.published.isEmpty())
+    }
+
+    @Test
+    fun theEndOfPrivateBrowsingDeletesKeptFiles() = runTest {
+        val s = setup(this)
+        val id = keptTorrent(s)
+        val kept = File(s.entry(id).keptDir!!)
+        assertEquals(listOf(id), s.manager.forgetPrivate())
+        advanceUntilIdle()
+        assertTrue(s.manager.entries.value.isEmpty())
+        assertFalse("OD-3: unsaved private files are deleted", kept.exists())
+        assertTrue(s.published.isEmpty())
+    }
+
+    @Test
+    fun theEndOfPrivateBrowsingDuringAKeepDeletesWhatWasMoved() = runTest {
+        val s = setup(this)
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = true)!!
+        advanceUntilIdle()
+        s.engine.emitMetadata(s.lastId(), sintelFiles)
+        advanceUntilIdle()
+        writePayload(s.entry(id))
+        val payload = File(s.entry(id).saveDir)
+        s.engine.finish(s.lastId())
+        // The keep job is queued; private browsing ends before it runs.
+        s.manager.forgetPrivate()
+        advanceUntilIdle()
+        assertTrue(s.manager.entries.value.isEmpty())
+        assertTrue(s.keepRoot.listFiles().orEmpty().isEmpty())
+        assertFalse(payload.exists())
+    }
+
+    @Test
+    fun removingAKeptRowDeletesItsKeptFiles() = runTest {
+        val s = setup(this)
+        val id = keptTorrent(s)
+        val kept = File(s.entry(id).keptDir!!)
+        s.manager.remove(id, deleteFiles = false)
+        advanceUntilIdle()
+        assertTrue(s.manager.entries.value.isEmpty())
+        assertFalse(kept.exists())
+        assertTrue(s.published.isEmpty())
+    }
+
+    @Test
+    fun saveAndRemoveOnASeedingPrivateTorrentStillPublishes() = runTest {
+        val s = setup(this)
+        s.settings.value = keepSeeding
+        val id = seedingTorrent(s, isPrivate = true)
+        val dir = File(s.entry(id).saveDir)
+        s.manager.remove(id, deleteFiles = false)
+        advanceUntilIdle()
+        assertTrue(s.manager.entries.value.isEmpty())
+        assertEquals(setOf("movie.mp4", "en.srt"), s.published.map { it.name }.toSet())
+        assertFalse(dir.exists())
+        assertTrue(s.keepRoot.listFiles().orEmpty().isEmpty())
+    }
+
+    @Test
+    fun stopSeedingOnAPrivateTorrentKeepsIt() = runTest {
+        val s = setup(this)
+        s.settings.value = keepSeeding
+        val id = seedingTorrent(s, isPrivate = true)
+        s.manager.stopSeeding(id)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.COMPLETED, s.entry(id).status)
+        assertNotNull(s.entry(id).keptDir)
+        assertTrue(s.published.isEmpty())
+    }
+
+    @Test
+    fun keptLeftoversOfADeadProcessAreDeletedOnRestoreButPrivateFilesAreNotTouched() = runTest {
+        val s = setup(this)
+        val leftover = File(s.keepRoot, "$secretName/sub")
+        leftover.mkdirs()
+        File(leftover, "en.srt").writeText("su")
+        // A private file download: the download manager's to clean, not the torrent manager's.
+        val file = File(s.keepRoot, "report.pdf").apply { writeText("pdf") }
+        s.manager.restore()
+        advanceUntilIdle()
+        assertFalse(File(s.keepRoot, secretName).exists())
+        assertTrue(file.isFile)
+        assertTrue(s.logs.contains("kept leftovers deleted 1"))
+    }
+
+    @Test
+    fun webSocketTrackersAreStrippedFromAMagnetAtIntake() = runTest {
+        val s = setup(this)
+        val ws = "$magnet&tr=wss%3A%2F%2Ftracker.example.org%2Fannounce&tr=ws://tracker.example.org:8000"
+        s.manager.add(TorrentSource.Magnet(ws), isPrivate = false)
+        advanceUntilIdle()
+        val uri = (s.engine.added.single().source as TorrentSource.Magnet).uri
+        assertEquals(magnet, uri)
+        assertTrue(s.logs.contains("announce urls dropped 2"))
+        for (line in s.logs) assertFalse(line, line.contains("tracker", ignoreCase = true))
+    }
+
+    @Test
+    fun keptEntriesAreNeverWrittenToTheIndex() = runTest {
+        val s = setup(this)
+        keptTorrent(s)
+        s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
+        advanceUntilIdle()
+        val text = File(s.stateDir, "index.json").readText()
+        assertFalse(text.contains(s.keepRoot.name))
+        assertFalse(text.contains("keptDir"))
+        assertEquals(1, s.store.load().entries.size)
     }
 }

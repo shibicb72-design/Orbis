@@ -28,10 +28,13 @@ sealed interface RowState {
 
     data object Completed : RowState
 
+    /** A finished private torrent kept inside Orbis, not in Downloads (it can still be saved there). */
+    data object Kept : RowState
+
     data class Failed(val kind: TorrentErrorKind) : RowState
 }
 
-enum class RowAction { PAUSE, RESUME, RETRY, OPEN, STOP_SEEDING, REMOVE }
+enum class RowAction { PAUSE, RESUME, RETRY, OPEN, STOP_SEEDING, SAVE_TO_DOWNLOADS, REMOVE }
 
 /**
  * What one torrent row shows, from its [TorrentEntry]. Pure (no Android), so every state is unit tested.
@@ -75,7 +78,7 @@ class TorrentRowModel(
             val percent =
                 when {
                     state == RowState.Checking || state == RowState.Publishing || state == RowState.Fetching -> null
-                    state == RowState.Completed -> 100
+                    state == RowState.Completed || state == RowState.Kept -> 100
                     e.totalBytes <= 0 -> null
                     else -> ((e.doneBytes.coerceIn(0L, e.totalBytes).toDouble() * 100.0) / e.totalBytes.toDouble()).toInt().coerceIn(0, 100)
                 }
@@ -109,7 +112,7 @@ class TorrentRowModel(
                     }
                 TorrentStatus.WAITING_FOR_WIFI -> RowState.WaitingWifi
                 TorrentStatus.PUBLISHING -> RowState.Publishing
-                TorrentStatus.COMPLETED -> RowState.Completed
+                TorrentStatus.COMPLETED -> if (e.isPrivate && e.keptDir != null) RowState.Kept else RowState.Completed
                 TorrentStatus.FAILED -> RowState.Failed(e.errorKind ?: TorrentErrorKind.ENGINE_ERROR)
                 TorrentStatus.REMOVED -> null
             }
@@ -122,6 +125,7 @@ class TorrentRowModel(
                 // A copy in flight must finish first.
                 RowState.Publishing -> emptySet()
                 RowState.Completed -> setOf(RowAction.OPEN, RowAction.REMOVE)
+                RowState.Kept -> setOf(RowAction.SAVE_TO_DOWNLOADS, RowAction.REMOVE)
                 is RowState.Failed -> if (state.kind in RETRYABLE) setOf(RowAction.RETRY, RowAction.REMOVE) else setOf(RowAction.REMOVE)
             }
 

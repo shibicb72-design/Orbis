@@ -41,7 +41,7 @@ class ObscuredTouchOldAndroidTest {
         val prompt = SitePrompt.SitePermission("https://example.com", null, listOf(SitePermissionKind.CAMERA)) { answers += it }
         rule.setContent { MaterialTheme { SitePromptDialog(prompt) } }
         rule.waitForIdle()
-        passTapGuard()
+        rule.passTapGuard()
         return ShadowDialog.getLatestDialog().window!!.decorView
     }
 

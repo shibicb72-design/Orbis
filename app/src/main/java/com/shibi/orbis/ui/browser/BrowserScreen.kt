@@ -1050,7 +1050,7 @@ private fun BrowserContent(
                 if (blankTab && !state.isLoading) {
                     if (selectedTab.isPrivate) {
                         // A private tab keeps its notice; the start page (history-based Top sites) is never shown here.
-                        OrbisEmptyState(stringResource(R.string.browser_private_empty_state), Icons.Filled.VisibilityOff)
+                        OrbisEmptyState(stringResource(R.string.browser_private_empty_state_files), Icons.Filled.VisibilityOff)
                     } else {
                         val pinned by container.browserSettings.pinnedSites.collectAsStateWithLifecycle()
                         val hidden by container.browserSettings.hiddenSites.collectAsStateWithLifecycle()

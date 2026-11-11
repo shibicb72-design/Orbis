@@ -152,7 +152,7 @@ fun SitePromptDialog(prompt: SitePrompt) {
                         stringResource(R.string.open_app_title_any)
                     },
                 onDismiss = prompt::dismiss,
-                confirmButton = { GuardedTextButton(onClick = prompt::open) { Text(stringResource(R.string.open_app_open)) } },
+                confirmButton = { GuardedTextButton(guardKey = prompt, onClick = prompt::open) { Text(stringResource(R.string.open_app_open)) } },
                 obscuredFilter = true,
                 dismissButton = {
                     TextButton(onClick = prompt::stay) {
@@ -170,7 +170,7 @@ fun SitePromptDialog(prompt: SitePrompt) {
                 title = stringResource(if (prompt.isUpdate) R.string.login_update_title else R.string.login_save_title, prompt.originHost),
                 onDismiss = prompt::dismiss,
                 confirmButton = {
-                    GuardedTextButton(onClick = { prompt.answer(SaveLoginChoice.SAVE) }) {
+                    GuardedTextButton(guardKey = prompt, onClick = { prompt.answer(SaveLoginChoice.SAVE) }) {
                         Text(stringResource(if (prompt.isUpdate) R.string.login_update else R.string.login_save))
                     }
                 },
@@ -240,7 +240,7 @@ private fun SitePermissionDialog(prompt: SitePrompt.SitePermission) {
         title = stringResource(R.string.perm_prompt_title, prompt.origin),
         onDismiss = prompt::dismiss,
         confirmButton = {
-            GuardedTextButton(onClick = { prompt.allow(prompt.offerRemember && rememberChoice) }) {
+            GuardedTextButton(guardKey = prompt, onClick = { prompt.allow(prompt.offerRemember && rememberChoice) }) {
                 Text(stringResource(R.string.perm_prompt_allow))
             }
         },

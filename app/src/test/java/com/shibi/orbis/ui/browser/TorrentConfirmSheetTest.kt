@@ -42,7 +42,7 @@ class TorrentConfirmSheetTest {
     private val magnet = "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel"
     private val note = "Torrent downloads connect directly to other people. They, and the trackers, can see your IP address. Orbis sends nothing else."
     private val reminder = "Peers can see your IP address"
-    private val privateLine = "From a private tab: kept out of the list when private browsing ends"
+    private val privateLine = "From a private tab: uses the torrent's trackers only. The files stay inside Orbis, not in your Downloads, and are deleted when private browsing ends unless you save them."
 
     private class Added(val source: TorrentSource, val isPrivate: Boolean, val noteShown: Boolean)
 
@@ -99,7 +99,7 @@ class TorrentConfirmSheetTest {
         rule.onNodeWithText(note).assertExists()
         rule.onAllNodesWithText(reminder).assertCountEquals(0)
         rule.onAllNodesWithText(privateLine).assertCountEquals(0)
-        passTapGuard()
+        rule.passTapGuard()
         rule.onNodeWithText("Download").assertIsEnabled().performClick()
         rule.waitForIdle()
         val a = added.single()
@@ -115,7 +115,7 @@ class TorrentConfirmSheetTest {
         rule.onNodeWithText(reminder).assertExists()
         rule.onAllNodesWithText(note).assertCountEquals(0)
         rule.onNodeWithText(privateLine).assertExists()
-        passTapGuard()
+        rule.passTapGuard()
         rule.onNodeWithText("Download").performClick()
         rule.waitForIdle()
         assertEquals(true, added.single().isPrivate)
@@ -132,7 +132,7 @@ class TorrentConfirmSheetTest {
         response.gate.countDown()
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Sintel").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("2 files", substring = true).assertExists()
-        passTapGuard()
+        rule.passTapGuard()
         rule.onNodeWithText("Download").assertIsEnabled().performClick()
         rule.waitForIdle()
         val a = added.single()

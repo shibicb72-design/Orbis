@@ -70,6 +70,7 @@ import com.shibi.orbis.passwords.LoginManager
 import com.shibi.orbis.passwords.SENSITIVE_CLIP_LABEL
 import com.shibi.orbis.passwords.SavedLogin
 import com.shibi.orbis.passwords.SensitiveClip
+import com.shibi.orbis.ui.GuardedTextButton
 import com.shibi.orbis.ui.ObscuredTouchFilter
 import com.shibi.orbis.ui.secondaryReadingWidth
 import java.util.Locale
@@ -298,9 +299,14 @@ fun PasswordsScreen(
         AlertDialog(
             onDismissRequest = { confirmReset = false },
             title = { Text(stringResource(R.string.passwords_reset)) },
-            text = { Text(stringResource(R.string.passwords_reset_warning)) },
+            text = {
+                // A dialog is its own window: the screen's filter does not reach it.
+                ObscuredTouchFilter()
+                Text(stringResource(R.string.passwords_reset_warning))
+            },
             confirmButton = {
-                TextButton(
+                GuardedTextButton(
+                    guardKey = Unit,
                     onClick = {
                         confirmReset = false
                         if (unlocked) manager.resetUnreadableStore()
@@ -314,9 +320,12 @@ fun PasswordsScreen(
     deleting?.takeIf { unlocked }?.let { login ->
         AlertDialog(
             onDismissRequest = { deleting = null },
-            text = { Text(stringResource(R.string.passwords_delete_confirm, login.host)) },
+            text = {
+                ObscuredTouchFilter()
+                Text(stringResource(R.string.passwords_delete_confirm, login.host))
+            },
             confirmButton = {
-                TextButton(onClick = {
+                GuardedTextButton(guardKey = login.guid, onClick = {
                     if (unlocked) manager.delete(login.guid)
                     deleting = null
                 }) { Text(stringResource(R.string.passwords_delete)) }

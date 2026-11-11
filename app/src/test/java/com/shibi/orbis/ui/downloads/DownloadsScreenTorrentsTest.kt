@@ -2,8 +2,10 @@ package com.shibi.orbis.ui.downloads
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -87,8 +89,9 @@ class DownloadsScreenTorrentsTest {
         rule.waitForIdle()
     }
 
-    private fun show(t: TorrentTestSetup, files: DownloadManager = downloads()) {
-        rule.setContent { MaterialTheme { DownloadsScreen(manager = files, torrents = t.manager, onBack = {}) } }
+    private fun show(t: TorrentTestSetup, files: DownloadManager = downloads(), dark: Boolean = false) {
+        val colors = if (dark) androidx.compose.material3.darkColorScheme() else androidx.compose.material3.lightColorScheme()
+        rule.setContent { MaterialTheme(colorScheme = colors) { DownloadsScreen(manager = files, torrents = t.manager, onBack = {}) } }
         idle()
     }
 
@@ -103,8 +106,8 @@ class DownloadsScreenTorrentsTest {
         return id
     }
 
-    private fun completed(t: TorrentTestSetup): String {
-        val id = downloading(t)
+    private fun completed(t: TorrentTestSetup, isPrivate: Boolean = false): String {
+        val id = downloading(t, isPrivate)
         val dir = File(t.entry(id).saveDir, "Sintel").apply { mkdirs() }
         File(dir, "movie.mp4").writeText("movie123")
         File(dir, "en.srt").writeText("su")
@@ -187,7 +190,7 @@ class DownloadsScreenTorrentsTest {
         idle()
         rule.onNodeWithText("Remove this torrent?").assertExists()
         rule.onNodeWithText("The 5 B downloaded so far will be deleted.").assertExists()
-        passTapGuard()
+        rule.passTapGuard()
         rule.onNodeWithText("Remove").performClick()
         idle()
         assertTrue(t.manager.entries.value.none { it.id == id })
@@ -204,7 +207,7 @@ class DownloadsScreenTorrentsTest {
         idle()
         rule.onNodeWithText("Remove from the list?").assertExists()
         rule.onNodeWithText("The files stay in Download/Orbis/Sintel.").assertExists()
-        passTapGuard()
+        rule.passTapGuard()
         rule.onNodeWithText("Remove").performClick()
         idle()
         assertTrue(t.manager.entries.value.none { it.id == id })
@@ -273,7 +276,7 @@ class DownloadsScreenTorrentsTest {
         idle()
         rule.onNodeWithText("The files are finished but not saved to Download/Orbis/Sintel yet.").assertExists()
         rule.onNodeWithText("Delete").assertExists()
-        passTapGuard()
+        rule.passTapGuard()
         rule.onNodeWithText("Save and remove").performClick()
         idle()
         assertTrue(t.manager.entries.value.none { it.id == id })
@@ -293,7 +296,7 @@ class DownloadsScreenTorrentsTest {
         idle()
         rule.onNodeWithText("The files are finished but not saved to Download/Orbis/Sintel yet.").assertExists()
         rule.onNodeWithText("Delete").assertExists()
-        passTapGuard()
+        rule.passTapGuard()
         rule.onNodeWithText("Save and remove").performClick()
         idle()
         assertTrue(t.manager.entries.value.none { it.id == id })
@@ -306,5 +309,46 @@ class DownloadsScreenTorrentsTest {
         rule.setContent { MaterialTheme { DownloadsScreen(manager = files, torrents = null, onBack = {}) } }
         idle()
         rule.onNodeWithText("a.bin").assertExists()
+    }
+
+    // ---- private torrents kept inside Orbis (security PR 9) ----
+
+    private fun keptRowOffersSaveToDownloads(dark: Boolean) {
+        val t = torrents()
+        val id = completed(t, isPrivate = true)
+        val kept = File(t.entry(id).keptDir!!)
+        show(t, dark = dark)
+        rule.onNodeWithText("Kept inside Orbis, not in your Downloads").assertExists()
+        rule.onAllNodesWithText("Sintel", substring = true).assertCountEquals(0)
+        rule.onAllNodesWithContentDescription("Open").assertCountEquals(0)
+        rule.onNodeWithText("Save to Downloads").assertIsDisplayed().performClick()
+        idle()
+        rule.onNodeWithText("Saved in your Downloads").assertExists()
+        assertEquals(setOf("movie.mp4", "en.srt"), t.published.map { it.name }.toSet())
+        assertTrue(!kept.exists())
+        rule.onAllNodesWithText("Save to Downloads").assertCountEquals(0)
+    }
+
+    @Test
+    fun aKeptPrivateRowOffersSaveToDownloads() = keptRowOffersSaveToDownloads(dark = false)
+
+    @Test
+    fun aKeptPrivateRowOffersSaveToDownloadsInTheDarkTheme() = keptRowOffersSaveToDownloads(dark = true)
+
+    @Test
+    fun removingAKeptPrivateRowSaysItsFilesAreDeleted() {
+        val t = torrents()
+        val id = completed(t, isPrivate = true)
+        val kept = File(t.entry(id).keptDir!!)
+        show(t)
+        rule.onNodeWithContentDescription("Remove").performClick()
+        idle()
+        rule.onNodeWithText("The files kept inside Orbis are deleted.").assertExists()
+        rule.passTapGuard()
+        rule.onNodeWithText("Remove").performClick()
+        idle()
+        assertTrue(t.manager.entries.value.none { it.id == id })
+        assertTrue(!kept.exists())
+        assertTrue(t.published.isEmpty())
     }
 }

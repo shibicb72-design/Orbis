@@ -214,7 +214,8 @@ fun TorrentConfirmSheet(model: TorrentConfirmModel, onDownload: () -> Unit, onCa
     ) {
         // Composed inside the sheet: the filter and the guard belong to the sheet's own window.
         ObscuredTouchFilter()
-        val tapGuard = rememberTapGuard()
+        // Keyed on enabled: a .torrent's Download comes alive when its bytes arrive, and the delay starts again then.
+        val tapGuard = rememberTapGuard(model.downloadEnabled)
         Column(
             Modifier
                 .verticalScroll(rememberScrollState())
@@ -269,7 +270,7 @@ fun TorrentConfirmSheet(model: TorrentConfirmModel, onDownload: () -> Unit, onCa
                 )
             }
             if (model.isPrivate) {
-                Text(stringResource(R.string.torrents_sheet_private), style = MaterialTheme.typography.bodyMedium, color = secondary)
+                Text(stringResource(R.string.torrents_sheet_private_kept), style = MaterialTheme.typography.bodyMedium, color = secondary)
             }
             if (model.showFirstUseNote) {
                 Surface(

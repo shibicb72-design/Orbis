@@ -247,7 +247,6 @@
     <string name="browser_crashed">This page crashed.</string>
     <string name="browser_retry">Retry</string>
     <string name="browser_empty_state">Search or enter an address to start browsing.</string>
-    <string name="browser_private_empty_state">Private tab. Pages here stay out of your history, and their cookies and site data are cleared when you close your last private tab. Bookmarks and downloads you save are kept.</string>
     <string name="private_banner_title">Private tab</string>
     <string name="private_close_all">Close private tabs</string>
     <string name="menu_more">More options</string>
@@ -338,7 +337,6 @@
     <string name="browser_download_size">Size: %1$s</string>
     <string name="browser_download_size_unknown">Size: unknown</string>
     <string name="browser_download_from">From: %1$s</string>
-    <string name="browser_download_private_note">This file stays on your device after private browsing ends.</string>
     <string name="browser_download_start">Download</string>
 
     <string name="settings_title">Settings</string>
@@ -421,4 +419,11 @@
     <string name="cast_this_page">Cast this page</string>
     <string name="cast_connecting">Connecting...</string>
     <string name="cast_close">Close</string>
+    <!-- Private-tab files are deleted when private browsing ends (OD-3, security PR 9). English only. -->
+    <string name="browser_private_empty_state_files" translatable="false">Private tab. Pages here stay out of your history, and their cookies and site data are cleared when you close your last private tab. Bookmarks you save are kept. Files downloaded here are deleted then; only a torrent you saved to your Downloads stays.</string>
+    <string name="browser_download_private_note_deleted" translatable="false">This file is deleted when private browsing ends.</string>
+    <string name="torrents_sheet_private_kept" translatable="false">From a private tab: uses the torrent\'s trackers only. The files stay inside Orbis, not in your Downloads, and are deleted when private browsing ends unless you save them.</string>
+    <string name="torrents_state_kept_private" translatable="false">Kept inside Orbis, not in your Downloads</string>
+    <string name="torrents_action_save_to_downloads" translatable="false">Save to Downloads</string>
+    <string name="torrents_remove_kept_body_private" translatable="false">The files kept inside Orbis are deleted.</string>
 </resources>
