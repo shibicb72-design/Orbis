@@ -79,20 +79,23 @@ class TorrentIntakeReader(
         )
 
     /**
-     * The size query is a provider call with its own deadline: a hung or failed query means "size unknown" (-1), and
-     * the capped read with its watchdog still enforces the limit.
+     * The size query and the open are provider calls with their own deadline and the shared thread cap
+     * ([providerCall]), so a provider that hangs in either cannot pin an IO thread; the confirm sheet starts this read
+     * before any tap. A hung or failed query means "size unknown" (-1), and the capped read with its watchdog still
+     * enforces the limit. A hung or failed open fails the read; a stream that opens after the deadline is closed.
      */
     internal suspend fun readWithDeclaredSize(querySize: () -> Long?, open: () -> InputStream?): Result {
         val declared = providerCall(providerTimeoutMs, log, querySize) ?: -1L
         if (declared > TorrentLimits.MAX_TORRENT_FILE_BYTES) return Result.Failed(IntakeRefusal.TOO_LARGE)
-        return read(open)
+        return read { providerCall(providerTimeoutMs, log, open) }
     }
 
     /**
      * The blocking read runs on its own job so a stream that ignores [InputStream.close] cannot hold the caller past the
-     * timeouts; the first of "read finished" and "timed out" decides.
+     * timeouts; the first of "read finished" and "timed out" decides. [open] may suspend; a stream it returns after the
+     * read already ended is closed here.
      */
-    internal suspend fun read(open: () -> InputStream?): Result =
+    internal suspend fun read(open: suspend () -> InputStream?): Result =
         // On [io] as a whole, so the watchdog's timing never depends on the caller's dispatcher (a test clock, a frame).
         withContext(io) {
             val outcome = CompletableDeferred<Result>()

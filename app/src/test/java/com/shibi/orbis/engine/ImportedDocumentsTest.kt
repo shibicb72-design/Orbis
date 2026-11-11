@@ -7,11 +7,17 @@ import java.io.InputStream
 import java.net.URI
 import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -619,6 +625,55 @@ class ImportedDocumentsTest {
         assertTrue(result is ImportResult.Failed)
         assertFalse(opened)
         assertTrue("query waited ${waitedMs}ms", waitedMs < 3_000)
+    }
+
+    @Test
+    fun aBlockedOpenDoesNotHoldTheDispatcherThread() {
+        val executor = Executors.newSingleThreadExecutor()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        try {
+            val single = executor.asCoroutineDispatcher()
+            val cache = ImportedFileCache(tmp.root, copyTimeoutMillis = 10_000, overallTimeoutMillis = 10_000, dispatcher = single)
+            runBlocking {
+                val copy = async(Dispatchers.IO) {
+                    cache.copyIn("a.pdf", "application/pdf", null) {
+                        entered.countDown()
+                        release.await(10, TimeUnit.SECONDS)
+                        ByteArrayInputStream(byteArrayOf(1))
+                    }
+                }
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                // The open is still stuck in the provider; the import's one thread must be free for other work.
+                withTimeout(2_000) { withContext(single) { } }
+                release.countDown()
+                assertTrue(copy.await() is ImportResult.Ready)
+            }
+        } finally {
+            release.countDown()
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun importProviderThreadsShareTheProviderCallCap() = runBlocking {
+        val release = CountDownLatch(1)
+        try {
+            val held = (1..ProviderDeadline.MAX_THREADS).map { async(Dispatchers.IO) { providerCall<Unit>(timeoutMs = 10_000) { release.await() } } }
+            withTimeout(5_000) { while (ProviderDeadline.aliveThreads() < ProviderDeadline.MAX_THREADS) delay(5) }
+            val cache = ImportedFileCache(tmp.root, dispatcher = Dispatchers.IO)
+            var queried = false
+            val result = cache.readShared("application/pdf", query = { queried = true; "a.pdf" to 1L }, open = { ByteArrayInputStream(byteArrayOf(1)) })
+            assertTrue(result is ImportResult.Failed)
+            assertFalse(queried)
+            release.countDown()
+            held.awaitAll()
+        } finally {
+            release.countDown()
+        }
+        val until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (ProviderDeadline.aliveThreads() > 0 && System.nanoTime() < until) Thread.sleep(10)
+        assertEquals(0, ProviderDeadline.aliveThreads())
     }
 
     @Test

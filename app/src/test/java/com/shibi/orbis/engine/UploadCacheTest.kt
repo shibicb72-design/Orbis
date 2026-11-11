@@ -4,14 +4,19 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.After
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Rule
@@ -261,6 +266,152 @@ class UploadCacheTest {
         job.start()
         job.join()
         assertTrue(job.isCancelled)
+        assertTrue(rootChildren(cache).isEmpty())
+    }
+
+    // ---- hostile providers ----
+
+    /** Stuck provider calls wait on this; released after each test so no provider thread outlives it. */
+    private val stuck = CountDownLatch(1)
+
+    @After
+    fun releaseStuckProviders() {
+        stuck.countDown()
+        val until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (ProviderDeadline.aliveThreads() > 0 && System.nanoTime() < until) Thread.sleep(10)
+        assertEquals(0, ProviderDeadline.aliveThreads())
+    }
+
+    /** Blocks in read() until closed, like a provider pipe that stops sending. */
+    private class StalledStream : InputStream() {
+        val closed = CountDownLatch(1)
+
+        override fun read(): Int {
+            closed.await()
+            throw IOException("closed")
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int = read()
+
+        override fun close() {
+            closed.countDown()
+        }
+    }
+
+    private fun hostileCache(idleTimeoutMs: Long = 60_000) =
+        UploadCache(tmp.newFolder("cache"), Dispatchers.IO, metadataTimeoutMs = 200, openTimeoutMs = 300, idleTimeoutMs = idleTimeoutMs)
+
+    @Test
+    fun aHangingNameQueryAndTypeLookupFallBackToAGenericName() = runBlocking {
+        val cache = hostileCache()
+        val source =
+            object : UploadCache.Source {
+                override val name: String? get() = stuck.await().let { "secret.pdf" }
+                override val size: Long? get() = stuck.await().let { 1L }
+                override val extension: String? get() = stuck.await().let { "pdf" }
+
+                override fun open(): InputStream = ByteArrayInputStream("hi".toByteArray())
+            }
+        val out = withTimeout(10_000) { cache.copy(listOf(source)) }
+        assertEquals("upload", out.single().name)
+        assertEquals("hi", out.single().readText())
+    }
+
+    @Test
+    fun aHangingOpenFailsAtItsDeadlineCleansUpAndALateStreamIsClosed() = runBlocking {
+        val cache = hostileCache()
+        val late = StalledStream()
+        val hanging =
+            object : UploadCache.Source {
+                override val name = "b.txt"
+                override val size: Long? = null
+
+                override fun open(): InputStream {
+                    stuck.await()
+                    return late
+                }
+            }
+        try {
+            withTimeout(10_000) { cache.copy(listOf(FakeSource("a.txt", byteArrayOf(1)), hanging)) }
+            fail("expected UploadCopyException")
+        } catch (e: UploadCopyException) {
+            // expected
+        }
+        assertTrue(rootChildren(cache).isEmpty())
+        stuck.countDown()
+        assertTrue(late.closed.await(10, TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun aStalledReadFailsAtTheIdleTimeoutAndClosesTheStream() = runBlocking {
+        val cache = hostileCache(idleTimeoutMs = 300)
+        val stream = StalledStream()
+        val stalled =
+            object : UploadCache.Source {
+                override val name = "big.bin"
+                override val size: Long? = null
+
+                override fun open(): InputStream = stream
+            }
+        try {
+            withTimeout(10_000) { cache.copy(listOf(stalled)) }
+            fail("expected UploadCopyException")
+        } catch (e: UploadCopyException) {
+            assertFalse(e.message.orEmpty().contains("big.bin"))
+        }
+        assertTrue(stream.closed.await(10, TimeUnit.SECONDS))
+        assertTrue(rootChildren(cache).isEmpty())
+    }
+
+    @Test
+    fun aSlowCopyThatKeepsSendingIsNotCutOff() = runBlocking {
+        val cache = hostileCache(idleTimeoutMs = 300)
+        var sent = 0
+        val trickle =
+            object : UploadCache.Source {
+                override val name = "slow.bin"
+                override val size: Long? = null
+
+                override fun open(): InputStream =
+                    object : InputStream() {
+                        override fun read(): Int = throw UnsupportedOperationException()
+
+                        override fun read(b: ByteArray, off: Int, len: Int): Int {
+                            if (sent >= 8) return -1
+                            Thread.sleep(150)
+                            sent++
+                            b[off] = 7
+                            return 1
+                        }
+                    }
+            }
+        // 8 x 150 ms is well past the idle window as a whole; no single gap is.
+        val out = cache.copy(listOf(trickle))
+        assertEquals(8, out.single().readBytes().size)
+    }
+
+    @Test
+    fun cancellingDuringABlockedReadClosesTheStreamAndCleansUp() = runBlocking {
+        val cache = hostileCache()
+        val stream = StalledStream()
+        val job =
+            launch(Dispatchers.Default) {
+                cache.copy(
+                    listOf(
+                        object : UploadCache.Source {
+                            override val name = "big.bin"
+                            override val size: Long? = null
+
+                            override fun open(): InputStream = stream
+                        },
+                    ),
+                )
+            }
+        withTimeout(10_000) { while (rootChildren(cache).isEmpty()) delay(5) }
+        job.cancel()
+        withTimeout(10_000) { job.join() }
+        assertTrue(job.isCancelled)
+        assertTrue(stream.closed.await(10, TimeUnit.SECONDS))
         assertTrue(rootChildren(cache).isEmpty())
     }
 

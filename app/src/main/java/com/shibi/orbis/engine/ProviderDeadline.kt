@@ -52,30 +52,40 @@ private sealed interface ProviderOutcome<out T> {
  *
  * [log] gets only [ProviderDeadline.TIMEOUT_LOG].
  */
-@OptIn(ExperimentalCoroutinesApi::class) // getCompleted, only after complete() returned false
 suspend fun <T> providerCall(
     timeoutMs: Long = ProviderDeadline.DEFAULT_TIMEOUT_MS,
     log: (String) -> Unit = {},
     block: () -> T,
+): T? = providerCallOn(timeoutMs, log, ::Thread, block)
+
+/** [providerCall] with the thread constructor as a seam, so a test can make building the thread fail. */
+@OptIn(ExperimentalCoroutinesApi::class) // getCompleted, only after complete() returned false
+internal suspend fun <T> providerCallOn(
+    timeoutMs: Long,
+    log: (String) -> Unit,
+    newThread: (Runnable, String) -> Thread,
+    block: () -> T,
 ): T? {
-    if (!ProviderDeadline.tryAcquire()) return null
     val outcome = CompletableDeferred<ProviderOutcome<T>>()
-    val worker =
-        Thread({
-            try {
-                val result: ProviderOutcome<T> =
-                    try {
-                        ProviderOutcome.Value(block())
-                    } catch (t: Throwable) {
-                        ProviderOutcome.Failed
-                    }
-                if (!outcome.complete(result) && result is ProviderOutcome.Value) closeQuietly(result.value)
-            } finally {
-                ProviderDeadline.release()
-            }
-        }, ProviderDeadline.THREAD_NAME)
-    worker.isDaemon = true
+    if (!ProviderDeadline.tryAcquire()) return null
+    // Building the thread can throw as well as starting it (OutOfMemoryError): both inside the try, so the slot is
+    // never leaked. When either throws the body never runs, so this catch is the only release.
     try {
+        val worker =
+            newThread({
+                try {
+                    val result: ProviderOutcome<T> =
+                        try {
+                            ProviderOutcome.Value(block())
+                        } catch (t: Throwable) {
+                            ProviderOutcome.Failed
+                        }
+                    if (!outcome.complete(result) && result is ProviderOutcome.Value) closeQuietly(result.value)
+                } finally {
+                    ProviderDeadline.release()
+                }
+            }, ProviderDeadline.THREAD_NAME)
+        worker.isDaemon = true
         worker.start()
     } catch (t: Throwable) {
         ProviderDeadline.release()

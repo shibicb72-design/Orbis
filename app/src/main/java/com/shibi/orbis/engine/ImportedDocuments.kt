@@ -18,7 +18,6 @@ import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantReadWriteLock
@@ -27,6 +26,7 @@ import kotlin.concurrent.write
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
@@ -52,6 +52,9 @@ const val IMPORT_COPY_IDLE_TIMEOUT_MILLIS = 30_000L
 
 /** Hard stop for one import, even when bytes keep arriving. Generous enough for a slow large PDF. */
 const val IMPORT_COPY_OVERALL_TIMEOUT_MILLIS = 5L * 60 * 1000
+
+/** How often an import checks on its provider thread. The check suspends, so no dispatcher thread waits. */
+private const val PROVIDER_POLL_MILLIS = 50L
 
 /**
  * Content-Security-Policy written into every imported HTML file.
@@ -642,17 +645,27 @@ class ImportedFileCache(
     private suspend fun <T> awaitProvider(scope: CoroutineScope, watchdog: ImportCopyWatchdog, block: () -> T): T? {
         if (watchdog.isTimedOut()) return null
         val future = CompletableFuture<T>()
-        val worker = Thread({
-            try {
-                val value = block()
-                if (watchdog.isTimedOut() && value is InputStream) runCatching { value.close() }
-                future.complete(value)
-            } catch (t: Throwable) {
-                future.completeExceptionally(t)
-            }
-        }, "import-provider")
-        worker.isDaemon = true
-        worker.start()
+        // A thread stuck in a provider cannot be stopped, only abandoned: these share the provider-call cap, so a flood
+        // of shares from a hostile provider cannot create threads without bound. No slot: the import fails at once.
+        if (!ProviderDeadline.tryAcquire()) return null
+        try {
+            val worker = Thread({
+                try {
+                    val value = block()
+                    if (watchdog.isTimedOut() && value is InputStream) runCatching { value.close() }
+                    future.complete(value)
+                } catch (t: Throwable) {
+                    future.completeExceptionally(t)
+                } finally {
+                    ProviderDeadline.release()
+                }
+            }, "import-provider")
+            worker.isDaemon = true
+            worker.start()
+        } catch (t: Throwable) {
+            ProviderDeadline.release()
+            return null
+        }
         try {
             while (true) {
                 scope.ensureActive()
@@ -663,16 +676,19 @@ class ImportedFileCache(
                     }
                     return null
                 }
+                // Poll without blocking: a dispatcher thread is never held while the provider thinks.
+                if (!future.isDone) {
+                    delay(PROVIDER_POLL_MILLIS)
+                    continue
+                }
                 try {
-                    val value = future.get(50, TimeUnit.MILLISECONDS)
+                    val value = future.get()
                     watchdog.bump()
                     if (watchdog.isTimedOut()) {
                         if (value is InputStream) runCatching { value.close() }
                         return null
                     }
                     return value
-                } catch (e: TimeoutException) {
-                    continue
                 } catch (e: ExecutionException) {
                     val cause = e.cause
                     if (cause is kotlinx.coroutines.CancellationException) throw cause
