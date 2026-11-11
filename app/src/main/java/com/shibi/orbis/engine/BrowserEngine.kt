@@ -157,6 +157,11 @@ data class SessionState(
     val javaScriptOn: Boolean = true,
     /** The last load failed because HTTPS-only mode found no secure version of the site. */
     val httpsOnlyBlocked: Boolean = false,
+    /**
+     * Gecko reports the committed page as secure: a verified connection, no certificate exception, and no mixed active
+     * content loaded. False from each page start and each move to another origin until Gecko has reported.
+     */
+    val secure: Boolean = false,
     /** What the on-device translator knows about the page; null until it reported. */
     val translation: TranslationInfo? = null,
     /** The page looks like an article (Readability's check): reader view is offered. Reset at each page start. */
@@ -191,7 +196,8 @@ data class SessionState(
 )
 
 // The one definition of how engine events change the session state, so the counters are maintained in one place and
-// the address bar's tests drive the same transitions the engine applies. url is never written here (onLocationChange).
+// the address bar's tests drive the same transitions the engine applies. url is written only by afterLocationChange
+// (onLocationChange).
 
 internal fun SessionState.afterPageStart(): SessionState =
     copy(
@@ -200,6 +206,7 @@ internal fun SessionState.afterPageStart(): SessionState =
         loadFailed = false,
         failedUrl = null,
         httpsOnlyBlocked = false,
+        secure = false,
         crashed = false,
         findResult = null,
         loadStarts = loadStarts + 1,
@@ -207,6 +214,25 @@ internal fun SessionState.afterPageStart(): SessionState =
 
 internal fun SessionState.afterPageStop(success: Boolean): SessionState =
     copy(isLoading = false, progress = if (success) 100 else 0, loadEnds = loadEnds + 1)
+
+/**
+ * The page committed [url]. Gecko's security report stays only within the same web origin (a fragment or pushState
+ * change); another origin, or a page that is not http(s), shows no lock until Gecko reports for it.
+ */
+internal fun SessionState.afterLocationChange(url: String): SessionState {
+    val origin = siteOriginOf(url)
+    return copy(url = url, secure = secure && origin != null && origin == siteOriginOf(this.url))
+}
+
+/**
+ * Gecko's security report for the committed page. Secure only for a secure connection that is not a certificate
+ * exception and loaded no mixed active content.
+ */
+internal fun SessionState.afterSecurityChange(
+    connectionSecure: Boolean,
+    certificateException: Boolean,
+    mixedActiveLoaded: Boolean,
+): SessionState = copy(secure = connectionSecure && !certificateException && !mixedActiveLoaded)
 
 /** [failedUrl] is the http(s) address that failed, or null. url is deliberately untouched: the old page is still displayed. */
 internal fun SessionState.afterLoadError(failedUrl: String?): SessionState =
