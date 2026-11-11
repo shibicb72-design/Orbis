@@ -109,6 +109,8 @@ android {
 
     buildFeatures {
         compose = true
+        // BuildConfig.DEBUG gates the torrent debug intent (adb verification only).
+        buildConfig = true
     }
 
     testOptions {
@@ -154,6 +156,11 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.zxing.core)
     implementation(libs.androidx.browser)
+    // Torrents: only torrent/Libtorrent4jEngine.kt may touch it; the native library loads only while a torrent is active.
+    implementation(libs.libtorrent4j.core)
+    implementation(libs.libtorrent4j.android.arm64)
+    implementation(libs.libtorrent4j.android.arm)
+    implementation(libs.libtorrent4j.android.x64)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)

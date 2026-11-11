@@ -22,6 +22,8 @@ camerax = "1.6.2"
 # Custom Tabs service and intent helpers (Google Maven), latest stable on 2026-11-09.
 androidxBrowser = "1.10.0"
 zxing = "3.5.4"
+# Torrent engine (Maven Central, MIT; libtorrent BSD-3). Java API plus one native jar per ABI, newest on 2026-11-10.
+libtorrent4j = "2.1.0-39"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -52,6 +54,10 @@ androidx-camera-view = { group = "androidx.camera", name = "camera-view", versio
 androidx-browser = { group = "androidx.browser", name = "browser", version.ref = "androidxBrowser" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 mozilla-concept-engine = { group = "org.mozilla.components", name = "concept-engine", version.ref = "mozillaAc" }
+libtorrent4j-core = { group = "org.libtorrent4j", name = "libtorrent4j", version.ref = "libtorrent4j" }
+libtorrent4j-android-arm64 = { group = "org.libtorrent4j", name = "libtorrent4j-android-arm64", version.ref = "libtorrent4j" }
+libtorrent4j-android-arm = { group = "org.libtorrent4j", name = "libtorrent4j-android-arm", version.ref = "libtorrent4j" }
+libtorrent4j-android-x64 = { group = "org.libtorrent4j", name = "libtorrent4j-android-x86_64", version.ref = "libtorrent4j" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
