@@ -1,10 +1,14 @@
 package com.shibi.orbis.downloads
 
 import android.content.ContentUris
+import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.os.Bundle
 import android.provider.MediaStore
+import com.shibi.orbis.torrent.TorrentPublisher
 import java.io.File
 
 /**
@@ -37,28 +41,54 @@ internal fun copyToPublicDownloads(context: Context, file: File, displayName: St
 /**
  * One file of a finished torrent into Download/<subPath>. A finished copy this app already made of the same file
  * (same folder, name and size: a publish cut short by a killed process) is reused instead of copied again, so a
- * restart never leaves "name (1)" duplicates. Blocking IO.
+ * restart never leaves "name (1)" duplicates; such a copy is marked reused, so a rollback leaves it alone. A
+ * half-written (IS_PENDING) copy of ours with that folder and name is deleted first. Blocking IO.
  */
-internal fun publishTorrentFile(context: Context, file: File, displayName: String, mimeType: String, subPath: String): Uri? {
+internal fun publishTorrentFile(context: Context, file: File, displayName: String, mimeType: String, subPath: String): TorrentPublisher.Published? {
+    val resolver = context.contentResolver
     val collection = downloadsCollection()
-    val existing =
+    val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND ${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.OWNER_PACKAGE_NAME} = ?"
+    val args = arrayOf(publicRelativePath(subPath) + "/", displayName, context.packageName)
+    val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.SIZE, MediaStore.MediaColumns.IS_PENDING)
+    val rows =
         runCatching {
-            context.contentResolver.query(
-                collection,
-                arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.SIZE),
-                "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND ${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.OWNER_PACKAGE_NAME} = ?",
-                arrayOf(publicRelativePath(subPath) + "/", displayName, context.packageName),
-                null,
-            )?.use { c ->
-                var found: Uri? = null
-                while (found == null && c.moveToNext()) {
-                    if (c.getLong(1) == file.length()) found = ContentUris.withAppendedId(collection, c.getLong(0))
+            val cursor =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val query =
+                        Bundle().apply {
+                            putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
+                            putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, args)
+                            putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_INCLUDE)
+                        }
+                    resolver.query(collection, projection, query, null)
+                } else {
+                    @Suppress("DEPRECATION")
+                    resolver.query(MediaStore.setIncludePending(collection), projection, selection, args, null)
                 }
-                found
+            cursor?.use { c ->
+                val out = ArrayList<PublishRow>()
+                while (c.moveToNext()) out += PublishRow(c.getLong(0), c.getLong(1), pending = c.getInt(2) != 0)
+                out
             }
-        }.getOrNull()
-    return existing ?: copyToPublicDownloads(context, file, displayName, mimeType, subPath)
+        }.getOrNull().orEmpty()
+    val decision = publishReuse(rows, file.length())
+    for (id in decision.deletePending) runCatching { resolver.delete(ContentUris.withAppendedId(collection, id), null, null) }
+    decision.reuse?.let { return TorrentPublisher.Published(ContentUris.withAppendedId(collection, it).toString(), reused = true) }
+    return copyToPublicDownloads(context, file, displayName, mimeType, subPath)?.let { TorrentPublisher.Published(it.toString(), reused = false) }
 }
+
+/** One of this app's MediaStore rows with the folder and name a torrent file is about to be published under. */
+internal class PublishRow(val id: Long, val size: Long, val pending: Boolean)
+
+/** [reuse]: a finished row to take as the copy (null: copy again). [deletePending]: half-written rows to delete first. */
+internal class PublishReuse(val reuse: Long?, val deletePending: List<Long>)
+
+/** Pure. A finished row of exactly [fileLength] bytes is reused; every pending row is a leftover and goes. */
+internal fun publishReuse(rows: List<PublishRow>, fileLength: Long): PublishReuse =
+    PublishReuse(
+        reuse = rows.firstOrNull { !it.pending && it.size == fileLength }?.id,
+        deletePending = rows.filter { it.pending }.map { it.id },
+    )
 
 /** Deletes a copy this app made (app-owned rows need no permission). Blocking IO; false when it could not. */
 internal fun deletePublished(context: Context, uri: Uri): Boolean = runCatching { context.contentResolver.delete(uri, null, null) > 0 }.getOrDefault(false)

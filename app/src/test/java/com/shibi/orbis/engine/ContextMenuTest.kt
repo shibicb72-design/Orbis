@@ -124,6 +124,7 @@ class ContextMenuTest {
                 ContextMenuItem.COPY_LINK_ADDRESS,
                 ContextMenuItem.COPY_LINK_TEXT,
                 ContextMenuItem.SHARE_LINK,
+                ContextMenuItem.DOWNLOAD_TORRENT,
                 ContextMenuItem.OPEN_EXTERNAL,
             ),
             menu.items,
@@ -140,6 +141,7 @@ class ContextMenuTest {
             )!!
         assertFalse(bare.items.contains(ContextMenuItem.COPY_LINK_TEXT))
         assertTrue(bare.items.contains(ContextMenuItem.OPEN_EXTERNAL))
+        assertFalse(bare.items.contains(ContextMenuItem.DOWNLOAD_TORRENT))
         val same =
             pageContextMenu(
                 ContextElementInfo(PageContextType.OTHER, "mailto:a@b.c", null, null, null, "mailto:a@b.c"),

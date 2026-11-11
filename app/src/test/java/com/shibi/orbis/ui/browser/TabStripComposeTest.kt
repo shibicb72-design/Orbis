@@ -104,6 +104,9 @@ class TabStripComposeTest {
         // The drag picture is recorded on first draw. Capture before switching so that draw has happened.
         assertEquals("tab 1 starts with the primary border", primary and RGB, topStrokeArgb(1) and RGB)
         rule.onNodeWithTag(tabChipTag(2)).performClick()
+        // The border colour is animated: the first frame after the click can still carry the old colour. Let the
+        // animation finish before reading pixels.
+        rule.mainClock.advanceTimeBy(1_000)
         rule.waitForIdle()
         assertNotEquals("tab 1 kept the primary border $primary", primary and RGB, topStrokeArgb(1) and RGB)
         assertEquals("tab 2 border", primary and RGB, topStrokeArgb(2) and RGB)

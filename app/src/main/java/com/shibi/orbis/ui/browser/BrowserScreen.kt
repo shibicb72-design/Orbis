@@ -138,6 +138,11 @@ import androidx.core.app.ActivityCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shibi.orbis.AppContainer
 import com.shibi.orbis.R
+import com.shibi.orbis.settings.MagnetHandler
+import com.shibi.orbis.torrent.IntakeLog
+import com.shibi.orbis.torrent.TorrentIntakeReader
+import com.shibi.orbis.torrent.TorrentLimits
+import com.shibi.orbis.torrent.TorrentLog
 import com.shibi.orbis.bookmarks.AddResult
 import com.shibi.orbis.engine.AndroidPermissionRequest
 import com.shibi.orbis.engine.BrowserSession
@@ -251,6 +256,7 @@ fun BrowserScreen(
     val ready by tabs.ready.collectAsStateWithLifecycle()
     val pendingUrl by container.pendingExternalUrl.collectAsStateWithLifecycle()
     val pendingImport by container.pendingImports.head.collectAsStateWithLifecycle()
+    val pendingTorrent by container.pendingTorrentIntake.collectAsStateWithLifecycle()
     val clearState by container.clear.state.collectAsStateWithLifecycle()
 
     // Sessions are created here and nowhere earlier: BrowserScreen is only composed after the onboarding decision.
@@ -268,6 +274,13 @@ fun BrowserScreen(
         val url = pendingImport
         if (ready && clearState !is ClearState.Running && url != null && container.pendingImports.consume(url)) {
             if (!tabs.openImported(url)) withContext(Dispatchers.IO) { container.imports.deleteImport(url) }
+        }
+    }
+    // A torrent from another app: the same wait, then the confirm sheet (one at a time; a second one is dropped).
+    LaunchedEffect(ready, pendingTorrent, clearState) {
+        val request = pendingTorrent
+        if (ready && clearState !is ClearState.Running && request != null && container.pendingTorrentIntake.compareAndSet(request, null)) {
+            tabs.offerTorrentIntake(request)
         }
     }
     LaunchedEffect(tabs) {
@@ -315,6 +328,9 @@ private fun BrowserContent(
     val thumbnailImages = remember(thumbnailMap) { thumbnailMap.mapValues { it.value.asImageBitmap() } }
     LaunchedEffect(tabList) { container.thumbnails.retain(tabList.map { it.id }.toSet()) }
     val pendingDownload by tabs.pendingDownload.collectAsStateWithLifecycle()
+    val pendingTorrent by tabs.pendingTorrentIntake.collectAsStateWithLifecycle()
+    val magnetHandler by container.browserSettings.magnetHandler.collectAsStateWithLifecycle()
+    val torrentIpNoteSeen by container.browserSettings.torrentIpNoteSeen.collectAsStateWithLifecycle()
     val linkMenu by tabs.linkMenu.collectAsStateWithLifecycle()
     val session = selectedTab.session
     val state by (session?.state ?: IDLE_STATE).collectAsStateWithLifecycle()
@@ -1287,6 +1303,42 @@ private fun BrowserContent(
         )
     }
 
+    pendingTorrent?.let { pending ->
+        val torrentLog = remember(container) { TorrentLog.sink(container.debugLog) }
+        val reader = remember { TorrentIntakeReader() }
+        val resolver = androidContext.contentResolver
+        val addedMessage = stringResource(R.string.torrents_added)
+        val viewLabel = stringResource(R.string.torrents_added_view)
+        val fullMessage = stringResource(R.string.torrents_list_full, TorrentLimits.MAX_ENTRIES)
+        TorrentIntakeSheet(
+            pending = pending,
+            ipNoteSeen = torrentIpNoteSeen,
+            reader = reader,
+            readUri = { uri -> reader.readUri(resolver, Uri.parse(uri)) },
+            onDownload = { source, isPrivate, noteShown ->
+                val id = container.torrents?.add(source, isPrivate)
+                tabs.resolveTorrentIntake(pending)
+                scope.launch {
+                    snackbars.currentSnackbarData?.dismiss()
+                    if (id == null) {
+                        snackbars.showSnackbar(fullMessage, duration = SnackbarDuration.Long)
+                    } else {
+                        val result = snackbars.showSnackbar(addedMessage, actionLabel = viewLabel, duration = SnackbarDuration.Short)
+                        if (result == SnackbarResult.ActionPerformed) onOpenDownloads()
+                    }
+                }
+                if (id != null) {
+                    torrentLog(IntakeLog.ADDED)
+                    if (noteShown) container.browserSettings.markTorrentIpNoteSeen()
+                    // After the add, as for downloads: the permission never delays or blocks the torrent.
+                    requestNotificationPermission()
+                }
+            },
+            onCancel = { tabs.resolveTorrentIntake(pending) },
+            log = torrentLog,
+        )
+    }
+
     if (castOpen) {
         CastSheet(
             coordinator = container.cast,
@@ -1308,6 +1360,7 @@ private fun BrowserContent(
             onDismiss = { tabs.dismissLinkMenu() },
             onOpenImageInNewTab = { tabs.openImageInNewTab(request) },
             onSaveImage = { tabs.saveImage(request) },
+            onDownloadTorrent = if (magnetHandler == MagnetHandler.ORBIS) ({ tabs.downloadTorrentLink(request) }) else null,
         )
     }
 }

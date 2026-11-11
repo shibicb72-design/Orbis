@@ -1,5 +1,7 @@
 package com.shibi.orbis.torrent
 
+import com.shibi.orbis.downloads.PublishRow
+import com.shibi.orbis.downloads.publishReuse
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CoroutineScope
@@ -30,6 +32,15 @@ class TorrentTestSetup(root: File, scheduler: TestCoroutineScheduler, freeBytes:
     val unpublished = CopyOnWriteArrayList<String>()
     var publishOk = true
 
+    /** Files (by display name) that already have a finished copy: published as reused, never copied again. */
+    val existingCopies = HashSet<String>()
+
+    /** Display names whose half-written (pending) copy the publisher deleted before copying again. */
+    val pendingDeleted = CopyOnWriteArrayList<String>()
+
+    /** Display names that have a pending (half-written) copy left over. */
+    val pendingCopies = HashSet<String>()
+
     /** Fails the publish of the n-th file (1-based, counted over every attempt); 0 never. */
     var failPublishAt = 0
     private var publishCount = 0
@@ -50,12 +61,21 @@ class TorrentTestSetup(root: File, scheduler: TestCoroutineScheduler, freeBytes:
             now = { clock },
             publisher =
                 object : TorrentPublisher {
-                    override fun publish(file: File, relativeDir: String, displayName: String): String? {
+                    override fun publish(file: File, relativeDir: String, displayName: String): TorrentPublisher.Published? {
                         publishCount++
                         if (!publishOk || publishCount == failPublishAt) return null
                         val handle = "content://media/external/downloads/$publishCount"
+                        // The same decision the MediaStore publisher makes (publishReuse).
+                        val rows =
+                            listOfNotNull(
+                                PublishRow(publishCount * 1000L, file.length(), pending = false).takeIf { displayName in existingCopies },
+                                PublishRow(publishCount * 1000L + 1, 1L, pending = true).takeIf { displayName in pendingCopies },
+                            )
+                        val decision = publishReuse(rows, file.length())
+                        if (decision.deletePending.isNotEmpty()) pendingDeleted += displayName
+                        if (decision.reuse != null) return TorrentPublisher.Published("content://media/external/downloads/existing/${decision.reuse}", reused = true)
                         published += Published(file.readText(), relativeDir, displayName, handle)
-                        return handle
+                        return TorrentPublisher.Published(handle, reused = false)
                     }
 
                     override fun unpublish(handle: String) {

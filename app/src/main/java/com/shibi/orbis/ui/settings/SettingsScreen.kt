@@ -4,6 +4,7 @@ import android.widget.Toast
 import com.shibi.orbis.settings.AppTheme
 import com.shibi.orbis.settings.BrowserSettings
 import com.shibi.orbis.settings.HttpsOnlyMode
+import com.shibi.orbis.settings.MagnetHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
@@ -151,7 +152,21 @@ fun SettingsScreen(
 ) {
     var themeDialogOpen by remember { mutableStateOf(false) }
     var httpsDialogOpen by remember { mutableStateOf(false) }
+    var magnetDialogOpen by remember { mutableStateOf(false) }
     if (site != null) {
+        val magnets by site.magnetHandler.collectAsStateWithLifecycle()
+        if (magnetDialogOpen) {
+            ChoiceDialog(
+                title = R.string.torrents_setting_magnets_title,
+                options = MagnetHandler.entries.map { it to magnetHandlerLabel(it) },
+                selected = magnets,
+                onSelect = {
+                    site.setMagnetHandler(it)
+                    magnetDialogOpen = false
+                },
+                onDismiss = { magnetDialogOpen = false },
+            )
+        }
         val theme by site.appTheme.collectAsStateWithLifecycle()
         val https by site.httpsOnly.collectAsStateWithLifecycle()
         if (themeDialogOpen) {
@@ -347,6 +362,13 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth().toggleable(value = openInApps, role = Role.Switch, onValueChange = site::setOpenLinksInApps),
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    val magnets by site.magnetHandler.collectAsStateWithLifecycle()
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.torrents_setting_magnets_title)) },
+                        supportingContent = { Text(stringResource(magnetHandlerLabel(magnets))) },
+                        modifier = Modifier.fillMaxWidth().clickable { magnetDialogOpen = true },
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.homepage_title)) },
@@ -468,6 +490,13 @@ private fun themeLabel(t: AppTheme): Int =
         AppTheme.SYSTEM -> R.string.theme_system
         AppTheme.LIGHT -> R.string.theme_light
         AppTheme.DARK -> R.string.theme_dark
+    }
+
+@StringRes
+private fun magnetHandlerLabel(h: MagnetHandler): Int =
+    when (h) {
+        MagnetHandler.ORBIS -> R.string.torrents_setting_magnets_orbis
+        MagnetHandler.OTHER_APP -> R.string.torrents_setting_magnets_other_app
     }
 
 @StringRes

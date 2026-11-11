@@ -185,7 +185,9 @@ internal class ExternalApps(private val context: Context) {
         val resolved = intent?.let { runCatching { pm.resolveActivity(it, PackageManager.MATCH_DEFAULT_ONLY) }.getOrNull() }
         val own = resolved?.activityInfo?.packageName == context.packageName
         return AppTarget(
-            intent = intent,
+            // Orbis claims magnet: from other apps. When it is the only handler there is no other app to open: never
+            // send a link back to ourselves (the "no app" offer follows instead).
+            intent = intent.takeIf { !own },
             label = labelOf(resolved),
             fallbackUrl = app.fallbackUrl,
             marketPackage = app.marketPackage,

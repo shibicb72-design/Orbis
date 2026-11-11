@@ -59,4 +59,29 @@
     <string name="torrents_remove_done_title">¿Quitar de la lista?</string>
     <string name="torrents_remove_done_body">Los archivos se quedan en Download/Orbis/%1$s.</string>
     <string name="torrents_remove_done_body_private">Los archivos guardados se quedan en tus Descargas.</string>
+
+    <!-- Torrent intake: the long-press row, the Magnet links setting and the confirm sheet. -->
+    <string name="torrents_menu_download">Descargar con Orbis</string>
+    <string name="torrents_setting_magnets_title">Enlaces magnet</string>
+    <string name="torrents_setting_magnets_orbis">Descargar con Orbis</string>
+    <string name="torrents_setting_magnets_other_app">Abrir en otra app</string>
+    <string name="torrents_sheet_title">¿Descargar torrent?</string>
+    <string name="torrents_sheet_unknown_file">Archivo torrent</string>
+    <string name="torrents_sheet_unknown_magnet">Enlace magnet</string>
+    <plurals name="torrents_sheet_files">
+        <item quantity="one">%d archivo</item>
+        <item quantity="many">%d archivos</item>
+        <item quantity="other">%d archivos</item>
+    </plurals>
+    <string name="torrents_sheet_private">De una pestaña privada: sale de la lista cuando termina la navegación privada</string>
+    <string name="torrents_sheet_ip_note">Las descargas de torrents se conectan directamente con otras personas. Ellas, y los trackers, pueden ver tu dirección IP. Orbis no envía nada más.</string>
+    <string name="torrents_sheet_ip_reminder">Otros usuarios pueden ver tu dirección IP</string>
+    <string name="torrents_sheet_download">Descargar</string>
+    <string name="torrents_sheet_reading">Leyendo el archivo torrent…</string>
+    <string name="torrents_sheet_too_large">Este archivo torrent es demasiado grande</string>
+    <string name="torrents_sheet_read_failed">No se ha podido leer este archivo torrent</string>
+    <string name="torrents_sheet_bad_magnet">Este enlace magnet no se puede usar</string>
+    <string name="torrents_added">Añadido a Descargas</string>
+    <string name="torrents_added_view">Ver</string>
+    <string name="torrents_list_full">La lista de torrents está llena (%1$d). Elimina algunos primero.</string>
 </resources>

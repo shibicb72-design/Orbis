@@ -39,8 +39,16 @@ class TorrentDirs(
  * content URI as a string, so the manager stays Android-free.
  */
 interface TorrentPublisher {
-    /** The published copy's handle, or null on any failure (a half-written copy is already gone). */
-    fun publish(file: File, relativeDir: String, displayName: String): String?
+    /**
+     * A copy published to [handle]. [reused]: a finished copy this app had already made of the same file (an earlier
+     * publish cut short) was taken as it is; it was there before this attempt, so a rollback must leave it.
+     */
+    class Published(val handle: String, val reused: Boolean) {
+        override fun toString(): String = "Published(reused=$reused)"
+    }
+
+    /** The published copy, or null on any failure (a half-written copy is already gone). */
+    fun publish(file: File, relativeDir: String, displayName: String): Published?
 
     /** Deletes a copy [publish] made. Never throws. */
     fun unpublish(handle: String)
@@ -593,21 +601,23 @@ class TorrentManager(
     /**
      * Blocking. Every file is checked to be inside [saveDir], a regular file and (when the plan knows it) exactly its
      * declared size before it is copied: a missing or short file fails the whole publish, and every copy this attempt
-     * made is deleted again, so Download/Orbis never holds half a torrent and a retry starts clean.
+     * made is deleted again, so Download/Orbis never holds half a torrent and a retry starts clean. A copy that was reused
+     * (it existed before this attempt) is never deleted by the rollback.
      */
     private fun publishFiles(saveDir: File, displayName: String, plan: TorrentPaths.Plan?): Boolean {
-        val made = ArrayList<String>()
+        val made = ArrayList<TorrentPublisher.Published>()
         val ok = publishAll(saveDir, displayName, plan, made)
-        if (!ok && made.isNotEmpty()) {
-            for (handle in made) {
-                runCatching { publisher.unpublish(handle) }.onFailure { log("unpublish failed: ${it.javaClass.simpleName}") }
+        val own = made.filterNot { it.reused }
+        if (!ok && own.isNotEmpty()) {
+            for (p in own) {
+                runCatching { publisher.unpublish(p.handle) }.onFailure { log("unpublish failed: ${it.javaClass.simpleName}") }
             }
-            log("publish rolled back ${made.size}")
+            log("publish rolled back ${own.size}")
         }
         return ok
     }
 
-    private fun publishAll(saveDir: File, displayName: String, plan: TorrentPaths.Plan?, made: MutableList<String>): Boolean {
+    private fun publishAll(saveDir: File, displayName: String, plan: TorrentPaths.Plan?, made: MutableList<TorrentPublisher.Published>): Boolean {
         val files: List<Triple<File, String, Long>> =
             if (plan != null) {
                 plan.relativePaths.indices.mapNotNull { i ->

@@ -12,6 +12,10 @@ import com.shibi.orbis.engine.isExternalScheme
 import com.shibi.orbis.engine.isImportLoadUrl
 import com.shibi.orbis.engine.isWebUrl
 import com.shibi.orbis.engine.pageContextMenu
+import com.shibi.orbis.engine.schemeOf
+import com.shibi.orbis.torrent.IntakeLog
+import com.shibi.orbis.torrent.IntakeRequest
+import com.shibi.orbis.torrent.TorrentIntake
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -67,6 +71,12 @@ const val RECENTLY_CLOSED_LIMIT = 25
 /** A download waiting for the user's yes/no. Exactly one is held at a time. */
 data class PendingDownload(val download: IncomingDownload, val sourceTabId: Long, val isPrivate: Boolean = false)
 
+/**
+ * A torrent waiting for the confirm sheet. Exactly one is held at a time. [sourceTabId] is the tab it came from, or
+ * null when another app handed it over (it is then never private).
+ */
+data class PendingTorrentIntake(val request: IntakeRequest, val sourceTabId: Long?)
+
 /** A long-press on a link in tab [tabId]; [isPrivate] is that tab's mode, so a tab opened from it matches. */
 data class LinkMenuRequest(
     /** The link, or the image itself when the long-pressed image is not a link ([hasLink] false). */
@@ -118,6 +128,8 @@ class TabManager(
      * opened it closes, and when a navigation leaves it with no back/forward history that could return to it.
      */
     private val releaseImport: (String) -> Unit = {},
+    /** The torrent log (intake lines only: kinds, enum names, booleans). */
+    private val torrentLog: (String) -> Unit = {},
 ) : SessionHost {
     private val list = ArrayList<Tab>()
     private var selectedId: Long
@@ -170,6 +182,11 @@ class TabManager(
 
     private val _pendingDownload = MutableStateFlow<PendingDownload?>(null)
     val pendingDownload: StateFlow<PendingDownload?> = _pendingDownload.asStateFlow()
+
+    private val _pendingTorrentIntake = MutableStateFlow<PendingTorrentIntake?>(null)
+
+    /** The torrent the confirm sheet asks about. Only the sheet's Download button adds it. */
+    val pendingTorrentIntake: StateFlow<PendingTorrentIntake?> = _pendingTorrentIntake.asStateFlow()
 
     private val _recentlyClosed = MutableStateFlow<List<ClosedTab>>(emptyList())
 
@@ -528,6 +545,11 @@ class TabManager(
             it.download.discard()
             _pendingDownload.value = null
         }
+        _pendingTorrentIntake.value?.takeIf { it.sourceTabId == tab.id }?.let {
+            (it.request as? IntakeRequest.TorrentResponse)?.download?.discard()
+            _pendingTorrentIntake.value = null
+            torrentLog(IntakeLog.CANCELLED)
+        }
         if (_linkMenu.value?.tabId == tab.id) _linkMenu.value = null
         if (privateId != null) onPrivateTabDisposed?.invoke(privateId)
     }
@@ -649,6 +671,34 @@ class TabManager(
     /** The user answered the download dialog (the caller already started or discarded it). */
     fun resolveDownload(pending: PendingDownload) {
         if (_pendingDownload.value == pending) _pendingDownload.value = null
+    }
+
+    /**
+     * Offers a torrent to the confirm sheet. One at a time: while a sheet (or a download question) is open, another
+     * request is dropped (a response's body is discarded) and false is returned.
+     */
+    fun offerTorrentIntake(request: IntakeRequest, sourceTabId: Long? = null): Boolean {
+        if (_pendingTorrentIntake.value != null || _pendingDownload.value != null) {
+            (request as? IntakeRequest.TorrentResponse)?.download?.discard()
+            torrentLog(IntakeLog.BUSY)
+            return false
+        }
+        _pendingTorrentIntake.value = PendingTorrentIntake(request, sourceTabId)
+        torrentLog(IntakeLog.received(request))
+        return true
+    }
+
+    /** The sheet closed (the caller already added the torrent, or discarded what needed discarding). */
+    fun resolveTorrentIntake(pending: PendingTorrentIntake) {
+        if (_pendingTorrentIntake.value == pending) _pendingTorrentIntake.value = null
+    }
+
+    /** Long-press "Download with Orbis" on a magnet: link. Same sheet as a tapped one, in the tab's mode. */
+    fun downloadTorrentLink(request: LinkMenuRequest) {
+        _linkMenu.value = null
+        if (schemeOf(request.url) != "magnet") return
+        if (indexOf(request.tabId) < 0) return
+        offerTorrentIntake(IntakeRequest.Magnet(request.url, request.isPrivate), request.tabId)
     }
 
     fun dismissLinkMenu() {
@@ -791,7 +841,28 @@ class TabManager(
             download.discard()
             return
         }
+        // A .torrent goes to the torrent sheet instead of being saved as a file.
+        if (TorrentIntake.isTorrentResponse(download.contentType, download.contentDisposition, download.url)) {
+            offerTorrentIntake(IntakeRequest.TorrentResponse(download, list[i].isPrivate), list[i].id)
+            return
+        }
+        if (_pendingTorrentIntake.value != null) {
+            download.discard()
+            return
+        }
         _pendingDownload.value = PendingDownload(download, list[i].id, list[i].isPrivate)
+    }
+
+    override fun onTorrentIntake(request: IntakeRequest, session: BrowserSession): Boolean {
+        val i = indexOfSession(session)
+        // Like downloads: only the tab the user is looking at may raise the sheet. Handled either way: a page in a
+        // background tab gets neither the sheet nor another app.
+        if (i < 0 || list[i].id != selectedId) {
+            (request as? IntakeRequest.TorrentResponse)?.download?.discard()
+            return true
+        }
+        offerTorrentIntake(request, list[i].id)
+        return true
     }
 
     override fun onExternalAppMissing(url: String) {

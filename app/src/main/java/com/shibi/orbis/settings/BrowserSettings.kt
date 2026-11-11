@@ -66,7 +66,16 @@ interface BrowserPrefs {
 
     /** Darken light websites that have no dark design of their own. */
     var forceDark: Boolean
+
+    /** Who opens a tapped magnet: link (Settings > Magnet links). */
+    var magnetHandler: MagnetHandler
+
+    /** The user confirmed a torrent while the full "peers can see your IP address" note was on the sheet. */
+    var torrentIpNoteSeen: Boolean
 }
+
+/** [ORBIS]: the torrent confirm sheet (the default). [OTHER_APP]: as before torrents, another app is asked to open it. */
+enum class MagnetHandler { ORBIS, OTHER_APP }
 
 enum class ReaderTheme { LIGHT, SEPIA, DARK }
 
@@ -136,6 +145,18 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         get() = ReaderTheme.entries.firstOrNull { it.name == prefs.getString(KEY_READER_THEME, null) } ?: ReaderTheme.LIGHT
         set(value) {
             prefs.edit { putString(KEY_READER_THEME, value.name) }
+        }
+
+    override var magnetHandler: MagnetHandler
+        get() = MagnetHandler.entries.firstOrNull { it.name == prefs.getString(KEY_MAGNET_HANDLER, null) } ?: MagnetHandler.ORBIS
+        set(value) {
+            prefs.edit { putString(KEY_MAGNET_HANDLER, value.name) }
+        }
+
+    override var torrentIpNoteSeen: Boolean
+        get() = prefs.getBoolean(KEY_TORRENT_IP_NOTE, false)
+        set(value) {
+            prefs.edit { putBoolean(KEY_TORRENT_IP_NOTE, value) }
         }
 
     override var httpsOnly: HttpsOnlyMode
@@ -280,6 +301,8 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         private const val KEY_TOOLBAR_BOTTOM = "toolbar_bottom"
         private const val KEY_COPY_DOWNLOADS = "copy_to_download_folder"
         private const val KEY_FORCE_DARK = "force_dark"
+        private const val KEY_MAGNET_HANDLER = "magnet_handler"
+        private const val KEY_TORRENT_IP_NOTE = "torrent_ip_note_seen"
         private const val KEY_APP_THEME = "app_theme"
         private const val KEY_DARK_WEBSITES = "dark_websites"
         private const val KEY_JS = "javascript"
@@ -367,6 +390,26 @@ class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
     }
 
     override fun offerAppsForLinks(): Boolean = _openLinksInApps.value
+
+    private val _magnetHandler = MutableStateFlow(prefs.magnetHandler)
+    val magnetHandler: StateFlow<MagnetHandler> = _magnetHandler.asStateFlow()
+
+    fun setMagnetHandler(handler: MagnetHandler) {
+        prefs.magnetHandler = handler
+        _magnetHandler.value = handler
+    }
+
+    override fun magnetsToOrbis(): Boolean = _magnetHandler.value == MagnetHandler.ORBIS
+
+    private val _torrentIpNoteSeen = MutableStateFlow(prefs.torrentIpNoteSeen)
+    val torrentIpNoteSeen: StateFlow<Boolean> = _torrentIpNoteSeen.asStateFlow()
+
+    /** The full IP note was on the sheet when the user tapped Download: from now on the one-line reminder. */
+    fun markTorrentIpNoteSeen() {
+        if (_torrentIpNoteSeen.value) return
+        prefs.torrentIpNoteSeen = true
+        _torrentIpNoteSeen.value = true
+    }
 
     private val _forceDark = MutableStateFlow(prefs.forceDark)
     val forceDark: StateFlow<Boolean> = _forceDark.asStateFlow()

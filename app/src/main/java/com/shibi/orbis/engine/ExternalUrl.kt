@@ -26,6 +26,19 @@ fun externalUrlFrom(action: String?, dataString: String?): String? {
 }
 
 /**
+ * A `magnet:?` link another app asks us to open, or null: ACTION_VIEW only, with the same length and character rules as
+ * [externalUrlFrom]. Callers pass `intent.dataString` and never extras. Whether it names a torrent is checked later.
+ */
+fun externalMagnetFrom(action: String?, dataString: String?): String? {
+    if (action != ACTION_VIEW) return null
+    val data = dataString ?: return null
+    if (data.isEmpty() || data.length > MAX_EXTERNAL_URL_LENGTH) return null
+    if (data.any { it.isWhitespace() || it.isISOControl() }) return null
+    if (!data.startsWith("magnet:?", ignoreCase = true)) return null
+    return data
+}
+
+/**
  * Host of an http(s)-style URL, lower case, or null. Hand parsed rather than java.net.URI, which rejects many URLs
  * browsers accept. Userinfo is stripped so `https://good.example@evil.example/` yields `evil.example`;
  * a backslash ends the authority like a slash does.

@@ -20,6 +20,9 @@ enum class ContextMenuItem {
     COPY_LINK_TEXT,
     SHARE_LINK,
     DOWNLOAD_LINK,
+
+    /** magnet: only; shown while Settings > Magnet links is "Download with Orbis" (the UI hides it otherwise). */
+    DOWNLOAD_TORRENT,
     OPEN_EXTERNAL,
     OPEN_IMAGE_NEW_TAB,
     SAVE_IMAGE,
@@ -93,6 +96,7 @@ private fun linkItems(linkUrl: String, linkText: String?): List<ContextMenuItem>
         if (linkText != null) add(ContextMenuItem.COPY_LINK_TEXT)
         add(ContextMenuItem.SHARE_LINK)
         if (web) add(ContextMenuItem.DOWNLOAD_LINK)
+        if (schemeOf(linkUrl) == "magnet") add(ContextMenuItem.DOWNLOAD_TORRENT)
         if (external) add(ContextMenuItem.OPEN_EXTERNAL)
     }
 }

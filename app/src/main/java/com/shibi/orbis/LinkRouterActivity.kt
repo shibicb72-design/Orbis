@@ -9,19 +9,30 @@ import com.shibi.orbis.customtabs.EXTRA_ORBIS_SHOW_TITLE
 import com.shibi.orbis.customtabs.EXTRA_ORBIS_TOOLBAR_COLOR
 import com.shibi.orbis.customtabs.customTabLookOf
 import com.shibi.orbis.customtabs.isCustomTabRequest
+import com.shibi.orbis.engine.externalMagnetFrom
 import com.shibi.orbis.engine.externalUrlFrom
+import com.shibi.orbis.torrent.IntakeRequest
 
 /**
  * Every web link from another app arrives here (it owns the VIEW filter) and goes on, as a fresh intent built by Orbis:
  *  - an app asking for a Custom Tab gets [CustomTabActivity], in the calling app's task;
  *  - anything else opens in the browser ([MainActivity]), exactly as before.
- * Only the http(s) address (and, for a Custom Tab, its toolbar color and title flag) is passed on; nothing else from the
- * caller's intent reaches Orbis's activities.
+ *  - a magnet: link goes to the torrent confirm sheet (never private; nothing is added before its Download tap).
+ * Only the http(s) address (and, for a Custom Tab, its toolbar color and title flag) or the magnet string is passed on;
+ * nothing else from the caller's intent reaches Orbis's activities.
  */
 class LinkRouterActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val incoming = intent
+        val magnet = externalMagnetFrom(incoming?.action, incoming?.dataString)
+        if (magnet != null) {
+            (application as OrbisApp).container.pendingTorrentIntake.value = IntakeRequest.Magnet(magnet, isPrivate = false)
+            // Brings the browser up; the intent carries no data and no extras.
+            runCatching { startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            finish()
+            return
+        }
         val url = externalUrlFrom(incoming?.action, incoming?.dataString)
         if (url != null && incoming != null) {
             val next =

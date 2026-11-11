@@ -23,6 +23,9 @@ import com.shibi.orbis.engine.mimeForSharedDocument
 import com.shibi.orbis.engine.schemeOf
 import com.shibi.orbis.engine.sharedDocumentRequest
 import com.shibi.orbis.engine.streamUriFrom
+import com.shibi.orbis.torrent.IntakeLog
+import com.shibi.orbis.torrent.TorrentIntake
+import com.shibi.orbis.torrent.TorrentLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -162,6 +165,7 @@ class MainActivity : ComponentActivity() {
     private fun takeViewIntent(incoming: Intent) {
         externalUrlFrom(incoming.action, incoming.dataString)?.let { app.container.pendingExternalUrl.value = it }
         takeSharedDocument(incoming)
+        takeSharedTorrent(incoming)
         // A download notification tap: only a flag, no extras or data are read, so it exposes nothing to a caller.
         if (incoming.action == DownloadNotifications.ACTION_SHOW_DOWNLOADS) app.container.pendingShowDownloads.value = true
         // The search widget: also only a flag.
@@ -203,6 +207,37 @@ class MainActivity : ComponentActivity() {
             val mime = mimeForSharedDocument(null, queried) ?: return@launch
             val resolved = sharedDocumentRequest(incoming.action, incoming.dataString, mime, stream) ?: return@launch
             openCopiedDocument(resolved.uri, resolved.mime)
+        }
+    }
+
+    /**
+     * A .torrent from another app (VIEW `content:` or SEND EXTRA_STREAM, type application/x-bittorrent). Only the URI
+     * string is kept, captured before [setIntent] clears the intent; the read grant stays with this activity, and the
+     * confirm sheet reads the file. Not private.
+     */
+    private fun takeSharedTorrent(incoming: Intent) {
+        val action = incoming.action
+        if (action != Intent.ACTION_VIEW && action != Intent.ACTION_SEND) return
+        val stream = if (action == Intent.ACTION_SEND) streamUriFrom(incoming)?.toString() else null
+        val data = incoming.dataString
+        val explicit = incoming.type?.takeIf { it.isNotBlank() }
+        val pkg = packageName
+        val pm = packageManager
+        val resolver = contentResolver
+        val log = TorrentLog.sink(app.container.debugLog)
+        app.appScope.launch {
+            val check =
+                withContext(Dispatchers.IO) {
+                    // A VIEW without a type names its file only: the provider's type is the one that counts.
+                    val type = explicit ?: data?.takeIf { action == Intent.ACTION_VIEW && schemeOf(it) == "content" }
+                        ?.let { runCatching { resolver.getType(Uri.parse(it)) }.getOrNull() }
+                    TorrentIntake.check(action, data, type, stream, pkg) { authority -> pm.resolveContentProvider(authority, 0)?.packageName }
+                }
+            when (check) {
+                is TorrentIntake.Check.Ok -> app.container.pendingTorrentIntake.value = check.request
+                is TorrentIntake.Check.Refused -> log(IntakeLog.refused(check.reason))
+                TorrentIntake.Check.NotTorrent -> Unit
+            }
         }
     }
 

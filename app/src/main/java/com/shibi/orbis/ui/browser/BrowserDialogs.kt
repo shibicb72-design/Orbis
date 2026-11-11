@@ -117,8 +117,12 @@ fun LinkMenuSheet(
     onDismiss: () -> Unit,
     onOpenImageInNewTab: () -> Unit = {},
     onSaveImage: () -> Unit = {},
+    /** Null hides "Download with Orbis" (Settings > Magnet links is "Open in another app"). */
+    onDownloadTorrent: (() -> Unit)? = null,
 ) {
-    val menu = request.pageMenu()
+    val menu = request.pageMenu()?.let { m ->
+        if (onDownloadTorrent != null) m else m.copy(items = m.items - ContextMenuItem.DOWNLOAD_TORRENT)
+    }
     if (menu == null) {
         LaunchedEffect(request) { onDismiss() }
         return
@@ -173,6 +177,7 @@ fun LinkMenuSheet(
                                 onDismiss()
                             }
                             ContextMenuItem.DOWNLOAD_LINK -> onDownloadLink()
+                            ContextMenuItem.DOWNLOAD_TORRENT -> onDownloadTorrent?.invoke()
                             ContextMenuItem.OPEN_EXTERNAL -> onOpenExternal()
                             ContextMenuItem.OPEN_IMAGE_NEW_TAB -> onOpenImageInNewTab()
                             ContextMenuItem.SAVE_IMAGE -> onSaveImage()
@@ -214,6 +219,7 @@ private fun contextMenuLabel(item: ContextMenuItem): String =
             ContextMenuItem.COPY_LINK_TEXT -> R.string.link_menu_copy_text
             ContextMenuItem.SHARE_LINK -> R.string.link_menu_share
             ContextMenuItem.DOWNLOAD_LINK -> R.string.link_menu_download
+            ContextMenuItem.DOWNLOAD_TORRENT -> R.string.torrents_menu_download
             ContextMenuItem.OPEN_EXTERNAL -> R.string.link_menu_open_external
             ContextMenuItem.OPEN_IMAGE_NEW_TAB -> R.string.image_menu_open_new_tab
             ContextMenuItem.SAVE_IMAGE -> R.string.image_menu_save
