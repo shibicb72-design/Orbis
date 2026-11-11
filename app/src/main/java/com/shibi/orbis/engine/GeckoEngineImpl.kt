@@ -728,21 +728,34 @@ private class GeckoBrowserSession(
                 }
                 if ((request.hasUserGesture || request.isDirectNavigation) && isWebUrl(request.uri)) importLeaveAllowed = true
                 if (request.hasUserGesture && !request.isRedirect) lastGestureNavigationAt = SystemClock.elapsedRealtime()
-                // file: is only a document we copied into the import cache. Anything else (another cache file,
-                // the app's private storage) is refused. HTML then runs with JavaScript off. applySitePolicy
-                // returns immediately for a non-web URL, so this is the place that sets it, before the document loads.
-                // PDF keeps JavaScript: pdf.js needs it. History navigations that skip this callback are corrected
-                // in onPageStart and onLocationChange.
-                if (schemeOf(request.uri) == "file") {
-                    if (!importFileAllowed(importRoot, request.uri)) {
-                        debugLog.log("GeckoSession", "refused file uri")
+                // Only the load loadExtensionPage started counts as Orbis's own; a page cannot set this flag.
+                val appExtensionLoad =
+                    schemeOf(request.uri) == "moz-extension" && request.isDirectNavigation && pendingExtensionLoad
+                if (appExtensionLoad) pendingExtensionLoad = false
+                when (topLevelLoadVerdict(request.uri, _state.value.url, appExtensionLoad)) {
+                    LoadVerdict.DENY -> {
+                        debugLog.log("GeckoSession", "refused load scheme=${loggableScheme(request.uri)}")
                         return GeckoResult.fromValue(AllowOrDeny.DENY)
                     }
-                    applyImportedScript(request.uri)
-                    return null
+                    // Gecko applies its own rules (about:, data:, blob:, javascript:, an allowed extension page).
+                    LoadVerdict.PASS -> return null
+                    // file: is only a document we copied into the import cache. Anything else (another cache file,
+                    // the app's private storage) is refused. HTML then runs with JavaScript off. applySitePolicy
+                    // returns immediately for a non-web URL, so this is the place that sets it, before the document
+                    // loads. PDF keeps JavaScript: pdf.js needs it. History navigations that skip this callback are
+                    // corrected in onPageStart and onLocationChange.
+                    LoadVerdict.IMPORT_FILE -> {
+                        if (!importFileAllowed(importRoot, request.uri)) {
+                            debugLog.log("GeckoSession", "refused file uri")
+                            return GeckoResult.fromValue(AllowOrDeny.DENY)
+                        }
+                        applyImportedScript(request.uri)
+                        return null
+                    }
+                    // Links for other apps (tel:, mailto:, intent:, an app's own scheme): never loaded here.
+                    LoadVerdict.EXTERNAL -> return externalSchemeRequest(request)
+                    LoadVerdict.WEB -> Unit
                 }
-                // Links for other apps (tel:, mailto:, intent:, an app's own scheme): never loaded here.
-                if (isExternalScheme(request.uri)) return externalSchemeRequest(request)
                 // A web link an installed app opens: ask first (link taps only, not typed addresses or same-site links).
                 if (request.hasUserGesture && !request.isDirectNavigation && isWebUrl(request.uri) &&
                     sitePolicy()?.offerAppsForLinks() != false &&
@@ -764,11 +777,11 @@ private class GeckoBrowserSession(
                 session: GeckoSession,
                 request: GeckoSession.NavigationDelegate.LoadRequest,
             ): GeckoResult<AllowOrDeny>? {
-                // Every file: subframe is denied. GeckoView has no callback for img, script or stylesheet loads
-                // (bug 1684947: those can read the app data dir). Imported HTML carries a CSP that blocks them;
-                // see IMPORT_CONTENT_SECURITY_POLICY.
-                if (!fileSubframeAllowed(request.uri)) {
-                    debugLog.log("GeckoSession", "refused file subframe")
+                // file:, content:, resource:, chrome:, view-source: and jar: subframes are denied. GeckoView has no
+                // callback for img, script or stylesheet loads (bug 1684947: those can read the app data dir).
+                // Imported HTML carries a CSP that blocks them; see IMPORT_CONTENT_SECURITY_POLICY.
+                if (!subframeLoadAllowed(request.uri)) {
+                    debugLog.log("GeckoSession", "refused subframe scheme=${loggableScheme(request.uri)}")
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
                 return null
@@ -908,6 +921,12 @@ private class GeckoBrowserSession(
      * leave an imported file (see [blocksImportAutoNavigation]). Main thread.
      */
     private var importLeaveAllowed = false
+
+    /**
+     * [loadExtensionPage] is about to load an extension's own page. onLoadRequest consumes it for the next direct
+     * `moz-extension:` load, so a page cannot open an extension page by itself (see [topLevelLoadVerdict]). Main thread.
+     */
+    private var pendingExtensionLoad = false
 
     /** An "Open in app" question is on screen or queued for this tab. Main thread. */
     private var openInAppPending = false
@@ -2052,6 +2071,7 @@ private class GeckoBrowserSession(
     override fun loadExtensionPage(url: String) {
         // Only an installed extension's own page (its settings), opened from Orbis's UI; never a page's request.
         if (closed || !url.startsWith("moz-extension://")) return
+        pendingExtensionLoad = true
         session.loadUri(url)
     }
 

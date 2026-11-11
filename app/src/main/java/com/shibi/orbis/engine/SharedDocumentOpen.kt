@@ -77,7 +77,9 @@ internal suspend fun importSharedDocument(
     ownerOfAuthority: (String) -> String?,
 ): ImportResult {
     if (!uri.scheme.equals(ContentResolver.SCHEME_CONTENT, ignoreCase = true)) return ImportResult.Failed
-    if (contentProviderIsThisApp(uri.toString(), ourPackage, ownerOfAuthority)) return ImportResult.Failed
+    // uri.authority is the parser ContentResolver uses; the check refuses when its own reading disagrees.
+    val ours = contentProviderIsThisApp(uri.toString(), uri.authority, ourPackage, setOf("$ourPackage.downloads"), ownerOfAuthority)
+    if (ours) return ImportResult.Failed
     // The name query and the stream share one idle timeout, so a stuck provider fails the import
     // instead of holding the copy open until the process gives up.
     return cache.readShared(mime, query = { openableColumns(resolver, uri) }, open = { openSharedDocument(resolver, uri) })
