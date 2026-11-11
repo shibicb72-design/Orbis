@@ -39,8 +39,6 @@ internal enum class CastFailure {
     SILENCE,
     /** The TV sent LAUNCH_ERROR, INVALID_REQUEST, LOAD_FAILED, or LOAD_CANCELLED. */
     REJECTED,
-    /** The device proved an identity key other than the one pinned for it on first use (deviceauth). */
-    UNTRUSTED,
 }
 
 internal data class CastFrame(
@@ -605,12 +603,7 @@ internal class CastSession(
     }
 }
 
-private fun jsonObject(payload: String): JSONObject? =
-    try {
-        JSONObject(payload)
-    } catch (_: Exception) {
-        null
-    }
+private fun jsonObject(payload: String): JSONObject? = parseJsonObject(payload)
 
 private fun jsonType(payload: String): String = jsonObject(payload)?.optString("type").orEmpty()
 

@@ -26,6 +26,8 @@ internal class ChromecastDiscovery(context: Context, private val log: (String) -
     private var resolving = false
     private var running = false
     private var lock: WifiManager.MulticastLock? = null
+    /** One "list full" line per discovery run. */
+    private var fullLogged = false
 
     var onChanged: (() -> Unit)? = null
 
@@ -34,6 +36,7 @@ internal class ChromecastDiscovery(context: Context, private val log: (String) -
     fun start() {
         if (nsd == null || running) return
         running = true
+        fullLogged = false
         lock = multicastLock()
         val discovery =
             object : NsdManager.DiscoveryListener {
@@ -158,11 +161,20 @@ internal class ChromecastDiscovery(context: Context, private val log: (String) -
             }
         val device = castDeviceFromTxt(info.attributes ?: emptyMap(), info.serviceName.orEmpty(), hosts) ?: return
         var added = false
+        var full = false
         val changed = synchronized(devices) {
             val previous = devices[device.id]
+            if (previous == null && devices.size >= CAST_DEVICE_LIST_MAX) {
+                full = true
+                return@synchronized false
+            }
             devices[device.id] = device
             added = previous == null
             previous != device
+        }
+        if (full && !fullLogged) {
+            fullLogged = true
+            log("discovery cast list full")
         }
         if (added) log("discovery cast found dev=${deviceTag(device.id)} model=\"${logModel(device.model)}\"")
         if (changed) onChanged?.invoke()
@@ -205,3 +217,6 @@ internal class ChromecastDiscovery(context: Context, private val log: (String) -
         if (held?.isHeld == true) runCatching { held.release() }
     }
 }
+
+/** A further distinct id is ignored once this many Chromecasts are listed. */
+internal const val CAST_DEVICE_LIST_MAX = 32

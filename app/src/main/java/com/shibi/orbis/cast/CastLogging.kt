@@ -54,9 +54,4 @@ internal fun castTxLine(namespace: String, payload: String): String? {
 
 internal fun payloadType(payload: String): String = jsonObjectOrNull(payload)?.optString("type").orEmpty()
 
-private fun jsonObjectOrNull(payload: String): JSONObject? =
-    try {
-        JSONObject(payload)
-    } catch (_: Exception) {
-        null
-    }
+private fun jsonObjectOrNull(payload: String): JSONObject? = parseJsonObject(payload)
