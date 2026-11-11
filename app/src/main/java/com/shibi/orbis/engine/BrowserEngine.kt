@@ -159,9 +159,15 @@ data class SessionState(
     val httpsOnlyBlocked: Boolean = false,
     /**
      * Gecko reports the committed page as secure: a verified connection, no certificate exception, and no mixed active
-     * content loaded. False from each page start and each move to another origin until Gecko has reported.
+     * content loaded. False from each page start and each move to another origin until Gecko has reported; a load that
+     * ends without committing a new location gives the old page its value back (see [secureBeforeLoad]).
      */
     val secure: Boolean = false,
+    /**
+     * [secure] as it was before the running load started. Gecko does not report again when a load ends without a
+     * location change (failed, cancelled, a download), so the old page's lock comes back at the end of that load.
+     */
+    val secureBeforeLoad: Boolean = false,
     /** What the on-device translator knows about the page; null until it reported. */
     val translation: TranslationInfo? = null,
     /** The page looks like an article (Readability's check): reader view is offered. Reset at each page start. */
@@ -207,13 +213,20 @@ internal fun SessionState.afterPageStart(): SessionState =
         failedUrl = null,
         httpsOnlyBlocked = false,
         secure = false,
+        secureBeforeLoad = secure || secureBeforeLoad,
         crashed = false,
         findResult = null,
         loadStarts = loadStarts + 1,
     )
 
 internal fun SessionState.afterPageStop(success: Boolean): SessionState =
-    copy(isLoading = false, progress = if (success) 100 else 0, loadEnds = loadEnds + 1)
+    copy(
+        isLoading = false,
+        progress = if (success) 100 else 0,
+        secure = secure || secureBeforeLoad,
+        secureBeforeLoad = false,
+        loadEnds = loadEnds + 1,
+    )
 
 /**
  * The page committed [url]. Gecko's security report stays only within the same web origin (a fragment or pushState
@@ -221,7 +234,7 @@ internal fun SessionState.afterPageStop(success: Boolean): SessionState =
  */
 internal fun SessionState.afterLocationChange(url: String): SessionState {
     val origin = siteOriginOf(url)
-    return copy(url = url, secure = secure && origin != null && origin == siteOriginOf(this.url))
+    return copy(url = url, secure = secure && origin != null && origin == siteOriginOf(this.url), secureBeforeLoad = false)
 }
 
 /**
@@ -232,7 +245,7 @@ internal fun SessionState.afterSecurityChange(
     connectionSecure: Boolean,
     certificateException: Boolean,
     mixedActiveLoaded: Boolean,
-): SessionState = copy(secure = connectionSecure && !certificateException && !mixedActiveLoaded)
+): SessionState = copy(secure = connectionSecure && !certificateException && !mixedActiveLoaded, secureBeforeLoad = false)
 
 /** [failedUrl] is the http(s) address that failed, or null. url is deliberately untouched: the old page is still displayed. */
 internal fun SessionState.afterLoadError(failedUrl: String?): SessionState =
@@ -241,6 +254,8 @@ internal fun SessionState.afterLoadError(failedUrl: String?): SessionState =
         loadFailed = true,
         isLoading = false,
         progress = 0,
+        secure = secure || secureBeforeLoad,
+        secureBeforeLoad = false,
         loadEnds = loadEnds + 1,
         loadErrors = loadErrors + 1,
     )
@@ -249,6 +264,8 @@ internal fun SessionState.afterContentProcessGone(): SessionState =
     copy(
         crashed = true,
         isLoading = false,
+        secure = false,
+        secureBeforeLoad = false,
         progress = 0,
         canGoBack = false,
         canGoForward = false,

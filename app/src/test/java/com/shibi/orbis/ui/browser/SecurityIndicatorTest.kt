@@ -1,6 +1,8 @@
 package com.shibi.orbis.ui.browser
 
 import com.shibi.orbis.engine.SessionState
+import com.shibi.orbis.engine.afterContentProcessGone
+import com.shibi.orbis.engine.afterLoadError
 import com.shibi.orbis.engine.afterLocationChange
 import com.shibi.orbis.engine.afterPageStart
 import com.shibi.orbis.engine.afterPageStop
@@ -69,6 +71,42 @@ class SecurityIndicatorTest {
         assertFalse(showsLock(moved))
         assertTrue(showsLock(moved.report()))
         assertFalse(showsLock(securePage.afterLocationChange("https://a.example:8443/")))
+    }
+
+    // Gecko sends no new report when a load ends without a location change (failed, cancelled, a download link).
+
+    @Test
+    fun aLoadThatFailsGivesTheOldPageItsLockBack() {
+        assertTrue(showsLock(securePage.afterPageStart().afterLoadError("https://broken.example/")))
+        assertTrue(showsLock(securePage.afterPageStart().afterLoadError(null)))
+        assertTrue(showsLock(securePage.afterPageStart().afterPageStop(success = false)))
+    }
+
+    @Test
+    fun aLoadThatCommitsAnotherOriginDoesNotGetTheOldLock() {
+        assertFalse(showsLock(securePage.afterPageStart().afterLocationChange("https://b.example/").afterPageStop(success = true)))
+    }
+
+    @Test
+    fun anInsecureReportDuringTheLoadWins() {
+        assertFalse(showsLock(securePage.afterPageStart().report(secure = false).afterPageStop(success = true)))
+    }
+
+    @Test
+    fun anInsecurePageStaysWithoutALockAfterAFailedLoad() {
+        val insecure = load(SessionState(), "https://a.example/").report(secure = false).afterPageStop(success = true)
+        assertFalse(showsLock(insecure.afterPageStart().afterLoadError("https://broken.example/")))
+    }
+
+    @Test
+    fun twoStartsThenAFailedStopGiveTheLockBack() {
+        assertTrue(showsLock(securePage.afterPageStart().afterPageStart().afterPageStop(success = false)))
+    }
+
+    @Test
+    fun aCrashedPageShowsNoLock() {
+        assertFalse(showsLock(securePage.afterContentProcessGone()))
+        assertFalse(showsLock(securePage.afterPageStart().afterContentProcessGone().afterPageStop(success = false)))
     }
 
     @Test

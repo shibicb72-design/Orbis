@@ -850,8 +850,10 @@ private class GeckoBrowserSession(
                 _state.update { it.copy(progress = progress) }
             }
 
-            // The lock follows this report, never the URL scheme. Gecko reports after the location change, and again
-            // when mixed content changes the page's state.
+            // The lock follows this report, never the URL scheme. Expected after the location change, and again when
+            // mixed content changes the page's state; that ordering is to be confirmed on a device by H-D21.
+            // mixedModeActive cannot be CONTENT_LOADED today: security.mixed_content.block_active_content is at its
+            // default (true), so Gecko blocks mixed scripts and the page stays secure. The check guards a pref change.
             override fun onSecurityChange(
                 session: GeckoSession,
                 securityInfo: GeckoSession.ProgressDelegate.SecurityInformation,
