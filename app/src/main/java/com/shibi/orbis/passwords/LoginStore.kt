@@ -4,8 +4,9 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import com.shibi.orbis.storage.AtomicTextFile
+import java.io.IOException
 import java.security.KeyStore
-import javax.crypto.AEADBadTagException
+import javax.crypto.BadPaddingException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -17,6 +18,12 @@ interface LoginCrypto {
     fun encrypt(plain: ByteArray): ByteArray
 
     fun decrypt(sealed: ByteArray): ByteArray
+
+    /**
+     * Forgets the key, so the next [encrypt] makes a fresh one. Everything sealed with the old key is lost. Only for the
+     * user's explicit reset of an unreadable store.
+     */
+    fun reset()
 }
 
 /**
@@ -52,6 +59,12 @@ class KeystoreLoginCrypto(private val alias: String = "orbis_logins_v1") : Login
         return c.doFinal(sealed, IV_BYTES, sealed.size - IV_BYTES)
     }
 
+    /** Deletes the key alias; [key] generates a new one on the next use. Throws if the Keystore refuses. */
+    override fun reset() {
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        if (ks.containsAlias(alias)) ks.deleteEntry(alias)
+    }
+
     private companion object {
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val IV_BYTES = 12
@@ -64,6 +77,12 @@ interface LoginStore {
     fun load(): List<SavedLogin>
 
     fun save(items: List<SavedLogin>)
+
+    /**
+     * The user gave up on a store that stays unreadable: moves what is there out of the way and starts empty, so the
+     * next [load] succeeds. Throws when that could not be done; saving stays refused then.
+     */
+    fun setAside()
 }
 
 /**
@@ -93,6 +112,16 @@ class FileLoginStore(private val file: AtomicTextFile, private val crypto: Login
             emptyList()
         }
 
+    /**
+     * Forgets the key first (if the Keystore refuses, nothing has changed and the user can try again), then sets the
+     * file aside as `.corrupt`; the next [save] of an empty list deletes that copy. Saving is allowed again.
+     */
+    override fun setAside() {
+        crypto.reset()
+        if (!file.setAside()) throw IOException("login file still in place")
+        blocked = false
+    }
+
     override fun save(items: List<SavedLogin>) {
         check(!blocked) { "login file unreadable and still in place" }
         val sealed = crypto.encrypt(LoginCodec.encode(items).toByteArray(Charsets.UTF_8))
@@ -102,9 +131,10 @@ class FileLoginStore(private val file: AtomicTextFile, private val crypto: Login
 
     private companion object {
         /**
-         * The file itself is bad: wrong key or tampered ciphertext (bad GCM tag), not Base64 or too short
+         * The file itself is bad: wrong key or tampered ciphertext (bad GCM tag, [BadPaddingException] covers
+         * `AEADBadTagException`), not Base64 or too short
          * ([IllegalArgumentException], also the `require` in [KeystoreLoginCrypto.decrypt]), or not our JSON.
          */
-        fun isCorrupt(e: Exception): Boolean = e is AEADBadTagException || e is IllegalArgumentException || e is JSONException
+        fun isCorrupt(e: Exception): Boolean = e is BadPaddingException || e is IllegalArgumentException || e is JSONException
     }
 }
