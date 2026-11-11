@@ -27,6 +27,34 @@ class ImportedDocumentsTest {
     @get:Rule
     val tmp = TemporaryFolder()
 
+    // ---- auto-navigation from an imported file ----
+
+    @Test
+    fun anImportedFileCannotLeaveForTheWebWithoutATap() {
+        val imported = "file:///data/user/0/com.shibi.orbis/cache/imports/abc/invoice.html"
+        val web = "https://evil.example/login"
+        fun blocks(committed: String?, target: String, gesture: Boolean, direct: Boolean = false, redirectOfAllowed: Boolean = false) =
+            blocksImportAutoNavigation(committed, target, gesture, direct, redirectOfAllowed)
+        // A meta refresh (no gesture) from the file to the web: refused, plain http too.
+        assertTrue(blocks(imported, web, gesture = false))
+        assertTrue(blocks(imported, "http://evil.example/", gesture = false))
+        // A link the user tapped in the file still works.
+        assertFalse(blocks(imported, web, gesture = true))
+        // The app's own loads (typed address, bookmark, reload) and a server redirect of an allowed load are not content.
+        assertFalse(blocks(imported, web, gesture = false, direct = true))
+        assertFalse(blocks(imported, web, gesture = false, redirectOfAllowed = true))
+        // A normal web page keeps its own redirects; nothing open yet is not an import.
+        assertFalse(blocks("https://news.example/", web, gesture = false))
+        assertFalse(blocks(null, web, gesture = false))
+        assertFalse(blocks("", web, gesture = false))
+        // A file outside the import directory is not an import page.
+        assertFalse(blocks("file:///sdcard/Download/invoice.html", web, gesture = false))
+        // Targets that are not http(s) are left to their own checks (file: import gate, external-app prompt).
+        assertFalse(blocks(imported, "file:///data/user/0/com.shibi.orbis/cache/imports/abc/other.html", gesture = false))
+        assertFalse(blocks(imported, "intent://x#Intent;end", gesture = false))
+        assertFalse(blocks(imported, "about:blank", gesture = false))
+    }
+
     // ---- MIME and extension ----
 
     @Test

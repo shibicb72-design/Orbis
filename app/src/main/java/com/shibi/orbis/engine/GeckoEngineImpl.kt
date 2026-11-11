@@ -330,10 +330,13 @@ class GeckoEngineImpl(
         }
     }
 
-    override suspend fun fetchFrom(url: String, fromByte: Long, isPrivate: Boolean): IncomingDownload? {
+    override suspend fun fetchFrom(url: String, fromByte: Long, isPrivate: Boolean, ifRange: String?): IncomingDownload? {
         if (!isWebUrl(url)) return null
         val rt = runtime ?: return null
-        val request = WebRequest.Builder(url).header("Range", "bytes=$fromByte-").build()
+        val builder = WebRequest.Builder(url).header("Range", "bytes=$fromByte-")
+        // With If-Range the server sends the rest (206) only when the file is unchanged, else the whole file (200).
+        if (ifRange != null) builder.header("If-Range", ifRange)
+        val request = builder.build()
         val flags = if (isPrivate) GeckoWebExecutor.FETCH_FLAGS_PRIVATE else GeckoWebExecutor.FETCH_FLAGS_NONE
         return try {
             // GeckoWebExecutor must be used from the main thread; the caller is a download job on an IO thread.
@@ -672,6 +675,7 @@ private class GeckoBrowserSession(
                 // The only writer of state.url. A load that is pending, halted or failed leaves the OLD page
                 // displayed, so showing its address would let a hostile page spoof the address bar.
                 if (url != null) {
+                    importLeaveAllowed = false
                     _state.update { it.copy(url = url) }
                     // Back/Forward commits without onLoadRequest. An import forces JavaScript (HTML off, PDF on).
                     // Forward back to a website has to restore that site's setting, or it stays off.
@@ -709,6 +713,20 @@ private class GeckoBrowserSession(
                         request.hasUserGesture && isWebUrl(request.uri) && host?.canOpenTab() == true
                     return GeckoResult.fromValue(if (allow) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
                 }
+                // A shared file must not send the tab to the web by itself (meta refresh); a tapped link still works,
+                // and so does the server redirect that follows it.
+                if (blocksImportAutoNavigation(
+                        committedUrl = _state.value.url,
+                        targetUrl = request.uri,
+                        hasUserGesture = request.hasUserGesture,
+                        isDirectNavigation = request.isDirectNavigation,
+                        redirectOfAllowedLoad = request.isRedirect && importLeaveAllowed,
+                    )
+                ) {
+                    debugLog.log("GeckoSession", "import auto-navigation blocked")
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
+                }
+                if ((request.hasUserGesture || request.isDirectNavigation) && isWebUrl(request.uri)) importLeaveAllowed = true
                 if (request.hasUserGesture && !request.isRedirect) lastGestureNavigationAt = SystemClock.elapsedRealtime()
                 // file: is only a document we copied into the import cache. Anything else (another cache file,
                 // the app's private storage) is refused. HTML then runs with JavaScript off. applySitePolicy
@@ -884,6 +902,12 @@ private class GeckoBrowserSession(
 
     /** elapsedRealtime of the last top-level navigation the user tapped; null before the first. Main thread. */
     private var lastGestureNavigationAt: Long? = null
+
+    /**
+     * A tapped or app-initiated web load left the committed page and has not committed yet, so a redirect of it may
+     * leave an imported file (see [blocksImportAutoNavigation]). Main thread.
+     */
+    private var importLeaveAllowed = false
 
     /** An "Open in app" question is on screen or queued for this tab. Main thread. */
     private var openInAppPending = false
@@ -1230,7 +1254,7 @@ private class GeckoBrowserSession(
         // The session is closed after a crash/kill; reopen it but do not reload (avoids crash loops).
         // `crashed` is per session: a background tab keeps it until it is selected, then its banner shows.
         runCatching { session.open(runtime) }
-            .onFailure { debugLog.log("GeckoSession", "reopen after $kind failed: ${it.message}") }
+            .onFailure { debugLog.log("GeckoSession", "reopen after $kind failed: ${it.javaClass.simpleName}") }
         applyActive()
         _state.update { it.afterContentProcessGone() }
     }
@@ -2286,7 +2310,7 @@ private class GeckoBrowserSession(
         closed = true
         host = null
         runCatching { session.close() }
-            .onFailure { debugLog.log("GeckoSession", "close failed: ${it.message}") }
+            .onFailure { debugLog.log("GeckoSession", "close failed: ${it.javaClass.simpleName}") }
         discardPrivateUploads()
     }
 
@@ -2312,6 +2336,7 @@ private class GeckoIncomingDownload(private val response: WebResponse, override 
     override val url: String get() = response.uri
     override val contentDisposition: String? get() = header("content-disposition")
     override val contentType: String? get() = header("content-type")
+    override val validator: String? get() = resumeValidator(header("etag"), header("last-modified"))
     // -1 (unknown) when the body may have been decoded: the length header then describes the compressed bytes, and a
     // known length that differs from what is received would be mistaken for a truncated download.
     override val contentLength: Long
