@@ -41,6 +41,11 @@ class DownloadManager(
     private val extensionForMime: (String) -> String? = { null },
     /** Fetches the rest of a paused download (see BrowserEngine.fetchFrom); null turns pause and resume off. */
     private val fetchFrom: (suspend (url: String, fromByte: Long, isPrivate: Boolean) -> IncomingDownload?)? = null,
+    /**
+     * A private download that was still running when private browsing ended has settled and left the list (see
+     * [forgetPrivate]). Called with its id on the thread that finished it, so its result notification can go too.
+     */
+    private val onPrivateDropped: (Long) -> Unit = {},
 ) {
     private val _entries = MutableStateFlow<List<DownloadEntry>>(emptyList())
 
@@ -371,7 +376,12 @@ class DownloadManager(
     private fun finish(a: Active, status: DownloadStatus, r: Reservation?, received: Long) {
         active.remove(a.id)
         val stillListed = _entries.value.any { it.id == a.id }
+        var dropped = false
         _entries.update { list ->
+            // Private browsing ended while it ran: it leaves the list now, its file stays. Settling and leaving are
+            // one update, so no observer ever sees it settled (no result notification names it).
+            dropped = a.id in dropOnFinish
+            if (dropped) return@update list.filterNot { it.id == a.id }
             list.map { e ->
                 if (e.id != a.id) {
                     e
@@ -388,10 +398,10 @@ class DownloadManager(
         }
         // Deleted while it was finishing: do not leave an orphan behind.
         if (!stillListed && status == DownloadStatus.COMPLETED) r?.finalFile?.delete()
-        // Private browsing ended while it ran: it leaves the list now, its file stays.
-        if (dropOnFinish.remove(a.id)) _entries.update { list -> list.filterNot { it.id == a.id } }
+        if (dropped) dropOnFinish.remove(a.id)
         saveNow()
         log("download ${status.name.lowercase()}")
+        if (dropped) runCatching { onPrivateDropped(a.id) }
     }
 
     private fun setProgress(id: Long, received: Long) {
