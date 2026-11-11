@@ -21,7 +21,7 @@ interface NeverSavePrefs {
 data class LoginImportResult(val added: Int, val skipped: Int)
 
 /**
- * The saved logins. Main thread only. [load] reads the encrypted store once; until it has finished, the engine is
+ * The saved logins. Main thread only. [load] reads the encrypted store; until it has succeeded, the engine is
  * offered nothing and changes are refused (a login form at the very first page of a cold start is filled on the next
  * load). Writes go to one writer coroutine in order, so an older list can never land last. No username, password or
  * site ever goes to the log.
@@ -43,26 +43,30 @@ class LoginManager(
 
     var loaded = false
         private set
-    private var loadStarted = false
+    private var loading = false
     private val writes = Channel<List<SavedLogin>>(Channel.CONFLATED)
     private var writerStarted = false
 
+    /**
+     * Reads the store unless it is loaded or a read is running. If the read fails (e.g. a passing Keystore error), the
+     * manager stays not loaded and a later call tries again; the app calls this on every start of the main screen.
+     */
     fun load() {
-        if (loadStarted) return
-        loadStarted = true
+        if (loaded || loading) return
+        loading = true
         scope.launch {
-            val stored =
-                try {
-                    withContext(io) { store.load() }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    log("logins load failed: ${e.javaClass.simpleName}")
-                    emptyList()
-                }
-            _logins.value = stored
-            loaded = true
-            log("logins loaded ${stored.size}")
+            try {
+                val stored = withContext(io) { store.load() }
+                _logins.value = stored
+                loaded = true
+                log("logins loaded ${stored.size}")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log("logins load failed: ${e.javaClass.simpleName}")
+            } finally {
+                loading = false
+            }
         }
     }
 

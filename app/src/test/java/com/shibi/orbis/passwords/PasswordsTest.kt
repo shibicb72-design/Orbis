@@ -4,6 +4,7 @@ import com.shibi.orbis.engine.EngineLogin
 import com.shibi.orbis.storage.AtomicTextFile
 import com.shibi.orbis.ui.passwords.filterLogins
 import java.io.File
+import java.security.KeyStoreException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
@@ -14,6 +15,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -41,6 +43,21 @@ private class FlipCrypto : LoginCrypto {
     override fun encrypt(plain: ByteArray) = plain.map { (it.toInt() xor 0x5A).toByte() }.toByteArray()
 
     override fun decrypt(sealed: ByteArray) = encrypt(sealed)
+}
+
+/** [FlipCrypto] whose first [failures] decrypts throw what the Android Keystore throws when it is briefly unavailable. */
+private class FlakyKeystoreCrypto(var failures: Int = 1) : LoginCrypto {
+    private val ok = FlipCrypto()
+
+    override fun encrypt(plain: ByteArray) = ok.encrypt(plain)
+
+    override fun decrypt(sealed: ByteArray): ByteArray {
+        if (failures > 0) {
+            failures--
+            throw KeyStoreException("keystore busy")
+        }
+        return ok.decrypt(sealed)
+    }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -202,6 +219,51 @@ class PasswordsTest {
         s.save(emptyList())
         assertFalse("an emptied store drops the set-aside copy", File(file.parentFile, "logins.enc.corrupt").exists())
         assertNotEquals("not base64 or not ours", file.readText())
+    }
+
+    @Test
+    fun badJsonInsideAValidCipherIsSetAside() {
+        val file = File(tmp.root, "logins/logins.enc")
+        file.parentFile!!.mkdirs()
+        file.writeText(android.util.Base64.encodeToString(FlipCrypto().encrypt("{not json".toByteArray()), android.util.Base64.NO_WRAP))
+        assertTrue(FileLoginStore(AtomicTextFile(file), FlipCrypto()).load().isEmpty())
+        assertFalse(file.exists())
+        assertTrue(File(file.parentFile, "logins.enc.corrupt").exists())
+    }
+
+    @Test
+    fun aTransientKeystoreErrorKeepsTheFileAndRefusesToSave() {
+        val file = File(tmp.root, "logins/logins.enc")
+        FileLoginStore(AtomicTextFile(file), FlipCrypto()).save(listOf(SavedLogin("g", "https://a.test", username = "alice", password = "hunter2")))
+        val before = file.readText()
+        val s = FileLoginStore(AtomicTextFile(file), FlakyKeystoreCrypto())
+        assertThrows(KeyStoreException::class.java) { s.load() }
+        assertEquals("file untouched", before, file.readText())
+        assertFalse("no aside for a transient error", File(file.parentFile, "logins.enc.corrupt").exists())
+        assertThrows(IllegalStateException::class.java) { s.save(emptyList()) }
+        assertEquals("a refused save does not write", before, file.readText())
+        assertEquals("hunter2", s.load().single().password)
+        s.save(emptyList())
+        assertNotEquals("saving works again after a good load", before, file.readText())
+    }
+
+    @Test
+    fun managerStaysUnloadedAfterATransientErrorAndRetries() {
+        val file = File(tmp.root, "logins/logins.enc")
+        FileLoginStore(AtomicTextFile(file), FlipCrypto()).save(listOf(SavedLogin("g", "https://a.test", username = "alice", password = "hunter2")))
+        val logs = mutableListOf<String>()
+        val m = LoginManager(FileLoginStore(AtomicTextFile(file), FlakyKeystoreCrypto()), MemNever(), scope, log = { logs += it }, now = { clock }, io = dispatcher)
+        m.load()
+        scheduler.advanceUntilIdle()
+        assertFalse(m.loaded)
+        assertEquals(listOf("logins load failed: KeyStoreException"), logs)
+        assertFalse(m.save("https://b.test", "bob", "pw"))
+        assertTrue(m.forDomain("a.test").isEmpty())
+        m.load()
+        scheduler.advanceUntilIdle()
+        assertTrue(m.loaded)
+        assertEquals(listOf("hunter2"), m.forDomain("a.test").map { it.password })
+        assertFalse(File(file.parentFile, "logins.enc.corrupt").exists())
     }
 
     @Test
