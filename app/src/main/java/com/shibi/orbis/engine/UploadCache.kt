@@ -8,6 +8,9 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
@@ -15,7 +18,9 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Copying a picked file failed. The message never carries a name or path. */
@@ -25,6 +30,19 @@ private const val FALLBACK_NAME = "upload"
 private const val MAX_NAME_BYTES = 120
 private const val MAX_EXTENSION_BYTES = 32
 private const val COPY_BUFFER_BYTES = 64 * 1024
+private const val WATCHDOG_TICK_MS = 250L
+
+/**
+ * How long [UploadCache] waits for a picked document's name, size or type. Longer than an intent's 3 s: a slow answer
+ * is not an error, and without it the file goes to the site as `upload` with no extension.
+ */
+const val UPLOAD_METADATA_TIMEOUT_MS = 10_000L
+
+/** How long [UploadCache] waits for a provider to hand over a picked document's stream. See [UploadCache]. */
+const val UPLOAD_OPEN_TIMEOUT_MS = 120_000L
+
+/** How long an upload copy may go without a byte before the stream is closed and the copy fails. */
+const val UPLOAD_IDLE_TIMEOUT_MS = 30_000L
 
 private fun utf8Size(codePoint: Int): Int =
     when {
@@ -109,9 +127,23 @@ fun sanitizeUploadName(raw: String?, extensionForMime: String?): String {
  *
  * Files are NOT deleted after a successful pick: Gecko reads the path at form-submit time. [clearAll] runs once at
  * engine start instead.
+ *
+ * The provider behind a picked document is another app and may hang. Each [Source] property and [Source.open] runs
+ * through [providerCall] (its own daemon thread, the [ProviderDeadline.picked] pool, a deadline), never on a
+ * dispatcher thread:
+ * [metadataTimeoutMs] for the name, size and extension, [openTimeoutMs] for the open. The open gets far longer than
+ * a metadata call because cloud providers fetch the whole file before they return the stream. The copy itself is
+ * bounded by [idleTimeoutMs] without a byte, not by an overall deadline: a large upload may take minutes.
  */
-class UploadCache(cacheDir: File, private val dispatcher: CoroutineDispatcher = Dispatchers.IO) {
-    /** One document to copy. Properties and [open] may block: they are only read on the copy's IO dispatcher. */
+class UploadCache(
+    cacheDir: File,
+    private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val metadataTimeoutMs: Long = UPLOAD_METADATA_TIMEOUT_MS,
+    private val openTimeoutMs: Long = UPLOAD_OPEN_TIMEOUT_MS,
+    private val idleTimeoutMs: Long = UPLOAD_IDLE_TIMEOUT_MS,
+    private val watchdogDispatcher: CoroutineDispatcher = Dispatchers.Default,
+) {
+    /** One document to copy. Properties and [open] may block: each is read once, on a provider thread. */
     interface Source {
         val name: String?
         val size: Long?
@@ -133,59 +165,122 @@ class UploadCache(cacheDir: File, private val dispatcher: CoroutineDispatcher = 
      */
     suspend fun copy(sources: List<Source>): List<File> =
         withContext(dispatcher) {
-            lock.read {
-                val created = ArrayList<File>()
-                try {
+            val created = ArrayList<File>()
+            try {
+                // Provider calls suspend, so they stay outside [lock]: a read lock must be released on the thread that
+                // took it, and a coroutine may resume on another.
+                val described = sources.map { describe(it) }
+                lock.read {
                     if (!root.isDirectory && !root.mkdirs() && !root.isDirectory) {
                         throw UploadCopyException("cache unavailable")
                     }
                     var needed = 0L
-                    for (source in sources) {
+                    for (source in described) {
                         val size = source.size ?: continue
                         if (size > 0) needed = if (Long.MAX_VALUE - needed < size) Long.MAX_VALUE else needed + size
                     }
                     if (needed > root.usableSpace) throw UploadCopyException("not enough space")
+                }
 
-                    val files = ArrayList<File>(sources.size)
-                    for (source in sources) {
-                        ensureActive()
-                        files += copyOne(source, created)
-                    }
+                val files = ArrayList<File>(sources.size)
+                for (source in described) {
                     ensureActive()
-                    files
-                } catch (e: CancellationException) {
-                    created.forEach { it.deleteRecursively() }
-                    throw e
-                } catch (e: UploadCopyException) {
-                    created.forEach { it.deleteRecursively() }
-                    throw e
+                    files += copyOne(source, created)
+                }
+                ensureActive()
+                files
+            } catch (e: CancellationException) {
+                created.forEach { it.deleteRecursively() }
+                throw e
+            } catch (e: UploadCopyException) {
+                created.forEach { it.deleteRecursively() }
+                // A cancel that closed a blocked read surfaces as an IOException: report it as the cancel it was.
+                ensureActive()
+                throw e
+            } catch (e: Exception) {
+                // IOException, SecurityException, or anything a provider throws: never leave a partial set.
+                created.forEach { it.deleteRecursively() }
+                ensureActive()
+                throw UploadCopyException("copy failed: ${e.javaClass.simpleName}", e)
+            }
+        }
+
+    /** What [copy] knows about a source; the provider is never asked twice. */
+    private class Described(val source: Source, val name: String?, val size: Long?, val extension: String?)
+
+    /**
+     * Name and size, then the extension, as two provider calls: in [ContentUriSource] they are a query and a getType,
+     * so a provider that hangs in one still answers the other. A call that timed out or failed counts as unknown,
+     * which the copy already handles (generic name, no space check).
+     */
+    private suspend fun describe(source: Source): Described {
+        val nameAndSize = providerCall(metadataTimeoutMs, pool = ProviderDeadline.picked) { source.name to source.size }
+        val extension = providerCall(metadataTimeoutMs, pool = ProviderDeadline.picked) { source.extension }
+        return Described(source, nameAndSize?.first, nameAndSize?.second, extension)
+    }
+
+    private suspend fun CoroutineScope.copyOne(source: Described, created: MutableList<File>): File {
+        val failure = AtomicReference<Throwable?>(null)
+        val input =
+            providerCall(openTimeoutMs, pool = ProviderDeadline.picked) {
+                try {
+                    source.source.open()
                 } catch (e: Exception) {
-                    // IOException, SecurityException, or anything a provider throws: never leave a partial set.
-                    created.forEach { it.deleteRecursively() }
-                    throw UploadCopyException("copy failed: ${e.javaClass.simpleName}", e)
+                    failure.set(e)
+                    null
                 }
+            } ?: throw UploadCopyException("cannot open source", failure.get())
+        return input.use { stream ->
+            val lastProgress = AtomicLong(System.nanoTime())
+            val stalled = AtomicBoolean(false)
+            val finished = AtomicBoolean(false)
+            // A read blocked in the provider ignores cancellation and only returns once the stream is closed (an
+            // Android file descriptor stream wakes a blocked reader on close). On its own dispatcher, so a busy copy
+            // dispatcher cannot starve it.
+            val watchdog =
+                launch(watchdogDispatcher) {
+                    while (true) {
+                        delay(minOf(idleTimeoutMs, WATCHDOG_TICK_MS).coerceAtLeast(1L))
+                        if ((System.nanoTime() - lastProgress.get()) / 1_000_000 >= idleTimeoutMs) {
+                            stalled.set(true)
+                            runCatching { stream.close() }
+                            break
+                        }
+                    }
+                }
+            // Cancelled with the copy (the prompt went away): close so a blocked read returns. A completion handler,
+            // not a finally in the body: a coroutine cancelled before its body starts never runs the body.
+            watchdog.invokeOnCompletion { if (!finished.get()) runCatching { stream.close() } }
+            try {
+                ensureActive()
+                lock.read {
+                    val dir = File(root, UUID.randomUUID().toString())
+                    if (!dir.mkdir()) throw UploadCopyException("cache unavailable")
+                    created += dir
+                    val target = File(dir, sanitizeUploadName(source.name, source.extension))
+                    try {
+                        target.outputStream().use { out ->
+                            val buffer = ByteArray(COPY_BUFFER_BYTES)
+                            while (true) {
+                                val n = stream.read(buffer)
+                                if (stalled.get()) throw UploadCopyException("source stalled")
+                                if (n < 0) break
+                                if (n > 0) lastProgress.set(System.nanoTime())
+                                out.write(buffer, 0, n)
+                                ensureActive()
+                            }
+                        }
+                    } catch (e: IOException) {
+                        if (stalled.get() && e !is UploadCopyException) throw UploadCopyException("source stalled", e)
+                        throw e
+                    }
+                    target
+                }
+            } finally {
+                finished.set(true)
+                watchdog.cancel()
             }
         }
-
-    private fun CoroutineScope.copyOne(source: Source, created: MutableList<File>): File {
-        val name = sanitizeUploadName(source.name, source.extension)
-        val dir = File(root, UUID.randomUUID().toString())
-        if (!dir.mkdir()) throw UploadCopyException("cache unavailable")
-        created += dir
-        val target = File(dir, name)
-        val input = source.open() ?: throw UploadCopyException("cannot open source")
-        input.use { stream ->
-            target.outputStream().use { out ->
-                val buffer = ByteArray(COPY_BUFFER_BYTES)
-                while (true) {
-                    val n = stream.read(buffer)
-                    if (n < 0) break
-                    out.write(buffer, 0, n)
-                    ensureActive()
-                }
-            }
-        }
-        return target
     }
 
     /** Deletes the files [copy] returned (their private directories) when the prompt ended before they were used. */
@@ -210,7 +305,10 @@ class UploadCache(cacheDir: File, private val dispatcher: CoroutineDispatcher = 
     }
 }
 
-/** Android glue: reads name, size and mime type through the resolver. A failed query is not fatal. */
+/**
+ * Android glue: reads name, size and mime type through the resolver. A failed query is not fatal. Every member calls
+ * into the provider; [UploadCache.copy] reads each one once, on a provider thread with a deadline.
+ */
 internal class ContentUriSource(private val resolver: ContentResolver, private val uri: Uri) : UploadCache.Source {
     private val meta: Pair<String?, Long?> by lazy {
         var name: String? = null

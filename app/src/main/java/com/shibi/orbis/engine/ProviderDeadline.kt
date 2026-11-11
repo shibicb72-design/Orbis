@@ -6,24 +6,18 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.withTimeoutOrNull
 
-/** Limits for [providerCall]. */
-object ProviderDeadline {
-    const val DEFAULT_TIMEOUT_MS = 3_000L
-
-    /** Stuck provider threads cannot be stopped, only abandoned: never more than this many alive at once. */
-    const val MAX_THREADS = 8
-
-    const val THREAD_NAME = "provider-call"
-    const val LOG_TAG = "Provider"
-    const val TIMEOUT_LOG = "provider call timed out"
-
+/**
+ * A cap on provider threads alive at once. Stuck provider threads cannot be stopped, only abandoned, and a slot is
+ * held until the provider returns, however long that is.
+ */
+class ProviderPool(val max: Int = ProviderDeadline.MAX_THREADS) {
     private val alive = AtomicInteger(0)
 
-    /** Provider threads still running, including abandoned ones. */
+    /** Provider threads of this pool still running, including abandoned ones. */
     internal fun aliveThreads(): Int = alive.get()
 
     internal fun tryAcquire(): Boolean {
-        if (alive.incrementAndGet() > MAX_THREADS) {
+        if (alive.incrementAndGet() > max) {
             alive.decrementAndGet()
             return false
         }
@@ -33,6 +27,33 @@ object ProviderDeadline {
     internal fun release() {
         alive.decrementAndGet()
     }
+}
+
+/** Limits for [providerCall]. */
+object ProviderDeadline {
+    const val DEFAULT_TIMEOUT_MS = 3_000L
+
+    /** Threads per [ProviderPool]. */
+    const val MAX_THREADS = 8
+
+    const val THREAD_NAME = "provider-call"
+    const val LOG_TAG = "Provider"
+    const val TIMEOUT_LOG = "provider call timed out"
+
+    /**
+     * Calls another app can cause without the user picking anything: `getType` on a shared or viewed URI, the
+     * torrent sheet's size query and open, the shared-document import.
+     */
+    val intents = ProviderPool()
+
+    /**
+     * Calls on a document the user picked (uploads). Separate, so a hostile app that fills [intents] with calls that
+     * never return cannot turn off file upload.
+     */
+    val picked = ProviderPool()
+
+    /** Provider threads still running in every pool, including abandoned ones. */
+    internal fun aliveThreads(): Int = intents.aliveThreads() + picked.aliveThreads()
 }
 
 private sealed interface ProviderOutcome<out T> {
@@ -47,38 +68,50 @@ private sealed interface ProviderOutcome<out T> {
 /**
  * Runs [block] (a call into another app's content provider) on its own daemon thread and waits at most [timeoutMs]
  * for it, without blocking a dispatcher thread while waiting. Returns null on timeout, on any exception, and at once
- * when [ProviderDeadline.MAX_THREADS] provider threads are already alive. A result that arrives after the caller gave
+ * when [pool] is full. A result that arrives after the caller gave
  * up is dropped; a late [Closeable] result is closed.
  *
  * [log] gets only [ProviderDeadline.TIMEOUT_LOG].
  */
-@OptIn(ExperimentalCoroutinesApi::class) // getCompleted, only after complete() returned false
 suspend fun <T> providerCall(
     timeoutMs: Long = ProviderDeadline.DEFAULT_TIMEOUT_MS,
     log: (String) -> Unit = {},
+    pool: ProviderPool = ProviderDeadline.intents,
+    block: () -> T,
+): T? = providerCallOn(timeoutMs, log, ::Thread, pool, block)
+
+/** [providerCall] with the thread constructor as a seam, so a test can make building the thread fail. */
+@OptIn(ExperimentalCoroutinesApi::class) // getCompleted, only after complete() returned false
+internal suspend fun <T> providerCallOn(
+    timeoutMs: Long,
+    log: (String) -> Unit,
+    newThread: (Runnable, String) -> Thread,
+    pool: ProviderPool = ProviderDeadline.intents,
     block: () -> T,
 ): T? {
-    if (!ProviderDeadline.tryAcquire()) return null
     val outcome = CompletableDeferred<ProviderOutcome<T>>()
-    val worker =
-        Thread({
-            try {
-                val result: ProviderOutcome<T> =
-                    try {
-                        ProviderOutcome.Value(block())
-                    } catch (t: Throwable) {
-                        ProviderOutcome.Failed
-                    }
-                if (!outcome.complete(result) && result is ProviderOutcome.Value) closeQuietly(result.value)
-            } finally {
-                ProviderDeadline.release()
-            }
-        }, ProviderDeadline.THREAD_NAME)
-    worker.isDaemon = true
+    if (!pool.tryAcquire()) return null
+    // Building the thread can throw as well as starting it (OutOfMemoryError): both inside the try, so the slot is
+    // never leaked. When either throws the body never runs, so this catch is the only release.
     try {
+        val worker =
+            newThread({
+                try {
+                    val result: ProviderOutcome<T> =
+                        try {
+                            ProviderOutcome.Value(block())
+                        } catch (t: Throwable) {
+                            ProviderOutcome.Failed
+                        }
+                    if (!outcome.complete(result) && result is ProviderOutcome.Value) closeQuietly(result.value)
+                } finally {
+                    pool.release()
+                }
+            }, ProviderDeadline.THREAD_NAME)
+        worker.isDaemon = true
         worker.start()
     } catch (t: Throwable) {
-        ProviderDeadline.release()
+        pool.release()
         return null
     }
     var delivered = false

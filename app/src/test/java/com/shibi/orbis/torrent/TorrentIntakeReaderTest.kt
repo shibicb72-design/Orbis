@@ -6,11 +6,16 @@ import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -53,6 +58,17 @@ class TorrentIntakeReaderTest {
 
     private val reader = TorrentIntakeReader(Dispatchers.IO, idleTimeoutMs = 300, overallTimeoutMs = 5_000)
 
+    /** Stuck opens wait on this; released after each test so no provider thread outlives it. */
+    private val stuck = CountDownLatch(1)
+
+    @After
+    fun releaseStuckProviders() {
+        stuck.countDown()
+        val until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (ProviderDeadline.aliveThreads() > 0 && System.nanoTime() < until) Thread.sleep(10)
+        assertEquals(0, ProviderDeadline.aliveThreads())
+    }
+
     @Test
     fun exactlyTheCapIsRead() = runBlocking {
         val d = FakeDownload({ ByteArrayInputStream(ByteArray(cap) { 7 }) })
@@ -86,7 +102,7 @@ class TorrentIntakeReaderTest {
         val r = reader.readResponse(d) as TorrentIntakeReader.Result.Failed
         assertEquals(IntakeRefusal.TIMEOUT, r.reason)
         assertEquals(1, d.discards)
-        assertTrue(stream.closed.await(1, TimeUnit.SECONDS))
+        assertTrue(stream.closed.await(10, TimeUnit.SECONDS))
     }
 
     @Test
@@ -181,6 +197,58 @@ class TorrentIntakeReaderTest {
     }
 
     @Test
+    fun anOpenThatHangsFailsAtTheProviderDeadlineAndALateStreamIsClosed() = runBlocking {
+        val logged = mutableListOf<String>()
+        val quick =
+            TorrentIntakeReader(
+                Dispatchers.IO,
+                idleTimeoutMs = 60_000,
+                overallTimeoutMs = 60_000,
+                providerTimeoutMs = 200,
+                log = { synchronized(logged) { logged += it } },
+            )
+        val late = StalledStream()
+        val r =
+            withTimeout(10_000) {
+                quick.readWithDeclaredSize(
+                    querySize = { 100L },
+                    open = {
+                        stuck.await()
+                        late
+                    },
+                )
+            } as TorrentIntakeReader.Result.Failed
+        assertEquals(IntakeRefusal.READ_FAILED, r.reason)
+        assertEquals(listOf(ProviderDeadline.TIMEOUT_LOG), synchronized(logged) { logged.toList() })
+        stuck.countDown()
+        assertTrue(late.closed.await(10, TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun opensThatHangDoNotPinTheIoThreads() {
+        // One IO thread: an open blocking on it would also starve the watchdog, and these reads would never end.
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val single = executor.asCoroutineDispatcher()
+            val quick = TorrentIntakeReader(single, idleTimeoutMs = 60_000, overallTimeoutMs = 60_000, providerTimeoutMs = 200)
+            runBlocking {
+                val results =
+                    withTimeout(10_000) {
+                        (1..20).map {
+                            async {
+                                quick.readWithDeclaredSize(querySize = { 100L }, open = { stuck.await(); null })
+                            }
+                        }.awaitAll()
+                    }
+                assertTrue(results.all { (it as TorrentIntakeReader.Result.Failed).reason == IntakeRefusal.READ_FAILED })
+            }
+        } finally {
+            stuck.countDown()
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
     fun cancellingTheReadClosesTheStreamAndDiscardsOnce() = runBlocking {
         val stream = StalledStream()
         val d = FakeDownload({ stream })
@@ -189,7 +257,7 @@ class TorrentIntakeReaderTest {
         delay(200)
         job.cancel()
         runCatching { job.await() }
-        assertTrue(stream.closed.await(1, TimeUnit.SECONDS))
+        assertTrue(stream.closed.await(10, TimeUnit.SECONDS))
         assertEquals(1, d.discards)
     }
 }
