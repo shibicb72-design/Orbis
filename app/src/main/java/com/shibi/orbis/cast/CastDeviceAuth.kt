@@ -114,29 +114,39 @@ internal fun deviceAuthChallengeMessage(nonce: ByteArray): CastMessage =
     )
 
 /**
- * The SubjectPublicKeyInfo of the device certificate when [payload] is an AuthResponse that echoes [nonce] and whose
- * signature over [nonce] || [tlsLeafDer] verifies with that certificate's RSA key. Null for anything else, including
- * an AuthError.
+ * A verified device: [spki] is the device certificate's SubjectPublicKeyInfo DER. [legacy] means the TV did not echo
+ * the nonce and signed only the TLS leaf, as pre-nonce firmware does.
  */
-internal fun verifyDeviceAuth(payload: ByteArray, nonce: ByteArray, tlsLeafDer: ByteArray): ByteArray? =
+internal class DeviceIdentity(val spki: ByteArray, val legacy: Boolean)
+
+/**
+ * The device identity when [payload] is an AuthResponse whose signature verifies with its certificate's RSA key over
+ * [nonce] || [tlsLeafDer]. A TV that echoes a nonce must echo [nonce]. A TV that echoes none (older firmware; Chromium
+ * and Openscreen do not enforce the echo either) may instead have signed [tlsLeafDer] alone. Null for anything else,
+ * including an AuthError.
+ */
+internal fun verifyDeviceAuth(payload: ByteArray, nonce: ByteArray, tlsLeafDer: ByteArray): DeviceIdentity? =
     try {
         val response = decodeDeviceAuthMessage(payload)?.response
         val echoed = response?.senderNonce
-        if (response == null || echoed == null || !MessageDigest.isEqual(echoed, nonce)) {
+        if (response == null || (echoed != null && !MessageDigest.isEqual(echoed, nonce))) {
             null
         } else {
             val certificate =
                 CertificateFactory.getInstance("X.509")
                     .generateCertificate(response.clientAuthCertificate.inputStream()) as X509Certificate
-            val key = certificate.publicKey as? RSAPublicKey
-            val verifier = key?.let { verifierFor(response.signatureAlgorithm, response.hashAlgorithm) }
-            if (key == null || verifier == null) {
-                null
-            } else {
-                verifier.initVerify(key)
-                verifier.update(nonce)
-                verifier.update(tlsLeafDer)
-                if (verifier.verify(response.signature)) key.encoded else null
+            val key = certificate.publicKey as? RSAPublicKey ?: return null
+            fun signs(vararg parts: ByteArray): Boolean =
+                runCatching {
+                    val verifier = verifierFor(response.signatureAlgorithm, response.hashAlgorithm) ?: return false
+                    verifier.initVerify(key)
+                    parts.forEach(verifier::update)
+                    verifier.verify(response.signature)
+                }.getOrDefault(false)
+            when {
+                signs(nonce, tlsLeafDer) -> DeviceIdentity(key.encoded, legacy = false)
+                echoed == null && signs(tlsLeafDer) -> DeviceIdentity(key.encoded, legacy = true)
+                else -> null
             }
         }
     } catch (_: Exception) {

@@ -95,7 +95,10 @@ internal class ChromecastHub(context: Context, private val log: (String) -> Unit
                 CastSocketOpen.AuthNone -> log("connect dev=$dev deviceauth none")
                 CastSocketOpen.Failed -> log("connect dev=$dev failed lan=${isLocalLanAddress(device.address)} ms=$connectMs")
                 is CastSocketOpen.Opened ->
-                    log("connect dev=$dev tls=ok deviceauth=ok pin=${opened.pin.name.lowercase()} ms=$connectMs")
+                    log(
+                        "connect dev=$dev tls=ok deviceauth=ok${if (opened.legacy) " legacy" else ""} " +
+                            "pin=${opened.pin.name.lowercase()} ms=$connectMs",
+                    )
             }
             val socket = (opened as? CastSocketOpen.Opened)?.socket
             if (socket == null || !isCurrent(epoch)) {
@@ -359,8 +362,8 @@ internal sealed interface Read {
 internal const val CAST_FRAME_DEADLINE_MS = 5_000L
 
 internal sealed interface CastSocketOpen {
-    /** [pin] is [CastPins.Verdict.PINNED] or [CastPins.Verdict.MATCHED]. */
-    data class Opened(val socket: SSLSocket, val pin: CastPins.Verdict) : CastSocketOpen
+    /** [pin] is [CastPins.Verdict.PINNED] or [CastPins.Verdict.MATCHED]. [legacy]: see [DeviceIdentity.legacy]. */
+    data class Opened(val socket: SSLSocket, val pin: CastPins.Verdict, val legacy: Boolean) : CastSocketOpen
     /** The device proved an identity key other than the one pinned for its id. */
     data object Untrusted : CastSocketOpen
     /** The deviceauth reply was an AuthError, malformed, or its signature or nonce did not check out. */
@@ -400,15 +403,15 @@ internal fun openCastSocket(address: InetAddress, deviceId: String, pins: CastPi
         opening.outputStream.write(frameCastMessage(deviceAuthChallengeMessage(nonce)))
         opening.outputStream.flush()
         val reply = awaitDeviceAuthReply(opening.inputStream)
-        val identityKey = reply?.let { verifyDeviceAuth(it, nonce, tlsLeafDer) }
+        val identity = reply?.let { verifyDeviceAuth(it, nonce, tlsLeafDer) }
         outcome =
             when {
                 reply == null -> CastSocketOpen.AuthNone
-                identityKey == null -> CastSocketOpen.AuthFailed
+                identity == null -> CastSocketOpen.AuthFailed
                 else ->
-                    when (val verdict = pins.check(deviceId, identityKey)) {
+                    when (val verdict = pins.check(deviceId, identity.spki)) {
                         CastPins.Verdict.CHANGED -> CastSocketOpen.Untrusted
-                        else -> CastSocketOpen.Opened(opening, verdict)
+                        else -> CastSocketOpen.Opened(opening, verdict, identity.legacy)
                     }
             }
     } catch (_: Exception) {

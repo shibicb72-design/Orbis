@@ -11,8 +11,10 @@ import java.security.spec.MGF1ParameterSpec
 import java.security.spec.PSSParameterSpec
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** S-01: the deviceauth challenge, the AuthResponse check, and the identity-key pin built on it. */
@@ -78,7 +80,9 @@ class CastDeviceAuthTest {
     @Test
     fun aGenuineResponseYieldsTheDeviceKey() {
         val payload = signedResponse(TV_A)
-        assertArrayEquals(TV_A.keys.public.encoded, verifyDeviceAuth(payload, nonce, tlsLeaf))
+        val identity = verifyDeviceAuth(payload, nonce, tlsLeaf)!!
+        assertArrayEquals(TV_A.keys.public.encoded, identity.spki)
+        assertFalse(identity.legacy)
     }
 
     @Test
@@ -103,9 +107,40 @@ class CastDeviceAuthTest {
     }
 
     @Test
-    fun aWrongOrMissingEchoedNonceIsRefused() {
+    fun aWrongEchoedNonceIsRefused() {
         assertNull(verifyDeviceAuth(signedResponse(TV_A, echoedNonce = ByteArray(DEVICE_AUTH_NONCE_BYTES)), nonce, tlsLeaf))
-        assertNull(verifyDeviceAuth(signedResponse(TV_A, echoedNonce = null), nonce, tlsLeaf))
+        // A wrong echo is refused even when the signature would pass the legacy leaf-only check.
+        val leafOnly = signedResponse(TV_A, signedNonce = ByteArray(0), echoedNonce = ByteArray(DEVICE_AUTH_NONCE_BYTES))
+        assertNull(verifyDeviceAuth(leafOnly, nonce, tlsLeaf))
+    }
+
+    @Test
+    fun aTvThatEchoesNoNonceIsAcceptedWhenItSignedNonceAndLeaf() {
+        val identity = verifyDeviceAuth(signedResponse(TV_A, echoedNonce = null), nonce, tlsLeaf)!!
+        assertArrayEquals(TV_A.keys.public.encoded, identity.spki)
+        assertFalse(identity.legacy)
+    }
+
+    @Test
+    fun legacyFirmwareThatEchoesNoNonceAndSignsOnlyTheLeafIsAccepted() {
+        val legacy = signedResponse(TV_A, signedNonce = ByteArray(0), echoedNonce = null)
+        val identity = verifyDeviceAuth(legacy, nonce, tlsLeaf)!!
+        assertArrayEquals(TV_A.keys.public.encoded, identity.spki)
+        assertTrue(identity.legacy)
+        // With the nonce echoed, a leaf-only signature is not enough.
+        assertNull(verifyDeviceAuth(signedResponse(TV_A, signedNonce = ByteArray(0)), nonce, tlsLeaf))
+    }
+
+    @Test
+    fun aTvThatEchoesNoNonceIsRefusedWhenItSignedAnythingElse() {
+        val otherNonce = signedResponse(TV_A, signedNonce = ByteArray(DEVICE_AUTH_NONCE_BYTES), echoedNonce = null)
+        assertNull(verifyDeviceAuth(otherNonce, nonce, tlsLeaf))
+        val otherLeaf = signedResponse(TV_A, signedNonce = ByteArray(0), echoedNonce = null, signedLeaf = byteArrayOf(0x30, 0x00))
+        assertNull(verifyDeviceAuth(otherLeaf, nonce, tlsLeaf))
+        val noncePlusOtherLeaf = signedResponse(TV_A, echoedNonce = null, signedLeaf = byteArrayOf(0x30, 0x00))
+        assertNull(verifyDeviceAuth(noncePlusOtherLeaf, nonce, tlsLeaf))
+        val forged = signedResponse(certificateOf = TV_A, signer = TV_B.keys, signedNonce = ByteArray(0), echoedNonce = null)
+        assertNull(verifyDeviceAuth(forged, nonce, tlsLeaf))
     }
 
     @Test
@@ -133,7 +168,7 @@ class CastDeviceAuthTest {
     fun theIdentityKeyPinLivesAcrossTlsRegenerationAndCatchesAnotherKey() {
         val pins = CastPins(MemoryPinStore())
         fun connect(tv: TestTv, leaf: ByteArray): CastPins.Verdict {
-            val key = verifyDeviceAuth(signedResponse(tv, signedLeaf = leaf), nonce, leaf)!!
+            val key = verifyDeviceAuth(signedResponse(tv, signedLeaf = leaf), nonce, leaf)!!.spki
             return pins.check("tv-1", key)
         }
         val today = byteArrayOf(0x30, 0x01, 0x01)
