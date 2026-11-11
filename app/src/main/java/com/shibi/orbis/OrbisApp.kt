@@ -15,6 +15,7 @@ import com.shibi.orbis.bookmarks.FileBookmarkStore
 import com.shibi.orbis.clear.BrowsingDataClearer
 import com.shibi.orbis.clear.ClearController
 import com.shibi.orbis.clear.ClearTargets
+import com.shibi.orbis.clear.clearDownloadLists
 import com.shibi.orbis.clear.clearSavedLogins
 import com.shibi.orbis.debug.DebugLog
 import com.shibi.orbis.downloads.DownloadForegroundController
@@ -328,8 +329,10 @@ class OrbisApp : Application() {
                 override fun closeNormalTabs() = tabs.closeAllNormal()
 
                 override fun clearDownloadsList() {
-                    // Result notifications name the file, so the cleared ones go with their entries.
-                    DownloadNotifications.cancelResults(this@OrbisApp, downloads.clearIndex())
+                    // Result notifications name the file, so the cleared ones go with their entries (torrents too, F-07).
+                    val cleared = clearDownloadLists(downloads, torrents)
+                    DownloadNotifications.cancelResults(this@OrbisApp, cleared.downloads)
+                    TorrentNotifications.cancelResults(this@OrbisApp, cleared.torrents)
                 }
 
                 override fun clearBookmarks() = bookmarks.clearAll()

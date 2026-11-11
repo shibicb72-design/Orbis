@@ -121,6 +121,9 @@ class TorrentStore(private val dir: File) {
     @Throws(IOException::class)
     fun writeTorrent(id: String, bytes: ByteArray) = write(File(dir, "$id.torrent"), bytes)
 
+    /** Deletes an index that [load] set aside (index.json.corrupt). Never throws. */
+    fun deleteSetAside() = index.deleteAside()
+
     /** Drops the resume data and metadata of [id]. Never throws. */
     fun deleteState(id: String) {
         runCatching { File(dir, "$id.fastresume").delete() }

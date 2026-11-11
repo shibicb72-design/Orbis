@@ -1481,4 +1481,195 @@ class TorrentManagerTest {
         assertFalse(text.contains("keptDir"))
         assertEquals(1, s.store.load().entries.size)
     }
+
+    // ---- Clear browsing data > Downloads list (security PR 10, F-07) ----
+
+    /** Added, metadata checked, partial payload written, then a file error: FAILED with its resume data and payload. */
+    private fun TestScope.fileErrorTorrent(s: TorrentTestSetup): String {
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
+        advanceUntilIdle()
+        val eid = s.lastId()
+        s.engine.emitMetadata(eid, sintelFiles)
+        advanceUntilIdle()
+        writePayload(s.entry(id))
+        s.engine.fail(eid, TorrentErrorKind.FILE_ERROR)
+        advanceUntilIdle()
+        assertEquals(TorrentErrorKind.FILE_ERROR, s.entry(id).errorKind)
+        return id
+    }
+
+    /** Added and metadata checked: DOWNLOADING. */
+    private fun TestScope.downloadingTorrent(s: TorrentTestSetup): String {
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
+        advanceUntilIdle()
+        s.engine.emitMetadata(s.lastId(), sintelFiles)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.DOWNLOADING, s.entry(id).status)
+        return id
+    }
+
+    @Test
+    fun clearTakesFinishedAndFailedRowsAndLeavesEverythingElse() = runTest {
+        val s = setup(this)
+        val completed = finishedTorrent(s)
+        s.clock += 1
+        s.publishOk = false
+        val publishFailed = finishedTorrent(s)
+        s.publishOk = true
+        assertEquals(TorrentErrorKind.PUBLISH_FAILED, s.entry(publishFailed).errorKind)
+        s.clock += 1
+        val failed = fileErrorTorrent(s)
+        val failedDir = File(s.entry(failed).saveDir)
+        assertTrue(failedDir.isDirectory)
+        assertNotNull(s.store.readResume(failed))
+        assertNotNull(s.store.readTorrent(failed))
+        s.clock += 1
+        val paused = downloadingTorrent(s)
+        s.manager.pause(paused)
+        advanceUntilIdle()
+        s.clock += 1
+        val downloading = downloadingTorrent(s)
+        s.clock += 1
+        s.settings.value = keepSeeding
+        val seeding = seedingTorrent(s)
+        val before = s.manager.entries.value.associateBy { it.id }
+
+        val ids = s.manager.clearSettled()
+        advanceUntilIdle()
+
+        assertEquals(setOf(completed, failed), ids.toSet())
+        assertEquals(setOf(publishFailed, paused, downloading, seeding), s.manager.entries.value.map { it.id }.toSet())
+        for (e in s.manager.entries.value) assertEquals(before.getValue(e.id).status, e.status)
+        assertEquals(TorrentErrorKind.PUBLISH_FAILED, s.entry(publishFailed).errorKind)
+        // The failed torrent's partial data and state files are gone; the unsaved finished files stay for Retry.
+        assertFalse(failedDir.exists())
+        assertNull(s.store.readResume(failed))
+        assertNull(s.store.readTorrent(failed))
+        assertTrue(File(s.entry(publishFailed).saveDir, "$secretName/movie.mp4").isFile)
+        assertTrue(File(s.entry(paused).saveDir).isDirectory)
+        assertNotNull(s.store.readResume(paused))
+        // What is published stays published: nothing was taken back.
+        assertTrue(s.unpublished.isEmpty())
+        // The index on disk has only the rows that stayed.
+        assertEquals(setOf(publishFailed, paused, downloading, seeding), s.store.load().entries.map { it.id }.toSet())
+        assertFalse(File(s.stateDir, "index.json").readText().contains(completed))
+        assertTrue(s.logs.contains("torrent list cleared 2"))
+        // The engine runs: session.dat is not touched now.
+        assertTrue(s.engine.started)
+        assertFalse("forgetSessionState" in s.engine.calls)
+        assertFalse(s.logs.contains("session state dropped"))
+    }
+
+    @Test
+    fun clearWithAnIdleEngineDropsTheSessionStateAndASetAsideIndex() = runTest {
+        val s = setup(this)
+        finishedTorrent(s)
+        assertFalse(s.engine.started)
+        assertTrue("the stop wrote it", s.store.sessionFile.isFile)
+        val aside = File(s.stateDir, "index.json.corrupt").apply { writeText("{ old") }
+
+        s.manager.clearSettled()
+        advanceUntilIdle()
+
+        assertTrue(s.manager.entries.value.isEmpty())
+        assertFalse(s.store.sessionFile.exists())
+        assertFalse(aside.exists())
+        assertTrue(s.logs.contains("session state dropped"))
+        assertTrue(s.store.load().entries.isEmpty())
+    }
+
+    @Test
+    fun clearWhileTheEngineRunsDropsTheSessionStateAfterTheStopWhenTheListIsEmpty() = runTest {
+        val s = setup(this)
+        val downloading = downloadingTorrent(s)
+        s.clock += 1
+        finishedTorrent(s)
+        assertTrue(s.engine.started)
+
+        s.manager.clearSettled()
+        advanceUntilIdle()
+        assertEquals(listOf(downloading), s.manager.entries.value.map { it.id })
+        assertFalse("forgetSessionState" in s.engine.calls)
+
+        s.manager.remove(downloading, deleteFiles = true)
+        advanceUntilIdle()
+        assertFalse(s.engine.started)
+        assertTrue(s.engine.calls.lastIndexOf("stop") < s.engine.calls.indexOf("forgetSessionState"))
+        assertFalse(s.store.sessionFile.exists())
+        assertTrue(s.logs.contains("session state dropped"))
+    }
+
+    @Test
+    fun clearWhileTheEngineRunsKeepsTheSessionStateWhenRowsAreLeftAtTheStop() = runTest {
+        val s = setup(this)
+        val downloading = downloadingTorrent(s)
+        s.clock += 1
+        finishedTorrent(s)
+        s.manager.clearSettled()
+        advanceUntilIdle()
+
+        s.manager.pause(downloading)
+        advanceUntilIdle()
+        assertFalse(s.engine.started)
+        assertTrue(s.store.sessionFile.isFile)
+        assertFalse("forgetSessionState" in s.engine.calls)
+    }
+
+    @Test
+    fun aClearedListIsNotRestored() = runTest {
+        val first = setup(this)
+        finishedTorrent(first)
+        first.clock += 1
+        fileErrorTorrent(first)
+        first.manager.clearSettled()
+        advanceUntilIdle()
+
+        val s = setup(this)
+        s.manager.restore()
+        advanceUntilIdle()
+        assertTrue(s.manager.entries.value.isEmpty())
+        assertTrue(s.store.storedIds().isEmpty())
+    }
+
+    @Test
+    fun aClearBeforeTheIndexIsReadAlsoClearsWhatItReads() = runTest {
+        val first = setup(this)
+        val completed = finishedTorrent(first)
+        first.clock += 1
+        val paused = downloadingTorrent(first)
+        first.manager.pause(paused)
+        advanceUntilIdle()
+        first.clock += 1
+        val failed = fileErrorTorrent(first)
+        val failedDir = File(first.entry(failed).saveDir)
+
+        val s = setup(this)
+        assertTrue(s.manager.clearSettled().isEmpty())
+        s.manager.restore()
+        advanceUntilIdle()
+        assertEquals(listOf(paused), s.manager.entries.value.map { it.id })
+        assertEquals(listOf(paused), s.store.load().entries.map { it.id })
+        assertFalse(failedDir.exists())
+        assertNull(s.store.readResume(failed))
+        assertNull(s.store.readResume(completed))
+        assertNotNull(s.store.readResume(paused))
+    }
+
+    @Test
+    fun aKeptPrivateRowLeavesWithTheClearAndItsFilesGoWhenPrivateBrowsingEnds() = runTest {
+        val s = setup(this)
+        val id = keptTorrent(s)
+        val kept = File(s.entry(id).keptDir!!)
+        assertTrue(File(kept, "movie.mp4").isFile)
+
+        assertEquals(listOf(id), s.manager.clearSettled())
+        advanceUntilIdle()
+        assertTrue(s.manager.entries.value.isEmpty())
+        // The files stay, like a private file download's when the list is cleared.
+        assertTrue(File(kept, "movie.mp4").isFile)
+
+        assertTrue(s.manager.forgetPrivate().isEmpty())
+        advanceUntilIdle()
+        assertFalse(kept.exists())
+    }
 }

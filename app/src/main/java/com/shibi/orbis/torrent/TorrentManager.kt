@@ -128,6 +128,19 @@ class TorrentManager(
     private var appliedSettings: TorrentSettings? = null
     private var lastCheckpoint = 0L
 
+    /** [restore] has read the index. Until then a [clearSettled] also applies to what it reads. */
+    private var restored = false
+    private var clearedBeforeRestore = false
+
+    /** [clearSettled] ran while the engine was running: the next stop drops session.dat if the list is empty then. */
+    private var forgetSessionOnStop = false
+
+    /**
+     * Kept folders of private rows [clearSettled] took off the list: the files stay, like a private file download's,
+     * and go when private browsing ends ([forgetPrivate], OD-3) or at the next start.
+     */
+    private val clearedKept = HashSet<String>()
+
     init {
         // Undispatched so the subscriptions exist before the first add can produce an event.
         scope.launch(start = CoroutineStart.UNDISPATCHED) { engine.events.collect { e -> lock.withLock { onEvent(e) } } }
@@ -143,7 +156,13 @@ class TorrentManager(
             lock.withLock {
                 val loaded = withContext(io) { store.load() }
                 if (loaded.corrupt) log("index set aside")
-                val restored = loaded.entries.take(TorrentLimits.MAX_ENTRIES).filterNot { r -> _entries.value.any { it.id == r.id } }
+                // A list cleared before the index was read does not get its settled rows back; their state files and
+                // payloads are leftovers now, which deleteLeftovers removes.
+                val restored =
+                    loaded.entries.take(TorrentLimits.MAX_ENTRIES).filterNot { r ->
+                        _entries.value.any { it.id == r.id } || clearedBeforeRestore && leavesOnClear(r)
+                    }
+                this@TorrentManager.restored = true
                 _entries.update { sorted(it + restored) }
                 withContext(io) { deleteLeftovers() }
                 persist()
@@ -325,15 +344,21 @@ class TorrentManager(
      * Private browsing ended: every private torrent leaves the list and every file of it that was not saved to
      * Download/Orbis is deleted (OD-3): partial payloads, finished ones still seeding, paused or waiting, and the
      * files kept inside Orbis. One being copied to Download/Orbis right now finishes its copy (the user asked for
-     * it), then what is left of it goes. Returns the ids that leave, so their notifications can go too.
+     * it), then what is left of it goes. Kept files whose row [clearSettled] took off the list go too. Returns the ids
+     * that leave, so their notifications can go too.
      */
     fun forgetPrivate(): List<String> {
         val ids = _entries.value.filter { it.isPrivate }.map { it.id }
-        if (ids.isNotEmpty()) dropPrivate()
+        dropPrivate()
         return ids
     }
 
     private fun dropPrivate() = locked {
+        if (clearedKept.isNotEmpty()) {
+            val orphans = clearedKept.toList()
+            clearedKept.clear()
+            withContext(io) { orphans.forEach { deleteKept(File(it)) } }
+        }
         val gone = _entries.value.filter { it.isPrivate }
         if (gone.isEmpty()) return@locked
         // Seeding, or finished and paused / waiting for Wi-Fi / stopped by Android: complete, but never saved.
@@ -353,6 +378,55 @@ class TorrentManager(
         if (finished > 0) log("seeding dropped, deleted $finished")
         log("private torrents dropped ${gone.size}")
         reconcile()
+    }
+
+    /**
+     * Clear browsing data > Downloads list. Finished rows and failed ones leave the list with their resume data and
+     * metadata; a failed one's partial payload is deleted too (nothing else can reach it). Files in Download/Orbis
+     * and kept private folders are not touched, as with file downloads; a kept folder still goes when private
+     * browsing ends. Anything running, paused, queued, waiting, seeding or being saved stays, and so does a
+     * PUBLISH_FAILED one: its finished files exist only inside Orbis until Retry saves them. session.dat goes once the
+     * list is empty and the engine is stopped; a set-aside index goes at once.
+     * Returns the ids that leave (from the list as it is now), so their notifications can go too.
+     */
+    fun clearSettled(): List<String> {
+        val ids = _entries.value.filter { leavesOnClear(it) }.map { it.id }
+        locked { dropSettled() }
+        return ids
+    }
+
+    private suspend fun dropSettled() {
+        if (!restored) clearedBeforeRestore = true
+        val gone = _entries.value.filter { leavesOnClear(it) }
+        for (e in gone) {
+            detach(e.id, deleteFiles = false)
+            forgetMemory(e.id)
+        }
+        val goneIds = gone.map { it.id }.toSet()
+        _entries.update { list -> list.filterNot { it.id in goneIds } }
+        gone.filter { it.isPrivate }.mapNotNullTo(clearedKept) { it.keptDir }
+        withContext(io) {
+            for (e in gone) {
+                store.deleteState(e.id)
+                if (e.status == TorrentStatus.FAILED) deletePayload(File(e.saveDir))
+            }
+            store.deleteSetAside()
+        }
+        log("torrent list cleared ${gone.size}")
+        persist()
+        when {
+            engineRunning -> forgetSessionOnStop = true
+            _entries.value.isEmpty() -> forgetSessionState()
+        }
+    }
+
+    /** What [clearSettled] takes off the list: every finished row, and every failed one but PUBLISH_FAILED. */
+    private fun leavesOnClear(e: TorrentEntry): Boolean =
+        e.status == TorrentStatus.COMPLETED || e.status == TorrentStatus.FAILED && e.errorKind != TorrentErrorKind.PUBLISH_FAILED
+
+    private fun forgetSessionState() {
+        engine.forgetSessionState()
+        log("session state dropped")
     }
 
     /** The foreground service is going away (or the app went to the background): write every resume file now. */
@@ -691,6 +765,11 @@ class TorrentManager(
         appliedSettings = null
         _entries.update { list -> list.map { it.copy(downBps = 0, upBps = 0, peers = 0, seeds = 0, etaSeconds = null) } }
         log("engine idle")
+        // Asked for by a clear while the engine ran; applied after the stop above has written the state.
+        if (forgetSessionOnStop) {
+            forgetSessionOnStop = false
+            if (_entries.value.isEmpty()) forgetSessionState()
+        }
     }
 
     private suspend fun checkpointAll() {

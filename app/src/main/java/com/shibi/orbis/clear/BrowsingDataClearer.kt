@@ -1,6 +1,8 @@
 package com.shibi.orbis.clear
 
+import com.shibi.orbis.downloads.DownloadManager
 import com.shibi.orbis.passwords.LoginManager
+import com.shibi.orbis.torrent.TorrentManager
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -58,7 +60,10 @@ interface ClearTargets {
     /** Closes every normal tab, leaving one blank one. Private tabs are not touched. */
     fun closeNormalTabs()
 
-    /** Forgets the finished downloads in the list; no file is deleted, running downloads stay. */
+    /**
+     * Forgets the finished and failed downloads and torrents in the list ([clearDownloadLists]); no downloaded file is
+     * deleted, running ones stay.
+     */
     fun clearDownloadsList()
     fun clearBookmarks()
 
@@ -72,6 +77,16 @@ interface ClearTargets {
     /** True only when the engine confirmed the clear. Must not be called while a private tab is open. */
     suspend fun clearEngine(cookiesAndSiteData: Boolean, cache: Boolean): Boolean
 }
+
+/** The ids [clearDownloadLists] took off each list, so their result notifications can go too. */
+class ClearedDownloadLists(val downloads: List<Long>, val torrents: List<String>)
+
+/**
+ * Clear browsing data > Downloads list: the file downloads ([DownloadManager.clearIndex]) and the torrents
+ * ([TorrentManager.clearSettled]).
+ */
+fun clearDownloadLists(downloads: DownloadManager, torrents: TorrentManager): ClearedDownloadLists =
+    ClearedDownloadLists(downloads.clearIndex(), torrents.clearSettled())
 
 /**
  * Clear browsing data > Passwords. A loaded store is emptied. A store whose last load failed is reset instead

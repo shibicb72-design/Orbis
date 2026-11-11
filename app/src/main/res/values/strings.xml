@@ -426,4 +426,6 @@
     <string name="torrents_state_kept_private" translatable="false">Kept inside Orbis, not in your Downloads</string>
     <string name="torrents_action_save_to_downloads" translatable="false">Save to Downloads</string>
     <string name="torrents_remove_kept_body_private" translatable="false">The files kept inside Orbis are deleted.</string>
+    <!-- Clear browsing data > Downloads list covers torrents too (F-07, security PR 10). English only. -->
+    <string name="clear_downloads_summary_torrents" translatable="false">Finished and failed downloads and torrents leave the list. Downloaded files stay on your device; only a failed torrent\'s partial data is deleted. Running downloads and torrents stay listed.</string>
 </resources>
