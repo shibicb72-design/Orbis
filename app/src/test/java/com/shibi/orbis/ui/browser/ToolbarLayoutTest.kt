@@ -13,4 +13,12 @@ class ToolbarLayoutTest {
         assertTrue(toolbarWraps(fontScale = 2.0f, screenWidthDp = 360))
         assertFalse("a wide window (Fold unfolded, landscape) keeps one row", toolbarWraps(fontScale = 1.6f, screenWidthDp = 700))
     }
+
+    @Test
+    fun castIconHidesOnlyOnNarrowOneRowToolbars() {
+        assertFalse(showsToolbarCast(windowWidthDp = 320, twoRow = false))
+        assertTrue(showsToolbarCast(windowWidthDp = 360, twoRow = false))
+        assertTrue("a two-row toolbar has room", showsToolbarCast(windowWidthDp = 320, twoRow = true))
+        assertTrue(showsToolbarCast(windowWidthDp = 700, twoRow = false))
+    }
 }

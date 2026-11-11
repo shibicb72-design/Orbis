@@ -364,6 +364,8 @@
 
     <string name="menu_cast">Übertragen</string>
     <string name="cast_title">Übertragen</string>
+    <string name="cast_toolbar_idle">Auf Fernseher oder Lautsprecher übertragen</string>
+    <string name="cast_toolbar_connected">Übertragung an %1$s</string>
     <string name="cast_searching">Suche nach Fernsehern und Lautsprechern...</string>
     <string name="cast_no_devices">Keine Geräte gefunden. Schalte den Fernseher oder Lautsprecher ein und nutze dasselbe WLAN wie dieses Telefon.</string>
     <string name="cast_no_media">Diese Seite hat kein übertragbares Video.</string>

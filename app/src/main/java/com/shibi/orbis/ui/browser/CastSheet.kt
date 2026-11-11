@@ -24,6 +24,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -41,6 +42,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -66,8 +69,45 @@ internal fun CastFullscreenButton(casting: Boolean, onClick: () -> Unit, modifie
             Icon(
                 if (casting) Icons.Filled.CastConnected else Icons.Filled.Cast,
                 contentDescription = stringResource(R.string.menu_cast),
+                tint = castTint(casting),
             )
         }
+    }
+}
+
+internal const val CAST_BUTTON_TAG = "toolbar_cast"
+
+/** Below this width a one-row toolbar has no room for the Cast icon; the menu's Cast item stays either way. */
+internal const val TOOLBAR_CAST_MIN_WIDTH_DP = 360
+
+internal fun showsToolbarCast(windowWidthDp: Int, twoRow: Boolean): Boolean =
+    twoRow || windowWidthDp >= TOOLBAR_CAST_MIN_WIDTH_DP
+
+/**
+ * Connected: the theme's primary (teal; the lighter tonal teal on the dark toolbar so it stays readable).
+ * Otherwise the content colour the IconButton provides, which is already its disabled colour when disabled.
+ */
+@Composable
+private fun castTint(connected: Boolean): Color =
+    if (connected) MaterialTheme.colorScheme.primary else LocalContentColor.current
+
+/** Cast icon in the top toolbar, between the tab count and the menu. */
+@Composable
+internal fun ToolbarCastButton(
+    connected: Boolean,
+    enabled: Boolean,
+    deviceName: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val description =
+        if (connected) stringResource(R.string.cast_toolbar_connected, deviceName.orEmpty()) else stringResource(R.string.cast_toolbar_idle)
+    IconButton(onClick = onClick, enabled = enabled, modifier = modifier.testTag(CAST_BUTTON_TAG)) {
+        Icon(
+            if (connected) Icons.Filled.CastConnected else Icons.Filled.Cast,
+            contentDescription = description,
+            tint = castTint(connected && enabled),
+        )
     }
 }
 

@@ -574,6 +574,14 @@ private fun BrowserContent(
                             )
                         }
                     }
+                    if (showsToolbarCast(windowWidthDp, twoRow)) {
+                        ToolbarCastButton(
+                            connected = casting != null,
+                            enabled = session != null,
+                            deviceName = casting?.deviceName,
+                            onClick = { castOpen = true },
+                        )
+                    }
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
                             Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.menu_more))

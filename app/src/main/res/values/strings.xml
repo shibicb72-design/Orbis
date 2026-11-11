@@ -383,6 +383,8 @@
 
     <string name="menu_cast">Cast</string>
     <string name="cast_title">Cast</string>
+    <string name="cast_toolbar_idle">Cast to a TV or speaker</string>
+    <string name="cast_toolbar_connected">Casting to %1$s</string>
     <string name="cast_searching">Looking for TVs and speakers...</string>
     <string name="cast_no_devices">No devices found. Turn the TV or speaker on, and use the same Wi-Fi as this phone.</string>
     <string name="cast_no_media">This page has no castable video.</string>

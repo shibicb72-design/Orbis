@@ -366,6 +366,8 @@
 
     <string name="menu_cast">Enviar</string>
     <string name="cast_title">Enviar</string>
+    <string name="cast_toolbar_idle">Enviar a un televisor o altavoz</string>
+    <string name="cast_toolbar_connected">Enviando a %1$s</string>
     <string name="cast_searching">Buscando televisores y altavoces...</string>
     <string name="cast_no_devices">No se han encontrado dispositivos. Enciende el televisor o el altavoz y usa la misma Wi-Fi que este teléfono.</string>
     <string name="cast_no_media">Esta página no tiene un vídeo que se pueda enviar.</string>
