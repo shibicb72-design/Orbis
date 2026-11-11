@@ -25,4 +25,29 @@ class ExternalMagnetTest {
         // The web-link router still refuses magnets.
         assertNull(externalUrlFrom(view, magnet))
     }
+
+    // ---- hand-off to another app ("Open in another app", or a Custom Tab): never Orbis itself ----
+
+    private val own = "com.shibi.orbis"
+
+    @Test
+    fun noOtherAppMeansTheNoAppOffer() {
+        assertEquals(HandoffPlan.None, pickExternalHandlers(emptyList(), own))
+        // Orbis alone (it claims magnet: from other apps) is not another app.
+        assertEquals(HandoffPlan.None, pickExternalHandlers(listOf(own), own))
+        assertEquals(HandoffPlan.None, pickExternalHandlers(listOf(own, own), own))
+    }
+
+    @Test
+    fun oneOtherAppIsOpenedDirectly() {
+        assertEquals(HandoffPlan.One("org.proninyaroslav.libretorrent"), pickExternalHandlers(listOf(own, "org.proninyaroslav.libretorrent"), own))
+        // Two activities of the same app are one app.
+        assertEquals(HandoffPlan.One("com.example.torrent"), pickExternalHandlers(listOf("com.example.torrent", "com.example.torrent"), own))
+    }
+
+    @Test
+    fun severalAppsGetTheChooserWithoutOrbis() {
+        assertEquals(HandoffPlan.Several(excludeOwn = true), pickExternalHandlers(listOf("a.one", own, "b.two"), own))
+        assertEquals(HandoffPlan.Several(excludeOwn = false), pickExternalHandlers(listOf("a.one", "b.two"), own))
+    }
 }

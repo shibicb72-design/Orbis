@@ -774,6 +774,18 @@ class TorrentManagerTest {
         val again = finishedTorrent(s)
         s.manager.retry(again)
         advanceUntilIdle()
+        // Seeding with stop seeding off and a ratio limit; a speed cap applied while it runs.
+        s.settings.value = TorrentSettings(stopSeeding = false, seedRatioLimit = 1f)
+        s.clock += 1
+        val seeder = finishedTorrent(s)
+        assertEquals(TorrentStatus.SEEDING, s.entry(seeder).status)
+        s.settings.value = s.settings.value.copy(downBps = 512_000, upBps = 256_000)
+        advanceUntilIdle()
+        s.engine.advance(s.lastId(), 10, 10, EngineState.SEEDING, ratio = 1f)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.COMPLETED, s.entry(seeder).status)
+        assertTrue(s.logs.contains("stop seeding RATIO"))
+        assertTrue(s.logs.contains("settings applied"))
         // Reaping at the next start.
         File(s.payloadRoot, "0123456789abcdef0123456789abcdef").mkdirs()
         File(s.payloadRoot, "keep").mkdirs()
@@ -818,8 +830,247 @@ class TorrentManagerTest {
             assertFalse(line, line.contains("tracker", ignoreCase = true))
             assertFalse(line, line.contains(id))
             assertFalse(line, line.contains(tmp.root.path))
+            // Caps are settings, not log lines.
+            assertFalse(line, line.contains("512000") || line.contains("256000"))
         }
         // Entries print without their name too.
         assertFalse(s.manager.entries.value.toString().contains(secretName))
+    }
+
+    // ---- seeding and settings (PR 4) ----
+
+    private val keepSeeding = TorrentSettings(stopSeeding = false)
+
+    /** Added, metadata checked, payload written and finished with stop seeding off: SEEDING. */
+    private fun TestScope.seedingTorrent(s: TorrentTestSetup, isPrivate: Boolean = false): String {
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = isPrivate)!!
+        advanceUntilIdle()
+        val eid = s.lastId()
+        s.engine.emitMetadata(eid, sintelFiles)
+        advanceUntilIdle()
+        writePayload(s.entry(id))
+        s.engine.finish(eid)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.SEEDING, s.entry(id).status)
+        return id
+    }
+
+    @Test
+    fun withStopSeedingOffAFinishedTorrentSeedsAndPublishesNothing() = runTest {
+        val s = setup(this)
+        s.settings.value = keepSeeding
+        val id = seedingTorrent(s)
+        val eid = s.lastId()
+        assertTrue(s.published.isEmpty())
+        assertTrue(s.engine.removed.isEmpty())
+        assertTrue(eid in s.engine.running)
+        assertTrue(File(s.entry(id).saveDir, "$secretName/movie.mp4").isFile)
+        assertEquals(TorrentStatus.SEEDING, s.store.load().entries.single().status)
+        // The ratio is mirrored from the engine (live only).
+        s.engine.advance(eid, 10, 10, EngineState.SEEDING, ratio = 0.4f)
+        advanceUntilIdle()
+        assertEquals(0.4f, s.entry(id).ratio)
+        assertEquals(TorrentStatus.SEEDING, s.entry(id).status)
+        // Paused and resumed, it seeds again (not "downloading").
+        s.manager.pause(id)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.PAUSED, s.entry(id).status)
+        s.manager.resume(id)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.SEEDING, s.entry(id).status)
+        val again = s.engine.added.last().id
+        s.engine.completeOnApproval += again
+        s.engine.emitMetadata(again, sintelFiles)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.SEEDING, s.entry(id).status)
+        assertTrue(again in s.engine.running)
+        assertTrue(s.published.isEmpty())
+    }
+
+    @Test
+    fun reachingTheRatioLimitSavesTheFilesAndDeletesThePayload() = runTest {
+        val s = setup(this)
+        s.settings.value = keepSeeding.copy(seedRatioLimit = 1f)
+        val id = seedingTorrent(s)
+        val eid = s.lastId()
+        val dir = File(s.entry(id).saveDir)
+        s.engine.advance(eid, 10, 10, EngineState.SEEDING, ratio = 0.9f)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.SEEDING, s.entry(id).status)
+        s.engine.advance(eid, 10, 10, EngineState.SEEDING, ratio = 1f)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.COMPLETED, s.entry(id).status)
+        assertEquals("Download/Orbis/$secretName", s.entry(id).publishedPath)
+        assertEquals(setOf("movie.mp4", "en.srt"), s.published.map { it.name }.toSet())
+        assertTrue(s.engine.removed.contains(eid to false))
+        assertFalse("payload deleted after the copy", dir.exists())
+        assertTrue(s.logs.contains("stop seeding RATIO"))
+        assertFalse(s.engine.started)
+    }
+
+    @Test
+    fun aRatioLimitIsIgnoredWhileStopSeedingIsOn() = runTest {
+        val s = setup(this)
+        // Stop seeding on: the torrent never seeds, the limit has nothing to do.
+        s.settings.value = TorrentSettings(seedRatioLimit = 1f)
+        val id = finishedTorrent(s)
+        assertEquals(TorrentStatus.COMPLETED, s.entry(id).status)
+        assertFalse(s.logs.any { it.startsWith("stop seeding") })
+    }
+
+    @Test
+    fun stopSeedingByTheUserSavesTheFiles() = runTest {
+        val s = setup(this)
+        s.settings.value = keepSeeding
+        val id = seedingTorrent(s)
+        val dir = File(s.entry(id).saveDir)
+        s.manager.stopSeeding(id)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.COMPLETED, s.entry(id).status)
+        assertEquals(2, s.published.size)
+        assertFalse(dir.exists())
+        assertTrue(s.logs.contains("stop seeding USER"))
+        // Nothing to stop any more.
+        s.manager.stopSeeding(id)
+        advanceUntilIdle()
+        assertEquals(1, s.logs.count { it == "stop seeding USER" })
+    }
+
+    @Test
+    fun turningStopSeedingOnFinishesEverySeedingTorrent() = runTest {
+        val s = setup(this)
+        s.settings.value = keepSeeding
+        val first = seedingTorrent(s)
+        s.clock += 1
+        val second = seedingTorrent(s)
+        assertEquals(2, s.manager.entries.value.count { it.status == TorrentStatus.SEEDING })
+        s.settings.value = s.settings.value.copy(stopSeeding = true)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.COMPLETED, s.entry(first).status)
+        assertEquals(TorrentStatus.COMPLETED, s.entry(second).status)
+        assertEquals(4, s.published.size)
+        assertTrue(s.logs.contains("stop seeding SETTING 2"))
+        assertFalse(s.engine.started)
+        // Turning it off again changes nothing that was saved.
+        s.settings.value = s.settings.value.copy(stopSeeding = false)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.COMPLETED, s.entry(first).status)
+        assertTrue(s.unpublished.isEmpty())
+    }
+
+    @Test
+    fun aPrivateSeedingTorrentIsSavedWhenPrivateBrowsingEnds() = runTest {
+        val s = setup(this)
+        s.settings.value = keepSeeding
+        val id = seedingTorrent(s, isPrivate = true)
+        val eid = s.lastId()
+        val dir = File(s.entry(id).saveDir)
+        assertTrue(dir.path.contains(TorrentDirs.PRIVATE_DIR))
+        assertEquals(listOf(id), s.manager.forgetPrivate())
+        advanceUntilIdle()
+        assertTrue(s.manager.entries.value.isEmpty())
+        assertEquals(setOf("movie.mp4", "en.srt"), s.published.map { it.name }.toSet())
+        assertTrue(s.engine.removed.contains(eid to false))
+        assertFalse("private payload deleted after the copy", dir.exists())
+        assertTrue(s.logs.contains("seeding dropped, publishing 1"))
+        assertTrue(s.store.load().entries.isEmpty())
+        assertFalse(s.engine.started)
+    }
+
+    @Test
+    fun saveAndRemoveOnASeedingTorrentPublishesThenRemovesTheRow() = runTest {
+        val s = setup(this)
+        s.settings.value = keepSeeding
+        val id = seedingTorrent(s)
+        val dir = File(s.entry(id).saveDir)
+        s.manager.remove(id, deleteFiles = false)
+        advanceUntilIdle()
+        assertTrue(s.manager.entries.value.isEmpty())
+        assertEquals(2, s.published.size)
+        assertFalse(dir.exists())
+        assertNull(s.store.readResume(id))
+        assertTrue(s.store.load().entries.isEmpty())
+    }
+
+    @Test
+    fun aFailedSaveAndRemoveKeepsTheRowForRetry() = runTest {
+        val s = setup(this)
+        s.settings.value = keepSeeding
+        val id = seedingTorrent(s)
+        s.publishOk = false
+        s.manager.remove(id, deleteFiles = false)
+        advanceUntilIdle()
+        assertEquals(TorrentErrorKind.PUBLISH_FAILED, s.entry(id).errorKind)
+        assertTrue(File(s.entry(id).saveDir, "$secretName/movie.mp4").isFile)
+    }
+
+    @Test
+    fun deleteOnASeedingTorrentDeletesItsFiles() = runTest {
+        val s = setup(this)
+        s.settings.value = keepSeeding
+        val id = seedingTorrent(s)
+        val eid = s.lastId()
+        val dir = File(s.entry(id).saveDir)
+        s.manager.remove(id, deleteFiles = true)
+        advanceUntilIdle()
+        assertTrue(s.manager.entries.value.isEmpty())
+        assertTrue(s.published.isEmpty())
+        assertTrue(s.engine.removed.contains(eid to true))
+        assertFalse(dir.exists())
+    }
+
+    @Test
+    fun aSettingsChangeWhileRunningIsAppliedOnce() = runTest {
+        val s = setup(this)
+        s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
+        advanceUntilIdle()
+        assertTrue(s.engine.started)
+        val limits = s.engine.calls.count { it == "limits" }
+        val discovery = s.engine.calls.count { it == "discovery" }
+        s.settings.value = s.settings.value.copy(downBps = 512_000, dht = false)
+        advanceUntilIdle()
+        assertEquals(limits + 1, s.engine.calls.count { it == "limits" })
+        assertEquals(discovery + 1, s.engine.calls.count { it == "discovery" })
+        assertEquals(1, s.logs.count { it == "settings applied" })
+        // The same value again is no change.
+        s.settings.value = s.settings.value.copy()
+        advanceUntilIdle()
+        assertEquals(limits + 1, s.engine.calls.count { it == "limits" })
+    }
+
+    @Test
+    fun withoutWifiOnlyTorrentsRunOnAnyNetwork() = runTest {
+        val s = setup(this)
+        s.settings.value = TorrentSettings(wifiOnly = false)
+        s.network.kind.value = NetworkKind.OTHER
+        s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.FETCHING_METADATA, s.only().status)
+        assertTrue(s.engine.started)
+    }
+
+    @Test
+    fun aSeedingTorrentWaitsForWifiAndPausesAtTheTimeout() = runTest {
+        val s = setup(this)
+        s.settings.value = keepSeeding
+        val id = seedingTorrent(s)
+        s.network.kind.value = NetworkKind.OTHER
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.WAITING_FOR_WIFI, s.entry(id).status)
+        assertFalse(s.engine.started)
+        s.network.kind.value = NetworkKind.WIFI_OR_ETHERNET
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.SEEDING, s.entry(id).status)
+        assertTrue(s.engine.started)
+
+        s.manager.onTimeout()
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.PAUSED, s.entry(id).status)
+        assertEquals(PauseReason.TIMEOUT, s.entry(id).pauseReason)
+        assertFalse(s.engine.started)
+        s.manager.resume(id)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.SEEDING, s.entry(id).status)
+        assertTrue(s.published.isEmpty())
     }
 }

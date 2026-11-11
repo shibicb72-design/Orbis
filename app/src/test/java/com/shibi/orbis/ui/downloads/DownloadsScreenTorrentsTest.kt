@@ -12,8 +12,10 @@ import com.shibi.orbis.downloads.DownloadEntry
 import com.shibi.orbis.downloads.DownloadManager
 import com.shibi.orbis.downloads.DownloadStatus
 import com.shibi.orbis.downloads.DownloadStore
+import com.shibi.orbis.torrent.EngineState
 import com.shibi.orbis.torrent.TorrentFileEntry
 import com.shibi.orbis.torrent.TorrentFiles
+import com.shibi.orbis.torrent.TorrentSettings
 import com.shibi.orbis.torrent.TorrentSource
 import com.shibi.orbis.torrent.TorrentStatus
 import com.shibi.orbis.torrent.TorrentTestSetup
@@ -218,6 +220,60 @@ class DownloadsScreenTorrentsTest {
         val top = { text: String -> rule.onNodeWithText(text).getBoundsInRoot().top }
         assertTrue(top("report.pdf") < top("Sintel"))
         assertTrue(top("Sintel") < top("old.zip"))
+    }
+
+    /** Finished with "Stop seeding when finished" off: seeding at ratio 0.25, uploading at 1 kB/s. */
+    private fun seeding(t: TorrentTestSetup, limit: Float? = null): String {
+        t.settings.value = TorrentSettings(stopSeeding = false, seedRatioLimit = limit)
+        val id = downloading(t)
+        val dir = File(t.entry(id).saveDir, "Sintel").apply { mkdirs() }
+        File(dir, "movie.mp4").writeText("movie123")
+        File(dir, "en.srt").writeText("su")
+        t.engine.finish(t.lastId())
+        scheduler.advanceUntilIdle()
+        t.engine.advance(t.lastId(), done = 10, total = 10, state = EngineState.SEEDING, downBps = 0, peers = 2, upBps = 1000, ratio = 0.25f)
+        scheduler.advanceUntilIdle()
+        assertEquals(TorrentStatus.SEEDING, t.entry(id).status)
+        return id
+    }
+
+    @Test
+    fun aSeedingRowShowsItsRatioAndStopSeeding() {
+        val t = torrents()
+        val id = seeding(t)
+        show(t)
+        rule.onNodeWithText("Seeding").assertExists()
+        rule.onNodeWithText("ratio 0.25", substring = true).assertExists()
+        rule.onNodeWithText("/s", substring = true).assertExists()
+        rule.onNodeWithText("Pause").assertExists()
+        rule.onNodeWithText("Stop seeding").performClick()
+        idle()
+        assertEquals(TorrentStatus.COMPLETED, t.entry(id).status)
+        rule.onNodeWithText("Saved in Download/Orbis/Sintel").assertExists()
+        assertTrue(t.logs.contains("stop seeding USER"))
+    }
+
+    @Test
+    fun aSeedingRowWithALimitSaysWhereItStops() {
+        val t = torrents()
+        seeding(t, limit = 1.5f)
+        show(t)
+        rule.onNodeWithText("Seeding, stops at ratio 1.5").assertExists()
+    }
+
+    @Test
+    fun removingASeedingTorrentOffersToSaveItFirst() {
+        val t = torrents()
+        val id = seeding(t)
+        show(t)
+        rule.onNodeWithContentDescription("Remove").performClick()
+        idle()
+        rule.onNodeWithText("The files are finished but not saved to Download/Orbis/Sintel yet.").assertExists()
+        rule.onNodeWithText("Delete").assertExists()
+        rule.onNodeWithText("Save and remove").performClick()
+        idle()
+        assertTrue(t.manager.entries.value.none { it.id == id })
+        assertEquals(setOf("movie.mp4", "en.srt"), t.published.map { it.name }.toSet())
     }
 
     @Test

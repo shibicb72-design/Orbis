@@ -3,6 +3,7 @@ package com.shibi.orbis.ui.settings
 import android.content.Context
 import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -43,6 +45,7 @@ import com.shibi.orbis.R
 import com.shibi.orbis.about.LicenceEntry
 import com.shibi.orbis.about.LicenceKind
 import com.shibi.orbis.about.LicenceNote
+import com.shibi.orbis.about.LicenceText
 import com.shibi.orbis.about.Licences
 import com.shibi.orbis.ui.secondaryReadingWidth
 import kotlinx.coroutines.Dispatchers
@@ -50,7 +53,8 @@ import kotlinx.coroutines.withContext
 
 /**
  * Settings > About > Open-source licences: every component the app ships, its version and licence. A tap shows the
- * full licence text, read once from assets/licenses/ off the main thread. Nothing here opens the web.
+ * full licence text, read once from assets/licenses/ off the main thread and laid out for the screen there
+ * ([LicenceText.reflow]: paragraphs wrap, lists and titles keep their layout). Nothing here opens the web.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -92,8 +96,8 @@ private fun LicenceCard(entry: LicenceEntry) {
     val colors = MaterialTheme.colorScheme
     val context = LocalContext.current
     var expanded by rememberSaveable(entry.name) { mutableStateOf(false) }
-    // Loaded once per card, the first time it is opened; an empty string means the asset could not be read.
-    var text by remember(entry.name) { mutableStateOf<String?>(null) }
+    // Loaded once per card, the first time it is opened; an empty list means the asset could not be read.
+    var text by remember(entry.name) { mutableStateOf<List<LicenceText.Block>?>(null) }
     if (expanded && text == null) {
         LaunchedEffect(entry.licence) { text = readLicence(context, entry.licence) }
     }
@@ -130,22 +134,40 @@ private fun LicenceCard(entry: LicenceEntry) {
                 when {
                     body == null -> Unit
                     body.isEmpty() -> Text(stringResource(R.string.licences_unavailable), style = MaterialTheme.typography.bodySmall, color = colors.error)
-                    else ->
-                        Text(
-                            body,
-                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                            modifier = Modifier.padding(top = 8.dp),
-                        )
+                    else -> LicenceBody(body)
                 }
             }
         }
     }
 }
 
-/** On IO, never on main. Empty when the asset is missing or unreadable. */
-private suspend fun readLicence(context: Context, kind: LicenceKind): String =
+@Composable
+private fun LicenceBody(blocks: List<LicenceText.Block>) {
+    Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (blocks.any { it is LicenceText.Block.Preformatted }) {
+            Text(stringResource(R.string.licences_preformatted), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        for (block in blocks) {
+            when (block) {
+                is LicenceText.Block.Paragraph -> Text(block.text, style = MaterialTheme.typography.bodySmall)
+                is LicenceText.Block.Preformatted ->
+                    // Kept as written: wide lines scroll sideways instead of breaking the layout.
+                    Text(
+                        block.text,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        softWrap = false,
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    )
+            }
+        }
+    }
+}
+
+/** On IO, never on main, and laid out there too. Empty when the asset is missing or unreadable. */
+private suspend fun readLicence(context: Context, kind: LicenceKind): List<LicenceText.Block> =
     withContext(Dispatchers.IO) {
-        runCatching { context.assets.open(kind.assetPath).bufferedReader().use { it.readText() } }.getOrDefault("")
+        val raw = runCatching { context.assets.open(kind.assetPath).bufferedReader().use { it.readText() } }.getOrDefault("")
+        if (raw.isBlank()) emptyList() else LicenceText.reflow(raw)
     }
 
 @StringRes

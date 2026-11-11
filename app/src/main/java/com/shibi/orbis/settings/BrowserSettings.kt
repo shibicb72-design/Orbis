@@ -411,6 +411,12 @@ class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
         _torrentIpNoteSeen.value = true
     }
 
+    /** Settings > Torrents: the next confirm sheet shows the full IP note again. */
+    fun resetTorrentIpNote() {
+        prefs.torrentIpNoteSeen = false
+        _torrentIpNoteSeen.value = false
+    }
+
     private val _forceDark = MutableStateFlow(prefs.forceDark)
     val forceDark: StateFlow<Boolean> = _forceDark.asStateFlow()
 
