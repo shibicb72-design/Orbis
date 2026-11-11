@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Only the two download directories and the camera capture directory are shareable. The downloads index
-     (filesDir/downloads_index.json), the upload copies (cacheDir/uploads/), torrent payloads
+<!-- Only the two download directories, the camera capture directory and the two share-out directories are
+     shareable. The downloads index (filesDir/downloads_index.json), the upload copies (cacheDir/uploads/), the
+     imported documents (cacheDir/imports/, cacheDir/import-staging/), torrent payloads
      (getExternalFilesDir("torrents")) and everything else are deliberately not listed and stay unreachable through
      the FileProvider. "Download" is Environment.DIRECTORY_DOWNLOADS, the type passed to getExternalFilesDir.
-     camera_capture/ holds the temp the camera app writes a photo into. -->
+     camera_capture/ holds the temp the camera app writes a photo into. shared_out/n/ and shared_out/p/ hold the
+     copies made when the user shares a PDF or an imported document (normal and private tabs); the root names end up
+     in the content URI, so neither says "private". -->
 <paths>
     <external-files-path name="downloads_external" path="Download/" />
     <files-path name="downloads_internal" path="downloads/" />
     <cache-path name="camera_capture" path="camera_capture/" />
+    <cache-path name="shared" path="shared_out/n/" />
+    <cache-path name="shared2" path="shared_out/p/" />
 </paths>

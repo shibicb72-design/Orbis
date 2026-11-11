@@ -353,6 +353,15 @@ interface BrowserSession {
      * normal download path (host.onDownload: the same dialog, file naming and private handling). "Save image".
      */
     fun saveUrl(url: String) {}
+
+    /** True when the built-in PDF viewer shows the current page. False on any doubt. Test doubles answer false. */
+    suspend fun isPdfDocument(): Boolean = false
+
+    /**
+     * The PDF the built-in viewer is showing, as the viewer holds it (no new network request). Null when the page is
+     * not a PDF, the engine does not answer in time, or the save fails. The caller ends it with openBody or discard.
+     */
+    suspend fun currentPdf(): IncomingDownload? = null
     /**
      * Opens a non-http(s) link in another app (magnet:, tel:, intent:, …). The user already chose it, from a tap the
      * engine handled itself or from the long-press menu. Test doubles may no-op.

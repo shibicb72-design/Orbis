@@ -60,6 +60,7 @@ import com.shibi.orbis.ubo.UboOnboardingController
 import java.io.File
 import com.shibi.orbis.engine.ImportOpenQueue
 import com.shibi.orbis.engine.ImportedFileCache
+import com.shibi.orbis.share.ShareOutCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -98,6 +99,12 @@ class OrbisApp : Application() {
         val pendingImports = ImportOpenQueue()
         // Files copied in from other apps: drop the ones older than a day. Young ones stay so an open tab can reload.
         appScope.launch(Dispatchers.IO) { imports.deleteOlderThan() }
+        val shareOut = ShareOutCache(cacheDir)
+        // Private tabs are never restored, so no private share outlives the process. Normal shares last a day.
+        appScope.launch(Dispatchers.IO) {
+            shareOut.clearPrivate()
+            shareOut.deleteOlderThan()
+        }
         val sitePermissions =
             SitePermissionDecisions(
                 store = FileSitePermissionStore(File(filesDir, "site_permissions.json")),
@@ -204,6 +211,7 @@ class OrbisApp : Application() {
                 },
                 onPrivateBrowsingEnded = {
                     engine.clearPrivateData()
+                    appScope.launch(Dispatchers.IO) { runCatching { shareOut.clearPrivate() } }
                     // Created just below; private browsing cannot end before then (no session exists yet).
                     // The private entries leave the list; their result notifications must not stay in the shade.
                     downloadsRef?.let { DownloadNotifications.cancelResults(this@OrbisApp, it.forgetPrivate()) }
@@ -347,6 +355,7 @@ class OrbisApp : Application() {
                     appScope.launch(Dispatchers.IO) {
                         val removed = runCatching { imports.clearAll() }.isSuccess
                         if (!removed) debugLog.log("Clear", "imported files not cleared")
+                        if (runCatching { shareOut.clearAll() }.isFailure) debugLog.log("Clear", "shared files not cleared")
                     }
                 }
             }
@@ -366,6 +375,7 @@ class OrbisApp : Application() {
                 tabs = tabs,
                 downloads = downloads,
                 imports = imports,
+                shareOut = shareOut,
                 pendingImports = pendingImports,
                 sitePermissions = sitePermissions,
                 bookmarks = bookmarks,
@@ -456,6 +466,8 @@ class AppContainer(
     val downloads: DownloadManager,
     /** PDF and HTML files opened from other apps. Cleared with history and the cache, and trimmed at startup. */
     val imports: ImportedFileCache,
+    /** Copies handed to other apps by Share (a PDF, an imported document). */
+    val shareOut: ShareOutCache,
     /** Documents copied from other apps, waiting to be opened. Cleared with the files. */
     val pendingImports: ImportOpenQueue,
     /** The user's camera, microphone and location answers; Settings lists and removes them. */
