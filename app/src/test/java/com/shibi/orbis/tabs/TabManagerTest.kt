@@ -308,6 +308,53 @@ class TabManagerTest {
         assertEquals(listOf(url), released)
     }
 
+    /**
+     * Cold start: Gecko's content process takes about two seconds to come up, and the session reports progress and
+     * loading while the import has not committed yet (the url is still empty). The file must survive that window,
+     * or the load that follows fails with ERROR_FILE_NOT_FOUND.
+     */
+    @Test
+    fun anImportThatHasNotCommittedYetIsNotDeleted() {
+        val released = mutableListOf<String>()
+        val m = manager(releaseImport = { released += it })
+        m.openSelected()
+        scheduler.runCurrent()
+        val url = "file:///data/user/0/com.shibi.orbis/cache/imports/11111111-1111-1111-1111-111111111111/dummy.pdf"
+        assertTrue(m.openImported(url))
+        val session = created.last()
+        session._state.value = session._state.value.copy(isLoading = true, progress = 10)
+        scheduler.runCurrent()
+        session._state.value = session._state.value.copy(url = "about:blank")
+        scheduler.runCurrent()
+        session._state.value = session._state.value.copy(progress = 40)
+        scheduler.runCurrent()
+        assertTrue(released.isEmpty())
+        session.navigate(url)
+        assertTrue(released.isEmpty())
+        // Once it has committed, leaving it with no way back still deletes it.
+        session.navigate("https://example.com/", canGoBack = true)
+        session.navigate("https://example.com/next", canGoBack = false, canGoForward = false)
+        assertEquals(listOf(url), released)
+    }
+
+    /** Same window, in a tab created for the import (the selected tab was not blank). */
+    @Test
+    fun anImportInANewTabIsNotDeletedBeforeItCommits() {
+        val released = mutableListOf<String>()
+        val m = manager(releaseImport = { released += it })
+        m.openSelected()
+        created[0].navigate("https://example.com/page", "Page")
+        val url = "file:///data/user/0/com.shibi.orbis/cache/imports/11111111-1111-1111-1111-111111111111/dummy.pdf"
+        assertTrue(m.openImported(url))
+        val session = created.last()
+        scheduler.runCurrent()
+        session._state.value = session._state.value.copy(isLoading = true, progress = 10)
+        scheduler.runCurrent()
+        assertTrue(released.isEmpty())
+        session.navigate(url)
+        assertTrue(released.isEmpty())
+    }
+
     @Test
     fun openImportedDoesNotHijackALoadedTab() {
         val m = manager()
