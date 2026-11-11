@@ -42,6 +42,9 @@ jobs:
       - name: YouTube ad observer tests
         run: node app/src/test/js/yt-ads.test.js
 
+      - name: Engine currency script tests (offline)
+        run: python3 -I scripts/test_check_engine_currency.py
+
       - name: Assemble debug APK, unit tests, lint, and shrink a release APK
         run: |
           chmod +x gradlew

@@ -1,0 +1,27 @@
+name: Engine currency
+
+# Goes red when GeckoView/AC, libtorrent4j or the bundled OpenSSL is behind its newest release
+# (scripts/check_engine_currency.py). A red run reaches the owner through GitHub's failed-workflow mail.
+# Only official release sources are contacted: maven.mozilla.org, repo1.maven.org, github.com/openssl.
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+# Read-only. No secrets, no issue creation.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # --warn-only openssl until the self-built torrent natives ship (security PR 7); then drop it.
+      - name: Check engine versions
+        run: python3 -I scripts/check_engine_currency.py --warn-only openssl

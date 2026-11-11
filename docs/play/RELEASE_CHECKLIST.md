@@ -39,3 +39,18 @@ gradlew.bat :app:assembleR8check    # the same shrunk build, own app id, debug-s
   (JavaScript); no native code is downloaded.
 - Updates: Google Play delivers them. There is no in-app update check.
 - Size: the AAB is about 280 MB with both ABIs; Play serves only the device's ABI (roughly the arm64 split).
+
+## 5. Engine currency
+- Ship a GeckoView/AC bump within 3 days of every Firefox release, major or dot. The daily Engine currency
+  workflow (`.github/workflows/engine-currency.yml`) goes red when one is out.
+- Bump = PR 1's recipe (#24): change the `mozillaAc` / `geckoview` pair in `gradle/libs.versions.toml`, regenerate
+  verification metadata, CI, smoke test H-D11, release.
+- OpenSSL: when the workflow reports a newer 3.5.x, rebuild the torrent natives (see
+  `docs/security/NATIVE-VERSIONS.md`) and release.
+- Before every release: run the Engine currency workflow by hand (Actions > Engine currency > Run workflow, or
+  `gh workflow run engine-currency.yml --ref main`); it must be green.
+- GitHub turns scheduled workflows off in a public repository after 60 days with no repository activity. If the
+  Actions tab shows "This scheduled workflow is disabled", press **Enable workflow** (or
+  `gh workflow enable engine-currency.yml`) and run it once by hand.
+- The failure mail for a scheduled run goes to the user who last changed the `cron:` line in the workflow file.
+  If that is not the owner's account, have the owner make the next edit to that line.
