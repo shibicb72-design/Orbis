@@ -88,6 +88,8 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         app.container.tabs.setForeground(true)
         app.downloadForeground?.onAppForeground()
+        // No-op once loaded; retries a load that failed (e.g. Keystore briefly unavailable).
+        app.container.logins.load()
     }
 
     /** Width:height of the video that may go picture-in-picture now, or null. */

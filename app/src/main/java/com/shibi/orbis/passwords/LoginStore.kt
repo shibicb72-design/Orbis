@@ -5,10 +5,12 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import com.shibi.orbis.storage.AtomicTextFile
 import java.security.KeyStore
+import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import org.json.JSONException
 
 /** Encrypts and decrypts the login file. Tests use a stand-in; the app uses [KeystoreLoginCrypto]. */
 interface LoginCrypto {
@@ -67,7 +69,8 @@ interface LoginStore {
 /**
  * `filesDir/logins/logins.enc`: the JSON list, encrypted, base64 in an atomically replaced file. A file that cannot be
  * decrypted or parsed (e.g. the key was lost on a restore to another phone) is set aside, never overwritten silently;
- * if it cannot be moved away, saving is refused.
+ * if it cannot be moved away, saving is refused. Any other failure (Keystore busy or unavailable, an I/O error) may be
+ * transient: the file is left in place, [load] rethrows, and saving is refused until a later [load] succeeds.
  */
 class FileLoginStore(private val file: AtomicTextFile, private val crypto: LoginCrypto) : LoginStore {
     @Volatile private var blocked = false
@@ -75,20 +78,33 @@ class FileLoginStore(private val file: AtomicTextFile, private val crypto: Login
     override fun load(): List<SavedLogin> =
         try {
             val text = file.read()
-            if (text.isNullOrBlank()) {
-                emptyList()
-            } else {
-                LoginCodec.decode(String(crypto.decrypt(Base64.decode(text, Base64.NO_WRAP)), Charsets.UTF_8))
-            }
+            val items =
+                if (text.isNullOrBlank()) {
+                    emptyList()
+                } else {
+                    LoginCodec.decode(String(crypto.decrypt(Base64.decode(text, Base64.NO_WRAP)), Charsets.UTF_8))
+                }
+            blocked = false
+            items
         } catch (e: Exception) {
-            if (!file.setAside()) blocked = true
+            blocked = true
+            if (!isCorrupt(e)) throw e
+            if (file.setAside()) blocked = false
             emptyList()
         }
 
     override fun save(items: List<SavedLogin>) {
-        check(!blocked) { "unreadable login file could not be set aside" }
+        check(!blocked) { "login file unreadable and still in place" }
         val sealed = crypto.encrypt(LoginCodec.encode(items).toByteArray(Charsets.UTF_8))
         file.write(Base64.encodeToString(sealed, Base64.NO_WRAP))
         if (items.isEmpty()) file.deleteAside()
+    }
+
+    private companion object {
+        /**
+         * The file itself is bad: wrong key or tampered ciphertext (bad GCM tag), not Base64 or too short
+         * ([IllegalArgumentException], also the `require` in [KeystoreLoginCrypto.decrypt]), or not our JSON.
+         */
+        fun isCorrupt(e: Exception): Boolean = e is AEADBadTagException || e is IllegalArgumentException || e is JSONException
     }
 }
