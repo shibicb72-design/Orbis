@@ -231,7 +231,12 @@ class MainActivity : ComponentActivity() {
                     // A VIEW without a type names its file only: the provider's type is the one that counts.
                     val type = explicit ?: data?.takeIf { action == Intent.ACTION_VIEW && schemeOf(it) == "content" }
                         ?.let { runCatching { resolver.getType(Uri.parse(it)) }.getOrNull() }
-                    TorrentIntake.check(action, data, type, stream, pkg) { authority -> pm.resolveContentProvider(authority, 0)?.packageName }
+                    // The authority as ContentResolver will read it, for the same URI check() picks.
+                    val picked = if (action == Intent.ACTION_VIEW) data else stream
+                    val platformAuthority = picked?.let { runCatching { Uri.parse(it).authority }.getOrNull() }
+                    TorrentIntake.check(action, data, type, stream, platformAuthority, pkg, setOf("$pkg.downloads")) { authority ->
+                        pm.resolveContentProvider(authority, 0)?.packageName
+                    }
                 }
             when (check) {
                 is TorrentIntake.Check.Ok -> app.container.pendingTorrentIntake.value = check.request
