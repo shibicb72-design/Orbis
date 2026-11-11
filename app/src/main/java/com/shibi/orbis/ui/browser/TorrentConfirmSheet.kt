@@ -53,6 +53,8 @@ import com.shibi.orbis.torrent.TorrentIntakeReader
 import com.shibi.orbis.torrent.TorrentPaths
 import com.shibi.orbis.torrent.TorrentPreview
 import com.shibi.orbis.torrent.TorrentSource
+import com.shibi.orbis.ui.ObscuredTouchFilter
+import com.shibi.orbis.ui.rememberTapGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -210,6 +212,9 @@ fun TorrentConfirmSheet(model: TorrentConfirmModel, onDownload: () -> Unit, onCa
         containerColor = container,
         contentColor = onContainer,
     ) {
+        // Composed inside the sheet: the filter and the guard belong to the sheet's own window.
+        ObscuredTouchFilter()
+        val tapGuard = rememberTapGuard()
         Column(
             Modifier
                 .verticalScroll(rememberScrollState())
@@ -288,7 +293,7 @@ fun TorrentConfirmSheet(model: TorrentConfirmModel, onDownload: () -> Unit, onCa
                     Text(stringResource(R.string.prompt_cancel))
                 }
                 Spacer(Modifier.width(8.dp))
-                Button(onClick = onDownload, enabled = model.downloadEnabled) {
+                Button(onClick = { if (tapGuard()) onDownload() }, enabled = model.downloadEnabled) {
                     Text(stringResource(R.string.torrents_sheet_download))
                 }
             }

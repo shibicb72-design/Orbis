@@ -70,6 +70,7 @@ import com.shibi.orbis.passwords.LoginManager
 import com.shibi.orbis.passwords.SENSITIVE_CLIP_LABEL
 import com.shibi.orbis.passwords.SavedLogin
 import com.shibi.orbis.passwords.SensitiveClip
+import com.shibi.orbis.ui.ObscuredTouchFilter
 import com.shibi.orbis.ui.secondaryReadingWidth
 import java.util.Locale
 import kotlinx.coroutines.launch
@@ -138,6 +139,8 @@ fun PasswordsScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+    // F-15: no tap that comes through another app's window drawn on top reaches this screen (Android 10 and 11).
+    ObscuredTouchFilter()
     val deviceSecure = remember { context.getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true }
 
     val importLauncher =

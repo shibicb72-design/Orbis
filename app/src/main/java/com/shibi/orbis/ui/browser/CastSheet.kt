@@ -59,6 +59,8 @@ import com.shibi.orbis.cast.CastPhase
 import com.shibi.orbis.cast.CastTrustPrompt
 import com.shibi.orbis.cast.CastTrustReason
 import com.shibi.orbis.engine.BrowserSession
+import com.shibi.orbis.ui.ObscuredTouchFilter
+import com.shibi.orbis.ui.rememberTapGuard
 
 /** Cast icon kept on top of a fullscreen video. Its surface carries its own content colour. */
 @Composable
@@ -326,6 +328,10 @@ internal fun CastTrustQuestion(
     modifier: Modifier = Modifier,
 ) {
     val warning = prompt.reason == CastTrustReason.KEY_CHANGED
+    // Drawn inside the Cast sheet, so both belong to the sheet's own window. Cancel is never delayed.
+    ObscuredTouchFilter()
+    val tapGuard = rememberTapGuard()
+    val confirm = { if (tapGuard()) onConfirm() }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             stringResource(castTrustText(prompt.reason), prompt.deviceName),
@@ -335,7 +341,7 @@ internal fun CastTrustQuestion(
         )
         Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (warning) {
-                TextButton(onClick = onConfirm, modifier = Modifier.testTag(CAST_TRUST_CONFIRM_TAG)) {
+                TextButton(onClick = confirm, modifier = Modifier.testTag(CAST_TRUST_CONFIRM_TAG)) {
                     Text(stringResource(R.string.cast_trust_confirm))
                 }
                 Button(onClick = onCancel, modifier = Modifier.testTag(CAST_TRUST_CANCEL_TAG)) {
@@ -345,7 +351,7 @@ internal fun CastTrustQuestion(
                 TextButton(onClick = onCancel, modifier = Modifier.testTag(CAST_TRUST_CANCEL_TAG)) {
                     Text(stringResource(R.string.cast_trust_cancel))
                 }
-                Button(onClick = onConfirm, modifier = Modifier.testTag(CAST_TRUST_CONFIRM_TAG)) {
+                Button(onClick = confirm, modifier = Modifier.testTag(CAST_TRUST_CONFIRM_TAG)) {
                     Text(stringResource(R.string.cast_trust_confirm))
                 }
             }

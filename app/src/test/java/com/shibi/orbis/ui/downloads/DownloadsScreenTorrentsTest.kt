@@ -20,6 +20,7 @@ import com.shibi.orbis.torrent.TorrentSource
 import com.shibi.orbis.torrent.TorrentStatus
 import com.shibi.orbis.torrent.TorrentTestSetup
 import com.shibi.orbis.ui.browser.ComposeActivityRegistration
+import com.shibi.orbis.ui.passTapGuard
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -186,6 +187,7 @@ class DownloadsScreenTorrentsTest {
         idle()
         rule.onNodeWithText("Remove this torrent?").assertExists()
         rule.onNodeWithText("The 5 B downloaded so far will be deleted.").assertExists()
+        passTapGuard()
         rule.onNodeWithText("Remove").performClick()
         idle()
         assertTrue(t.manager.entries.value.none { it.id == id })
@@ -202,6 +204,7 @@ class DownloadsScreenTorrentsTest {
         idle()
         rule.onNodeWithText("Remove from the list?").assertExists()
         rule.onNodeWithText("The files stay in Download/Orbis/Sintel.").assertExists()
+        passTapGuard()
         rule.onNodeWithText("Remove").performClick()
         idle()
         assertTrue(t.manager.entries.value.none { it.id == id })
@@ -270,6 +273,7 @@ class DownloadsScreenTorrentsTest {
         idle()
         rule.onNodeWithText("The files are finished but not saved to Download/Orbis/Sintel yet.").assertExists()
         rule.onNodeWithText("Delete").assertExists()
+        passTapGuard()
         rule.onNodeWithText("Save and remove").performClick()
         idle()
         assertTrue(t.manager.entries.value.none { it.id == id })
@@ -289,6 +293,7 @@ class DownloadsScreenTorrentsTest {
         idle()
         rule.onNodeWithText("The files are finished but not saved to Download/Orbis/Sintel yet.").assertExists()
         rule.onNodeWithText("Delete").assertExists()
+        passTapGuard()
         rule.onNodeWithText("Save and remove").performClick()
         idle()
         assertTrue(t.manager.entries.value.none { it.id == id })

@@ -15,6 +15,7 @@ import com.shibi.orbis.torrent.IntakeRequest
 import com.shibi.orbis.torrent.TorrentIntakeReader
 import com.shibi.orbis.torrent.TorrentSource
 import com.shibi.orbis.torrent.bencode
+import com.shibi.orbis.ui.passTapGuard
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.util.concurrent.CountDownLatch
@@ -98,6 +99,7 @@ class TorrentConfirmSheetTest {
         rule.onNodeWithText(note).assertExists()
         rule.onAllNodesWithText(reminder).assertCountEquals(0)
         rule.onAllNodesWithText(privateLine).assertCountEquals(0)
+        passTapGuard()
         rule.onNodeWithText("Download").assertIsEnabled().performClick()
         rule.waitForIdle()
         val a = added.single()
@@ -113,6 +115,7 @@ class TorrentConfirmSheetTest {
         rule.onNodeWithText(reminder).assertExists()
         rule.onAllNodesWithText(note).assertCountEquals(0)
         rule.onNodeWithText(privateLine).assertExists()
+        passTapGuard()
         rule.onNodeWithText("Download").performClick()
         rule.waitForIdle()
         assertEquals(true, added.single().isPrivate)
@@ -129,6 +132,7 @@ class TorrentConfirmSheetTest {
         response.gate.countDown()
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Sintel").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("2 files", substring = true).assertExists()
+        passTapGuard()
         rule.onNodeWithText("Download").assertIsEnabled().performClick()
         rule.waitForIdle()
         val a = added.single()
