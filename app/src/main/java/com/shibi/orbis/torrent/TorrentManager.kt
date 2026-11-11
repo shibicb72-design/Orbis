@@ -243,8 +243,9 @@ class TorrentManager(
         when (event) {
             is TorrentEvent.MetadataReceived -> onMetadata(entry, a, event)
             // Only a torrent whose file list was checked can be finished; anything else is not ours to publish.
-            // With nothing wanted yet libtorrent may call a torrent finished: only an approved, running one can be.
-            is TorrentEvent.Finished -> if (a.metadataOk && a.running) onFinished(entry, a) else log("finished before approval, ignored")
+            // With nothing wanted yet libtorrent may call a torrent finished: only an approved one can be (the engine
+            // filters that alert too). A paused one may finish: its last piece landed while it was being paused.
+            is TorrentEvent.Finished -> if (a.metadataOk) onFinished(entry, a) else log("finished before approval, ignored")
             is TorrentEvent.Error -> fail(id, event.kind)
         }
     }

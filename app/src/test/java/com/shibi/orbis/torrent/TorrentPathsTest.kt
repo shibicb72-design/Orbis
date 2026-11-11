@@ -73,7 +73,8 @@ class TorrentPathsTest {
     @Test
     fun duplicatePathsAreRejected() {
         assertEquals(TorrentPaths.Rejection.DUPLICATE, rejected(torrent("t", entry("t", "a.bin"), entry("t", "a.bin"))))
-        assertEquals(TorrentPaths.Rejection.DUPLICATE, rejected(torrent("t", entry("t", "A.bin"), entry("t", "a.BIN"))))
+        // Names that differ only in case are two files: the collision counter keeps them apart.
+        assertEquals(listOf("t/A.bin", "t/a (1).BIN"), ok(torrent("t", entry("t", "A.bin"), entry("t", "a.BIN"))).relativePaths)
         // Pad files may repeat; they are never written.
         ok(torrent("t", entry("t", "a.bin"), entry(".pad", "1", pad = true), entry(".pad", "1", pad = true)))
     }
@@ -108,12 +109,12 @@ class TorrentPathsTest {
                     entry("t", "a?b", "1.txt"),
                     entry("t", "a*b", "2.txt"),
                     entry("t", "a?b", "3.txt"),
-                    entry("t", "x<y.TXT"),
-                    entry("t", "x>y.txt"),
+                    entry("t", "Readme.TXT"),
+                    entry("t", "readme.txt"),
                 ),
             )
         assertEquals(
-            listOf("t/a_b/1.txt", "t/a_b (1)/2.txt", "t/a_b/3.txt", "t/x_y.TXT", "t/x_y (1).txt"),
+            listOf("t/a_b/1.txt", "t/a_b (1)/2.txt", "t/a_b/3.txt", "t/Readme.TXT", "t/readme (1).txt"),
             plan.relativePaths,
         )
     }

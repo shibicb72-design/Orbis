@@ -81,7 +81,12 @@ class FakeTorrentEngine : TorrentEngine {
         calls += "approve ${id.value}"
         if (renames.isNotEmpty()) this.renames[id] = renames
         approved += id
+        // The real engine reports a torrent that is already complete on disk when its files are approved.
+        if (id in completeOnApproval) check(_events.tryEmit(TorrentEvent.Finished(id)))
     }
+
+    /** Engine ids whose payload is already complete when approved (restored after the last piece). */
+    val completeOnApproval = HashSet<EngineId>()
 
     override suspend fun saveResumeData(id: EngineId): ByteArray? {
         calls += "save ${id.value}"

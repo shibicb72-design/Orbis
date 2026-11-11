@@ -207,7 +207,14 @@ class Libtorrent4jEngine(
         // stop_when_ready: libtorrent counts downloading_metadata as a transferring state, so a magnet with that flag
         // pauses itself straight out of checking_resume_data and never fetches anything.
         var flags = p.getFlags().and_(TorrentFlags.AUTO_MANAGED.inv()).and_(TorrentFlags.SEED_MODE.inv())
-        flags = if (withMetadata) flags.or_(TorrentFlags.PAUSED) else flags.and_(TorrentFlags.PAUSED.inv()).and_(TorrentFlags.STOP_WHEN_READY.inv())
+        flags =
+            if (withMetadata) {
+                flags.or_(TorrentFlags.PAUSED)
+            } else {
+                // default_dont_download: files past the priority list below (a torrent with more files than any we
+                // accept) are not wanted either, so nothing at all is created before the list is rejected.
+                flags.and_(TorrentFlags.PAUSED.inv()).and_(TorrentFlags.STOP_WHEN_READY.inv()).or_(TorrentFlags.DEFAULT_DONT_DOWNLOAD)
+            }
         flags = discoveryFlags(flags)
         p.setFlags(flags)
         // No file is wanted until the manager approved the list: libtorrent then creates no empty file, folder or
@@ -295,6 +302,14 @@ class Libtorrent4jEngine(
             renames.forEach { (index, path) -> h.renameFile(index, path) }
             val count = h.torrentFile()?.numFiles() ?: return@post
             h.prioritizeFiles(Priority.array(Priority.DEFAULT, count))
+            // libtorrent posts "finished" only on a not-finished -> finished change, and a torrent with nothing wanted
+            // already counts as finished. One that is complete on disk (restored after its last piece) would never
+            // get the alert, so it is reported here.
+            val st = h.status()
+            if (st.hasMetadata() && st.totalWanted() > 0 && st.totalWantedDone() >= st.totalWanted()) {
+                log("complete at approval ${id.value}")
+                emit(TorrentEvent.Finished(id))
+            }
         }
     }
 

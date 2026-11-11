@@ -148,6 +148,51 @@ class TorrentManagerTest {
     }
 
     @Test
+    fun aTorrentThatFinishesWhileBeingPausedIsPublished() = runTest {
+        val s = Setup(this)
+        val paused = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
+        s.clock += 1
+        s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
+        advanceUntilIdle()
+        val eid = s.engine.added.first { it.saveDir.name == paused }.id
+        s.engine.emitMetadata(eid, sintelFiles)
+        advanceUntilIdle()
+        // The other torrent keeps the session up, so the paused one stays in it.
+        s.manager.pause(paused)
+        advanceUntilIdle()
+        assertTrue(s.engine.started)
+        writePayload(s.manager.entries.value.first { it.id == paused })
+        s.engine.finish(eid)
+        advanceUntilIdle()
+        val e = s.manager.entries.value.first { it.id == paused }
+        assertEquals(TorrentStatus.COMPLETED, e.status)
+        assertEquals(2, s.published.size)
+    }
+
+    @Test
+    fun aTorrentCompleteOnDiskFinishesWhenResumed() = runTest {
+        val s = Setup(this)
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
+        advanceUntilIdle()
+        s.engine.emitMetadata(s.lastId(), sintelFiles)
+        advanceUntilIdle()
+        // Paused right as the last piece landed: the engine stopped, the resume data is complete.
+        s.manager.pause(id)
+        advanceUntilIdle()
+        assertFalse(s.engine.started)
+        writePayload(s.only())
+        s.manager.resume(id)
+        advanceUntilIdle()
+        val again = s.engine.added.last().id
+        s.engine.completeOnApproval += again
+        s.engine.emitMetadata(again, sintelFiles)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.COMPLETED, s.only().status)
+        assertEquals("Download/Orbis/$secretName", s.only().publishedPath)
+        assertFalse(s.engine.started)
+    }
+
+    @Test
     fun missingOrShortFilesAreNeverPublished() = runTest {
         val s = Setup(this)
         s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)

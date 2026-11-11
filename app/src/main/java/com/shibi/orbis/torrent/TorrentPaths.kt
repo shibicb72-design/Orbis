@@ -24,7 +24,7 @@ object TorrentPaths {
         TOO_LARGE,
         EMPTY_NAME,
 
-        /** Two entries name the same file (case-insensitively): they would collapse onto one file. */
+        /** Two entries name exactly the same file: they would collapse onto one. (Case-only twins get a counter.) */
         DUPLICATE,
     }
 
@@ -94,7 +94,7 @@ object TorrentPaths {
         for (f in files.files) {
             if (f.isPadFile) continue
             // NUL cannot occur in a segment (checked above), so it is a safe separator for the key.
-            if (!seen.add(f.pathSegments.joinToString("\u0000").lowercase())) return Result.Rejected(Rejection.DUPLICATE)
+            if (!seen.add(f.pathSegments.joinToString("\u0000"))) return Result.Rejected(Rejection.DUPLICATE)
         }
 
         // A raw folder must map to the same safe folder in every file, so folders are keyed by their raw path.
