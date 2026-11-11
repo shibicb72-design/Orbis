@@ -81,10 +81,11 @@ class TorrentManagerTest {
 
     private val sintelFiles = files(secretName, listOf(secretName, "movie.mp4") to 8L, listOf(secretName, "sub", "en.srt") to 2L)
 
+    // Sizes match sintelFiles (8 and 2 bytes).
     private fun writePayload(entry: TorrentEntry) {
         File(entry.saveDir, "$secretName/sub").mkdirs()
-        File(entry.saveDir, "$secretName/movie.mp4").writeText("movie")
-        File(entry.saveDir, "$secretName/sub/en.srt").writeText("subs")
+        File(entry.saveDir, "$secretName/movie.mp4").writeText("movie123")
+        File(entry.saveDir, "$secretName/sub/en.srt").writeText("su")
     }
 
     @Test
@@ -105,6 +106,8 @@ class TorrentManagerTest {
         advanceUntilIdle()
         assertEquals(TorrentStatus.DOWNLOADING, s.only().status)
         assertEquals(10L, s.only().totalBytes)
+        assertTrue(eid in s.engine.approved)
+        assertTrue(s.engine.calls.indexOf("approve ${eid.value}") < s.engine.calls.lastIndexOf("resume ${eid.value}"))
         assertTrue(eid in s.engine.running)
         assertNotNull(s.store.readTorrent(id))
 
@@ -120,7 +123,7 @@ class TorrentManagerTest {
         assertEquals("Download/Orbis/$secretName", e.publishedPath)
         val targets = s.published.map { it.dir to it.name }.toSet()
         assertEquals(setOf("Orbis/$secretName" to "movie.mp4", "Orbis/$secretName/sub" to "en.srt"), targets)
-        assertEquals("movie", s.published.first { it.name == "movie.mp4" }.content)
+        assertEquals("movie123", s.published.first { it.name == "movie.mp4" }.content)
         assertTrue(s.engine.removed.contains(eid to false))
         assertFalse("private copy deleted", File(e.saveDir).exists())
         assertNull(s.store.readResume(id))
@@ -142,6 +145,23 @@ class TorrentManagerTest {
         assertEquals(TorrentStatus.FETCHING_METADATA, s.only().status)
         assertTrue(s.published.isEmpty())
         assertTrue(s.engine.removed.isEmpty())
+    }
+
+    @Test
+    fun missingOrShortFilesAreNeverPublished() = runTest {
+        val s = Setup(this)
+        s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
+        advanceUntilIdle()
+        s.engine.emitMetadata(s.lastId(), sintelFiles)
+        advanceUntilIdle()
+        // Only one of the two files, and that one short: a finish that was not one.
+        File(s.only().saveDir, "$secretName").mkdirs()
+        File(s.only().saveDir, "$secretName/movie.mp4").writeText("mov")
+        s.engine.finish(s.lastId())
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.FAILED, s.only().status)
+        assertEquals(TorrentErrorKind.PUBLISH_FAILED, s.only().errorKind)
+        assertTrue(s.published.isEmpty())
     }
 
     @Test
@@ -410,15 +430,42 @@ class TorrentManagerTest {
     }
 
     @Test
-    fun engineErrorFailsTheEntry() = runTest {
+    fun fileErrorFailsTheEntryButKeepsThePartialDownload() = runTest {
         val s = Setup(this)
-        s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
         advanceUntilIdle()
-        s.engine.fail(s.lastId(), TorrentErrorKind.FILE_ERROR)
+        val eid = s.lastId()
+        s.engine.emitMetadata(eid, sintelFiles)
+        advanceUntilIdle()
+        writePayload(s.only())
+        s.engine.resumeBytes = { "before-error".toByteArray() }
+        s.engine.fail(eid, TorrentErrorKind.FILE_ERROR)
         advanceUntilIdle()
         assertEquals(TorrentStatus.FAILED, s.only().status)
         assertEquals(TorrentErrorKind.FILE_ERROR, s.only().errorKind)
+        assertTrue(s.engine.removed.contains(eid to false))
+        assertTrue(File(s.only().saveDir, "$secretName/movie.mp4").isFile)
+        assertArrayEquals("before-error".toByteArray(), s.store.readResume(id))
         assertFalse(s.engine.started)
+    }
+
+    @Test
+    fun removingAPayloadNeverFollowsASymlink() = runTest {
+        val s = Setup(this)
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
+        advanceUntilIdle()
+        val outside = File(tmp.root, "outside").apply { mkdirs() }
+        val keep = File(outside, "keep.txt").apply { writeText("mine") }
+        val dir = File(s.only().saveDir).apply { mkdirs() }
+        val link = File(dir, "link")
+        val linked =
+            runCatching { java.nio.file.Files.createSymbolicLink(link.toPath(), outside.toPath()) }.isSuccess
+        // Windows without developer mode cannot create symlinks; Linux CI always can.
+        org.junit.Assume.assumeTrue(linked)
+        s.manager.remove(id, deleteFiles = true)
+        advanceUntilIdle()
+        assertFalse(dir.exists())
+        assertTrue(keep.isFile)
     }
 
     @Test

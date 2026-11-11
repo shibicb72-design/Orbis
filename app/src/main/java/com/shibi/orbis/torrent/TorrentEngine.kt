@@ -18,10 +18,10 @@ interface TorrentEngine {
     fun stop()
 
     /**
-     * Adds a torrent saving into [saveDir]. A torrent with metadata (a .torrent, or resume data that carries it) is
-     * added paused and announced with [TorrentEvent.MetadataReceived]; a magnet without metadata starts fetching it and
-     * pauses itself when it arrives. Either way nothing is downloaded before the caller has checked the file list and
-     * called [resume].
+     * Adds a torrent saving into [saveDir]. Every file starts at "don't download", so libtorrent creates no file, folder
+     * or symlink for it. A torrent with metadata (a .torrent, or resume data that carries it) is added paused and
+     * announced with [TorrentEvent.MetadataReceived]; a magnet without metadata runs to fetch it and is paused when it
+     * arrives. Nothing is written until the caller has checked the file list and called [approveFiles] (and [resume]).
      */
     fun add(source: TorrentSource, saveDir: java.io.File, resumeData: ByteArray?): EngineId
 
@@ -31,8 +31,11 @@ interface TorrentEngine {
 
     fun remove(id: EngineId, deleteFiles: Boolean)
 
-    /** Renames file [index] to [relativePath] (below the save directory, '/' separated). Before resume only. */
-    fun renameFiles(id: EngineId, relativePaths: Map<Int, String>)
+    /**
+     * The file list passed the caller's checks: renames file index -> relative path (below the save directory, '/'
+     * separated), then lets every file download. Until this call no file is wanted.
+     */
+    fun approveFiles(id: EngineId, renames: Map<Int, String>)
 
     /** Flushes what was written and returns the resume data; null when the torrent is unknown or the save failed. */
     suspend fun saveResumeData(id: EngineId): ByteArray?

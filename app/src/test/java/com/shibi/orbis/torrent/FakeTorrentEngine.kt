@@ -74,8 +74,13 @@ class FakeTorrentEngine : TorrentEngine {
         _snapshots.update { it - id }
     }
 
-    override fun renameFiles(id: EngineId, relativePaths: Map<Int, String>) {
-        renames[id] = relativePaths
+    /** Engine ids whose file list the manager approved (only those may download). */
+    val approved = HashSet<EngineId>()
+
+    override fun approveFiles(id: EngineId, renames: Map<Int, String>) {
+        calls += "approve ${id.value}"
+        if (renames.isNotEmpty()) this.renames[id] = renames
+        approved += id
     }
 
     override suspend fun saveResumeData(id: EngineId): ByteArray? {

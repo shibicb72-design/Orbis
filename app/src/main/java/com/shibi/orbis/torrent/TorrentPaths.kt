@@ -23,6 +23,9 @@ object TorrentPaths {
         TOO_MANY_PIECES,
         TOO_LARGE,
         EMPTY_NAME,
+
+        /** Two entries name the same file (case-insensitively): they would collapse onto one file. */
+        DUPLICATE,
     }
 
     /** Where each file goes. [relativePaths] is '/'-separated below the save directory; null for a pad file. */
@@ -33,6 +36,8 @@ object TorrentPaths {
         val renames: Map<Int, String>,
         /** Below Download/Orbis/<displayName>/: the path inside the torrent without its top folder. Null for a pad file. */
         val publishPaths: List<String?>,
+        /** Declared size of each file (same order); empty when unknown. */
+        val sizes: List<Long> = emptyList(),
     ) {
         override fun toString(): String = "Plan(files=${relativePaths.size}, renames=${renames.size})"
     }
@@ -85,6 +90,12 @@ object TorrentPaths {
         if (name.isEmpty()) return Result.Rejected(Rejection.EMPTY_NAME)
         if (files.files.isEmpty()) return Result.Rejected(Rejection.EMPTY_PATH)
         for (f in files.files) check(f)?.let { return Result.Rejected(it) }
+        val seen = HashSet<String>()
+        for (f in files.files) {
+            if (f.isPadFile) continue
+            // NUL cannot occur in a segment (checked above), so it is a safe separator for the key.
+            if (!seen.add(f.pathSegments.joinToString("\u0000").lowercase())) return Result.Rejected(Rejection.DUPLICATE)
+        }
 
         // A raw folder must map to the same safe folder in every file, so folders are keyed by their raw path.
         val assigned = HashMap<String, String>()
@@ -118,7 +129,7 @@ object TorrentPaths {
         val top = real.firstOrNull()?.pathSegments?.firstOrNull()
         val hasTopFolder = top != null && real.all { it.pathSegments.size > 1 && it.pathSegments[0] == top }
         val publish = relative.map { p -> p?.let { if (hasTopFolder) it.substringAfter('/') else it } }
-        return Result.Ok(Plan(name, relative, renames, publish))
+        return Result.Ok(Plan(name, relative, renames, publish, files.files.map { it.size }))
     }
 
     /** Every planned file resolves below [saveDir] (symlinks on disk included). */

@@ -22,6 +22,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.libtorrent4j.AlertListener
 import org.libtorrent4j.AddTorrentParams
 import org.libtorrent4j.FileStorage
+import org.libtorrent4j.Priority
 import org.libtorrent4j.SessionManager
 import org.libtorrent4j.SessionParams
 import org.libtorrent4j.SettingsPack
@@ -111,11 +112,13 @@ class Libtorrent4jEngine(
             val params =
                 runCatching { if (sessionFile.isFile) SessionParams(sessionFile.readBytes()) else null }.getOrNull()
                     ?: SessionParams(SettingsPack())
+            // Our settings go in before the session exists: libtorrent's defaults would start UPnP and NAT-PMP (and
+            // send its own user agent) the moment the session is built. This replaces any settings in session.dat.
+            params.setSettings(pack(settings))
             // Files go through plain read/write: mmap on Android's external storage is not worth the risk.
             params.setPosixDiskIO()
             started.addListener(listener)
             started.start(params)
-            started.applySettings(pack(settings))
             session = started
             ticker =
                 scope.launch {
@@ -207,6 +210,12 @@ class Libtorrent4jEngine(
         flags = if (withMetadata) flags.or_(TorrentFlags.PAUSED) else flags.and_(TorrentFlags.PAUSED.inv()).and_(TorrentFlags.STOP_WHEN_READY.inv())
         flags = discoveryFlags(flags)
         p.setFlags(flags)
+        // No file is wanted until the manager approved the list: libtorrent then creates no empty file, folder or
+        // symlink under the torrent's own names. For a magnet the list is longer than any accepted torrent; libtorrent
+        // cuts it to the real file count when the metadata arrives.
+        val fileCount =
+            if (withMetadata) runCatching { TorrentInfo(p.ti_ptr()).numFiles() }.getOrDefault(TorrentLimits.MAX_FILES) else TorrentLimits.MAX_FILES
+        AddTorrentParams(p).filePriorities(Priority.array(Priority.IGNORE, fileCount))
         ec.clear()
         val h = s.swig().add_torrent(p, ec)
         if (ec.failed() || h == null || !h.is_valid()) {
@@ -280,10 +289,12 @@ class Libtorrent4jEngine(
         }
     }
 
-    override fun renameFiles(id: EngineId, relativePaths: Map<Int, String>) {
+    override fun approveFiles(id: EngineId, renames: Map<Int, String>) {
         post {
             val h = handles[id.value] ?: return@post
-            relativePaths.forEach { (index, path) -> h.renameFile(index, path) }
+            renames.forEach { (index, path) -> h.renameFile(index, path) }
+            val count = h.torrentFile()?.numFiles() ?: return@post
+            h.prioritizeFiles(Priority.array(Priority.DEFAULT, count))
         }
     }
 
@@ -382,7 +393,20 @@ class Libtorrent4jEngine(
             }
             AlertType.TORRENT_FINISHED -> {
                 val key = (alert as TorrentAlert<*>).handle().swig().id()
-                post { byHandle[key]?.let { emit(TorrentEvent.Finished(it)) } }
+                post {
+                    val id = byHandle[key] ?: return@post
+                    val h = handles[id.value] ?: return@post
+                    // libtorrent also calls a torrent "finished" while no file is wanted yet (before approveFiles), and
+                    // that alert can arrive after the approval. Only a torrent with every file wanted and every wanted
+                    // byte on disk is really done.
+                    val st = h.status()
+                    val allWanted = h.filePriorities().none { it == Priority.IGNORE }
+                    if (allWanted && st.hasMetadata() && st.totalWanted() > 0 && st.totalWantedDone() >= st.totalWanted()) {
+                        emit(TorrentEvent.Finished(id))
+                    } else {
+                        log("finished alert ignored ${id.value}")
+                    }
+                }
             }
             AlertType.SAVE_RESUME_DATA -> {
                 val a = alert as SaveResumeDataAlert

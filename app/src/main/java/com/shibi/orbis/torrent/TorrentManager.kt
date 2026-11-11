@@ -243,7 +243,8 @@ class TorrentManager(
         when (event) {
             is TorrentEvent.MetadataReceived -> onMetadata(entry, a, event)
             // Only a torrent whose file list was checked can be finished; anything else is not ours to publish.
-            is TorrentEvent.Finished -> if (a.metadataOk) onFinished(entry, a) else log("finished before metadata check, ignored")
+            // With nothing wanted yet libtorrent may call a torrent finished: only an approved, running one can be.
+            is TorrentEvent.Finished -> if (a.metadataOk && a.running) onFinished(entry, a) else log("finished before approval, ignored")
             is TorrentEvent.Error -> fail(id, event.kind)
         }
     }
@@ -276,7 +277,7 @@ class TorrentManager(
             fail(entry.id, TorrentErrorKind.NO_SPACE)
             return
         }
-        if (plan.renames.isNotEmpty()) engine.renameFiles(a.eid, plan.renames)
+        engine.approveFiles(a.eid, plan.renames)
         plans[entry.id] = plan
         a.metadataOk = true
         a.running = false
@@ -322,12 +323,19 @@ class TorrentManager(
 
     private suspend fun fail(id: String, kind: TorrentErrorKind) {
         val e = find(id) ?: return
-        detach(id, deleteFiles = true)
-        forgetMemory(id)
+        // Only an untrustworthy or unusable torrent loses its files. A full disk or a file error keeps the partial
+        // download and its resume data, so a later retry continues from there.
+        val discard = kind == TorrentErrorKind.UNSAFE_METADATA || kind == TorrentErrorKind.INVALID_SOURCE || kind == TorrentErrorKind.MISSING_DATA
+        val a = attached[id]
+        if (a != null && !discard) checkpoint(id, a)
+        detach(id, deleteFiles = discard)
+        if (discard) forgetMemory(id) else sources.remove(id)
         set(id) { it.copy(status = TorrentStatus.FAILED, errorKind = kind, downBps = 0, upBps = 0, peers = 0, seeds = 0, etaSeconds = null) }
-        withContext(io) {
-            store.deleteState(id)
-            deletePayload(File(e.saveDir))
+        if (discard) {
+            withContext(io) {
+                store.deleteState(id)
+                deletePayload(File(e.saveDir))
+            }
         }
         log("failed ${kind.name}")
         persist()
@@ -531,14 +539,17 @@ class TorrentManager(
         }
     }
 
-    /** Blocking. Every file is checked to be inside [saveDir] and a regular file before it is copied. */
+    /**
+     * Blocking. Every file is checked to be inside [saveDir], a regular file and (when the plan knows it) exactly its
+     * declared size before it is copied: a missing or short file fails the whole publish.
+     */
     private fun publishFiles(saveDir: File, displayName: String, plan: TorrentPaths.Plan?): Boolean {
-        val files: List<Pair<File, String>> =
+        val files: List<Triple<File, String, Long>> =
             if (plan != null) {
                 plan.relativePaths.indices.mapNotNull { i ->
                     val rel = plan.relativePaths[i] ?: return@mapNotNull null
                     val pub = plan.publishPaths[i] ?: return@mapNotNull null
-                    File(saveDir, rel) to pub
+                    Triple(File(saveDir, rel), pub, plan.sizes.getOrElse(i) { -1L })
                 }
             } else {
                 // Restored mid-publish: the plan is gone, the folder is the truth.
@@ -546,16 +557,17 @@ class TorrentManager(
                 val rels = found.map { it.relativeTo(saveDir).invariantSeparatorsPath }
                 val top = rels.firstOrNull()?.substringBefore('/', "")
                 val stripTop = !top.isNullOrEmpty() && rels.all { it.startsWith("$top/") }
-                found.zip(rels.map { if (stripTop) it.substringAfter('/') else it })
+                found.zip(rels.map { if (stripTop) it.substringAfter('/') else it }).map { (f, p) -> Triple(f, p, -1L) }
             }
         if (files.isEmpty()) return false
-        for ((file, pub) in files) {
+        for ((file, pub, size) in files) {
             if (!DownloadFileNames.isInside(saveDir, file)) return false
             if (Files.isSymbolicLink(file.toPath()) || !Files.isRegularFile(file.toPath(), LinkOption.NOFOLLOW_LINKS)) {
-                // A zero-byte file libtorrent never had to write: nothing to copy.
-                if (!file.exists()) continue
+                // Only an empty file may be absent (nothing to copy); anything else is missing data.
+                if (!file.exists() && size == 0L) continue
                 return false
             }
+            if (size >= 0 && file.length() != size) return false
             val (dir, name) = TorrentPaths.publishTarget(displayName, pub)
             if (!publisher.publish(file, dir, name)) return false
         }
@@ -577,10 +589,19 @@ class TorrentManager(
     /** Deletes a payload folder, but only one inside the payload root. Never throws. */
     private fun deletePayload(dir: File) {
         try {
-            if (DownloadFileNames.isInside(dirs.payloadRoot(), dir)) dir.deleteRecursively() else log("payload outside root, kept")
+            if (DownloadFileNames.isInside(dirs.payloadRoot(), dir)) deleteTree(dir) else log("payload outside root, kept")
         } catch (e: Exception) {
             log("payload delete failed: ${e.javaClass.simpleName}")
         }
+    }
+
+    /** Deletes [f] and what is below it without ever following a symlink (a link is removed, not its target). */
+    private fun deleteTree(f: File) {
+        val path = f.toPath()
+        if (!Files.isSymbolicLink(path) && Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+            f.listFiles()?.forEach { deleteTree(it) }
+        }
+        Files.deleteIfExists(path)
     }
 
     private suspend fun persist() {
