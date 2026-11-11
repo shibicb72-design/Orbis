@@ -16,10 +16,17 @@ internal data class DlnaPlayback(val positionSec: Double, val durationSec: Doubl
  * Finds MediaRenderer devices with SSDP and drives AVTransport. Discovery uses a multicast lock so Wi-Fi power saving
  * does not drop the replies. Nothing is written to disk.
  */
-internal class DlnaClient(context: Context) {
+internal class DlnaClient(context: Context, private val log: (String) -> Unit = {}) {
     private val appContext = context.applicationContext
 
     fun discover(timeoutMs: Int = 5_000): List<DlnaRenderer> {
+        val started = System.currentTimeMillis()
+        val found = discoverRenderers(timeoutMs)
+        log("discovery dlna done count=${found.size} ms=${System.currentTimeMillis() - started}")
+        return found
+    }
+
+    private fun discoverRenderers(timeoutMs: Int): List<DlnaRenderer> {
         val deadline = System.currentTimeMillis() + timeoutMs
         val searchMs = (timeoutMs / 2).coerceIn(400, 2_500)
         val targets = selectDiscoveryTargets(ssdpSearch(searchMs))
@@ -61,13 +68,21 @@ internal class DlnaClient(context: Context) {
 
     fun play(renderer: DlnaRenderer, media: CastableMedia): Boolean {
         val didl = buildDidlLite(media)
+        val dev = deviceTag(renderer.uuid ?: renderer.avTransportUrl)
         // A renderer that is already playing rejects a new URI until it is stopped.
         postSoap(renderer.avTransportUrl, soapStop())
-        val set = postSoap(renderer.avTransportUrl, soapSetAvTransportUri(media.url, didl)) ?: return false
-        if (set.code !in 200..299) return false
-        val play = postSoap(renderer.avTransportUrl, soapPlay()) ?: return false
-        if (play.code !in 200..299) return false
+        val set = postSoap(renderer.avTransportUrl, soapSetAvTransportUri(media.url, didl))
+        if (set == null || set.code !in 200..299) {
+            log("dlna play dev=$dev step=setUri http=${set?.code ?: "none"}")
+            return false
+        }
+        val play = postSoap(renderer.avTransportUrl, soapPlay())
+        if (play == null || play.code !in 200..299) {
+            log("dlna play dev=$dev step=play http=${play?.code ?: "none"}")
+            return false
+        }
         if (media.positionSec >= 1.0) postSoap(renderer.avTransportUrl, soapSeek(media.positionSec))
+        log("dlna play dev=$dev ok adaptive=${media.adaptive}")
         return true
     }
 
