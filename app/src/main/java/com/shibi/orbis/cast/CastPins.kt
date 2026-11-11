@@ -3,9 +3,6 @@ package com.shibi.orbis.cast
 import android.content.Context
 import androidx.core.content.edit
 import java.security.MessageDigest
-import java.security.cert.CertificateException
-import java.security.cert.X509Certificate
-import javax.net.ssl.X509TrustManager
 
 /** Where [CastPins] keeps one fingerprint per device. Keys and values are hex strings. */
 internal interface CastPinStore {
@@ -37,22 +34,24 @@ internal class PrefsCastPinStore(context: Context) : CastPinStore {
 internal const val CAST_PINS_FILE = "cast_pins"
 
 /**
- * Trust on first use for Chromecast TLS. The first leaf certificate a device id presents is remembered as a SHA-256
- * fingerprint; later connections must present the same certificate. The store sees a hash of the device id, not the id.
+ * Trust on first use for a Chromecast's identity key. The first device-certificate public key (SPKI DER) that a device
+ * id proves it holds through deviceauth (see CastDeviceAuth.kt) is remembered as a SHA-256 fingerprint; later
+ * connections must prove the same key. The TLS leaf is not pinned: receivers regenerate it every day or two. The store
+ * sees a hash of the device id, not the id.
  */
 internal class CastPins(private val store: CastPinStore) {
     enum class Verdict {
-        /** No pin existed for this device. The certificate is now pinned. */
+        /** No pin existed for this device. The key is now pinned. */
         PINNED,
         MATCHED,
-        /** The device presented a different certificate from the pinned one. The pin is kept. */
+        /** The device proved a different key from the pinned one. The pin is kept. */
         CHANGED,
     }
 
     @Synchronized
-    fun check(deviceId: String, leafEncoded: ByteArray): Verdict {
+    fun check(deviceId: String, identityKeySpki: ByteArray): Verdict {
         val key = keyFor(deviceId)
-        val presented = sha256Hex(leafEncoded)
+        val presented = sha256Hex(identityKeySpki)
         val pinned = store.get(key)
         return when {
             pinned == null -> {
@@ -65,40 +64,13 @@ internal class CastPins(private val store: CastPinStore) {
         }
     }
 
-    /** Drops the pin, so the next connection to [deviceId] pins whatever certificate it presents. */
+    /** Drops the pin, so the next connection to [deviceId] pins whatever key it proves. */
     @Synchronized
     fun forget(deviceId: String) {
         store.remove(keyFor(deviceId))
     }
 
     private fun keyFor(deviceId: String): String = sha256Hex(deviceId.toByteArray(Charsets.UTF_8))
-}
-
-/** Thrown during the handshake when a device's certificate no longer matches its pin. */
-internal class CastPinMismatchException : CertificateException("Cast device certificate changed")
-
-/**
- * Trusts the peer certificate of one Cast socket when it matches the pin for [deviceId], or when there is no pin yet.
- * Not installed on the default SSL context. [changed] tells the caller that a failed handshake was a pin mismatch.
- */
-internal class PinnedCastTrust(private val deviceId: String, private val pins: CastPins) : X509TrustManager {
-    @Volatile
-    var changed: Boolean = false
-        private set
-
-    override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {
-        throw CertificateException("Cast does not authenticate this phone to the TV")
-    }
-
-    override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {
-        val leaf = chain?.firstOrNull() ?: throw CertificateException("Cast device presented no certificate")
-        if (pins.check(deviceId, leaf.encoded) == CastPins.Verdict.CHANGED) {
-            changed = true
-            throw CastPinMismatchException()
-        }
-    }
-
-    override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
 }
 
 private fun sha256Hex(bytes: ByteArray): String =

@@ -329,7 +329,7 @@ internal fun castNoticeText(notice: CastNotice): Int =
         CastNotice.UNTRUSTED -> R.string.cast_untrusted
     }
 
-/** Only a changed certificate offers "Forget this TV" and "Cancel". */
+/** Only a changed identity key offers "Forget this TV" and "Cancel". */
 internal fun castNoticeOffersForget(notice: CastNotice): Boolean = notice == CastNotice.UNTRUSTED
 
 private fun clock(seconds: Double): String {

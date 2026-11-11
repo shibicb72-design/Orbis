@@ -379,7 +379,7 @@
     <string name="cast_failed">Übertragen auf dieses Gerät nicht möglich.</string>
     <string name="cast_youtube_unconfirmed">Der Fernseher hat dieses YouTube-Video nicht gestartet.</string>
     <string name="cast_rejected">Der Fernseher hat diese Übertragung abgelehnt.</string>
-    <string name="cast_untrusted">Das Sicherheitszertifikat dieses Fernsehers hat sich seit deiner letzten Übertragung geändert.</string>
+    <string name="cast_untrusted">Der Identitätsschlüssel dieses Fernsehers hat sich seit deiner letzten Übertragung geändert. Es könnte ein anderes Gerät sein.</string>
     <string name="cast_forget_tv">Diesen Fernseher vergessen</string>
     <string name="cast_play">Wiedergeben</string>
     <string name="cast_pause">Pause</string>

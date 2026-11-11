@@ -35,7 +35,7 @@ enum class CastNotice {
     FAILED,
     YOUTUBE_UNCONFIRMED,
     REJECTED,
-    /** The TV's certificate changed since it was pinned. The sheet offers to forget the TV. */
+    /** The TV's identity key changed since it was pinned. The sheet offers to forget the TV. */
     UNTRUSTED,
 }
 
@@ -89,7 +89,7 @@ class CastCoordinator(
     private var connectingKind: CastDeviceKind? = null
     private var deviceName: String = ""
     private var connectingDeviceId: String? = null
-    /** The Chromecast whose certificate no longer matches its pin, while [CastNotice.UNTRUSTED] is shown. */
+    /** The Chromecast whose identity key no longer matches its pin, while [CastNotice.UNTRUSTED] is shown. */
     private var untrustedDeviceId: String? = null
     private var shownTitle: String = ""
     private var youtube = false
@@ -306,7 +306,7 @@ class CastCoordinator(
         sync()
     }
 
-    /** "Forget this TV": drops the certificate pin, so the next cast to it pins the certificate it presents then. */
+    /** "Forget this TV": drops the identity-key pin, so the next cast to it pins the key it proves then. */
     fun forgetUntrustedDevice() {
         val id = untrustedDeviceId ?: return
         chromecast.forgetPin(id)

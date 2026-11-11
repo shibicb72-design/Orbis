@@ -381,7 +381,7 @@
     <string name="cast_failed">Impossible de diffuser vers cet appareil.</string>
     <string name="cast_youtube_unconfirmed">Le téléviseur n\'a pas lancé cette vidéo YouTube.</string>
     <string name="cast_rejected">Le téléviseur a refusé cette diffusion.</string>
-    <string name="cast_untrusted">Le certificat de sécurité de ce téléviseur a changé depuis votre dernière diffusion vers lui.</string>
+    <string name="cast_untrusted">La clé d\'identité de ce téléviseur a changé depuis votre dernière diffusion vers lui. Il peut s\'agir d\'un autre appareil.</string>
     <string name="cast_forget_tv">Oublier ce téléviseur</string>
     <string name="cast_play">Lecture</string>
     <string name="cast_pause">Pause</string>
