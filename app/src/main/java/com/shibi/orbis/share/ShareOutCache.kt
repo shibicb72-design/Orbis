@@ -33,6 +33,9 @@ private const val NORMAL_DIR = "n"
 private const val PRIVATE_DIR = "p"
 private const val CHUNK = 64 * 1024
 
+/** Taken by [ShareOutCache.begin] when the user taps Share; see there. */
+class ShareTicket internal constructor(internal val all: Int, internal val private: Int)
+
 sealed class ShareOutResult {
     data class Ready(val file: File, val mime: String) : ShareOutResult()
 
@@ -60,11 +63,20 @@ class ShareOutCache(
     private val privateDir = File(root, PRIVATE_DIR)
     private val lock = Any()
 
-    /** Bumped by [clearAll] and [clearPrivate]. A copy that started before a clear does not publish. */
-    private var epoch = 0
+    /** Bumped by [clearAll]. */
+    private var allEpoch = 0
+
+    /** Bumped by [clearPrivate] and [clearAll]. */
+    private var privateEpoch = 0
+
+    /**
+     * Call when the user taps Share, before asking the engine for the file. A copy whose ticket predates a clear of
+     * its directory is not published, so a private PDF still being saved when private browsing ends is dropped.
+     */
+    fun begin(): ShareTicket = synchronized(lock) { ShareTicket(allEpoch, privateEpoch) }
 
     /** Copies an imported document (`imports/<id>/<name>`, PDF or HTML) into `n/`. Imports are never private. */
-    suspend fun copyImported(importRoot: File, url: String): ShareOutResult = withContext(dispatcher) {
+    suspend fun copyImported(importRoot: File, url: String, ticket: ShareTicket): ShareOutResult = withContext(dispatcher) {
         if (!importFileAllowed(importRoot, url)) return@withContext ShareOutResult.Failed
         val source = try {
             File(URI(url).path ?: return@withContext ShareOutResult.Failed).canonicalFile
@@ -79,21 +91,21 @@ class ShareOutCache(
         }
         if (source.length() > maxBytes) return@withContext ShareOutResult.TooLarge
         val name = sanitizeImportFileName(importDisplayName(url), ext)
-        write(normalDir, name, mime) { FileInputStream(source) }
+        write(ticket, normalDir, name, mime) { FileInputStream(source) }
     }
 
     /**
      * Copies the PDF [download] into `p/` when [isPrivate], else `n/`. The body is always ended (read or discarded).
      * The name comes from untrusted headers and is made safe; the MIME is always `application/pdf`.
      */
-    suspend fun copyPdf(download: IncomingDownload, isPrivate: Boolean): ShareOutResult {
+    suspend fun copyPdf(download: IncomingDownload, isPrivate: Boolean, ticket: ShareTicket): ShareOutResult {
         var opened = false
         try {
             if (download.contentLength > maxBytes) return ShareOutResult.TooLarge
             val resolved = DownloadFileNames.resolve(download.contentDisposition, download.url, "application/pdf") { null }
             val name = sanitizeImportFileName(resolved, "pdf")
             return withContext(dispatcher) {
-                write(if (isPrivate) privateDir else normalDir, name, "application/pdf") {
+                write(ticket, if (isPrivate) privateDir else normalDir, name, "application/pdf") {
                     opened = true
                     download.openBody()
                 }
@@ -116,20 +128,21 @@ class ShareOutCache(
 
     fun clearPrivate() {
         synchronized(lock) {
-            epoch++
+            privateEpoch++
             deleteTree(privateDir)
         }
     }
 
     fun clearAll() {
         synchronized(lock) {
-            epoch++
+            allEpoch++
+            privateEpoch++
             deleteTree(root)
         }
     }
 
-    private suspend fun write(base: File, name: String, mime: String, open: () -> InputStream?): ShareOutResult {
-        val ticket = synchronized(lock) { epoch }
+    private suspend fun write(ticket: ShareTicket, base: File, name: String, mime: String, open: () -> InputStream?): ShareOutResult {
+        if (!synchronized(lock) { isCurrent(ticket, base) }) return ShareOutResult.Failed
         if (!base.isDirectory && !base.mkdirs() && !base.isDirectory) return ShareOutResult.Failed
         val dir = File(base, UUID.randomUUID().toString())
         if (!dir.mkdir()) return ShareOutResult.Failed
@@ -140,7 +153,7 @@ class ShareOutCache(
             val within = input.use { copyCapped(it, part) }
             if (!within) return discard(dir, ShareOutResult.TooLarge)
             synchronized(lock) {
-                if (ticket != epoch || !part.renameTo(target) || !isPlaced(base, dir, target)) {
+                if (!isCurrent(ticket, base) || !part.renameTo(target) || !isPlaced(base, dir, target)) {
                     discard(dir, ShareOutResult.Failed)
                 } else {
                     ShareOutResult.Ready(target, mime)
@@ -155,6 +168,10 @@ class ShareOutCache(
             discard(dir, ShareOutResult.Failed)
         }
     }
+
+    /** Caller holds [lock]. */
+    private fun isCurrent(ticket: ShareTicket, base: File): Boolean =
+        ticket.all == allEpoch && (base != privateDir || ticket.private == privateEpoch)
 
     /** False when more than [maxBytes] arrive. Checks for cancellation between chunks. */
     private suspend fun copyCapped(input: InputStream, part: File): Boolean {

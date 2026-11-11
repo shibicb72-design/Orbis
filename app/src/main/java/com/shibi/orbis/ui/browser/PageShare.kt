@@ -95,14 +95,19 @@ internal class PageShareState(context: Context, private val uiScope: CoroutineSc
     fun shareChoiceFile() {
         val choice = pdfChoice ?: return
         pdfChoice = null
+        val shareOut = app().container.shareOut
+        // Before the engine call: private browsing may end while pdf.js is still handing the file over.
+        val ticket = shareOut.begin()
         runShare {
             val download = choice.session.currentPdf() ?: return@runShare ShareOutResult.Failed
-            app().container.shareOut.copyPdf(download, choice.session.isPrivate)
+            shareOut.copyPdf(download, choice.session.isPrivate, ticket)
         }
     }
 
     private fun shareImported(url: String) {
-        runShare { app().container.let { it.shareOut.copyImported(it.imports.root, url) } }
+        val container = app().container
+        val ticket = container.shareOut.begin()
+        runShare { container.shareOut.copyImported(container.imports.root, url, ticket) }
     }
 
     private fun runShare(copy: suspend () -> ShareOutResult) {

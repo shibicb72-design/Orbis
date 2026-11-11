@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.core.content.FileProvider
 import androidx.test.core.app.ApplicationProvider
 import com.shibi.orbis.MainActivity
 import java.io.File
@@ -13,6 +14,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -26,6 +28,24 @@ class ShareIntentsTest {
     private val id = "11111111-1111-1111-1111-111111111111"
 
     // The FileProvider is the one the merged manifest declares, reading the real res/xml/download_paths.xml.
+
+    /**
+     * FileProvider keeps the roots it parsed in a static map (`sCache`). Robolectric gives every test a new cacheDir
+     * but keeps the class, so later tests would be matched against the first test's directories and refused.
+     * Fails, rather than skips, if a library bump renames the field.
+     */
+    @Before
+    fun forgetCachedProviderRoots() {
+        val field =
+            try {
+                FileProvider::class.java.getDeclaredField("sCache")
+            } catch (e: NoSuchFieldException) {
+                throw AssertionError("androidx FileProvider.sCache is gone; update this test's cache reset", e)
+            }
+        field.isAccessible = true
+        val cache = field.get(null) as? MutableMap<*, *> ?: throw AssertionError("FileProvider.sCache is not a map")
+        synchronized(cache) { cache.clear() }
+    }
 
     /**
      * androidx FileProvider matches roots with a hard-coded '/', so on a Windows host no root ever matches and every
@@ -109,5 +129,10 @@ class ShareIntentsTest {
                 file(context.filesDir, "a.pdf"),
             )
         for (f in refused) assertNull(f.path, ShareIntents.fileChooser(context, f, "application/pdf", "Share file"))
+        // Positive control: the same provider accepts a share-out file, so the refusals above are not stale roots.
+        if (File.separatorChar == '/') {
+            val accepted = file(context.cacheDir, "shared_out", "n", id, "ok.pdf")
+            assertNotNull(ShareIntents.fileChooser(context, accepted, "application/pdf", "Share file"))
+        }
     }
 }

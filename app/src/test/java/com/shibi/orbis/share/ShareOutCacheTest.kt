@@ -58,6 +58,11 @@ class ShareOutCacheTest {
 
     private fun shareRoot() = File(tmp.root, SHARE_OUT_DIR)
 
+    /** A share tapped just now: the ticket is fresh. */
+    private suspend fun ShareOutCache.pdf(download: IncomingDownload, isPrivate: Boolean) = copyPdf(download, isPrivate, begin())
+
+    private suspend fun ShareOutCache.imported(importRoot: File, url: String) = copyImported(importRoot, url, begin())
+
     private fun filesUnder(dir: File): List<File> = dir.walkTopDown().filter { it.isFile }.toList()
 
     /** A real import, made the way the app makes one. */
@@ -69,7 +74,7 @@ class ShareOutCacheTest {
         val imports = ImportedFileCache(tmp.root)
         val bytes = ByteArray(200_000) { (it % 251).toByte() }
         val url = import(imports, "a.pdf", "application/pdf", bytes)
-        val result = ShareOutCache(tmp.root).copyImported(imports.root, url) as ShareOutResult.Ready
+        val result = ShareOutCache(tmp.root).imported(imports.root, url) as ShareOutResult.Ready
         assertEquals("application/pdf", result.mime)
         assertEquals("a.pdf", result.file.name)
         assertTrue(uuid.matches(result.file.parentFile!!.name))
@@ -83,7 +88,7 @@ class ShareOutCacheTest {
     fun copyImportedSharesHtmlAsHtml() = runBlocking {
         val imports = ImportedFileCache(tmp.root)
         val url = import(imports, "page.html", "text/html", "<p>hi</p>".toByteArray())
-        val result = ShareOutCache(tmp.root).copyImported(imports.root, url) as ShareOutResult.Ready
+        val result = ShareOutCache(tmp.root).imported(imports.root, url) as ShareOutResult.Ready
         assertEquals("text/html", result.mime)
         assertEquals("page.html", result.file.name)
         assertEquals(File(URI(url)).readText(), result.file.readText())
@@ -98,13 +103,13 @@ class ShareOutCacheTest {
             parentFile!!.mkdirs()
             writeBytes(byteArrayOf(9))
         }
-        assertEquals(ShareOutResult.Failed, cache.copyImported(imports.root, outside.toURI().toASCIIString()))
-        assertEquals(ShareOutResult.Failed, cache.copyImported(imports.root, url.replace("/imports/", "/imports/../imports/")))
-        assertEquals(ShareOutResult.Failed, cache.copyImported(imports.root, url.substringBeforeLast('/') + "/missing.pdf"))
+        assertEquals(ShareOutResult.Failed, cache.imported(imports.root, outside.toURI().toASCIIString()))
+        assertEquals(ShareOutResult.Failed, cache.imported(imports.root, url.replace("/imports/", "/imports/../imports/")))
+        assertEquals(ShareOutResult.Failed, cache.imported(imports.root, url.substringBeforeLast('/') + "/missing.pdf"))
         val txt = File(File(URI(url)).parentFile, "notes.txt").apply { writeText("x") }
-        assertEquals(ShareOutResult.Failed, cache.copyImported(imports.root, txt.toURI().toASCIIString()))
-        assertEquals(ShareOutResult.Failed, cache.copyImported(imports.root, "file:///etc/passwd"))
-        assertEquals(ShareOutResult.Failed, cache.copyImported(imports.root, "https://example.com/a.pdf"))
+        assertEquals(ShareOutResult.Failed, cache.imported(imports.root, txt.toURI().toASCIIString()))
+        assertEquals(ShareOutResult.Failed, cache.imported(imports.root, "file:///etc/passwd"))
+        assertEquals(ShareOutResult.Failed, cache.imported(imports.root, "https://example.com/a.pdf"))
         assertTrue(filesUnder(shareRoot()).isEmpty())
     }
 
@@ -116,7 +121,7 @@ class ShareOutCacheTest {
         val link = File(File(URI(url)).parentFile, "escape.pdf")
         val made = runCatching { Files.createSymbolicLink(link.toPath(), outside.toPath()) }.isSuccess
         assumeTrue("symlinks need extra rights on this OS", made)
-        assertEquals(ShareOutResult.Failed, ShareOutCache(tmp.root).copyImported(imports.root, link.toURI().toASCIIString()))
+        assertEquals(ShareOutResult.Failed, ShareOutCache(tmp.root).imported(imports.root, link.toURI().toASCIIString()))
         assertTrue(filesUnder(shareRoot()).isEmpty())
     }
 
@@ -137,7 +142,7 @@ class ShareOutCacheTest {
         val dirs = HashSet<String>()
         for (header in hostile) {
             val pdf = FakePdf(header, { ByteArrayInputStream(byteArrayOf(37, 80, 68, 70)) })
-            val ready = cache.copyPdf(pdf, isPrivate = false) as ShareOutResult.Ready
+            val ready = cache.pdf(pdf, isPrivate = false) as ShareOutResult.Ready
             val file = ready.file
             assertEquals("application/pdf", ready.mime)
             assertTrue(file.name, file.name.endsWith(".pdf"))
@@ -154,7 +159,7 @@ class ShareOutCacheTest {
     @Test
     fun copyPdfRefusesADeclaredLengthOverTheCapWithoutOpeningTheBody() = runBlocking {
         val pdf = FakePdf("attachment; filename=a.pdf", { error("must not open") }, contentLength = 101)
-        assertEquals(ShareOutResult.TooLarge, ShareOutCache(tmp.root, maxBytes = 100).copyPdf(pdf, isPrivate = false))
+        assertEquals(ShareOutResult.TooLarge, ShareOutCache(tmp.root, maxBytes = 100).pdf(pdf, isPrivate = false))
         assertFalse(pdf.opened)
         assertTrue(pdf.discarded)
         assertTrue(filesUnder(shareRoot()).isEmpty())
@@ -163,7 +168,7 @@ class ShareOutCacheTest {
     @Test
     fun copyPdfStopsAStreamThatRunsPastTheCap() = runBlocking {
         val pdf = FakePdf("attachment; filename=a.pdf", { ByteArrayInputStream(ByteArray(300_000)) })
-        assertEquals(ShareOutResult.TooLarge, ShareOutCache(tmp.root, maxBytes = 200_000).copyPdf(pdf, isPrivate = false))
+        assertEquals(ShareOutResult.TooLarge, ShareOutCache(tmp.root, maxBytes = 200_000).pdf(pdf, isPrivate = false))
         assertTrue(pdf.closed)
         assertTrue(filesUnder(shareRoot()).isEmpty())
         assertTrue(File(shareRoot(), "n").list().orEmpty().isEmpty())
@@ -184,7 +189,7 @@ class ShareOutCacheTest {
                 }
             }
         val pdf = FakePdf("attachment; filename=a.pdf", { failing })
-        assertEquals(ShareOutResult.Failed, ShareOutCache(tmp.root).copyPdf(pdf, isPrivate = false))
+        assertEquals(ShareOutResult.Failed, ShareOutCache(tmp.root).pdf(pdf, isPrivate = false))
         assertTrue(pdf.closed)
         assertTrue(File(shareRoot(), "n").list().orEmpty().isEmpty())
     }
@@ -192,15 +197,15 @@ class ShareOutCacheTest {
     @Test
     fun aMissingBodyFails() = runBlocking {
         val pdf = FakePdf("attachment; filename=a.pdf", { null })
-        assertEquals(ShareOutResult.Failed, ShareOutCache(tmp.root).copyPdf(pdf, isPrivate = false))
+        assertEquals(ShareOutResult.Failed, ShareOutCache(tmp.root).pdf(pdf, isPrivate = false))
         assertTrue(File(shareRoot(), "n").list().orEmpty().isEmpty())
     }
 
     @Test
     fun privateSharesLiveUnderPAndClearPrivateLeavesNormalOnes() = runBlocking {
         val cache = ShareOutCache(tmp.root)
-        val priv = cache.copyPdf(FakePdf("attachment; filename=p.pdf", { ByteArrayInputStream(byteArrayOf(1)) }), isPrivate = true) as ShareOutResult.Ready
-        val norm = cache.copyPdf(FakePdf("attachment; filename=n.pdf", { ByteArrayInputStream(byteArrayOf(2)) }), isPrivate = false) as ShareOutResult.Ready
+        val priv = cache.pdf(FakePdf("attachment; filename=p.pdf", { ByteArrayInputStream(byteArrayOf(1)) }), isPrivate = true) as ShareOutResult.Ready
+        val norm = cache.pdf(FakePdf("attachment; filename=n.pdf", { ByteArrayInputStream(byteArrayOf(2)) }), isPrivate = false) as ShareOutResult.Ready
         assertEquals(File(shareRoot(), "p").canonicalFile, priv.file.parentFile!!.parentFile!!.canonicalFile)
         cache.clearPrivate()
         assertFalse(File(shareRoot(), "p").exists())
@@ -208,12 +213,32 @@ class ShareOutCacheTest {
     }
 
     @Test
+    fun aPrivateShareStartedBeforePrivateBrowsingEndedIsNotPublished() = runBlocking {
+        val cache = ShareOutCache(tmp.root)
+        val ticket = cache.begin()
+        // Private browsing ends while the engine is still handing the PDF over.
+        cache.clearPrivate()
+        val pdf = FakePdf("attachment; filename=p.pdf", { ByteArrayInputStream(byteArrayOf(1)) })
+        assertEquals(ShareOutResult.Failed, cache.copyPdf(pdf, isPrivate = true, ticket))
+        assertTrue(pdf.discarded || pdf.closed)
+        assertTrue(File(shareRoot(), "p").list().orEmpty().isEmpty())
+        // A normal share from before the private clear is unaffected; one from before Clear browsing data is not.
+        val normalTicket = cache.begin()
+        cache.clearPrivate()
+        assertTrue(cache.copyPdf(FakePdf("attachment; filename=n.pdf", { ByteArrayInputStream(byteArrayOf(2)) }), false, normalTicket) is ShareOutResult.Ready)
+        val staleTicket = cache.begin()
+        cache.clearAll()
+        assertEquals(ShareOutResult.Failed, cache.copyPdf(FakePdf("attachment; filename=n.pdf", { ByteArrayInputStream(byteArrayOf(3)) }), false, staleTicket))
+        assertFalse(shareRoot().exists())
+    }
+
+    @Test
     fun oldNormalSharesAreTrimmedAndClearAllRemovesEverything() = runBlocking {
         val now = System.currentTimeMillis()
         val cache = ShareOutCache(tmp.root, now = { now })
-        val old = cache.copyPdf(FakePdf("attachment; filename=old.pdf", { ByteArrayInputStream(byteArrayOf(1)) }), isPrivate = false) as ShareOutResult.Ready
-        val young = cache.copyPdf(FakePdf("attachment; filename=new.pdf", { ByteArrayInputStream(byteArrayOf(2)) }), isPrivate = false) as ShareOutResult.Ready
-        val priv = cache.copyPdf(FakePdf("attachment; filename=p.pdf", { ByteArrayInputStream(byteArrayOf(3)) }), isPrivate = true) as ShareOutResult.Ready
+        val old = cache.pdf(FakePdf("attachment; filename=old.pdf", { ByteArrayInputStream(byteArrayOf(1)) }), isPrivate = false) as ShareOutResult.Ready
+        val young = cache.pdf(FakePdf("attachment; filename=new.pdf", { ByteArrayInputStream(byteArrayOf(2)) }), isPrivate = false) as ShareOutResult.Ready
+        val priv = cache.pdf(FakePdf("attachment; filename=p.pdf", { ByteArrayInputStream(byteArrayOf(3)) }), isPrivate = true) as ShareOutResult.Ready
         assertTrue(old.file.setLastModified(now - 25L * 60 * 60 * 1000))
         assertEquals(1, cache.deleteOlderThan())
         assertFalse(old.file.parentFile!!.exists())
