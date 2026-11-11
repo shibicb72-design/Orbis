@@ -11,13 +11,10 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
 import java.security.SecureRandom
-import java.security.cert.CertificateException
-import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.Executors
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
-import javax.net.ssl.X509TrustManager
 
 internal data class CastLinkStatus(
     val playing: Boolean,
@@ -49,6 +46,7 @@ internal class ChromecastHub(context: Context, private val log: (String) -> Unit
             Thread(runnable, "orbis-cast-lounge").apply { isDaemon = true }
         }
     private val loungeClient = LoungeClient(HttpsLoungeTransport(), log)
+    private val pins = CastPins(PrefsCastPinStore(appContext))
     private var live: Live? = null
     private var generation = 0
 
@@ -85,16 +83,18 @@ internal class ChromecastHub(context: Context, private val log: (String) -> Unit
         Thread({
             if (!isCurrent(epoch)) return@Thread
             val connectStart = System.currentTimeMillis()
-            val socket = openCastSocket(device.address) { LanBind.bind(appContext, it) }
+            val opened = openCastSocket(device.address, device.id, pins) { LanBind.bind(appContext, it) }
             val connectMs = System.currentTimeMillis() - connectStart
-            if (socket == null) {
-                log("connect dev=$dev failed lan=${isLocalLanAddress(device.address)} ms=$connectMs")
-            } else {
-                log("connect dev=$dev tls=ok ms=$connectMs")
+            when (opened) {
+                CastSocketOpen.Untrusted -> log("connect dev=$dev untrusted")
+                CastSocketOpen.Failed -> log("connect dev=$dev failed lan=${isLocalLanAddress(device.address)} ms=$connectMs")
+                is CastSocketOpen.Opened -> log("connect dev=$dev tls=ok ms=$connectMs")
             }
+            val socket = (opened as? CastSocketOpen.Opened)?.socket
             if (socket == null || !isCurrent(epoch)) {
                 runCatching { socket?.close() }
-                if (isCurrent(epoch)) main.post { onFailed(CastFailure.GENERIC) }
+                val reason = if (opened == CastSocketOpen.Untrusted) CastFailure.UNTRUSTED else CastFailure.GENERIC
+                if (isCurrent(epoch)) main.post { onFailed(reason) }
                 return@Thread
             }
             val session = Live(epoch, device, goal, machine, socket, inbox)
@@ -179,6 +179,12 @@ internal class ChromecastHub(context: Context, private val log: (String) -> Unit
     }
 
     fun hasSession(): Boolean = synchronized(this) { live != null }
+
+    /** Drops the certificate pin for [deviceId]. The next cast to it pins the certificate it presents then. */
+    fun forgetPin(deviceId: String) {
+        pins.forget(deviceId)
+        log("pin forgotten dev=${deviceTag(deviceId)}")
+    }
 
     private fun command(block: (CastSession) -> List<CastEffect>) {
         val session = synchronized(this) { live } ?: return
@@ -345,16 +351,25 @@ internal sealed interface Read {
 /** Once any byte of a frame has arrived, the rest must finish within this long or the session closes. */
 internal const val CAST_FRAME_DEADLINE_MS = 5_000L
 
+internal sealed interface CastSocketOpen {
+    data class Opened(val socket: SSLSocket) : CastSocketOpen
+    /** The device presented a certificate other than the one pinned for its id. */
+    data object Untrusted : CastSocketOpen
+    data object Failed : CastSocketOpen
+}
+
 /**
- * TLS to a discovered LAN host on the Cast port. The trust manager accepts the device certificate for this socket
- * only. [bind] attaches the socket to Wi-Fi before connect. Returns null for any address that is not a private LAN host.
+ * TLS to a discovered LAN host on the Cast port. The device certificate is pinned for [deviceId] on first use and must
+ * match on later connections (see [CastPins]); the trust manager applies to this socket only. [bind] attaches the
+ * socket to Wi-Fi before connect. Fails for any address that is not a private LAN host.
  */
-internal fun openCastSocket(address: InetAddress, bind: (Socket) -> Unit): SSLSocket? {
-    if (!isLocalLanAddress(address)) return null
+internal fun openCastSocket(address: InetAddress, deviceId: String, pins: CastPins, bind: (Socket) -> Unit): CastSocketOpen {
+    if (!isLocalLanAddress(address)) return CastSocketOpen.Failed
     var socket: SSLSocket? = null
+    val trust = PinnedCastTrust(deviceId, pins)
     return try {
         val context = SSLContext.getInstance("TLS")
-        context.init(null, arrayOf(LanCastTrust()), SecureRandom())
+        context.init(null, arrayOf(trust), SecureRandom())
         socket = context.socketFactory.createSocket() as SSLSocket
         bind(socket)
         socket.connect(InetSocketAddress(address, CAST_PORT), 4_000)
@@ -364,10 +379,10 @@ internal fun openCastSocket(address: InetAddress, bind: (Socket) -> Unit): SSLSo
         socket.keepAlive = true
         socket.startHandshake()
         socket.soTimeout = 400
-        socket
+        CastSocketOpen.Opened(socket)
     } catch (_: Exception) {
         runCatching { socket?.close() }
-        null
+        if (trust.changed) CastSocketOpen.Untrusted else CastSocketOpen.Failed
     }
 }
 
@@ -442,17 +457,4 @@ private fun dialHost(address: InetAddress): String? {
     if (!isLocalLanAddress(address)) return null
     val raw = address.hostAddress ?: return null
     return if (raw.contains(':')) "[${raw.substringBefore('%')}]" else raw
-}
-
-/** Trusts the peer certificate of one Cast socket. Not installed on the default SSL context. */
-private class LanCastTrust : X509TrustManager {
-    override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {
-        throw CertificateException("Cast does not authenticate this phone to the TV")
-    }
-
-    override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {
-        if (chain.isNullOrEmpty()) throw CertificateException("Cast device presented no certificate")
-    }
-
-    override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
 }

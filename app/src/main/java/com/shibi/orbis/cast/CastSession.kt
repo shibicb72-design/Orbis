@@ -39,6 +39,8 @@ internal enum class CastFailure {
     SILENCE,
     /** The TV sent LAUNCH_ERROR, INVALID_REQUEST, LOAD_FAILED, or LOAD_CANCELLED. */
     REJECTED,
+    /** The TLS certificate differs from the one pinned for this device on first use. */
+    UNTRUSTED,
 }
 
 internal data class CastFrame(

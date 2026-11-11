@@ -35,6 +35,8 @@ enum class CastNotice {
     FAILED,
     YOUTUBE_UNCONFIRMED,
     REJECTED,
+    /** The TV's certificate changed since it was pinned. The sheet offers to forget the TV. */
+    UNTRUSTED,
 }
 
 sealed interface CastPhase {
@@ -86,6 +88,9 @@ class CastCoordinator(
     private var activeKind: CastDeviceKind? = null
     private var connectingKind: CastDeviceKind? = null
     private var deviceName: String = ""
+    private var connectingDeviceId: String? = null
+    /** The Chromecast whose certificate no longer matches its pin, while [CastNotice.UNTRUSTED] is shown. */
+    private var untrustedDeviceId: String? = null
     private var shownTitle: String = ""
     private var youtube = false
     private var connectStartedAt = 0L
@@ -171,6 +176,8 @@ class CastCoordinator(
         val generation = flow.beginConnect(connectStartedAt)
         log("choose dev=${deviceTag(item.id)} kind=${item.kind} youtube=${chosen is CastTarget.YouTube} gen=$generation")
         connectingKind = item.kind
+        connectingDeviceId = item.id
+        untrustedDeviceId = null
         deviceName = item.name
         sync()
         armConnectTimeout(generation, item.kind)
@@ -294,8 +301,16 @@ class CastCoordinator(
     }
 
     fun dismissNotice() {
+        untrustedDeviceId = null
         flow.showNotice(null)
         sync()
+    }
+
+    /** "Forget this TV": drops the certificate pin, so the next cast to it pins the certificate it presents then. */
+    fun forgetUntrustedDevice() {
+        val id = untrustedDeviceId ?: return
+        chromecast.forgetPin(id)
+        dismissNotice()
     }
 
     fun sheetClosed() {
@@ -433,9 +448,11 @@ class CastCoordinator(
             when (reason) {
                 CastFailure.YOUTUBE_UNCONFIRMED -> CastNotice.YOUTUBE_UNCONFIRMED
                 CastFailure.REJECTED -> CastNotice.REJECTED
+                CastFailure.UNTRUSTED -> CastNotice.UNTRUSTED
                 else -> CastNotice.FAILED
             }
         if (!flow.failConnect(generation, youtube, notice)) return
+        untrustedDeviceId = if (reason == CastFailure.UNTRUSTED) connectingDeviceId else null
         log("session failed reason=$reason gen=$generation ms=${System.currentTimeMillis() - connectStartedAt}")
         connectingKind = null
         _dlnaFormatNote.value = false
