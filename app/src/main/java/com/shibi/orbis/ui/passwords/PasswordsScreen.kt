@@ -140,8 +140,6 @@ fun PasswordsScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    // F-15: no tap that comes through another app's window drawn on top reaches this screen (Android 10 and 11).
-    ObscuredTouchFilter()
     val deviceSecure = remember { context.getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true }
 
     val importLauncher =
@@ -300,7 +298,7 @@ fun PasswordsScreen(
             onDismissRequest = { confirmReset = false },
             title = { Text(stringResource(R.string.passwords_reset)) },
             text = {
-                // A dialog is its own window: the screen's filter does not reach it.
+                // F-15: this confirmation drops taps that come through another app's window on top.
                 ObscuredTouchFilter()
                 Text(stringResource(R.string.passwords_reset_warning))
             },

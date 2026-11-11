@@ -119,15 +119,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Orbis"
         android:usesCleartextTraffic="false">
-        <!-- taskAffinity="" (F-15): another app cannot declare Orbis's affinity and slip its own screen into the Orbis
-             task (the Android 10 task-hijack pattern; Android 11+ is not affected). Kept only if H-D22 shows no
-             regression on API 29, 30 and 36; otherwise removed and the Android 10 case recorded as accepted. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:configChanges="keyboard|keyboardHidden|mcc|mnc|orientation|screenSize|locale|layoutDirection|smallestScreenSize|screenLayout|uiMode"
             android:launchMode="singleTask"
-            android:taskAffinity=""
             android:supportsPictureInPicture="true"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>

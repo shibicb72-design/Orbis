@@ -21,8 +21,10 @@ const val TAP_GUARD_DELAY_MS = 500L
 
 /**
  * F-15: while this is composed, the window it is in drops touches that arrive through another app's window drawn on top
- * (Android sets FLAG_WINDOW_IS_OBSCURED on them). Android 12+ already blocks most of those; this covers Android 10
- * and 11. Inside a dialog or bottom sheet that is the dialog's own window.
+ * (Android sets FLAG_WINDOW_IS_OBSCURED on them). Kept on Android 12+, which blocks taps through untrusted overlays
+ * but still passes them through overlays at or below 80% opacity. Only for confirm prompts: a whole screen that
+ * silently ignores touches would lock out users of screen-dimmer apps.
+ * Inside a dialog or bottom sheet that is the dialog's own window.
  *
  * The flag goes on the window's root view, not on [LocalView]: the Compose view handles touches itself and does not
  * run the platform's obscured-touch check, while every ViewGroup above it does.
