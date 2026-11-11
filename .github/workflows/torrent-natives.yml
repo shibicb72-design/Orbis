@@ -1,0 +1,124 @@
+name: Torrent natives
+
+# Builds libtorrent4j.so (arm64-v8a, armeabi-v7a, x86_64) from the pinned, hash-checked inputs in
+# native/libtorrent4j/build.env, twice per ABI, checks the version strings, compares each library with upstream's
+# released one, and publishes the files with their SHA-256 as artifacts. No app change: nothing here feeds the APK.
+# See native/libtorrent4j/README.md and docs/security/NATIVE-VERSIONS.md.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "native/libtorrent4j/**"
+      - "scripts/check_torrent_natives.py"
+      - "scripts/compare_torrent_natives.py"
+      - "scripts/check_16kb_alignment.py"
+      - ".github/workflows/torrent-natives.yml"
+
+# Read-only. No secrets.
+permissions:
+  contents: read
+
+concurrency:
+  group: torrent-natives-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.abi }} (repeat ${{ matrix.repeat }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86_64]
+        repeat: [1, 2]
+    env:
+      ABI: ${{ matrix.abi }}
+      REPEAT: ${{ matrix.repeat }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Script tests (offline)
+        run: |
+          python3 -I scripts/test_check_torrent_natives.py
+          python3 -I scripts/test_compare_torrent_natives.py
+
+      - name: Build (native/libtorrent4j/build.sh)
+        id: build
+        run: |
+          df -h "$RUNNER_TEMP" | tail -n 1
+          bash native/libtorrent4j/build.sh "$ABI" "$RUNNER_TEMP/lt4j"
+          df -h "$RUNNER_TEMP" | tail -n 1
+
+      - name: Version strings
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          openssl="$(sed -n 's/^OPENSSL_VERSION=//p' native/libtorrent4j/build.env)"
+          libtorrent="$(sed -n 's/^LIBTORRENT_VERSION=//p' native/libtorrent4j/build.env)"
+          python3 -I scripts/check_torrent_natives.py --min-openssl "$openssl" --libtorrent "$libtorrent" \
+            --abis "$ABI" --json "$RUNNER_TEMP/versions.json" "$RUNNER_TEMP/lt4j/out/libtorrent4j.so"
+
+      - name: Compare with upstream's released library
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          python3 -I scripts/compare_torrent_natives.py --abi "$ABI" --json "$RUNNER_TEMP/compare.json" \
+            "$RUNNER_TEMP/lt4j/out/libtorrent4j.so"
+
+      # 16 KB pages apply to the 64-bit libraries only.
+      - name: 16 KB page alignment
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.abi != 'armeabi-v7a' }}
+        run: python3 -I scripts/check_16kb_alignment.py --strict "$RUNNER_TEMP/lt4j/out/libtorrent4j.so"
+
+      - name: BUILDINFO.json and SHA-256
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/dist"
+          cp "$RUNNER_TEMP/lt4j/out/libtorrent4j.so" "$RUNNER_TEMP/dist/libtorrent4j.so"
+          (cd "$RUNNER_TEMP/dist" && sha256sum libtorrent4j.so > libtorrent4j.so.sha256 && cat libtorrent4j.so.sha256)
+          python3 -I native/libtorrent4j/buildinfo.py write --abi "$ABI" --repeat "$REPEAT" \
+            --so "$RUNNER_TEMP/dist/libtorrent4j.so" --versions "$RUNNER_TEMP/versions.json" \
+            --compare "$RUNNER_TEMP/compare.json" --submodules "$RUNNER_TEMP/lt4j/out/submodules.txt" \
+            --out "$RUNNER_TEMP/dist/BUILDINFO.json"
+
+      - name: Upload libtorrent4j-${{ matrix.abi }}-${{ matrix.repeat }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: libtorrent4j-${{ matrix.abi }}-${{ matrix.repeat }}
+          path: |
+            ${{ runner.temp }}/dist/libtorrent4j.so
+            ${{ runner.temp }}/dist/libtorrent4j.so.sha256
+            ${{ runner.temp }}/dist/BUILDINFO.json
+          if-no-files-found: error
+
+      - name: Upload build logs on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: build-logs-${{ matrix.abi }}-${{ matrix.repeat }}
+          path: ${{ runner.temp }}/lt4j/logs/
+          if-no-files-found: ignore
+
+  summary:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: libtorrent4j-*
+          path: ${{ runner.temp }}/artifacts
+
+      - name: Hash table
+        run: python3 -I native/libtorrent4j/buildinfo.py summary "$RUNNER_TEMP/artifacts" | tee -a "$GITHUB_STEP_SUMMARY"
