@@ -2,9 +2,10 @@ package com.shibi.orbis.about
 
 /**
  * Lays a verbatim licence text out for a phone screen, at display time only (the assets stay byte for byte as
- * published). Text that was hard-wrapped at ~72 columns becomes [Block.Paragraph]s the screen wraps; anything whose
- * layout carries meaning (a centered title, an underline, a list, an indented notice line, a URL on its own) stays a
- * [Block.Preformatted] block. Pure, so every rule is unit tested.
+ * published). Text that was hard-wrapped at ~72 columns becomes [Block.Paragraph]s the screen wraps, and list items
+ * with their wrapped continuation lines become [Block.Bullet]s (wrapped too, with a hanging indent). Anything whose
+ * layout carries meaning (a centered title, an underline, a table-like block, an indented notice line, a URL on its
+ * own) stays a [Block.Preformatted] block. Pure, so every rule is unit tested.
  */
 object LicenceText {
     sealed interface Block {
@@ -15,6 +16,11 @@ object LicenceText {
 
         /** Shown as written, in a monospace font that does not wrap. */
         data class Preformatted(override val text: String) : Block
+
+        /** One list item: its [marker] ("*", "(a)", "1.") hangs, its [body] wraps beside it. */
+        data class Bullet(val marker: String, val body: String) : Block {
+            override val text: String get() = "$marker $body"
+        }
     }
 
     /** A line under a title: "=====" or "-----". */
@@ -25,6 +31,9 @@ object LicenceText {
 
     /** "- x", "* x", "(a) x", "1. x", "1.1. x", "a) x". */
     private val LIST_ITEM = Regex("""^([-*]|\([0-9a-zA-Z]{1,4}\)|\d+(\.\d+)*\.|[a-zA-Z]\))\s+\S.*""")
+
+    /** The marker of a [LIST_ITEM] line (trimmed) and the gap after it. */
+    private val MARKER = Regex("""^([-*]|\([0-9a-zA-Z]{1,4}\)|\d+(\.\d+)*\.|[a-zA-Z]\))([ \t]+)""")
 
     /** Lines shorter than this are a short-line block (names, addresses), not a hard-wrapped paragraph. */
     private const val SHORT_LINE = 50
@@ -63,11 +72,17 @@ object LicenceText {
             layout(lines.drop(1).map { dedent(it, cut) }, out)
             return
         }
+        // List items, each with its continuation lines set in to its text column: one wrapped bullet per item.
+        bullets(lines)?.let {
+            out += it
+            return
+        }
         val min = indents.minOf { it }
         val body = lines.map { dedent(it, min) }
-        // A list (a marker below the first line) keeps its layout, one block per item when items wrap.
+        // Any other block with a marker below its first line is laid out by hand (a lead line over a list, a
+        // commented header): it keeps its layout.
         if (body.drop(1).any { LIST_ITEM.matches(it.trimStart()) && indentOf(it) <= 2 }) {
-            splitItems(lines, out)
+            out += Block.Preformatted(lines.joinToString("\n"))
             return
         }
         val first = indents[0]
@@ -81,25 +96,33 @@ object LicenceText {
         out += Block.Preformatted(lines.joinToString("\n"))
     }
 
-    /** One Preformatted block per list item, when every line is an item or a deeper continuation of one. */
-    private fun splitItems(lines: List<String>, out: MutableList<Block>) {
-        val itemIndent = lines.filter { LIST_ITEM.matches(it.trimStart()) }.minOf { indentOf(it) }
-        val isItem = lines.map { LIST_ITEM.matches(it.trimStart()) && indentOf(it) == itemIndent }
-        val continuation = lines.indices.filter { !isItem[it] }
-        val splittable = isItem[0] && continuation.isNotEmpty() && continuation.all { indentOf(lines[it]) > itemIndent }
-        if (!splittable) {
-            out += Block.Preformatted(lines.joinToString("\n"))
-            return
-        }
-        var current = ArrayList<String>()
-        for ((i, line) in lines.withIndex()) {
-            if (isItem[i] && current.isNotEmpty()) {
-                out += Block.Preformatted(current.joinToString("\n"))
-                current = ArrayList()
+    /**
+     * The block as bullets, or null when it is not a clean list: the first line is an item, every item sits at the
+     * first item's indent, and every other line is set in at least to the text column of the item above it.
+     */
+    private fun bullets(lines: List<String>): List<Block.Bullet>? {
+        val itemIndent = indentOf(lines[0])
+        val out = ArrayList<Block.Bullet>()
+        var marker: String? = null
+        val body = StringBuilder()
+        var textColumn = 0
+        for (line in lines) {
+            val indent = indentOf(line)
+            val trimmed = line.trimStart()
+            val m = MARKER.find(trimmed)
+            if (indent == itemIndent && m != null && LIST_ITEM.matches(trimmed)) {
+                marker?.let { out += Block.Bullet(it, collapse(body.toString())) }
+                marker = m.groupValues[1]
+                body.setLength(0)
+                body.append(trimmed.substring(m.range.last + 1))
+                textColumn = indent + m.groupValues[1].length + m.groupValues[3].sumOf { if (it == '\t') 4L else 1L }.toInt()
+            } else {
+                if (marker == null || indent < textColumn) return null
+                body.append(' ').append(trimmed)
             }
-            current += line
         }
-        if (current.isNotEmpty()) out += Block.Preformatted(current.joinToString("\n"))
+        marker?.let { out += Block.Bullet(it, collapse(body.toString())) }
+        return out.takeIf { it.isNotEmpty() }
     }
 
     private fun paragraph(lines: List<String>): Block.Paragraph {

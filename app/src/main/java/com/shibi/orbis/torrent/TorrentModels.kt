@@ -54,8 +54,23 @@ data class TorrentEntry(
     /** Uploaded divided by downloaded, over the torrent's whole life (libtorrent's all-time counters). */
     val ratio: Float = 0f,
 ) {
+    /** Every byte is on disk (both fields are persisted, so this holds after a restart too). */
+    val isFinished: Boolean get() = hasMetadata && totalBytes > 0 && doneBytes >= totalBytes
+
+    /**
+     * Finished but not saved to Download/Orbis yet: seeding, or a finished torrent that is paused (by the user or
+     * Android) or waiting for Wi-Fi. Removing it without deleting, or the end of private browsing, saves it first.
+     */
+    val finishedUnsaved: Boolean
+        get() = status !in UNSAVED_EXCLUDED && (status == TorrentStatus.SEEDING || isFinished)
+
     // Deliberately no name: a torrent name must not end up in a log line.
     override fun toString(): String = "TorrentEntry(status=$status, private=$isPrivate)"
+
+    private companion object {
+        /** Already saved, being saved, or failed (Retry handles a failed copy). */
+        val UNSAVED_EXCLUDED = setOf(TorrentStatus.PUBLISHING, TorrentStatus.COMPLETED, TorrentStatus.FAILED, TorrentStatus.REMOVED)
+    }
 }
 
 /** User choices for torrents (Settings > Torrents, stored by [TorrentSettingsStore]). The defaults are the owner's. */

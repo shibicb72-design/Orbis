@@ -56,15 +56,35 @@ class LicenceTextTest {
     }
 
     @Test
-    fun theLibtorrentConditionsKeepOneBlockEach() {
-        val b = blocks(LicenceKind.BSD_3_CLAUSE)
-        val conditions = b.filter { it.text.trimStart().let { t -> t.startsWith("* Redistributions") || t.startsWith("* Neither") } }
-        assertEquals(3, conditions.size)
-        assertTrue(conditions.all { it is Block.Preformatted })
-        assertTrue(conditions[0].text.trimStart().startsWith("* Redistributions of source code"))
-        assertTrue(conditions[0].text.endsWith("notice, this list of conditions and the following disclaimer."))
-        assertTrue(conditions[1].text.trimStart().startsWith("* Redistributions in binary form"))
-        assertTrue(conditions[2].text.trimStart().startsWith("* Neither the name of the author"))
+    fun theLibtorrentConditionsBecomeThreeWrappedBullets() {
+        val raw = File(assets, LicenceKind.BSD_3_CLAUSE.assetPath).readText()
+        val b = LicenceText.reflow(raw)
+        val conditions = b.filterIsInstance<Block.Bullet>().filter { it.body.startsWith("Redistributions") || it.body.startsWith("Neither") }
+        assertEquals(
+            listOf(
+                Block.Bullet("*", "Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer."),
+                Block.Bullet(
+                    "*",
+                    "Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the " +
+                        "following disclaimer in the documentation and/or other materials provided with the distribution.",
+                ),
+                Block.Bullet(
+                    "*",
+                    "Neither the name of the author nor the names of its contributors may be used to endorse or promote products " +
+                        "derived from this software without specific prior written permission.",
+                ),
+            ),
+            conditions,
+        )
+        // Every word of the three conditions, in order, exactly as in the asset.
+        val start = raw.indexOf("* Redistributions of source code")
+        val end = raw.indexOf("written permission.") + "written permission.".length
+        val words = raw.substring(start, end).split(Regex("\\s+"))
+        assertEquals(words, conditions.joinToString(" ") { it.text }.split(" "))
+        // No line break inside a bullet: the screen wraps it.
+        assertTrue(conditions.none { '\n' in it.body })
+        // The route.h comment block (every line starts with " *") is laid out by hand and keeps its layout.
+        assertTrue(b.single { it.text.contains("@APPLE_OSREFERENCE_LICENSE_HEADER_START@") } is Block.Preformatted)
         // The sentence before them and the disclaimer after them wrap to the screen.
         assertEquals(
             Block.Paragraph("Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:"),
@@ -88,9 +108,15 @@ class LicenceTextTest {
         assertEquals(listOf(Block.Preformatted("Conditions:\n- one\n- two")), list)
         // A line set in on its own (a URL) is not reflowed.
         assertEquals(listOf(Block.Preformatted("   https://example.org/")), LicenceText.reflow("   https://example.org/"))
-        // A hanging list item wraps as one paragraph.
+        // A hanging list item wraps as one bullet; two items are two bullets.
         assertEquals(
-            listOf(Block.Paragraph("(a) under intellectual property rights (other than patent or trademark) Licensable by such Contributor")),
+            listOf(Block.Bullet("1.", "one two"), Block.Bullet("2.", "three")),
+            LicenceText.reflow("  1. one\n     two\n  2. three\n"),
+        )
+        // A continuation left of the text column is not a clean list: kept as written.
+        assertEquals(listOf(Block.Preformatted("  - one\n two")), LicenceText.reflow("  - one\n two\n"))
+        assertEquals(
+            listOf(Block.Bullet("(a)", "under intellectual property rights (other than patent or trademark) Licensable by such Contributor")),
             LicenceText.reflow("(a) under intellectual property rights (other than patent or trademark)\n    Licensable by such Contributor\n"),
         )
     }

@@ -244,13 +244,14 @@ fun DownloadsScreen(
 /**
  * An unfinished torrent has no usable files outside the app (they are published only when it finishes), so removing
  * it deletes what was downloaded. A completed one only leaves the list: its files stay in Download/Orbis/<name>.
- * A seeding one is finished but not saved yet: "Save and remove" copies it to Download/Orbis first, "Delete" does not.
+ * A finished one that is not saved yet (seeding, or paused or waiting for Wi-Fi after it finished): "Save and remove"
+ * copies it to Download/Orbis first, "Delete" does not.
  */
 @Composable
 private fun RemoveTorrentDialog(entry: TorrentEntry, onRemove: (deleteFiles: Boolean) -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val onSurface = MaterialTheme.colorScheme.onSurface
-    if (entry.status == TorrentStatus.SEEDING) {
+    if (entry.finishedUnsaved) {
         val buttons = ButtonDefaults.textButtonColors(contentColor = onSurface)
         AlertDialog(
             onDismissRequest = onDismiss,

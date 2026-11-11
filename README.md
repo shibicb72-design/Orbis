@@ -52,7 +52,8 @@ DHT, peer exchange and local peer discovery on, UPnP and NAT-PMP off, no speed l
 Privacy: peers, trackers, DHT bootstrap nodes and (with local peer discovery) devices on the same network can see the
 phone's IP address, as for any peer-to-peer download. Nothing is sent to the developers. A private tab's torrents
 are never written to the torrent list on disk and leave the list when private browsing ends (one that finished and
-was still seeding is saved to Download/Orbis first, like a private file download).
+was still seeding is saved to Download/Orbis first, like a private file download). A private torrent that is still
+seeding when the app's process dies is removed unsaved at the next start, because nothing about it is written to disk.
 
 Settings > Torrents: Wi-Fi only, download and upload speed limits (KB/s), stop seeding when finished (off: Orbis
 keeps sharing the finished files until you tap Stop seeding or an optional ratio is reached; they are saved to

@@ -150,6 +150,12 @@ private fun LicenceBody(blocks: List<LicenceText.Block>) {
         for (block in blocks) {
             when (block) {
                 is LicenceText.Block.Paragraph -> Text(block.text, style = MaterialTheme.typography.bodySmall)
+                is LicenceText.Block.Bullet ->
+                    // The marker hangs; the item's text wraps beside it.
+                    Row(Modifier.fillMaxWidth().padding(start = 8.dp)) {
+                        Text(block.marker, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(end = 8.dp))
+                        Text(block.body, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    }
                 is LicenceText.Block.Preformatted ->
                     // Kept as written: wide lines scroll sideways instead of breaking the layout.
                     Text(

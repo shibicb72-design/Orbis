@@ -1073,4 +1073,99 @@ class TorrentManagerTest {
         assertEquals(TorrentStatus.SEEDING, s.entry(id).status)
         assertTrue(s.published.isEmpty())
     }
+
+    /** A private torrent, finished with stop seeding off, then knocked out of SEEDING by [knock]: saved, not deleted. */
+    private fun TestScope.privateFinishedIsSavedAtTheEnd(knock: (TorrentTestSetup, String) -> Unit, expected: TorrentStatus) {
+        val s = setup(this)
+        s.settings.value = keepSeeding
+        val id = seedingTorrent(s, isPrivate = true)
+        val dir = File(s.entry(id).saveDir)
+        knock(s, id)
+        advanceUntilIdle()
+        assertEquals(expected, s.entry(id).status)
+        assertTrue(s.entry(id).finishedUnsaved)
+        assertTrue(File(dir, "$secretName/movie.mp4").isFile)
+        assertEquals(listOf(id), s.manager.forgetPrivate())
+        advanceUntilIdle()
+        assertTrue(s.manager.entries.value.isEmpty())
+        assertEquals(setOf("movie.mp4", "en.srt"), s.published.map { it.name }.toSet())
+        assertEquals("movie123", s.published.first { it.name == "movie.mp4" }.content)
+        assertFalse("private payload deleted after the copy", dir.exists())
+        assertTrue(s.logs.contains("seeding dropped, publishing 1"))
+    }
+
+    @Test
+    fun aPausedFinishedPrivateTorrentIsSavedWhenPrivateBrowsingEnds() = runTest {
+        privateFinishedIsSavedAtTheEnd({ s, id -> s.manager.pause(id) }, TorrentStatus.PAUSED)
+    }
+
+    @Test
+    fun aFinishedPrivateTorrentWaitingForWifiIsSavedWhenPrivateBrowsingEnds() = runTest {
+        privateFinishedIsSavedAtTheEnd({ s, _ -> s.network.kind.value = NetworkKind.OTHER }, TorrentStatus.WAITING_FOR_WIFI)
+    }
+
+    @Test
+    fun aFinishedPrivateTorrentStoppedByAndroidIsSavedWhenPrivateBrowsingEnds() = runTest {
+        privateFinishedIsSavedAtTheEnd({ s, _ -> s.manager.onTimeout() }, TorrentStatus.PAUSED)
+    }
+
+    @Test
+    fun aTorrentThatFinishedWhilePausedIsPublishedAtPrivateEnd() = runTest {
+        val s = setup(this)
+        s.settings.value = keepSeeding
+        val priv = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = true)!!
+        s.clock += 1
+        // Another torrent keeps the session up, so the paused one stays in it and can finish.
+        s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
+        advanceUntilIdle()
+        val eid = s.engine.added.first { it.saveDir.name == priv }.id
+        s.engine.emitMetadata(eid, sintelFiles)
+        advanceUntilIdle()
+        s.manager.pause(priv)
+        advanceUntilIdle()
+        writePayload(s.entry(priv))
+        s.engine.finish(eid)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.PAUSED, s.entry(priv).status)
+        s.manager.forgetPrivate()
+        advanceUntilIdle()
+        assertTrue(s.manager.entries.value.none { it.id == priv })
+        assertEquals(setOf("movie.mp4", "en.srt"), s.published.map { it.name }.toSet())
+        assertTrue(s.engine.removed.contains(eid to false))
+    }
+
+    @Test
+    fun anUnfinishedPausedPrivateTorrentIsStillDeleted() = runTest {
+        val s = setup(this)
+        s.settings.value = keepSeeding
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = true)!!
+        advanceUntilIdle()
+        s.engine.emitMetadata(s.lastId(), sintelFiles)
+        advanceUntilIdle()
+        s.engine.advance(s.lastId(), done = 5, total = 10)
+        advanceUntilIdle()
+        writePayload(s.entry(id))
+        val dir = File(s.entry(id).saveDir)
+        s.manager.pause(id)
+        advanceUntilIdle()
+        assertFalse(s.entry(id).finishedUnsaved)
+        s.manager.forgetPrivate()
+        advanceUntilIdle()
+        assertTrue(s.published.isEmpty())
+        assertFalse(dir.exists())
+    }
+
+    @Test
+    fun saveAndRemoveOnAPausedFinishedTorrentPublishesThenRemovesTheRow() = runTest {
+        val s = setup(this)
+        s.settings.value = keepSeeding
+        val id = seedingTorrent(s)
+        s.manager.pause(id)
+        advanceUntilIdle()
+        s.manager.remove(id, deleteFiles = false)
+        advanceUntilIdle()
+        assertTrue(s.manager.entries.value.isEmpty())
+        assertEquals(2, s.published.size)
+        assertTrue(s.logs.contains("removed PAUSED, publishing"))
+    }
 }

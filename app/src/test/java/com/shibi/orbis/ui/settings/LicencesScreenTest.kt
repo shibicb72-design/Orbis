@@ -48,7 +48,7 @@ class LicencesScreenTest {
         // Reflowed for the screen: the sentence is one paragraph, no longer broken at the asset's 72 columns.
         assertTrue(shown.startsWith("Redistribution and use in source and binary forms, with or without modification, are permitted"))
         rule.onNodeWithText("Copyright (c) 2003-2020, Arvid Norberg\nAll rights reserved.").assertExists()
-        // The list of conditions keeps its layout, one block per condition.
-        rule.onNodeWithText("* Redistributions of source code", substring = true).assertExists()
+        // Each condition is one wrapped bullet, not a preformatted block cut off at the right edge.
+        rule.onNodeWithText("Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.").assertExists()
     }
 }

@@ -277,6 +277,25 @@ class DownloadsScreenTorrentsTest {
     }
 
     @Test
+    fun aPausedFinishedRowOffersSaveAndRemove() {
+        val t = torrents()
+        val id = seeding(t)
+        t.manager.pause(id)
+        scheduler.advanceUntilIdle()
+        assertEquals(TorrentStatus.PAUSED, t.entry(id).status)
+        assertEquals(t.entry(id).totalBytes, t.entry(id).doneBytes)
+        show(t)
+        rule.onNodeWithContentDescription("Remove").performClick()
+        idle()
+        rule.onNodeWithText("The files are finished but not saved to Download/Orbis/Sintel yet.").assertExists()
+        rule.onNodeWithText("Delete").assertExists()
+        rule.onNodeWithText("Save and remove").performClick()
+        idle()
+        assertTrue(t.manager.entries.value.none { it.id == id })
+        assertEquals(setOf("movie.mp4", "en.srt"), t.published.map { it.name }.toSet())
+    }
+
+    @Test
     fun withoutTorrentsTheScreenStillWorks() {
         val files = downloads(DownloadEntry(1L, "a.bin", "application/octet-stream", null, 3, 3, DownloadStatus.COMPLETED, File(tmp.root, "a.bin").path, 1L))
         rule.setContent { MaterialTheme { DownloadsScreen(manager = files, torrents = null, onBack = {}) } }
