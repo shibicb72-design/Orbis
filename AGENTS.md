@@ -16,6 +16,7 @@ Open-source Android browser (Path B: GeckoView + Mozilla Android Components). Pr
 - Dependencies only through `gradle/libs.versions.toml`. Mozilla Maven repo in `settings.gradle.kts`.
 - GeckoView + AC versions are pinned as a matching pair — bump them together.
 - uBlock Origin: AMO onboarding (not APK-bundled). No XPI under assets. Error log lives **only** in Settings.
+- `torrent/`: engine behind `TorrentEngine`, `TorrentManager` owns the list; settings through `TorrentSettingsStore`; only `Libtorrent4jEngine.kt` imports libtorrent4j (rule already in Design rules).
 - Tests: `app/src/test/java/com/shibi/orbis/` (JUnit 4).
 
 ## Build and test (always via the wrapper)

@@ -19,6 +19,10 @@ the app. Data a user sends to websites they visit, through a browser, is not col
     the developers. The torrent list stays on the phone (a private tab's torrents are never written to the list on
     disk). This is the user exchanging a file with peers they chose, as when visiting a website, so no data type is
     declared. Play's form has no data type for "IP address seen by peers"; answer No and keep this note for a review.
+  - Seeding (uploading pieces of a finished torrent to other people) happens only when the user turns "Stop seeding
+    when finished" off in Settings > Torrents; by default nothing is uploaded once a download is finished. DHT, peer
+    exchange and local peer discovery can each be turned off there. Speed limits and "Wi-Fi only" are local
+    settings: they stay on the phone and change nothing that is sent. None of this changes the answers above.
 - **Is all data encrypted in transit?** Yes for Orbis's own requests (search suggestions and add-on
   install use HTTPS). Websites the user opens may use HTTP unless HTTPS-only mode is on. Torrent traffic with peers
   and trackers uses the BitTorrent protocols; peers may or may not support encryption.
