@@ -9,8 +9,8 @@ import android.os.Build
 import android.os.Bundle
 import androidx.core.net.toUri
 
-/** Schemes Gecko loads itself (or refuses itself): never handed to another app. */
-private val ENGINE_SCHEMES =
+/** Schemes Gecko loads itself (or refuses itself): never handed to another app. See also [topLevelLoadVerdict]. */
+internal val ENGINE_SCHEMES =
     setOf(
         "http",
         "https",
@@ -26,6 +26,7 @@ private val ENGINE_SCHEMES =
         "chrome",
         "ws",
         "wss",
+        "jar",
     )
 
 /** The scheme of [uri], lower-cased, or null when it has none. */

@@ -56,7 +56,7 @@ const val IMPORT_COPY_OVERALL_TIMEOUT_MILLIS = 5L * 60 * 1000
 /**
  * Content-Security-Policy written into every imported HTML file.
  *
- * GeckoView 159's NavigationDelegate can deny top-level loads
+ * GeckoView 160's NavigationDelegate can deny top-level loads
  * (`onLoadRequest`) and subframes (`onSubframeLoadRequest`) only. It has no callback for `<img>`, `<script>`,
  * `<link>` or CSS `url()`. Mozilla bug 1684947: those `file:` subresources are not blocked from the app data
  * directory. This policy is the block. `default-src 'none'` denies every scheme that a directive does not
@@ -146,33 +146,51 @@ fun sharedDocumentRequest(action: String?, dataString: String?, mimeType: String
     return SharedDocumentRequest(raw, mime)
 }
 
+private const val MAX_AUTHORITY_LENGTH = 255
+
 /**
- * True when [uri] is a `content:` URI whose provider belongs to this app. Opening it would display our own
- * private files (the FileProvider can see the cache). A lookup that throws is treated as ours so a failure
- * cannot become a way through. A provider we cannot resolve is not ours.
+ * True when [uri] must be treated as one of this app's own providers and refused. Opening it would display our
+ * own private files. Every doubt counts as ours (fail closed); false means the provider belongs to another app
+ * or does not exist.
  *
- * An authority containing `@` is also treated as ours. Android keeps a userId prefix on the authority
- * (`content://0@com.shibi.orbis.downloads/...`), and resolving that whole string does not find our provider,
- * which would otherwise let the check through. The part after `@` is not looked up either.
+ * The authority is cut out of the string by hand (scheme `content`, then `//`, then up to the first `/`, `?`,
+ * `#` or the end) and must be plain `[A-Za-z0-9._-]`. That refuses `%`-encoding, a `0@` userId prefix, `\`, a
+ * port and non-ASCII, all of which made a different parser see a different authority. [platformAuthority] is
+ * `android.net.Uri.parse(uri).authority`, the parser `ContentResolver` uses; when it disagrees with ours, the
+ * two would open different providers, so the URI is refused. [ownAuthorities] are refused without a lookup.
+ * A lookup that throws, or that names [ourPackage], is ours.
  */
-fun contentProviderIsThisApp(uri: String, ourPackage: String, ownerOfAuthority: (String) -> String?): Boolean {
-    if (ourPackage.isEmpty()) return false
-    val parsed = try {
-        URI(uri)
-    } catch (e: Exception) {
-        return false
-    }
-    if (!parsed.scheme.equals("content", ignoreCase = true)) return false
-    val raw = parsed.rawAuthority?.takeIf { it.isNotEmpty() && it.length <= 512 } ?: return false
-    val decoded = parsed.authority ?: raw
-    if ('@' in raw || '@' in decoded) return true
+fun contentProviderIsThisApp(
+    uri: String,
+    platformAuthority: String?,
+    ourPackage: String,
+    ownAuthorities: Set<String>,
+    ownerOfAuthority: (String) -> String?,
+): Boolean {
+    val authority = contentAuthorityOf(uri) ?: return true
+    if (authority.isEmpty() || authority.length > MAX_AUTHORITY_LENGTH) return true
+    if (!authority.all { it.isPlainAuthorityChar() }) return true
+    if (platformAuthority.isNullOrEmpty() || !platformAuthority.equals(authority, ignoreCase = true)) return true
+    if (ownAuthorities.any { it.equals(authority, ignoreCase = true) }) return true
     val owner = try {
-        ownerOfAuthority(raw)
+        ownerOfAuthority(authority)
     } catch (e: Exception) {
         return true
     }
     return owner == ourPackage
 }
+
+/** The text between `content://` and the first `/`, `?`, `#` or the end, or null when [uri] has no such part. */
+private fun contentAuthorityOf(uri: String): String? {
+    val prefix = "content://"
+    if (!uri.regionMatches(0, prefix, 0, prefix.length, ignoreCase = true)) return null
+    var end = prefix.length
+    while (end < uri.length && uri[end] != '/' && uri[end] != '?' && uri[end] != '#') end++
+    return uri.substring(prefix.length, end)
+}
+
+private fun Char.isPlainAuthorityChar(): Boolean =
+    this in 'a'..'z' || this in 'A'..'Z' || this in '0'..'9' || this == '.' || this == '_' || this == '-'
 
 /**
  * A file name that is safe to create under the import cache and whose final extension matches [extension]
@@ -335,17 +353,6 @@ fun scriptAfterHistoryCommit(
 }
 
 /**
- * Whether a subframe may load [url]. Every `file:` URL is refused.
- *
- * This is the whole of what GeckoView can gate below the top-level document. `<img>`, `<script>` and stylesheets
- * never arrive here (no such callback on `NavigationDelegate` or `ContentDelegate` in GeckoView 160), and bug
- * 1684947 means Gecko will fetch a `file:` subresource from the app data directory. Those are stopped by
- * [IMPORT_CONTENT_SECURITY_POLICY], which is written into the imported HTML before it is shown.
- * XHTML is not imported: a late `head`, a non-XHTML default namespace, or `<?xml-stylesheet?>` can bypass a meta.
- */
-fun fileSubframeAllowed(url: String): Boolean = schemeOf(url) != "file"
-
-/**
  * True when [policy] lets [scheme] be loaded for [directive] (`img-src`, `script-src`, …).
  * A directive that the policy does not mention falls back to `default-src`, matching CSP.
  * Used to prove the policy copied into an import denies `file:` (and the network) for subresources.
@@ -443,7 +450,7 @@ class ImportOpenQueue {
  * data dir (bug 1684947), and a unique file origin does not stop that. HTML is therefore rewritten with
  * [IMPORT_CONTENT_SECURITY_POLICY] and shown with JavaScript off. The policy meta is inserted after the BOM,
  * leading whitespace, comments and an optional doctype, so the page stays in standards mode. PDF is left
- * byte-for-byte so pdf.js can read it, and JavaScript stays on for that viewer. [fileSubframeAllowed] denies
+ * byte-for-byte so pdf.js can read it, and JavaScript stays on for that viewer. [subframeLoadAllowed] denies
  * every `file:` subframe on top. XHTML is refused.
  *
  * [deleteOlderThan] runs at startup (files older than 24h). [clearAll] runs when the user clears history or the cache.

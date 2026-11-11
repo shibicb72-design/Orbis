@@ -268,21 +268,93 @@ class ImportedDocumentsTest {
         assertFalse(isImportLoadUrl(ready.url.substringBeforeLast('/') + "/./Report..v2.pdf"))
     }
 
+    // ---- is this content: URI one of our own providers (F-04) ----
+
+    private val pkg = "com.shibi.orbis"
+    private val ownDownloads = setOf("com.shibi.orbis.downloads")
+
+    /** What android.net.Uri reports: the text after `//` up to `/`, `\`, `?` or `#`, percent-decoded. */
+    private fun platformAuthorityOf(uri: String): String? {
+        val start = uri.indexOf("//").takeIf { it >= 0 }?.plus(2) ?: return null
+        var end = start
+        while (end < uri.length && uri[end] !in "/\\?#") end++
+        return java.net.URLDecoder.decode(uri.substring(start, end).replace("+", "%2B"), "UTF-8")
+    }
+
+    private fun ours(uri: String, platform: String? = platformAuthorityOf(uri), lookup: (String) -> String?): Boolean =
+        contentProviderIsThisApp(uri, platform, pkg, ownDownloads, lookup)
+
+    /** A lookup that does not know our provider, as when a parser hands it a different authority. */
+    private val foreign: (String) -> String? = { "com.whatsapp" }
+
     @Test
     fun ownContentProviderIsRefusedAndAnotherAppsIsNot() {
-        val ours = "content://com.shibi.orbis.fileprovider/cache/imports/secret.pdf"
         val theirs = "content://com.whatsapp.provider.media/item/1"
-        assertTrue(contentProviderIsThisApp(ours, "com.shibi.orbis") { "com.shibi.orbis" })
-        assertFalse(contentProviderIsThisApp(theirs, "com.shibi.orbis") { "com.whatsapp" })
-        assertFalse(contentProviderIsThisApp(theirs, "com.shibi.orbis") { null })
-        assertFalse(contentProviderIsThisApp("file:///data/secret.pdf", "com.shibi.orbis") { "com.shibi.orbis" })
-        assertTrue(contentProviderIsThisApp(theirs, "com.shibi.orbis") { error("lookup failed") })
-        // A userId prefix (content://0@authority/...) stays in the raw authority. Resolving that whole string
-        // misses our provider, so any authority that contains '@' is treated as ours.
-        val prefixed = "content://0@com.shibi.orbis.downloads/cache/secret.pdf"
-        assertTrue(contentProviderIsThisApp(prefixed, "com.shibi.orbis") { error("should not resolve") })
-        val encoded = "content://0%40com.shibi.orbis.downloads/cache/secret.pdf"
-        assertTrue(contentProviderIsThisApp(encoded, "com.shibi.orbis") { error("should not resolve") })
+        assertFalse(ours(theirs) { "com.whatsapp" })
+        // No such provider: not ours.
+        assertFalse(ours(theirs) { null })
+        // The lookup names us, or fails: ours.
+        assertTrue(ours("content://com.shibi.orbis.other/a.pdf") { pkg })
+        assertTrue(ours(theirs) { error("lookup failed") })
+        // Our download provider is refused without a lookup, in any case.
+        assertTrue(ours("content://com.shibi.orbis.downloads/downloads_external/a.pdf", lookup = foreign))
+        assertTrue(ours("content://COM.SHIBI.ORBIS.DOWNLOADS/downloads_external/a.pdf", lookup = foreign))
+        assertTrue(ours("CONTENT://com.shibi.orbis.downloads/downloads_external/a.pdf", lookup = foreign))
+    }
+
+    @Test
+    fun theReviewExamplesAreRefused() {
+        // java.net.URI could not parse the `{`, and the old check let an unparseable URI through.
+        assertTrue(ours("content://com.shibi.orbis.downloads/downloads_external/a.pdf?{", lookup = foreign))
+        // The percent-encoded dot resolved to nothing under the raw authority, but ContentResolver decodes it.
+        assertTrue(ours("content://com.shibi.orbis%2Edownloads/downloads_external/a.pdf", lookup = foreign))
+    }
+
+    @Test
+    fun authoritiesThatParsersReadDifferentlyAreRefused() {
+        // userId prefix, plain and encoded.
+        assertTrue(ours("content://0@com.shibi.orbis.downloads/a.pdf", lookup = foreign))
+        assertTrue(ours("content://0%40com.shibi.orbis.downloads/a.pdf", lookup = foreign))
+        // Backslash tricks: Android stops the authority at `\`, our extractor does not.
+        assertTrue(ours("content://com.shibi.orbis.downloads\\@evil.example/a.pdf", lookup = foreign))
+        assertTrue(ours("content://evil.example\\@com.shibi.orbis.downloads/a.pdf", lookup = foreign))
+        // A port, an empty authority, no authority at all, non-ASCII, too long.
+        assertTrue(ours("content://com.whatsapp.provider.media:443/item/1", lookup = foreign))
+        assertTrue(ours("content:///item/1", lookup = foreign))
+        assertTrue(ours("content:com.whatsapp.provider.media/item/1", platform = null, lookup = foreign))
+        assertTrue(ours("content://com.whatsapp.prövider/item/1", lookup = foreign))
+        assertTrue(ours("content://" + "a".repeat(256) + "/x", lookup = foreign))
+        assertFalse(ours("content://" + "a".repeat(255) + "/x", lookup = foreign))
+        // Not content: at all.
+        assertTrue(ours("file:///data/secret.pdf") { null })
+    }
+
+    @Test
+    fun aPlatformAuthorityThatDisagreesIsRefused() {
+        val theirs = "content://com.whatsapp.provider.media/item/1"
+        assertTrue(ours(theirs, platform = "com.shibi.orbis.downloads", lookup = foreign))
+        assertTrue(ours(theirs, platform = null, lookup = foreign))
+        assertTrue(ours(theirs, platform = "", lookup = foreign))
+        // Case alone is not a disagreement.
+        assertFalse(ours(theirs, platform = "COM.WHATSAPP.PROVIDER.MEDIA", lookup = foreign))
+    }
+
+    @Test
+    fun theLookupSeesTheCheckedAuthority() {
+        var asked: String? = null
+        assertFalse(ours("content://com.whatsapp.provider.media/item/1?x#y") { asked = it; "com.whatsapp" })
+        assertEquals("com.whatsapp.provider.media", asked)
+    }
+
+    @Test
+    fun theFileProviderSharesOnlyTheDownloadAndCameraRoots() {
+        val doc = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder()
+            .parse(File("src/main/res/xml/download_paths.xml"))
+        val nodes = doc.documentElement.childNodes
+        val names = (0 until nodes.length).map { nodes.item(it) }
+            .filterIsInstance<org.w3c.dom.Element>()
+            .map { it.getAttribute("name") }
+        assertEquals(listOf("downloads_external", "downloads_internal", "camera_capture"), names)
     }
 
     @Test
@@ -297,12 +369,12 @@ class ImportedDocumentsTest {
 
     @Test
     fun fileSubframesAreDeniedAndImportedHtmlDoesNotRunScript() {
-        assertFalse(fileSubframeAllowed("file:///data/user/0/com.shibi.orbis/cache/imports/id/a.html"))
-        assertFalse(fileSubframeAllowed("file:///data/data/com.shibi.orbis/shared_prefs/x.xml"))
-        assertFalse(fileSubframeAllowed("FILE:///etc/passwd"))
-        assertTrue(fileSubframeAllowed("https://example.com/a.png"))
-        assertTrue(fileSubframeAllowed("about:blank"))
-        assertTrue(fileSubframeAllowed("data:text/html,hi"))
+        assertFalse(subframeLoadAllowed("file:///data/user/0/com.shibi.orbis/cache/imports/id/a.html"))
+        assertFalse(subframeLoadAllowed("file:///data/data/com.shibi.orbis/shared_prefs/x.xml"))
+        assertFalse(subframeLoadAllowed("FILE:///etc/passwd"))
+        assertTrue(subframeLoadAllowed("https://example.com/a.png"))
+        assertTrue(subframeLoadAllowed("about:blank"))
+        assertTrue(subframeLoadAllowed("data:text/html,hi"))
     }
 
     @Test

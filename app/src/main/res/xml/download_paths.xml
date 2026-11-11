@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Only the two download directories and the camera capture directory are shareable. The downloads index
-     (filesDir/downloads_index.json), the upload copies (cacheDir/uploads/, deliberately not listed here) and everything
-     else stays unreachable through the FileProvider. "Download" is Environment.DIRECTORY_DOWNLOADS, the type passed to
-     getExternalFilesDir. camera_capture/ holds the temp the camera app writes a photo into. -->
+     (filesDir/downloads_index.json), the upload copies (cacheDir/uploads/), torrent payloads
+     (getExternalFilesDir("torrents")) and everything else are deliberately not listed and stay unreachable through
+     the FileProvider. "Download" is Environment.DIRECTORY_DOWNLOADS, the type passed to getExternalFilesDir.
+     camera_capture/ holds the temp the camera app writes a photo into. -->
 <paths>
     <external-files-path name="downloads_external" path="Download/" />
-    <!-- Torrent payloads while they download (getExternalFilesDir("torrents")); finished ones go to Download/Orbis. -->
-    <external-files-path name="torrents" path="torrents/" />
     <files-path name="downloads_internal" path="downloads/" />
     <cache-path name="camera_capture" path="camera_capture/" />
 </paths>

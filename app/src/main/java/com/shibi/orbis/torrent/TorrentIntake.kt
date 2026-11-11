@@ -110,14 +110,18 @@ object TorrentIntake {
     /**
      * A VIEW (`content:` data) or SEND (`content:` EXTRA_STREAM, [streamUri]) intent of type [MIME] from another app,
      * mirroring the shared-document rules: 8 KB cap, no whitespace or control characters, `content:` only (never
-     * `file:`), and never one of this app's own providers ([ownerOfAuthority] as for [contentProviderIsThisApp]).
+     * `file:`), and never one of this app's own providers ([platformAuthority], [ownAuthorities] and
+     * [ownerOfAuthority] as for [contentProviderIsThisApp]). [platformAuthority] is `Uri.parse(raw).authority` of
+     * the URI this picks: [dataString] for VIEW, [streamUri] for SEND.
      */
     fun check(
         action: String?,
         dataString: String?,
         mimeType: String?,
         streamUri: String?,
+        platformAuthority: String?,
         ourPackage: String,
+        ownAuthorities: Set<String>,
         ownerOfAuthority: (String) -> String?,
     ): Check {
         if (mimeType.isNullOrBlank() || DownloadFileNames.cleanMime(mimeType) != MIME) return Check.NotTorrent
@@ -130,7 +134,9 @@ object TorrentIntake {
         if (raw.length > MAX_URI_LENGTH) return Check.Refused(IntakeRefusal.NOT_CONTENT)
         if (raw.any { it.isWhitespace() || it.isISOControl() }) return Check.Refused(IntakeRefusal.NOT_CONTENT)
         if (schemeOf(raw) != "content") return Check.Refused(IntakeRefusal.NOT_CONTENT)
-        if (contentProviderIsThisApp(raw, ourPackage, ownerOfAuthority)) return Check.Refused(IntakeRefusal.OWN_PROVIDER)
+        if (contentProviderIsThisApp(raw, platformAuthority, ourPackage, ownAuthorities, ownerOfAuthority)) {
+            return Check.Refused(IntakeRefusal.OWN_PROVIDER)
+        }
         return Check.Ok(IntakeRequest.TorrentUri(raw))
     }
 
@@ -140,7 +146,11 @@ object TorrentIntake {
         dataString: String?,
         mimeType: String?,
         streamUri: String?,
+        platformAuthority: String?,
         ourPackage: String,
+        ownAuthorities: Set<String>,
         ownerOfAuthority: (String) -> String?,
-    ): IntakeRequest? = (check(action, dataString, mimeType, streamUri, ourPackage, ownerOfAuthority) as? Check.Ok)?.request
+    ): IntakeRequest? =
+        (check(action, dataString, mimeType, streamUri, platformAuthority, ourPackage, ownAuthorities, ownerOfAuthority) as? Check.Ok)
+            ?.request
 }
