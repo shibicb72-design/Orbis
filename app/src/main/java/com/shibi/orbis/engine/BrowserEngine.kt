@@ -101,8 +101,9 @@ interface BrowserEngine {
     /**
      * Fetches [url] again from byte [fromByte] (a paused download being resumed), in the private context when
      * [isPrivate]. Null when the request failed. The server may ignore the range: then [IncomingDownload.startOffset] is 0.
+     * [ifRange] (the first response's [IncomingDownload.validator]) is sent as `If-Range`, so a changed file comes back whole.
      */
-    suspend fun fetchFrom(url: String, fromByte: Long, isPrivate: Boolean): IncomingDownload? = null
+    suspend fun fetchFrom(url: String, fromByte: Long, isPrivate: Boolean, ifRange: String? = null): IncomingDownload? = null
     /**
      * Clears the engine's cookies and site data ([cookiesAndSiteData]) and/or its caches ([cache]). Never touches site
      * permission answers or settings. Gecko has no normal-only scope for this: it reaches private storage too, so a
