@@ -90,9 +90,28 @@ private val CASTABLE_MIME =
         "audio/x-flac",
     )
 
-/** YouTube receiver (the TV's YouTube app). Local Cast channel only; the phone does not call YouTube's lounge API. */
+/**
+ * YouTube receiver (the TV's YouTube app). The TV reports its lounge screen id on [YOUTUBE_NAMESPACE]; the phone then
+ * hands the video over through YouTube's lounge API (see `youtube/LoungeClient.kt`). DIAL and `flingVideo` remain as
+ * the fallback.
+ */
 internal const val YOUTUBE_RECEIVER_APP_ID = "233637DE"
 internal const val YOUTUBE_NAMESPACE = "urn:x-cast:com.google.youtube.mdx"
+
+/** Asks the YouTube receiver for its MDX session status, which carries the lounge screen id. */
+internal fun youtubeMdxStatusRequest(): String = JSONObject().put("type", "getMdxSessionStatus").toString()
+
+/** The lounge screen id from an `mdxSessionStatus` payload. Null for any other payload or a blank id. */
+internal fun parseMdxScreenId(payload: String): String? {
+    val root =
+        try {
+            JSONObject(payload)
+        } catch (_: Exception) {
+            return null
+        }
+    if (root.optString("type") != "mdxSessionStatus") return null
+    return root.optJSONObject("data")?.optString("screenId")?.trim()?.takeIf { it.isNotEmpty() }
+}
 
 internal fun youtubeFlingPayload(videoId: String, startSec: Double): String =
     JSONObject()

@@ -298,7 +298,7 @@ class OrbisApp : Application() {
                 clearer = BrowsingDataClearer(clearTargets, log = { debugLog.log("Clear", it) }),
                 scope = appScope,
             )
-        val cast = CastCoordinator(this, appScope)
+        val cast = CastCoordinator(this, appScope, log = { debugLog.log("Cast", it) })
         tabs.onPrivateTabDisposed = { id -> cast.onPrivateTabClosed(id) }
         container =
             AppContainer(

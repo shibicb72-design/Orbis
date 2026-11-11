@@ -47,13 +47,19 @@ sealed interface CastPhase {
 
 /**
  * In-memory cast session. Private tabs may cast: the page address is sent only to the chosen device and is not written
- * to disk, history, or the error log. The phone notification for a private tab does not include the page title.
+ * to disk, history, or the error log. A YouTube video id also goes to YouTube's lounge API, which hands it to the TV.
+ * The phone notification for a private tab does not include the page title.
+ * [log] receives secret-free "Cast" lines for the error log (see CastLogging.kt).
  */
-class CastCoordinator(context: Context, private val scope: CoroutineScope) {
+class CastCoordinator(
+    context: Context,
+    private val scope: CoroutineScope,
+    private val log: (String) -> Unit = {},
+) {
     private val appContext = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
-    private val chromecast = ChromecastHub(appContext)
-    private val dlna = DlnaClient(appContext)
+    private val chromecast = ChromecastHub(appContext, log)
+    private val dlna = DlnaClient(appContext, log)
 
     private val _phase = MutableStateFlow<CastPhase>(CastPhase.Idle)
     val phase: StateFlow<CastPhase> = _phase.asStateFlow()
@@ -82,6 +88,7 @@ class CastCoordinator(context: Context, private val scope: CoroutineScope) {
     private var deviceName: String = ""
     private var shownTitle: String = ""
     private var youtube = false
+    private var connectStartedAt = 0L
     private val dlnaById = LinkedHashMap<String, DlnaRenderer>()
 
     init {
@@ -160,7 +167,9 @@ class CastCoordinator(context: Context, private val scope: CoroutineScope) {
         }
         _dlnaFormatNote.value =
             chosen is CastTarget.Direct && item.kind == CastDeviceKind.DLNA && chosen.media.adaptive
-        val generation = flow.beginConnect(System.currentTimeMillis())
+        connectStartedAt = System.currentTimeMillis()
+        val generation = flow.beginConnect(connectStartedAt)
+        log("choose dev=${deviceTag(item.id)} kind=${item.kind} youtube=${chosen is CastTarget.YouTube} gen=$generation")
         connectingKind = item.kind
         deviceName = item.name
         sync()
@@ -334,6 +343,7 @@ class CastCoordinator(context: Context, private val scope: CoroutineScope) {
     private fun beginDiscovery() {
         discovery?.cancel()
         dlnaById.clear()
+        log("discovery start kinds=cast,dlna")
         chromecast.startDiscovery()
         publishDevices(searching = true)
         discovery =
@@ -368,6 +378,7 @@ class CastCoordinator(context: Context, private val scope: CoroutineScope) {
             if (renderer != null) scope.launch(Dispatchers.IO) { dlna.stop(renderer) }
             return false
         }
+        log("session ready kind=$kind gen=$generation ms=${System.currentTimeMillis() - connectStartedAt}")
         connectingKind = null
         activeKind = kind
         val duration =
@@ -425,6 +436,7 @@ class CastCoordinator(context: Context, private val scope: CoroutineScope) {
                 else -> CastNotice.FAILED
             }
         if (!flow.failConnect(generation, youtube, notice)) return
+        log("session failed reason=$reason gen=$generation ms=${System.currentTimeMillis() - connectStartedAt}")
         connectingKind = null
         _dlnaFormatNote.value = false
         if (unselect) chromecast.disconnect()

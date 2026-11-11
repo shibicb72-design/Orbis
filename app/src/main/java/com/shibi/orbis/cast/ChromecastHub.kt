@@ -3,6 +3,8 @@ package com.shibi.orbis.cast
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import com.shibi.orbis.youtube.HttpsLoungeTransport
+import com.shibi.orbis.youtube.LoungeClient
 import java.io.InputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -28,10 +30,11 @@ internal data class CastLinkStatus(
  * One Chromecast session over CASTV2, plus the mDNS list that feeds the sheet.
  * The TLS trust decision exists only for this socket and only after the address has been checked to be a private LAN
  * host. It is not installed as the process trust manager.
+ * [log] receives secret-free "Cast" lines (see CastLogging.kt).
  */
-internal class ChromecastHub(context: Context) {
+internal class ChromecastHub(context: Context, private val log: (String) -> Unit = {}) {
     private val appContext = context.applicationContext
-    private val discovery = ChromecastDiscovery(appContext)
+    private val discovery = ChromecastDiscovery(appContext, log)
     private val main = Handler(Looper.getMainLooper())
     private val dials =
         Executors.newSingleThreadExecutor { runnable ->
@@ -41,6 +44,11 @@ internal class ChromecastHub(context: Context) {
         Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "orbis-cast-io").apply { isDaemon = true }
         }
+    private val lounges =
+        Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "orbis-cast-lounge").apply { isDaemon = true }
+        }
+    private val loungeClient = LoungeClient(HttpsLoungeTransport(), log)
     private var live: Live? = null
     private var generation = 0
 
@@ -71,11 +79,19 @@ internal class ChromecastHub(context: Context) {
         }
         disconnect()
         val epoch = synchronized(this) { generation += 1; generation }
-        val machine = CastSession(goal)
+        val machine = CastSession(goal, log = log)
         val inbox = ConcurrentLinkedQueue<() -> Unit>()
+        val dev = deviceTag(device.id)
         Thread({
             if (!isCurrent(epoch)) return@Thread
+            val connectStart = System.currentTimeMillis()
             val socket = openCastSocket(device.address) { LanBind.bind(appContext, it) }
+            val connectMs = System.currentTimeMillis() - connectStart
+            if (socket == null) {
+                log("connect dev=$dev failed lan=${isLocalLanAddress(device.address)} ms=$connectMs")
+            } else {
+                log("connect dev=$dev tls=ok ms=$connectMs")
+            }
             if (socket == null || !isCurrent(epoch)) {
                 runCatching { socket?.close() }
                 if (isCurrent(epoch)) main.post { onFailed(CastFailure.GENERIC) }
@@ -90,6 +106,7 @@ internal class ChromecastHub(context: Context) {
                 live = session
             }
             var ready = false
+            var cause = "localStop"
             try {
                 apply(session, machine.start(System.currentTimeMillis()), onReady, onFailed) { ready = true }
                 while (isCurrent(epoch) && !session.localStop) {
@@ -97,8 +114,12 @@ internal class ChromecastHub(context: Context) {
                     if (!isCurrent(epoch) || session.localStop) break
                     when (val read = readCastFrame(socket.inputStream)) {
                         Read.Tick -> apply(session, machine.onClock(System.currentTimeMillis()), onReady, onFailed) { ready = true }
-                        Read.Closed -> break
-                        is Read.Frame ->
+                        Read.Closed -> {
+                            cause = "closed"
+                            break
+                        }
+                        is Read.Frame -> {
+                            logRx(session, read.message.namespace, read.message.payloadUtf8)
                             apply(
                                 session,
                                 machine.onFrame(
@@ -108,11 +129,15 @@ internal class ChromecastHub(context: Context) {
                                 onReady,
                                 onFailed,
                             ) { ready = true }
+                        }
                     }
                 }
-            } catch (_: Exception) {
+                if (cause == "localStop" && !session.localStop) cause = "replaced"
+            } catch (e: Exception) {
+                cause = "error err=${errName(e)}"
                 if (isCurrent(epoch) && !session.localStop && !ready) main.post { onFailed(CastFailure.GENERIC) }
             } finally {
+                log("session ended cause=$cause dev=$dev ready=$ready")
                 runCatching { socket.close() }
                 val ended = synchronized(this) {
                     val current = live === session
@@ -142,11 +167,11 @@ internal class ChromecastHub(context: Context) {
             live.also { live = null }
         } ?: return
         session.localStop = true
-        val frames =
-            synchronized(session.machine) { session.machine.close() }
-                .filterIsInstance<CastEffect.Send>()
-                .map { it.frame }
-        if (session.goal is CastGoal.YouTube) dialDelete(session.device.address)
+        val closing = synchronized(session.machine) { session.machine.close() }
+        val frames = closing.filterIsInstance<CastEffect.Send>().map { it.frame }
+        val deleteDial = closing.any { it == CastEffect.DialDelete }
+        log("disconnect dev=${deviceTag(session.device.id)} dialDelete=$deleteDial")
+        if (deleteDial) dialDelete(session.device.address)
         sessionIo.execute {
             write(session, frames)
             runCatching { session.socket.close() }
@@ -181,14 +206,21 @@ internal class ChromecastHub(context: Context) {
         val sends = ArrayList<CastFrame>()
         for (effect in effects) {
             when (effect) {
-                is CastEffect.Send -> sends += effect.frame
+                is CastEffect.Send -> {
+                    sends += effect.frame
+                    castTxLine(effect.frame.namespace, effect.frame.payload)?.let(log)
+                }
                 is CastEffect.DialPost -> dial(session, effect.body)
+                is CastEffect.LoungePlay -> lounge(session, effect)
                 CastEffect.DialDelete -> dialDelete(session.device.address)
                 is CastEffect.Ready -> {
                     markReady()
                     if (isCurrent(session.epoch)) main.post { onReady() }
                 }
-                is CastEffect.Failed -> if (isCurrent(session.epoch) && !session.localStop) main.post { onFailed(effect.reason) }
+                is CastEffect.Failed -> {
+                    if (effect.reason == CastFailure.SILENCE) log("session ended cause=silence dev=${deviceTag(session.device.id)}")
+                    if (isCurrent(session.epoch) && !session.localStop) main.post { onFailed(effect.reason) }
+                }
                 is CastEffect.Progress ->
                     if (isCurrent(session.epoch)) {
                         main.post {
@@ -210,6 +242,7 @@ internal class ChromecastHub(context: Context) {
         val epoch = session.epoch
         dials.execute {
             if (!isCurrent(epoch)) return@execute
+            val started = System.currentTimeMillis()
             val response =
                 lanExchange(
                     method = "POST",
@@ -218,6 +251,7 @@ internal class ChromecastHub(context: Context) {
                     body = body,
                     bind = { socket -> LanBind.bind(appContext, socket) },
                 )
+            log("youtube step=dial http=${response?.code ?: "none"} ms=${System.currentTimeMillis() - started}")
             if (!isCurrent(epoch)) return@execute
             session.inbox.add {
                 apply(
@@ -228,6 +262,36 @@ internal class ChromecastHub(context: Context) {
                     {},
                 )
             }
+        }
+    }
+
+    /** Lounge hand-over off the socket thread. The result goes back to the machine through the session inbox. */
+    private fun lounge(session: Live, effect: CastEffect.LoungePlay) {
+        val epoch = session.epoch
+        lounges.execute {
+            if (!isCurrent(epoch)) return@execute
+            val result =
+                loungeClient.play(effect.screenId, effect.videoId, effect.startSec) { isCurrent(epoch) }
+                    ?: return@execute
+            if (!isCurrent(epoch)) return@execute
+            session.inbox.add {
+                apply(
+                    session,
+                    synchronized(session.machine) { session.machine.onLounge(result, System.currentTimeMillis()) },
+                    {},
+                    {},
+                    {},
+                )
+            }
+        }
+    }
+
+    /** Receiver and error frames get a line; each YouTube-namespace message type gets one line per session. */
+    private fun logRx(session: Live, namespace: String, payload: String) {
+        castRxLine(namespace, payload)?.let(log)
+        if (namespace == YOUTUBE_NAMESPACE) {
+            val type = logToken(payloadType(payload)).ifEmpty { "unknown" }
+            if (session.mdxTypes.add(type)) log("rx mdx type=$type")
         }
     }
 
@@ -268,6 +332,7 @@ internal class ChromecastHub(context: Context) {
         val inbox: ConcurrentLinkedQueue<() -> Unit>,
     ) {
         @Volatile var localStop: Boolean = false
+        val mdxTypes = HashSet<String>()
     }
 }
 

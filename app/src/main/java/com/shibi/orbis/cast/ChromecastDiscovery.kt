@@ -12,7 +12,7 @@ import java.util.concurrent.Executors
  * Android 14 and later resolve through [NsdManager.ServiceInfoCallback]. Older releases resolve one service at a time,
  * which is all [NsdManager.resolveService] allows. Nothing here contacts Google.
  */
-internal class ChromecastDiscovery(context: Context) {
+internal class ChromecastDiscovery(context: Context, private val log: (String) -> Unit = {}) {
     private val appContext = context.applicationContext
     private val nsd = appContext.getSystemService(NsdManager::class.java)
     private val executor =
@@ -41,6 +41,7 @@ internal class ChromecastDiscovery(context: Context) {
                 override fun onDiscoveryStopped(serviceType: String) = Unit
                 override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
                     running = false
+                    log("discovery cast error=NsdFailed code=$errorCode")
                 }
                 override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) = Unit
 
@@ -68,7 +69,8 @@ internal class ChromecastDiscovery(context: Context) {
                 }
             }
             nsd.discoverServices(CAST_SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discovery)
-        } catch (_: SecurityException) {
+        } catch (e: SecurityException) {
+            log("discovery cast error=${errName(e)}")
             running = false
             releaseLock()
         }
@@ -155,11 +157,14 @@ internal class ChromecastDiscovery(context: Context) {
                 listOfNotNull(info.host)
             }
         val device = castDeviceFromTxt(info.attributes ?: emptyMap(), info.serviceName.orEmpty(), hosts) ?: return
+        var added = false
         val changed = synchronized(devices) {
             val previous = devices[device.id]
             devices[device.id] = device
+            added = previous == null
             previous != device
         }
+        if (added) log("discovery cast found dev=${deviceTag(device.id)} model=\"${logModel(device.model)}\"")
         if (changed) onChanged?.invoke()
     }
 
@@ -173,12 +178,13 @@ internal class ChromecastDiscovery(context: Context) {
         if (serviceName.isBlank()) return
         val removed = synchronized(devices) {
             val id = devices.entries.firstOrNull { it.value.serviceName == serviceName }?.key
-            if (id == null) false else {
-                devices.remove(id)
-                true
-            }
+            if (id != null) devices.remove(id)
+            id
         }
-        if (removed) onChanged?.invoke()
+        if (removed != null) {
+            log("discovery cast lost dev=${deviceTag(removed)}")
+            onChanged?.invoke()
+        }
     }
 
     private fun multicastLock(): WifiManager.MulticastLock? {

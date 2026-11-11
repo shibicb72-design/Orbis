@@ -1,5 +1,6 @@
 package com.shibi.orbis.cast
 
+import com.shibi.orbis.youtube.LoungeResult
 import java.io.InputStream
 import java.net.InetAddress
 import java.net.SocketTimeoutException
@@ -13,6 +14,10 @@ import org.junit.Test
 
 /** CASTV2 framing, receiver and media status, the YouTube launch, and Chromecast TXT records. */
 class CastProtocolTest {
+    private companion object {
+        const val OK_AT = 2_000L
+    }
+
     @Test
     fun castMessageRoundTripsIncludingALongUtf8Payload() {
         val payload = """{"type":"PING","title":"${"🎬".repeat(40)}"}"""
@@ -136,55 +141,134 @@ class CastProtocolTest {
     }
 
     @Test
-    fun youtubeTriesDialFirstAndConfirmsOnlyWhenTheVideoIsPlaying() {
-        val video = YouTubeVideo("dQw4w9WgXcQ", "https://youtu.be/dQw4w9WgXcQ", 12.0, "Song")
-        val session = CastSession(CastGoal.YouTube(video))
+    fun youtubeDoesNotDialBeforeLounge() {
+        val session = CastSession(CastGoal.YouTube(video()))
         val opened = session.start(0)
-        val dial = opened.filterIsInstance<CastEffect.DialPost>().single()
-        assertEquals("v=dQw4w9WgXcQ&t=12", dial.body)
-        assertTrue(session.onDial(201, 50).isEmpty())
+        assertTrue(opened.none { it is CastEffect.DialPost })
+        val types = opened.filterIsInstance<CastEffect.Send>().map { JSONObject(it.frame.payload).getString("type") }
+        assertEquals(listOf("CONNECT", "GET_STATUS"), types)
         val wrongApp = session.onFrame(frame(NS_RECEIVER, receiver(DEFAULT_MEDIA_APP_ID, "s", "web-d", 1.0, 1)), 100)
         val launch = wrongApp.filterIsInstance<CastEffect.Send>().map { it.frame }.single { it.namespace == NS_RECEIVER }
+        assertEquals("LAUNCH", JSONObject(launch.payload).getString("type"))
         assertEquals(YOUTUBE_RECEIVER_APP_ID, JSONObject(launch.payload).getString("appId"))
-        val appUp = session.onFrame(frame(NS_RECEIVER, receiver(YOUTUBE_RECEIVER_APP_ID, "ys", "web-1", 1.0, 2)), 200)
-        assertTrue(appUp.any { it is CastEffect.Send && it.frame.destinationId == "web-1" && it.frame.namespace == NS_CONNECTION })
-        assertTrue(appUp.none { it is CastEffect.Send && it.frame.namespace == YOUTUBE_NAMESPACE })
-        assertTrue(session.onClock(200 + YOUTUBE_FLING_FALLBACK_MS - 1).none { it is CastEffect.Send && (it as CastEffect.Send).frame.namespace == YOUTUBE_NAMESPACE })
-        val fling = session.onClock(200 + YOUTUBE_FLING_FALLBACK_MS).filterIsInstance<CastEffect.Send>().single { it.frame.namespace == YOUTUBE_NAMESPACE }
+        assertTrue(wrongApp.none { it is CastEffect.DialPost })
+        val joined = session.onFrame(frame(NS_RECEIVER, receiver(YOUTUBE_RECEIVER_APP_ID, "ys", "web-1", 1.0, 2)), 200)
+        assertTrue(joined.none { it is CastEffect.DialPost })
+        assertTrue(joined.none { isYouTubeSend(it, "flingVideo") })
+        assertTrue(session.onClock(200 + MDX_STATUS_WAIT_MS - 1).none { it is CastEffect.DialPost })
+    }
+
+    @Test
+    fun youtubeAsksMdxStatusAfterJoinAndEmitsLoungePlay() {
+        val session = CastSession(CastGoal.YouTube(video(start = 12.0)))
+        session.start(0)
+        val joined = session.onFrame(frame(NS_RECEIVER, receiver(YOUTUBE_RECEIVER_APP_ID, "ys", "web-1", 1.0, 1)), 100)
+        val connect = joined.filterIsInstance<CastEffect.Send>().first { it.frame.namespace == NS_CONNECTION }
+        assertEquals("web-1", connect.frame.destinationId)
+        val ask = joined.filterIsInstance<CastEffect.Send>().single { it.frame.namespace == YOUTUBE_NAMESPACE }
+        assertEquals("web-1", ask.frame.destinationId)
+        assertEquals("getMdxSessionStatus", JSONObject(ask.frame.payload).getString("type"))
+        assertTrue(session.onClock(100 + MDX_STATUS_RETRY_MS - 1).none { isYouTubeSend(it, "getMdxSessionStatus") })
+        assertTrue(session.onClock(100 + MDX_STATUS_RETRY_MS).any { isYouTubeSend(it, "getMdxSessionStatus") })
+        val other = session.onFrame(frame(YOUTUBE_NAMESPACE, """{"type":"loungeStatus","data":{}}"""), 1_200)
+        assertTrue(other.none { it is CastEffect.LoungePlay })
+        val status = """{"type":"mdxSessionStatus","data":{"screenId":"screen-abc","deviceId":"d"}}"""
+        val play = session.onFrame(frame(YOUTUBE_NAMESPACE, status), 1_300).single() as CastEffect.LoungePlay
+        assertEquals(CastEffect.LoungePlay("screen-abc", "dQw4w9WgXcQ", 12.0), play)
+        assertTrue(session.onFrame(frame(YOUTUBE_NAMESPACE, status), 1_400).none { it is CastEffect.LoungePlay })
+        val later = session.onClock(1_300 + MDX_STATUS_WAIT_MS * 2)
+        assertTrue(later.none { it is CastEffect.DialPost || isYouTubeSend(it, "getMdxSessionStatus") })
+    }
+
+    @Test
+    fun youtubeMdxTimeoutFallsBackToDialThenFling() {
+        val session = CastSession(CastGoal.YouTube(video(start = 12.0)))
+        session.start(0)
+        session.onFrame(frame(NS_RECEIVER, receiver(YOUTUBE_RECEIVER_APP_ID, "ys", "web-1", 1.0, 1)), 200)
+        assertTrue(session.onClock(200 + MDX_STATUS_WAIT_MS - 1).none { it is CastEffect.DialPost })
+        val timedOut = session.onClock(200 + MDX_STATUS_WAIT_MS)
+        assertEquals("v=dQw4w9WgXcQ&t=12", timedOut.filterIsInstance<CastEffect.DialPost>().single().body)
+        val late = """{"type":"mdxSessionStatus","data":{"screenId":"screen-abc"}}"""
+        assertTrue(session.onFrame(frame(YOUTUBE_NAMESPACE, late), 4_300).none { it is CastEffect.LoungePlay })
+        assertTrue(session.onDial(201, 4_400).isEmpty())
+        assertTrue(session.onClock(4_400 + YOUTUBE_FLING_FALLBACK_MS - 1).none { isYouTubeSend(it, "flingVideo") })
+        val fling =
+            session.onClock(4_400 + YOUTUBE_FLING_FALLBACK_MS).filterIsInstance<CastEffect.Send>()
+                .single { it.frame.namespace == YOUTUBE_NAMESPACE }
         val body = JSONObject(fling.frame.payload)
         assertEquals("flingVideo", body.getString("type"))
         assertEquals("dQw4w9WgXcQ", body.getJSONObject("data").getString("videoId"))
         assertEquals(12.0, body.getJSONObject("data").getDouble("currentTime"), 0.001)
-        val ignored = session.onFrame(frame(YOUTUBE_NAMESPACE, """{"type":"data","data":{"videoId":"other","currentTime":1}}"""), 2_500)
+        assertTrue(session.onClock(9_000).none { it is CastEffect.DialPost })
+        val ignored = session.onFrame(frame(YOUTUBE_NAMESPACE, """{"type":"data","data":{"videoId":"other","currentTime":1}}"""), 7_000)
         assertTrue(ignored.none { it is CastEffect.Ready })
-        val ready = session.onFrame(frame(NS_MEDIA, mediaStatus("dQw4w9WgXcQ", "PLAYING", 12.0, 200.0, 4)), 2_600)
+        val ready = session.onFrame(frame(NS_MEDIA, mediaStatus("dQw4w9WgXcQ", "PLAYING", 12.0, 200.0, 4)), 7_100)
         assertTrue(ready.single() is CastEffect.Ready)
+        assertTrue(session.close().contains(CastEffect.DialDelete))
     }
 
     @Test
-    fun youtubeDialFailureLaunchesAndAPlayingStatusConfirmsWithoutWaiting() {
-        val video = YouTubeVideo("abcdefghijk", "https://www.youtube.com/watch?v=abcdefghijk", 0.0, "Clip")
-        val session = CastSession(CastGoal.YouTube(video))
+    fun youtubeLoungeFailureFallsBackToDialOnce() {
+        val session = CastSession(CastGoal.YouTube(video("abcdefghijk")))
         session.start(0)
-        val launch = session.onDial(404, 10).filterIsInstance<CastEffect.Send>().single()
-        assertEquals("LAUNCH", JSONObject(launch.frame.payload).getString("type"))
-        val joined = session.onFrame(frame(NS_RECEIVER, receiver(YOUTUBE_RECEIVER_APP_ID, "ys", "web-2", 1.0, 2)), 20)
-        assertTrue(joined.any { it is CastEffect.Send && it.frame.namespace == YOUTUBE_NAMESPACE })
+        session.onFrame(frame(NS_RECEIVER, receiver(YOUTUBE_RECEIVER_APP_ID, "ys", "web-2", 1.0, 1)), 20)
+        session.onFrame(frame(YOUTUBE_NAMESPACE, """{"type":"mdxSessionStatus","data":{"screenId":"scr"}}"""), 30)
+        val fallback = session.onLounge(LoungeResult.BindFailed(401), 40)
+        assertEquals("v=abcdefghijk&t=0", fallback.filterIsInstance<CastEffect.DialPost>().single().body)
+        assertTrue(session.onLounge(LoungeResult.Network("UnknownHostException"), 50).isEmpty())
+        assertTrue(session.onClock(5_000).none { it is CastEffect.DialPost })
+        assertTrue(session.onDial(404, 60).isEmpty())
+        val fling = session.onClock(70).filterIsInstance<CastEffect.Send>().single { it.frame.namespace == YOUTUBE_NAMESPACE }
+        assertEquals("flingVideo", JSONObject(fling.frame.payload).getString("type"))
+        assertTrue(session.onClock(1_100).none { isYouTubeSend(it, "flingVideo") })
         val status = """{"type":"data","data":{"videoId":"abcdefghijk","currentTime":0,"playerState":"BUFFERING"}}"""
         assertTrue(youtubeStatusConfirms("abcdefghijk", status))
-        assertTrue(session.onFrame(frame(YOUTUBE_NAMESPACE, status), 30).single() is CastEffect.Ready)
+        assertTrue(session.onFrame(frame(YOUTUBE_NAMESPACE, status), 1_200).single() is CastEffect.Ready)
+    }
+
+    @Test
+    fun youtubeLoungeOkBecomesReadyOnMediaStatusOrAfterGrace() {
+        val confirmed = loungeAccepted(video("abcdefghijk"))
+        val poll = confirmed.onClock(OK_AT + 1_000).filterIsInstance<CastEffect.Send>().single { it.frame.namespace == NS_MEDIA }
+        assertEquals("GET_STATUS", JSONObject(poll.frame.payload).getString("type"))
+        assertEquals("web-3", poll.frame.destinationId)
+        val leftover = mediaStatus("zzzzzzzzzzz", "IDLE", 0.0, 0.0, 2, idle = "FINISHED")
+        assertTrue(confirmed.onFrame(frame(NS_MEDIA, leftover), OK_AT + 1_100).isEmpty())
+        val playing = mediaStatus("abcdefghijk", "PLAYING", 1.0, 100.0, 2)
+        assertTrue(confirmed.onFrame(frame(NS_MEDIA, playing), OK_AT + 1_500).single() is CastEffect.Ready)
+        assertFalse(confirmed.close().contains(CastEffect.DialDelete))
+
+        val graced = loungeAccepted(video("abcdefghijk"))
+        assertTrue(graced.onClock(OK_AT + LOUNGE_READY_GRACE_MS - 1).none { it is CastEffect.Ready })
+        assertTrue(graced.onClock(OK_AT + LOUNGE_READY_GRACE_MS).any { it is CastEffect.Ready })
+        assertTrue(graced.onClock(OK_AT + LOUNGE_READY_GRACE_MS + 1_000).none { it is CastEffect.Ready })
+
+        val rejected = loungeAccepted(video("abcdefghijk"))
+        val error = rejected.onFrame(frame(NS_RECEIVER, """{"type":"LAUNCH_ERROR","requestId":9}"""), OK_AT + 500)
+        assertEquals(CastFailure.REJECTED, (error.single() as CastEffect.Failed).reason)
+        assertTrue(rejected.onClock(OK_AT + LOUNGE_READY_GRACE_MS).none { it is CastEffect.Ready })
+    }
+
+    @Test
+    fun mdxSessionStatusParsesScreenIdAndOtherTypesAreNull() {
+        assertEquals("abc123", parseMdxScreenId("""{"type":"mdxSessionStatus","data":{"screenId":"abc123","deviceId":"x"}}"""))
+        assertNull(parseMdxScreenId("""{"type":"mdxSessionStatus","data":{"screenId":""}}"""))
+        assertNull(parseMdxScreenId("""{"type":"mdxSessionStatus"}"""))
+        assertNull(parseMdxScreenId("""{"type":"loungeStatus","data":{"screenId":"abc123"}}"""))
+        assertNull(parseMdxScreenId("not json"))
+        assertEquals("getMdxSessionStatus", JSONObject(youtubeMdxStatusRequest()).getString("type"))
     }
 
     @Test
     fun youtubeFailsWhenTheLoadedVideoIsNotTheOneAskedFor() {
-        val video = YouTubeVideo("abcdefghijk", "https://www.youtube.com/watch?v=abcdefghijk", 1.0, "Clip")
-        val session = CastSession(CastGoal.YouTube(video))
+        val session = CastSession(CastGoal.YouTube(video("abcdefghijk", start = 1.0)))
         session.start(0)
-        session.onDial(201, 10)
         session.onFrame(frame(NS_RECEIVER, receiver(YOUTUBE_RECEIVER_APP_ID, "ys", "web-2", 1.0, 1)), 20)
-        session.onClock(20 + YOUTUBE_FLING_FALLBACK_MS)
+        session.onClock(20 + MDX_STATUS_WAIT_MS)
+        session.onDial(201, 4_100)
+        session.onClock(4_100 + YOUTUBE_FLING_FALLBACK_MS)
         val idle = mediaStatus("abcdefghijk", "IDLE", 0.0, 0.0, 3, idle = "ERROR")
-        val failed = session.onFrame(frame(NS_MEDIA, idle), 3_000)
+        val failed = session.onFrame(frame(NS_MEDIA, idle), 7_000)
         assertEquals(CastFailure.YOUTUBE_UNCONFIRMED, (failed.single() as CastEffect.Failed).reason)
     }
 
@@ -222,7 +306,6 @@ class CastProtocolTest {
         val video = YouTubeVideo("dQw4w9WgXcQ", "https://youtu.be/dQw4w9WgXcQ", 0.0, "Song")
         val session = CastSession(CastGoal.YouTube(video))
         session.start(0)
-        session.onDial(404, 10)
         session.onFrame(frame(NS_RECEIVER, receiver(YOUTUBE_RECEIVER_APP_ID, "ys", "web-1", 1.0, 2)), 20)
         val same = session.onFrame(frame(NS_RECEIVER, receiver(YOUTUBE_RECEIVER_APP_ID, "ys", "web-1", 1.0, 3)), 30)
         assertTrue(same.none { it is CastEffect.Send && it.frame.namespace == NS_CONNECTION })
@@ -289,6 +372,24 @@ class CastProtocolTest {
         positionSec = position,
         durationSec = duration,
     )
+
+    private fun video(id: String = "dQw4w9WgXcQ", start: Double = 0.0) =
+        YouTubeVideo(id, "https://www.youtube.com/watch?v=$id", start, "Clip")
+
+    /** A YouTube session that joined web-3, reported a screen id and had the lounge accept the video at [OK_AT]. */
+    private fun loungeAccepted(video: YouTubeVideo): CastSession {
+        val session = CastSession(CastGoal.YouTube(video))
+        session.start(0)
+        session.onFrame(frame(NS_RECEIVER, receiver(YOUTUBE_RECEIVER_APP_ID, "ys", "web-3", 1.0, 1)), 100)
+        session.onFrame(frame(YOUTUBE_NAMESPACE, """{"type":"mdxSessionStatus","data":{"screenId":"scr"}}"""), 200)
+        val ok = session.onLounge(LoungeResult.Ok, OK_AT)
+        assertTrue(ok.none { it is CastEffect.DialPost || it is CastEffect.Ready })
+        return session
+    }
+
+    private fun isYouTubeSend(effect: CastEffect, type: String): Boolean =
+        effect is CastEffect.Send && effect.frame.namespace == YOUTUBE_NAMESPACE &&
+            JSONObject(effect.frame.payload).optString("type") == type
 
     private fun frame(namespace: String, payload: String) =
         CastFrame(CAST_RECEIVER_ID, CAST_SENDER_ID, namespace, payload)

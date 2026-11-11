@@ -1,5 +1,6 @@
 package com.shibi.orbis.cast
 
+import com.shibi.orbis.youtube.LoungeResult
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -16,6 +17,18 @@ internal const val HEARTBEAT_SILENCE_MS = 15_000L
 
 /** How long to wait, after DIAL has brought the YouTube app up, before handing the video over the Cast channel. */
 internal const val YOUTUBE_FLING_FALLBACK_MS = 2_000L
+
+/** How long the YouTube receiver has to report its lounge screen id before the DIAL fallback starts. */
+internal const val MDX_STATUS_WAIT_MS = 4_000L
+
+/** Interval between repeated `getMdxSessionStatus` requests while the receiver has not answered. */
+internal const val MDX_STATUS_RETRY_MS = 1_000L
+
+/**
+ * After the lounge accepted setPlaylist, the attempt counts as started once this much time passes with no error from
+ * the TV, even when no status names the video (owner decision: grace-ready).
+ */
+internal const val LOUNGE_READY_GRACE_MS = 4_000L
 
 internal const val CAST_SERVICE_TYPE = "_googlecast._tcp."
 
@@ -43,6 +56,8 @@ internal sealed interface CastGoal {
 internal sealed interface CastEffect {
     data class Send(val frame: CastFrame) : CastEffect
     data class DialPost(val body: String) : CastEffect
+    /** Hand [videoId] to the TV through the YouTube lounge API. Reported back through [CastSession.onLounge]. */
+    data class LoungePlay(val screenId: String, val videoId: String, val startSec: Double) : CastEffect
     data object DialDelete : CastEffect
     data class Ready(val volume: Float) : CastEffect
     data class Failed(val reason: CastFailure) : CastEffect
@@ -228,11 +243,19 @@ internal fun sameMedia(expectedUrl: String, contentId: String): Boolean {
 }
 
 /**
- * CASTV2 session decisions with no socket. DIAL is requested as an effect and reported back through [onDial].
- * YouTube tries DIAL first. Success is a receiver or media payload that names the video as loaded or playing.
- * A receiver that is already running a different app is not reused.
+ * CASTV2 session decisions with no socket. DIAL and the lounge are requested as effects and reported back through
+ * [onDial] and [onLounge].
+ * YouTube: launch or reuse the YouTube receiver, ask it for its lounge screen id, then hand the video over through the
+ * lounge. When the screen id does not come or the lounge fails, DIAL and `flingVideo` are tried once.
+ * Success is a receiver or media payload that names the video as loaded or playing, or, after the lounge accepted the
+ * video, [LOUNGE_READY_GRACE_MS] without an error. A receiver that is already running a different app is not reused.
+ * [log] receives secret-free lines (see CastLogging.kt).
  */
-internal class CastSession(private val goal: CastGoal, private val senderId: String = CAST_SENDER_ID) {
+internal class CastSession(
+    private val goal: CastGoal,
+    private val senderId: String = CAST_SENDER_ID,
+    private val log: (String) -> Unit = {},
+) {
     private var requestId = 0
     private var lastHeard = 0L
     private var lastPing = 0L
@@ -244,7 +267,15 @@ internal class CastSession(private val goal: CastGoal, private val senderId: Str
     private var joined = false
     private var handed = false
     private var dialOk: Boolean? = null
-    private var appSeenAt = 0L
+    private var dialPosted = false
+    private var dialAnsweredAt = 0L
+    private var startedAt = 0L
+    private var mdxAskedAt: Long? = null
+    private var mdxLastAsk = 0L
+    private var mdxAsks = 0
+    private var loungeSent = false
+    private var loungeOkAt: Long? = null
+    private var legacy = false
     private var transportId: String? = null
     private var appSessionId: String? = null
     private var mediaSessionId = 0
@@ -260,12 +291,10 @@ internal class CastSession(private val goal: CastGoal, private val senderId: Str
     fun start(nowMs: Long): List<CastEffect> {
         lastHeard = nowMs
         lastPing = nowMs
+        startedAt = nowMs
         opened = true
         val effects = ArrayList<CastEffect>()
         effects += send(CAST_RECEIVER_ID, NS_CONNECTION, connectPayload())
-        if (goal is CastGoal.YouTube) {
-            effects += CastEffect.DialPost(youtubeDialBody(goal.video.videoId, goal.video.startSec))
-        }
         effects += send(CAST_RECEIVER_ID, NS_RECEIVER, json("GET_STATUS", nextRequest()))
         return effects
     }
@@ -274,8 +303,23 @@ internal class CastSession(private val goal: CastGoal, private val senderId: Str
         if (finished) return emptyList()
         heard(nowMs)
         dialOk = code != null && code in 200..299
+        dialAnsweredAt = nowMs
         if (goal is CastGoal.YouTube && dialOk != true && transportId == null && !launchSent) return launch()
         return emptyList()
+    }
+
+    /** The lounge hand-over finished. Ok starts the wait for confirmation; any failure falls back to DIAL once. */
+    fun onLounge(result: LoungeResult, nowMs: Long): List<CastEffect> {
+        if (finished || goal !is CastGoal.YouTube || !loungeSent || legacy || loungeOkAt != null) return emptyList()
+        if (result == LoungeResult.Ok) {
+            loungeOkAt = nowMs
+            handed = true
+            val dest = transportId ?: return emptyList()
+            lastMediaPoll = nowMs
+            return listOf(send(dest, NS_MEDIA, mediaStatusRequest()))
+        }
+        log("youtube step=lounge result=${loungeResultName(result)} -> dial fallback")
+        return fallBackToDial()
     }
 
     fun onFrame(frame: CastFrame, nowMs: Long): List<CastEffect> {
@@ -290,7 +334,7 @@ internal class CastSession(private val goal: CastGoal, private val senderId: Str
             }
         }
         if (frame.namespace == NS_RECEIVER) return onReceiver(frame.payload, nowMs)
-        if (frame.namespace == NS_MEDIA || frame.namespace == YOUTUBE_NAMESPACE) return onPayload(frame.payload)
+        if (frame.namespace == NS_MEDIA || frame.namespace == YOUTUBE_NAMESPACE) return onPayload(frame.namespace, frame.payload, nowMs)
         return emptyList()
     }
 
@@ -298,11 +342,28 @@ internal class CastSession(private val goal: CastGoal, private val senderId: Str
         if (finished || !opened) return emptyList()
         if (nowMs - lastHeard >= HEARTBEAT_SILENCE_MS) return fail(CastFailure.SILENCE)
         val effects = ArrayList<CastEffect>()
-        if (goal is CastGoal.YouTube && !handed && !readySent && transportId != null && appSeenAt > 0L && dialOk != null) {
-            val dialFailed = dialOk == false
-            if (dialFailed || nowMs - appSeenAt >= YOUTUBE_FLING_FALLBACK_MS) effects += fling()
+        if (goal is CastGoal.YouTube) {
+            val asked = mdxAskedAt
+            val dest = transportId
+            if (!legacy && !loungeSent && asked != null && dest != null) {
+                if (nowMs - asked >= MDX_STATUS_WAIT_MS) {
+                    log("youtube step=mdxStatus timeout ms=${nowMs - asked} asks=$mdxAsks -> dial fallback")
+                    effects += fallBackToDial()
+                } else if (nowMs - mdxLastAsk >= MDX_STATUS_RETRY_MS) {
+                    effects += askMdxStatus(dest, nowMs)
+                }
+            }
+            if (legacy && !handed && !readySent && dest != null && dialOk != null) {
+                if (dialOk == false || nowMs - dialAnsweredAt >= YOUTUBE_FLING_FALLBACK_MS) effects += fling()
+            }
+            val okAt = loungeOkAt
+            if (okAt != null && !readySent && nowMs - okAt >= LOUNGE_READY_GRACE_MS) {
+                log("youtube ready via=grace ms=${nowMs - startedAt}")
+                effects += succeed()
+            }
         }
-        if (readySent && mediaSessionId > 0 && transportId != null && nowMs - lastMediaPoll >= 1_000L) {
+        val waitingForLounge = loungeOkAt != null && !readySent
+        if ((waitingForLounge || (readySent && mediaSessionId > 0)) && transportId != null && nowMs - lastMediaPoll >= 1_000L) {
             lastMediaPoll = nowMs
             effects += send(transportId!!, NS_MEDIA, mediaStatusRequest())
         }
@@ -364,7 +425,7 @@ internal class CastSession(private val goal: CastGoal, private val senderId: Str
         effects += send(CAST_RECEIVER_ID, NS_CONNECTION, """{"type":"CLOSE"}""")
         val transport = transportId
         if (transport != null) effects += send(transport, NS_CONNECTION, """{"type":"CLOSE"}""")
-        if (goal is CastGoal.YouTube) effects += CastEffect.DialDelete
+        if (goal is CastGoal.YouTube && dialPosted) effects += CastEffect.DialDelete
         return effects
     }
 
@@ -377,14 +438,15 @@ internal class CastSession(private val goal: CastGoal, private val senderId: Str
                 val previous = transportId
                 val transportChanged = previous != null && previous != action.transportId
                 transportId = action.transportId
-                if (previous == null) appSeenAt = nowMs
                 val effects = ArrayList<CastEffect>()
                 if (!joined || transportChanged) {
                     joined = true
+                    log("app joined app=${logToken(appId)} transport=yes")
                     effects += send(action.transportId, NS_CONNECTION, connectPayload())
                 }
                 if (goal is CastGoal.Media && !handed) effects += load()
-                if (goal is CastGoal.YouTube && dialOk == false && !handed) effects += fling()
+                if (goal is CastGoal.YouTube && mdxAskedAt == null && !legacy) effects += askMdxStatus(action.transportId, nowMs)
+                if (goal is CastGoal.YouTube && legacy && dialOk == false && !handed) effects += fling()
                 return effects
             }
             ReceiverAction.Launch -> {
@@ -397,15 +459,38 @@ internal class CastSession(private val goal: CastGoal, private val senderId: Str
         }
     }
 
-    private fun onPayload(payload: String): List<CastEffect> {
+    private fun onPayload(namespace: String, payload: String, nowMs: Long): List<CastEffect> {
         val media = parseMediaStatus(payload)
         media.firstOrNull { it.mediaSessionId > 0 }?.let { mediaSessionId = it.mediaSessionId }
         when (val current = goal) {
             is CastGoal.YouTube -> {
-                if (youtubeStatusConfirms(current.video.videoId, payload)) return succeed()
-                val broken = media.any { it.playerState.equals("IDLE", true) && it.idleReason.isNotBlank() }
+                if (namespace == YOUTUBE_NAMESPACE && !legacy && !loungeSent && mdxAskedAt != null) {
+                    val screenId = parseMdxScreenId(payload)
+                    if (screenId != null) {
+                        loungeSent = true
+                        log("youtube step=mdxStatus rx screenId=yes")
+                        return listOf(CastEffect.LoungePlay(screenId, current.video.videoId, current.video.startSec))
+                    }
+                }
+                if (youtubeStatusConfirms(current.video.videoId, payload)) {
+                    if (!readySent) {
+                        val via = if (namespace == NS_MEDIA) "MEDIA_STATUS" else "mdx"
+                        val state =
+                            media.firstOrNull { sameVideo(current.video.videoId, it.contentId) }?.playerState.orEmpty()
+                        val stateText = if (state.isEmpty()) "" else " state=${logToken(state)}"
+                        log("youtube confirmed via=$via$stateText ms=${nowMs - startedAt}")
+                    }
+                    return succeed()
+                }
+                // While the lounge hand-over is pending, a leftover IDLE status from an earlier video is not a
+                // failure; an ERROR is.
+                val broken =
+                    media.any {
+                        it.playerState.equals("IDLE", true) && it.idleReason.isNotBlank() &&
+                            (loungeOkAt == null || readySent || it.idleReason.equals("ERROR", true))
+                    }
                 if (broken && handed) return fail(CastFailure.YOUTUBE_UNCONFIRMED)
-                if (!handed && transportId != null && dialOk != null && (dialOk == false || media.isNotEmpty())) {
+                if (legacy && !handed && transportId != null && dialOk != null && (dialOk == false || media.isNotEmpty())) {
                     return fling()
                 }
                 return emptyList()
@@ -444,7 +529,28 @@ internal class CastSession(private val goal: CastGoal, private val senderId: Str
         val dest = transportId ?: return emptyList()
         val video = goal as? CastGoal.YouTube ?: return emptyList()
         handed = true
+        log("youtube step=fling tx")
         return listOf(send(dest, YOUTUBE_NAMESPACE, youtubeFlingPayload(video.video.videoId, video.video.startSec)))
+    }
+
+    private fun askMdxStatus(dest: String, nowMs: Long): List<CastEffect> {
+        if (mdxAskedAt == null) {
+            mdxAskedAt = nowMs
+            log("youtube step=mdxStatus tx")
+        }
+        mdxLastAsk = nowMs
+        mdxAsks += 1
+        return listOf(send(dest, YOUTUBE_NAMESPACE, youtubeMdxStatusRequest()))
+    }
+
+    /** The legacy hand-over, once per attempt: DIAL with the video id, then `flingVideo` on the Cast channel. */
+    private fun fallBackToDial(): List<CastEffect> {
+        val video = goal as? CastGoal.YouTube ?: return emptyList()
+        if (legacy) return emptyList()
+        legacy = true
+        if (dialPosted) return emptyList()
+        dialPosted = true
+        return listOf(CastEffect.DialPost(youtubeDialBody(video.video.videoId, video.video.startSec)))
     }
 
     private fun succeed(): List<CastEffect> {
@@ -473,8 +579,11 @@ internal class CastSession(private val goal: CastGoal, private val senderId: Str
         return listOf(send(dest, NS_MEDIA, commandPayload(type, mediaSessionId)))
     }
 
-    private fun mediaStatusRequest(): String =
-        JSONObject().put("type", "GET_STATUS").put("requestId", nextRequest()).put("mediaSessionId", mediaSessionId).toString()
+    private fun mediaStatusRequest(): String {
+        val payload = JSONObject().put("type", "GET_STATUS").put("requestId", nextRequest())
+        if (mediaSessionId > 0) payload.put("mediaSessionId", mediaSessionId)
+        return payload.toString()
+    }
 
     private fun commandPayload(type: String, session: Int): String =
         JSONObject().put("type", type).put("requestId", nextRequest()).put("mediaSessionId", session).toString()
@@ -502,3 +611,13 @@ private fun jsonObject(payload: String): JSONObject? =
     }
 
 private fun jsonType(payload: String): String = jsonObject(payload)?.optString("type").orEmpty()
+
+/** The variant name of a lounge result, with its HTTP status or exception class name. No other detail. */
+internal fun loungeResultName(result: LoungeResult): String =
+    when (result) {
+        LoungeResult.Ok -> "Ok"
+        is LoungeResult.TokenFailed -> "TokenFailed http=${result.http}"
+        is LoungeResult.BindFailed -> "BindFailed http=${result.http}"
+        is LoungeResult.PlayFailed -> "PlayFailed http=${result.http}"
+        is LoungeResult.Network -> "Network err=${logToken(result.errName)}"
+    }
