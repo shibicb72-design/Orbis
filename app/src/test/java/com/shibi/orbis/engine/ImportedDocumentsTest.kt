@@ -353,14 +353,19 @@ class ImportedDocumentsTest {
     }
 
     @Test
-    fun theFileProviderSharesOnlyTheDownloadAndCameraRoots() {
+    fun theFileProviderSharesOnlyTheDownloadCameraAndShareOutRoots() {
         val doc = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder()
             .parse(File("src/main/res/xml/download_paths.xml"))
         val nodes = doc.documentElement.childNodes
         val names = (0 until nodes.length).map { nodes.item(it) }
             .filterIsInstance<org.w3c.dom.Element>()
             .map { it.getAttribute("name") }
-        assertEquals(listOf("downloads_external", "downloads_internal", "camera_capture"), names)
+        assertEquals(listOf("downloads_external", "downloads_internal", "camera_capture", "shared", "shared2"), names)
+        val paths = (0 until nodes.length).map { nodes.item(it) }
+            .filterIsInstance<org.w3c.dom.Element>()
+            .map { it.getAttribute("path") }
+        // Imports, their staging area and uploads are never roots; only the share-out copies are.
+        assertEquals(listOf("Download/", "downloads/", "camera_capture/", "shared_out/n/", "shared_out/p/"), paths)
     }
 
     @Test

@@ -38,6 +38,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.Autocomplete
 import org.mozilla.geckoview.ContentBlocking
@@ -2304,6 +2305,62 @@ private class GeckoBrowserSession(
             },
             { debugLog.log("GeckoSession", "save failed: ${it?.javaClass?.simpleName}") },
         )
+    }
+
+    override suspend fun isPdfDocument(): Boolean =
+        withContext(Dispatchers.Main.immediate) {
+            if (closed) return@withContext false
+            try {
+                withTimeoutOrNull(1_000L) {
+                    suspendCancellableCoroutine { cont ->
+                        session.isPdfJs().accept(
+                            { if (cont.isActive) cont.resume(it == true) },
+                            { if (cont.isActive) cont.resume(false) },
+                        )
+                    }
+                } ?: false
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                false
+            }
+        }
+
+    /**
+     * pdf.js hands over the bytes it already holds (GeckoView's own "Download" path), so nothing is fetched again.
+     * GeckoView never answers on a page that is not pdf.js, hence the check first and the timeout.
+     */
+    override suspend fun currentPdf(): IncomingDownload? {
+        if (!isPdfDocument()) return null
+        return withContext(Dispatchers.Main.immediate) {
+            if (closed) return@withContext null
+            try {
+                withTimeoutOrNull(30_000L) {
+                    suspendCancellableCoroutine<IncomingDownload?> { cont ->
+                        session.pdfFileSaver.save().accept(
+                            { response ->
+                                if (response == null || response.statusCode !in 200..299) {
+                                    runCatching { response?.body?.close() }
+                                    debugLog.log("GeckoSession", "pdf share failed: status")
+                                    if (cont.isActive) cont.resume(null)
+                                    return@accept
+                                }
+                                if (cont.isActive) cont.resume(GeckoIncomingDownload(response)) else runCatching { response.body?.close() }
+                            },
+                            {
+                                debugLog.log("GeckoSession", "pdf share failed: ${it?.javaClass?.simpleName}")
+                                if (cont.isActive) cont.resume(null)
+                            },
+                        )
+                    }
+                }.also { if (it != null) debugLog.log("GeckoSession", "pdf share offered") }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                debugLog.log("GeckoSession", "pdf share failed: ${e.javaClass.simpleName}")
+                null
+            }
+        }
     }
 
     override fun exitFullScreen() {

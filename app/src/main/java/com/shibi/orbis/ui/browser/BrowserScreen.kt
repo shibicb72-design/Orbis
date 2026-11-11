@@ -317,6 +317,7 @@ private fun BrowserContent(
     var showRecentlyClosed by remember { mutableStateOf(false) }
     var showSiteSettings by remember { mutableStateOf(false) }
     var generatedPassword by remember { mutableStateOf<String?>(null) }
+    val pageShare = rememberPageShare()
     val toolbarBottom by container.browserSettings.toolbarBottom.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbars = remember { SnackbarHostState() }
@@ -657,10 +658,10 @@ private fun BrowserContent(
                                     )
                                 }
                                 IconButton(
-                                    enabled = isWebUrl(state.url),
+                                    enabled = shareTargetFor(state.url, session != null) != ShareTarget.NONE,
                                     onClick = {
                                         menuOpen = false
-                                        shareLink(androidContext, state.url, state.title)
+                                        pageShare.onShare(session, state.url, state.title)
                                     },
                                 ) { Icon(Icons.Filled.Share, contentDescription = shareDescription) }
                             }
@@ -1197,6 +1198,8 @@ private fun BrowserContent(
             onDismiss = { generatedPassword = null },
         )
     }
+
+    PageShareDialogs(pageShare)
 
     if (showRecentlyClosed) {
         RecentlyClosedDialog(
