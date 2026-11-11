@@ -512,4 +512,7 @@ class AppContainer(
      * window (FLAG_SECURE, no Recents snapshot) as it does for private tabs.
      */
     val sensitiveScreens = MutableStateFlow(0)
+
+    /** A password Orbis copied, cleared from the clipboard after a minute (memory only). */
+    val sensitiveClip = com.shibi.orbis.passwords.SensitiveClip()
 }

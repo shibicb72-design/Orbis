@@ -22,6 +22,7 @@ import java.io.File
 import java.io.InputStream
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -107,6 +108,9 @@ class GeckoEngineImpl(
     /** Temps the camera app writes photos into. Wiped with [uploads]: a photo is copied to uploads before Gecko sees it. */
     private val captureFiles = CameraCaptureFiles(appContext.cacheDir)
 
+    /** Private sessions built and not yet closed, popups included. See [recordsLoginUse]. */
+    private val privateSessions = AtomicInteger(0)
+
     /** Gecko asks for and reports logins here; the app store answers through [logins]. Nothing is logged about them. */
     private fun loginStorageDelegate() =
         object : Autocomplete.StorageDelegate {
@@ -120,6 +124,9 @@ class GeckoEngineImpl(
             }
 
             override fun onLoginUsed(login: Autocomplete.LoginEntry, usedFields: Int) {
+                // The delegate is per runtime and is not told which session used the login: while any private session
+                // exists, no use is recorded, so a private tab never leaves a "last used" trace.
+                if (!recordsLoginUse(privateSessions.get())) return
                 login.guid?.let { logins?.used(it) }
             }
         }
@@ -481,7 +488,8 @@ class GeckoEngineImpl(
             newPopupChild = { opener ->
                 buildSession(SessionInit(desktopMode = opener.state.value.desktopMode, isPrivate = opener.isPrivate))
             },
-        )
+            onClosed = { if (init.isPrivate) privateSessions.decrementAndGet() },
+        ).also { if (init.isPrivate) privateSessions.incrementAndGet() }
     }
 
     override fun createContentView(context: Context): View {
@@ -500,6 +508,12 @@ class GeckoEngineImpl(
     private fun requireRuntime(): GeckoRuntime =
         runtime ?: error("GeckoRuntime not warmed up")
 }
+
+/**
+ * Whether Gecko's report that a saved login was used may update its "last used" time: only while no private session
+ * exists. Conservative on purpose: a normal tab's use is not recorded while a private tab is open either.
+ */
+internal fun recordsLoginUse(privateSessions: Int): Boolean = privateSessions <= 0
 
 /**
  * The StorageController.ClearFlags for [GeckoEngineImpl.clearProfileData]: cookies, auth sessions and DOM storage for
@@ -540,6 +554,8 @@ private class GeckoBrowserSession(
     private val sitePolicy: () -> SitePolicy?,
     private val onYoutubeAd: () -> ((YoutubeAdEvent) -> Unit)?,
     private val newPopupChild: (GeckoBrowserSession) -> GeckoBrowserSession,
+    /** Runs once, when this session closes. */
+    private val onClosed: () -> Unit,
 ) : BrowserSession {
     private val _state = MutableStateFlow(SessionState(desktopMode = initialDesktopMode))
     override val state: StateFlow<SessionState> = _state.asStateFlow()
@@ -2413,6 +2429,7 @@ private class GeckoBrowserSession(
         host = null
         runCatching { session.close() }
             .onFailure { debugLog.log("GeckoSession", "close failed: ${it.javaClass.simpleName}") }
+        onClosed()
         discardPrivateUploads()
     }
 
