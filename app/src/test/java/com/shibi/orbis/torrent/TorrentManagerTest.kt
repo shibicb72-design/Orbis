@@ -1039,6 +1039,46 @@ class TorrentManagerTest {
     }
 
     @Test
+    fun theEngineStartsOnTheInstallsListenPort() = runTest {
+        val s = setup(this)
+        s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
+        advanceUntilIdle()
+        val started = s.engine.starts.single()
+        assertEquals(TorrentTestSetup.LISTEN_PORT, started.listenPort)
+        // Local peers is off unless the user turns it on.
+        assertFalse(started.lsd)
+        assertFalse(s.engine.discovery.getValue(s.lastId()).lsd)
+    }
+
+    @Test
+    fun aPrivateTorrentNeverUsesLocalPeersWhateverTheSettingsSay() = runTest {
+        val s = setup(this)
+        s.settings.value = TorrentSettings(lsd = true)
+        s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
+        s.manager.add(TorrentSource.Magnet(magnet), isPrivate = true)
+        advanceUntilIdle()
+        val normal = s.engine.added.single { !it.isPrivate }.id
+        val priv = s.engine.added.single { it.isPrivate }.id
+        assertEquals(TorrentDiscovery(dht = true, pex = true, lsd = true), s.engine.discovery[normal])
+        // DHT and peer exchange follow the settings (a magnet finds its peers through them); local peers never.
+        assertEquals(TorrentDiscovery(dht = true, pex = true, lsd = false), s.engine.discovery[priv])
+
+        // Off and on again, with other changes in between: every change reaches both torrents, none turns local
+        // peers on for the private one.
+        s.settings.value = s.settings.value.copy(lsd = false)
+        advanceUntilIdle()
+        s.settings.value = s.settings.value.copy(lsd = true, dht = false)
+        advanceUntilIdle()
+        s.settings.value = s.settings.value.copy(dht = true, pex = false)
+        advanceUntilIdle()
+        val privateChanges = s.engine.discoveryLog.filter { it.first == priv }.map { it.second }
+        assertEquals(4, privateChanges.size)
+        assertTrue(privateChanges.none { it.lsd })
+        assertEquals(TorrentDiscovery(dht = true, pex = false, lsd = false), s.engine.discovery[priv])
+        assertEquals(TorrentDiscovery(dht = true, pex = false, lsd = true), s.engine.discovery[normal])
+    }
+
+    @Test
     fun withoutWifiOnlyTorrentsRunOnAnyNetwork() = runTest {
         val s = setup(this)
         s.settings.value = TorrentSettings(wifiOnly = false)

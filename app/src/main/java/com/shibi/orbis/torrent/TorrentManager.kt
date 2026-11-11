@@ -76,6 +76,8 @@ class TorrentManager(
     private val log: (String) -> Unit,
     /** Settings > Torrents; every change is applied at once (limits, discovery, Wi-Fi only, seeding). */
     val settings: StateFlow<TorrentSettings>,
+    /** The per-install listen port ([TorrentSettingsStore.listenPort]), read at each engine start. */
+    private val listenPort: () -> Int,
     private val network: TorrentNetwork,
     private val now: () -> Long,
     private val publisher: TorrentPublisher,
@@ -576,7 +578,7 @@ class TorrentManager(
             return
         }
         if (!engineRunning) {
-            engine.start(s.engine())
+            engine.start(s.engine(withContext(io) { listenPort() }))
             engineRunning = true
             appliedSettings = s
         } else if (appliedSettings != s) {
@@ -606,7 +608,7 @@ class TorrentManager(
         }
         val saveDir = File(e.saveDir)
         withContext(io) { saveDir.mkdirs() }
-        val eid = engine.add(source, saveDir, resume)
+        val eid = engine.add(source, saveDir, resume, e.isPrivate)
         val expectsMetadata = source is TorrentSource.TorrentFile || e.hasMetadata
         val a = Attached(eid, expectsMetadata)
         // A magnet without metadata starts fetching by itself.

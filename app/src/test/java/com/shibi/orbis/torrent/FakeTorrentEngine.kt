@@ -9,9 +9,20 @@ import kotlinx.coroutines.flow.update
 
 /** Scripted [TorrentEngine] for JVM tests: records every call; the test plays libtorrent with emitMetadata/advance/finish/fail. */
 class FakeTorrentEngine : TorrentEngine {
-    class Added(val id: EngineId, val source: TorrentSource, val saveDir: File, val resumeData: ByteArray?)
+    class Added(val id: EngineId, val source: TorrentSource, val saveDir: File, val resumeData: ByteArray?, val isPrivate: Boolean)
 
     val added = ArrayList<Added>()
+
+    /** The settings of every start call, in order. */
+    val starts = ArrayList<EngineSettings>()
+
+    /** What each known torrent uses right now, as the real engine applies it (through [TorrentDiscovery.of]). */
+    val discovery = HashMap<EngineId, TorrentDiscovery>()
+
+    /** Every per-torrent discovery change: at add and on each setDiscovery, in order. */
+    val discoveryLog = ArrayList<Pair<EngineId, TorrentDiscovery>>()
+    private var sessionDiscovery = TorrentDiscovery(dht = true, pex = true, lsd = false)
+    private val privateIds = HashSet<EngineId>()
     val calls = ArrayList<String>()
     val running = HashSet<EngineId>()
     val removed = ArrayList<Pair<EngineId, Boolean>>()
@@ -35,6 +46,8 @@ class FakeTorrentEngine : TorrentEngine {
 
     override fun start(settings: EngineSettings) {
         calls += "start"
+        starts += settings
+        sessionDiscovery = TorrentDiscovery(settings.dht, settings.pex, settings.lsd)
         if (!started) startCount++
         started = true
     }
@@ -43,15 +56,19 @@ class FakeTorrentEngine : TorrentEngine {
         calls += "stop"
         started = false
         known.clear()
+        privateIds.clear()
+        discovery.clear()
         running.clear()
         _snapshots.value = emptyMap()
     }
 
-    override fun add(source: TorrentSource, saveDir: File, resumeData: ByteArray?): EngineId {
+    override fun add(source: TorrentSource, saveDir: File, resumeData: ByteArray?, isPrivate: Boolean): EngineId {
         check(started) { "add before start" }
         val id = EngineId(++next)
-        added += Added(id, source, saveDir, resumeData)
+        added += Added(id, source, saveDir, resumeData, isPrivate)
         known += id
+        if (isPrivate) privateIds += id
+        applyDiscovery(id)
         calls += "add ${id.value}"
         return id
     }
@@ -70,6 +87,8 @@ class FakeTorrentEngine : TorrentEngine {
         calls += "remove ${id.value} $deleteFiles"
         removed += id to deleteFiles
         known -= id
+        privateIds -= id
+        discovery -= id
         running -= id
         _snapshots.update { it - id }
     }
@@ -107,6 +126,15 @@ class FakeTorrentEngine : TorrentEngine {
 
     override fun setDiscovery(dht: Boolean, pex: Boolean, lsd: Boolean) {
         calls += "discovery"
+        sessionDiscovery = TorrentDiscovery(dht, pex, lsd)
+        known.sortedBy { it.value }.forEach { applyDiscovery(it) }
+    }
+
+    private fun applyDiscovery(id: EngineId) {
+        val s = sessionDiscovery
+        val d = TorrentDiscovery.of(s.dht, s.pex, s.lsd, isPrivate = id in privateIds)
+        discovery[id] = d
+        discoveryLog += id to d
     }
 
     override fun pauseAll() {

@@ -17,5 +17,4 @@ object TorrentLimits {
 
     /** Resume data is written at most this often while a torrent downloads (and only when it moved). */
     const val CHECKPOINT_INTERVAL_MS = 60_000L
-    const val LISTEN_INTERFACES = "0.0.0.0:6881,[::]:6881"
 }
