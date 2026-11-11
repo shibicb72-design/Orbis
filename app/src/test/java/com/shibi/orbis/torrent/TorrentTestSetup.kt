@@ -57,6 +57,7 @@ class TorrentTestSetup(root: File, scheduler: TestCoroutineScheduler, freeBytes:
             io = StandardTestDispatcher(scheduler),
             log = { logs += it },
             settings = settings,
+            listenPort = { LISTEN_PORT },
             network = network,
             now = { clock },
             publisher =
@@ -89,4 +90,8 @@ class TorrentTestSetup(root: File, scheduler: TestCoroutineScheduler, freeBytes:
     fun entry(id: String): TorrentEntry = manager.entries.value.first { it.id == id }
 
     fun lastId(): EngineId = engine.added.last().id
+
+    companion object {
+        const val LISTEN_PORT = 50123
+    }
 }

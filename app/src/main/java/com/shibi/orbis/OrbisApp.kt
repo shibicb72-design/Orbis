@@ -248,13 +248,14 @@ class OrbisApp : Application() {
             )
         val torrents =
             TorrentManager(
-                engine = Libtorrent4jEngine("Orbis/" + BuildConfig.VERSION_NAME, torrentStore.sessionFile, torrentLog),
+                engine = Libtorrent4jEngine(torrentStore.sessionFile, torrentLog),
                 store = torrentStore,
                 dirs = TorrentDirs(payloadRoot = { getExternalFilesDir("torrents") ?: File(filesDir, "torrents/data") }),
                 scope = appScope,
                 io = Dispatchers.IO,
                 log = torrentLog,
                 settings = torrentSettings.settings,
+                listenPort = torrentSettings::listenPort,
                 network = AndroidTorrentNetwork(this),
                 now = System::currentTimeMillis,
                 publisher =
