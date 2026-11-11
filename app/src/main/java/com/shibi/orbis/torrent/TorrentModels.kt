@@ -79,15 +79,16 @@ data class TorrentSettings(
     val stopSeeding: Boolean = true,
     val dht: Boolean = true,
     val pex: Boolean = true,
-    val lsd: Boolean = true,
+    /** Off by default (OD-2): it tells every device on the network what is being downloaded. */
+    val lsd: Boolean = false,
     /** Bytes per second; 0 is no limit. */
     val downBps: Int = 0,
     val upBps: Int = 0,
     /** Only while [stopSeeding] is off: a seeding torrent stops (and is saved) at this ratio. Null: no limit. */
     val seedRatioLimit: Float? = null,
 ) {
-    fun engine(): EngineSettings =
-        EngineSettings(dht = dht, pex = pex, lsd = lsd, downBps = downBps, upBps = upBps, stopSeeding = stopSeeding)
+    fun engine(listenPort: Int): EngineSettings =
+        EngineSettings(listenPort = listenPort, dht = dht, pex = pex, lsd = lsd, downBps = downBps, upBps = upBps, stopSeeding = stopSeeding)
 
     /** Caps at 0 or more; a ratio limit of null or 0.1..100 with one decimal (0 or less means no limit). */
     fun clamped(): TorrentSettings =

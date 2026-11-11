@@ -20,7 +20,7 @@ Status values: `open` (nothing merged), `partial` (a first step is merged), `fix
 | F-08 | low | Deeply nested JSON on the cast channel can crash the app | `opus/sec2-cast-identity` | open | | |
 | F-09 | low | On Android 10 other apps can read and replace downloads and torrent payloads | `opus/sec2-storage-api29` | open | | |
 | F-10 | low | Debug builds use the production package name and a public signing key | `opus/sec2-debug-appid` | open | | |
-| F-11 | low | Torrent defaults reveal more than needed | `opus/sec2-torrent-exposure` | open | | |
+| F-11 | low | Torrent defaults reveal more than needed | `opus/sec2-torrent-exposure` | open (code in review: no "Orbis" user agent, random listen port per install, local peers off by default and never for private-tab torrents, `ssrf_mitigation` set) | #30 | pending H-D16 (wire check), H-D3, H-D5 |
 | F-12 | low | Calls into another app's provider have no timeout | `opus/sec2-provider-timeouts` | open (fix in #29: 3 s deadline on `getType` and the torrent size query, at most 8 provider threads) | #29 | none needed (no UI; `ProviderDeadlineTest`, `TorrentIntakeReaderTest`) |
 | F-13 | info | Password store hardening | `opus/sec2-passwords` | open | | |
 | F-14 | info | Lock icon follows the URL scheme (HTTPS-only already defaults to all tabs) | `opus/sec2-security-indicator` | open | | |
@@ -33,9 +33,9 @@ Status values: `open` (nothing merged), `partial` (a first step is merged), `fix
 |---|---|---|---|---|---|
 | 1 | `content:` navigation from an imported HTML file (F-05) | `opus/sec2-local-content-gates` | open | #27 | pending H-D1 before and after |
 | 2 | Safe Browsing really active | none (test only) | open | | |
-| 3 | BEP 27 private torrents stay off DHT, PEX and LSD | `opus/sec2-torrent-exposure` | open | | |
+| 3 | BEP 27 private torrents stay off DHT, PEX and LSD | `opus/sec2-torrent-exposure` | open (no code change for BEP 27 itself; LSD is now off by default) | #30 | pending H-D3 |
 | 4 | Nothing is written before approval (hostile torrent names) | none (test only) | open | | |
-| 5 | LAN requests caused by a torrent | `opus/sec2-torrent-exposure` | open | | |
+| 5 | LAN requests caused by a torrent | `opus/sec2-torrent-exposure` | open (`ssrf_mitigation` stated explicitly; it covers loopback only, so LAN trackers and web seeds are what H-D5 checks) | #30 | pending H-D5 |
 | 6 | Tap timing on confirm sheets | `opus/sec2-overlay-tapguard` | open | | |
 | 7 | OpenSSL and libtorrent version strings in the shipped `.so` (F-02) | `opus/sec2-torrent-natives-ship` | open | | |
 | 8 | Reader view on a hostile page | `opus/sec2-reader-scan` | open | | |

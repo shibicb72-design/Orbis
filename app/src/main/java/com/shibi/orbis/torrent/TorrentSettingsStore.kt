@@ -2,6 +2,8 @@ package com.shibi.orbis.torrent
 
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import java.security.SecureRandom
+import java.util.Random
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,12 +50,42 @@ class SharedPreferencesTorrentPrefs(private val prefs: SharedPreferences) : Torr
 /**
  * Settings > Torrents. App-wide (private tabs included) and never written to the torrent index. Every value is clamped
  * when read and when written, so a hand-edited or older file cannot carry a negative cap or a ratio of 0.
+ *
+ * Also keeps the engine's [listenPort], which is not a user setting.
  */
-class TorrentSettingsStore(private val prefs: TorrentPrefs) {
+class TorrentSettingsStore(private val prefs: TorrentPrefs, private val random: Random = SecureRandom()) {
     constructor(shared: SharedPreferences) : this(SharedPreferencesTorrentPrefs(shared))
 
-    private val _settings = MutableStateFlow(read())
+    private val _settings =
+        MutableStateFlow(
+            run {
+                migrate()
+                read()
+            },
+        )
     val settings: StateFlow<TorrentSettings> = _settings.asStateFlow()
+
+    /**
+     * The port torrents listen on: picked at random in [LISTEN_PORT_MIN]..[LISTEN_PORT_MAX] the first time it is
+     * asked for, then the same on every start. A stored value outside the range is replaced by a new one.
+     */
+    @Synchronized
+    fun listenPort(): Int {
+        prefs.int(KEY_LISTEN_PORT)?.takeIf { it in LISTEN_PORT_MIN..LISTEN_PORT_MAX }?.let { return it }
+        val port = LISTEN_PORT_MIN + random.nextInt(LISTEN_PORT_MAX - LISTEN_PORT_MIN + 1)
+        prefs.write(mapOf(KEY_LISTEN_PORT to port))
+        return port
+    }
+
+    /**
+     * Files from before [SCHEMA] stored "Local peers" on (the old default) as soon as any torrent setting changed, so
+     * a stored "on" there is the old default, not a choice: it is dropped and the new default (off) applies. A stored
+     * "off" was a choice and stays.
+     */
+    private fun migrate() {
+        if ((prefs.int(KEY_SCHEMA) ?: 0) >= SCHEMA) return
+        if (prefs.boolean(KEY_LSD) == true) prefs.write(mapOf(KEY_LSD to null, KEY_SCHEMA to SCHEMA))
+    }
 
     /** Applies [block] to the current settings, writes the clamped result and emits it (nothing when unchanged). */
     @Synchronized
@@ -71,6 +103,7 @@ class TorrentSettingsStore(private val prefs: TorrentPrefs) {
                 KEY_LSD to next.lsd,
                 KEY_DOWN_BPS to next.downBps,
                 KEY_UP_BPS to next.upBps,
+                KEY_SCHEMA to SCHEMA,
             ),
         )
         _settings.value = next
@@ -99,5 +132,14 @@ class TorrentSettingsStore(private val prefs: TorrentPrefs) {
         const val KEY_LSD = "lsd"
         const val KEY_DOWN_BPS = "down_bps"
         const val KEY_UP_BPS = "up_bps"
+        const val KEY_LISTEN_PORT = "listen_port"
+
+        /** 2: "Local peers" defaults to off (see [migrate]). Absent: written by an older version. */
+        const val KEY_SCHEMA = "schema"
+        const val SCHEMA = 2
+
+        /** The dynamic (private) port range: no well-known BitTorrent port, nothing that marks the client. */
+        const val LISTEN_PORT_MIN = 49152
+        const val LISTEN_PORT_MAX = 65535
     }
 }
