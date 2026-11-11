@@ -50,3 +50,79 @@ class TorrentNotificationModel(
         }
     }
 }
+
+/**
+ * What the "paused" notification shows (only after a pause from the notification or Android's timeout; a pause from
+ * the list posts nothing). Android-free. A private torrent among them: no name anywhere, a generic title.
+ */
+class TorrentPausedModel(
+    /** The paused torrents, ascending. */
+    val ids: List<String>,
+    val isPrivate: Boolean,
+    /** Android ended the time budget (the text tells the user to tap Resume); false for a pause from the notification. */
+    val byTimeout: Boolean,
+) {
+    val count: Int get() = ids.size
+
+    /** Resume acts on this one id; null resumes every PAUSED(USER|TIMEOUT) torrent. */
+    val resumeId: String? get() = ids.singleOrNull()
+
+    override fun equals(other: Any?): Boolean = other is TorrentPausedModel && ids == other.ids && isPrivate == other.isPrivate && byTimeout == other.byTimeout
+
+    override fun hashCode(): Int = 31 * (31 * ids.hashCode() + isPrivate.hashCode()) + byTimeout.hashCode()
+
+    override fun toString(): String = "TorrentPausedModel(count=$count, private=$isPrivate, timeout=$byTimeout)"
+
+    companion object {
+        /**
+         * Null when none of [pausedIds] is still PAUSED by the user or the timeout (resumed, removed, queued, or gone
+         * with private browsing): then the notification is cancelled.
+         */
+        fun from(entries: List<TorrentEntry>, pausedIds: Set<String>, byTimeout: Boolean): TorrentPausedModel? {
+            val paused =
+                entries.filter {
+                    it.id in pausedIds && it.status == TorrentStatus.PAUSED && (it.pauseReason == PauseReason.USER || it.pauseReason == PauseReason.TIMEOUT)
+                }
+            if (paused.isEmpty()) return null
+            return TorrentPausedModel(paused.map { it.id }.sorted(), paused.any { it.isPrivate }, byTimeout)
+        }
+    }
+}
+
+/** Which title a torrent's result notification gets. A private torrent's never names it. */
+enum class TorrentResultTitle { DONE, FAILED, PRIVATE_DONE, PRIVATE_FAILED }
+
+/** Title and text of the result notification for one torrent; [text] (the name) is null for a private one. */
+class TorrentResultContent(val title: TorrentResultTitle, val text: String?) {
+    // Deliberately no text: a torrent name must not end up in a log line.
+    override fun toString(): String = "TorrentResultContent(title=$title)"
+
+    companion object {
+        fun from(entry: TorrentEntry): TorrentResultContent {
+            val done = entry.status == TorrentStatus.COMPLETED
+            if (entry.isPrivate) return TorrentResultContent(if (done) TorrentResultTitle.PRIVATE_DONE else TorrentResultTitle.PRIVATE_FAILED, null)
+            return TorrentResultContent(if (done) TorrentResultTitle.DONE else TorrentResultTitle.FAILED, entry.displayName)
+        }
+    }
+}
+
+/**
+ * Finds torrents that settled (COMPLETED or FAILED) since the previous snapshot, each once per settling. Only an id
+ * that was in the previous snapshot and not settled there can be reported: the list as restored at process start, and
+ * an entry that appears already failed (a refused link), report nothing.
+ */
+class TorrentSettledTracker {
+    private var previous: Map<String, TorrentStatus>? = null
+
+    fun update(entries: List<TorrentEntry>): List<TorrentEntry> {
+        val before = previous
+        previous = entries.associate { it.id to it.status }
+        if (before == null) return emptyList()
+        return entries.filter {
+            val was = before[it.id]
+            it.status.isSettled && was != null && !was.isSettled
+        }
+    }
+
+    private val TorrentStatus.isSettled: Boolean get() = this == TorrentStatus.COMPLETED || this == TorrentStatus.FAILED
+}

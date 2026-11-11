@@ -253,6 +253,15 @@ class Libtorrent4jEngine(
             emit(TorrentEvent.Error(id, TorrentErrorKind.INVALID_SOURCE))
             return
         }
+        val bytes =
+            runCatching {
+                val p = add_torrent_params().apply { set_ti(ti.swig()) }
+                Vectors.byte_vector2bytes(libtorrent.write_torrent_file_buf_ex(p))
+            }.getOrNull()
+        emit(TorrentEvent.MetadataReceived(id, filesOf(ti), bytes))
+    }
+
+    private fun filesOf(ti: TorrentInfo): TorrentFiles {
         val fs: FileStorage = ti.files()
         val files =
             (0 until fs.numFiles()).map { i ->
@@ -264,13 +273,15 @@ class Libtorrent4jEngine(
                     isPadFile = fs.padFileAt(i),
                 )
             }
-        val bytes =
-            runCatching {
-                val p = add_torrent_params().apply { set_ti(ti.swig()) }
-                Vectors.byte_vector2bytes(libtorrent.write_torrent_file_buf_ex(p))
-            }.getOrNull()
-        emit(TorrentEvent.MetadataReceived(id, TorrentFiles(ti.name() ?: "", ti.totalSize(), ti.numPieces(), files), bytes))
+        return TorrentFiles(ti.name() ?: "", ti.totalSize(), ti.numPieces(), files)
     }
+
+    override suspend fun readFiles(torrentFile: ByteArray): TorrentFiles? =
+        withContext(dispatcher) {
+            runCatching { TorrentInfo.bdecode(torrentFile).takeIf { it.isValid }?.let { filesOf(it) } }
+                .onFailure { log("stored torrent unreadable: ${it.javaClass.simpleName}") }
+                .getOrNull()
+        }
 
     override fun pause(id: EngineId) {
         post { handles[id.value]?.pause() }
@@ -305,12 +316,22 @@ class Libtorrent4jEngine(
             // libtorrent posts "finished" only on a not-finished -> finished change, and a torrent with nothing wanted
             // already counts as finished. One that is complete on disk (restored after its last piece) would never
             // get the alert, so it is reported here.
-            val st = h.status()
-            if (st.hasMetadata() && st.totalWanted() > 0 && st.totalWantedDone() >= st.totalWanted()) {
+            if (isComplete(h)) {
                 log("complete at approval ${id.value}")
                 emit(TorrentEvent.Finished(id))
             }
         }
+    }
+
+    /**
+     * Every wanted byte is on disk. A torrent made only of empty files wants nothing at all (totalWanted 0) and is
+     * complete as soon as it has metadata; for any other torrent 0 wanted means "not approved yet", never done.
+     */
+    private fun isComplete(h: TorrentHandle): Boolean {
+        val st = h.status()
+        if (!st.hasMetadata()) return false
+        if (st.totalWanted() > 0) return st.totalWantedDone() >= st.totalWanted()
+        return runCatching { h.torrentFile()?.totalSize() == 0L }.getOrDefault(false)
     }
 
     override suspend fun saveResumeData(id: EngineId): ByteArray? {
@@ -414,9 +435,8 @@ class Libtorrent4jEngine(
                     // libtorrent also calls a torrent "finished" while no file is wanted yet (before approveFiles), and
                     // that alert can arrive after the approval. Only a torrent with every file wanted and every wanted
                     // byte on disk is really done.
-                    val st = h.status()
                     val allWanted = h.filePriorities().none { it == Priority.IGNORE }
-                    if (allWanted && st.hasMetadata() && st.totalWanted() > 0 && st.totalWantedDone() >= st.totalWanted()) {
+                    if (allWanted && isComplete(h)) {
                         emit(TorrentEvent.Finished(id))
                     } else {
                         log("finished alert ignored ${id.value}")

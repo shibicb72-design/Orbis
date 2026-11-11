@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Torrent notification (the torrent screens come in a later change). -->
+    <!-- Torrent notifications. -->
     <string name="torrents_notif_channel_name">Torrents</string>
     <string name="torrents_notif_channel_description">Progreso de las descargas de torrents</string>
     <string name="torrents_notif_starting">Iniciando torrent</string>
@@ -18,4 +18,45 @@
     <string name="torrents_pause">Pausar</string>
     <string name="torrents_pause_all">Pausar todo</string>
     <string name="torrents_cancel">Cancelar</string>
+    <string name="torrents_resume">Reanudar</string>
+    <string name="torrents_notif_paused">Torrent en pausa</string>
+    <string name="torrents_notif_paused_many">Torrents en pausa (%d)</string>
+    <string name="torrents_notif_private_paused">Descarga privada en pausa</string>
+    <string name="torrents_notif_paused_timeout">Android lo ha pausado. Toca Reanudar para continuar.</string>
+    <string name="torrents_notif_public_paused">Descargas en pausa</string>
+
+    <!-- Torrent rows in the Downloads list. -->
+    <string name="torrents_private_title">Descarga privada</string>
+    <string name="torrents_state_fetching">Obteniendo datos del torrent</string>
+    <string name="torrents_state_downloading">Descargando</string>
+    <string name="torrents_state_checking">Comprobando archivos</string>
+    <string name="torrents_state_seeding">Compartiendo</string>
+    <string name="torrents_state_paused">En pausa</string>
+    <string name="torrents_state_queued">Esperando un hueco libre</string>
+    <string name="torrents_state_paused_timeout">Pausado por Android, toca Reanudar</string>
+    <string name="torrents_state_waiting_wifi">Esperando Wi-Fi</string>
+    <string name="torrents_state_publishing">Guardando en Descargas</string>
+    <string name="torrents_state_saved">Guardado en Download/Orbis/%1$s</string>
+    <string name="torrents_state_saved_private">Guardado en tus Descargas</string>
+    <string name="torrents_failed_no_space">No hay espacio suficiente</string>
+    <string name="torrents_failed_file">No se pudieron escribir los archivos</string>
+    <string name="torrents_failed_load">No se pudo cargar el torrent</string>
+    <string name="torrents_failed_unsafe">Este torrent se rechazó por seguridad</string>
+    <string name="torrents_failed_missing">No se pudo restaurar el torrent</string>
+    <string name="torrents_failed_publish">No se pudo guardar en Descargas</string>
+    <string name="torrents_stats_speed">%1$s/s</string>
+    <plurals name="torrents_stats_peers">
+        <item quantity="one">%d par</item>
+        <item quantity="many">%d pares</item>
+        <item quantity="other">%d pares</item>
+    </plurals>
+    <string name="torrents_stats_eta">quedan %1$s</string>
+    <string name="torrents_retry">Reintentar</string>
+    <string name="torrents_remove">Quitar</string>
+    <string name="torrents_remove_title">¿Quitar este torrent?</string>
+    <string name="torrents_remove_body">Se borrarán los %1$s descargados hasta ahora.</string>
+    <string name="torrents_remove_body_nothing">Aún no se ha descargado nada.</string>
+    <string name="torrents_remove_done_title">¿Quitar de la lista?</string>
+    <string name="torrents_remove_done_body">Los archivos se quedan en Download/Orbis/%1$s.</string>
+    <string name="torrents_remove_done_body_private">Los archivos guardados se quedan en tus Descargas.</string>
 </resources>

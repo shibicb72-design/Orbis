@@ -93,6 +93,14 @@ class FakeTorrentEngine : TorrentEngine {
         return if (id in known) resumeBytes(id) else null
     }
 
+    /** What readFiles returns for any stored .torrent (the fake does not parse bencode). */
+    var parsedFiles: TorrentFiles? = null
+
+    override suspend fun readFiles(torrentFile: ByteArray): TorrentFiles? {
+        calls += "readFiles"
+        return parsedFiles
+    }
+
     override fun setLimits(downBps: Int, upBps: Int) {
         calls += "limits"
     }
@@ -117,9 +125,17 @@ class FakeTorrentEngine : TorrentEngine {
         check(_events.tryEmit(TorrentEvent.MetadataReceived(id, files, torrentFile)))
     }
 
-    fun advance(id: EngineId, done: Long, total: Long, state: EngineState = EngineState.DOWNLOADING, downBps: Long = 1000) {
+    fun advance(
+        id: EngineId,
+        done: Long,
+        total: Long,
+        state: EngineState = EngineState.DOWNLOADING,
+        downBps: Long = 1000,
+        peers: Int = 3,
+        etaSeconds: Long? = null,
+    ) {
         _snapshots.update {
-            it + (id to TorrentSnapshot(state, total, done, downBps, 0, 3, 1, null, 0f, hasMetadata = total > 0))
+            it + (id to TorrentSnapshot(state, total, done, downBps, 0, peers, 1, etaSeconds, 0f, hasMetadata = total > 0))
         }
     }
 

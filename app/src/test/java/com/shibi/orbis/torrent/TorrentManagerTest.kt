@@ -1,12 +1,8 @@
 package com.shibi.orbis.torrent
 
 import java.io.File
-import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -35,46 +31,8 @@ class TorrentManagerTest {
     private val secretName = "SecretName"
     private val magnet = "magnet:?xt=urn:btih:$hash&dn=$secretName&tr=udp%3A%2F%2Ftracker.example.org%3A1337"
 
-    private class FakeNetwork : TorrentNetwork {
-        override val kind = MutableStateFlow(NetworkKind.WIFI_OR_ETHERNET)
-    }
-
-    private class Published(val content: String, val dir: String, val name: String)
-
-    private inner class Setup(scope: TestScope, freeBytes: Long = Long.MAX_VALUE / 4) {
-        val engine = FakeTorrentEngine()
-        val stateDir = File(tmp.root, "state")
-        val payloadRoot = File(tmp.root, "payload")
-        val store = TorrentStore(stateDir)
-        val logs = CopyOnWriteArrayList<String>()
-        val network = FakeNetwork()
-        val settings = MutableStateFlow(TorrentSettings())
-        val published = CopyOnWriteArrayList<Published>()
-        var publishOk = true
-        var clock = 1_000L
-        // Not backgroundScope: advanceUntilIdle does not wait for background work. Cancelled in tearDown.
-        val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scope.testScheduler)).also { scopes += it }
-        val manager =
-            TorrentManager(
-                engine = engine,
-                store = store,
-                dirs = TorrentDirs(payloadRoot = { payloadRoot }, freeBytes = { freeBytes }),
-                scope = this.scope,
-                io = StandardTestDispatcher(scope.testScheduler),
-                log = { logs += it },
-                settings = settings,
-                network = network,
-                now = { clock },
-                publisher = { file, dir, name ->
-                    published += Published(file.readText(), dir, name)
-                    publishOk
-                },
-            )
-
-        fun only(): TorrentEntry = manager.entries.value.single()
-
-        fun lastId(): EngineId = engine.added.last().id
-    }
+    private fun setup(scope: TestScope, freeBytes: Long = Long.MAX_VALUE / 4) =
+        TorrentTestSetup(tmp.root, scope.testScheduler, freeBytes).also { scopes += it.scope }
 
     private fun files(name: String = secretName, vararg paths: Pair<List<String>, Long>) =
         TorrentFiles(name, paths.sumOf { it.second }, 4, paths.map { TorrentFileEntry(it.first, it.second) })
@@ -90,7 +48,7 @@ class TorrentManagerTest {
 
     @Test
     fun addFetchesMetadataDownloadsAndPublishes() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
         advanceUntilIdle()
         assertEquals(32, id.length)
@@ -135,7 +93,7 @@ class TorrentManagerTest {
 
     @Test
     fun finishedBeforeTheFileListIsCheckedIsIgnored() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
         advanceUntilIdle()
         // A magnet runs on its own until its metadata arrives (no stop_when_ready, which kept it paused).
@@ -149,7 +107,7 @@ class TorrentManagerTest {
 
     @Test
     fun aTorrentThatFinishesWhileBeingPausedIsPublished() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         val paused = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
         s.clock += 1
         s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
@@ -171,7 +129,7 @@ class TorrentManagerTest {
 
     @Test
     fun aTorrentCompleteOnDiskFinishesWhenResumed() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
         advanceUntilIdle()
         s.engine.emitMetadata(s.lastId(), sintelFiles)
@@ -194,7 +152,7 @@ class TorrentManagerTest {
 
     @Test
     fun missingOrShortFilesAreNeverPublished() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
         advanceUntilIdle()
         s.engine.emitMetadata(s.lastId(), sintelFiles)
@@ -211,7 +169,7 @@ class TorrentManagerTest {
 
     @Test
     fun publishFailureKeepsThePayload() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         s.publishOk = false
         s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
         advanceUntilIdle()
@@ -227,7 +185,7 @@ class TorrentManagerTest {
 
     @Test
     fun pauseSavesResumeDataAndResumeReAddsFromIt() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
         advanceUntilIdle()
         val eid = s.lastId()
@@ -259,7 +217,7 @@ class TorrentManagerTest {
 
     @Test
     fun removeWithFilesDeletesThePayload() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
         advanceUntilIdle()
         val eid = s.lastId()
@@ -279,7 +237,7 @@ class TorrentManagerTest {
 
     @Test
     fun removeWithoutFilesKeepsThePayload() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
         advanceUntilIdle()
         val eid = s.lastId()
@@ -298,7 +256,7 @@ class TorrentManagerTest {
 
     @Test
     fun restoreReAddsDownloadingEntriesWithTheirResumeData() = runTest {
-        val first = Setup(this)
+        val first = setup(this)
         val running = first.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
         first.clock = 2_000L
         val paused = first.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
@@ -313,7 +271,7 @@ class TorrentManagerTest {
         advanceUntilIdle()
 
         // A new process: same files, a fresh engine.
-        val s = Setup(this)
+        val s = setup(this)
         assertTrue(s.manager.entries.value.isEmpty())
         s.manager.restore()
         advanceUntilIdle()
@@ -329,7 +287,7 @@ class TorrentManagerTest {
 
     @Test
     fun restoreWithAnEmptyListNeverStartsTheEngine() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         s.manager.restore()
         advanceUntilIdle()
         assertEquals(0, s.engine.startCount)
@@ -338,7 +296,7 @@ class TorrentManagerTest {
 
     @Test
     fun corruptIndexIsSetAside() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         s.stateDir.mkdirs()
         File(s.stateDir, "index.json").writeText("{ not json")
         s.manager.restore()
@@ -350,7 +308,7 @@ class TorrentManagerTest {
 
     @Test
     fun privateTorrentWritesNothingAndLeavesWithPrivateBrowsing() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = true)!!
         advanceUntilIdle()
         val eid = s.lastId()
@@ -383,7 +341,7 @@ class TorrentManagerTest {
 
     @Test
     fun privateLeftoversOfADeadProcessAreDeletedOnRestore() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         val leftover = File(s.payloadRoot, "private/0123456789abcdef0123456789abcdef/x")
         leftover.mkdirs()
         File(leftover, "part").writeText("x")
@@ -394,7 +352,7 @@ class TorrentManagerTest {
 
     @Test
     fun wifiGateHoldsTorrentsUntilWifiReturns() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         s.network.kind.value = NetworkKind.OTHER
         s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
         advanceUntilIdle()
@@ -421,7 +379,7 @@ class TorrentManagerTest {
 
     @Test
     fun userPauseIsNotUndoneByWifiComingBack() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
         advanceUntilIdle()
         s.engine.emitMetadata(s.lastId(), sintelFiles)
@@ -439,7 +397,7 @@ class TorrentManagerTest {
 
     @Test
     fun unsafeMetadataFailsAndDeletesEverything() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
         advanceUntilIdle()
         val eid = s.lastId()
@@ -454,7 +412,7 @@ class TorrentManagerTest {
 
     @Test
     fun unsafeNamesAreRenamedBeforeDownloading() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
         advanceUntilIdle()
         val eid = s.lastId()
@@ -466,7 +424,7 @@ class TorrentManagerTest {
 
     @Test
     fun notEnoughSpaceFails() = runTest {
-        val s = Setup(this, freeBytes = 150L * 1024 * 1024)
+        val s = setup(this, freeBytes = 150L * 1024 * 1024)
         s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
         advanceUntilIdle()
         s.engine.emitMetadata(s.lastId(), files(secretName, listOf("big.bin") to 10L))
@@ -476,7 +434,7 @@ class TorrentManagerTest {
 
     @Test
     fun fileErrorFailsTheEntryButKeepsThePartialDownload() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
         advanceUntilIdle()
         val eid = s.lastId()
@@ -496,7 +454,7 @@ class TorrentManagerTest {
 
     @Test
     fun removingAPayloadNeverFollowsASymlink() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
         advanceUntilIdle()
         val outside = File(tmp.root, "outside").apply { mkdirs() }
@@ -515,7 +473,7 @@ class TorrentManagerTest {
 
     @Test
     fun oversizedSourceIsRefusedBeforeTheEngine() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         s.manager.add(TorrentSource.Magnet("magnet:?xt=urn:btih:$hash&dn=" + "x".repeat(TorrentLimits.MAX_MAGNET_CHARS)), isPrivate = false)
         advanceUntilIdle()
         assertEquals(TorrentStatus.FAILED, s.only().status)
@@ -525,7 +483,7 @@ class TorrentManagerTest {
 
     @Test
     fun atMostFiveRunAndTheRestQueue() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         val ids =
             (1..6).map {
                 s.clock += 1
@@ -546,7 +504,7 @@ class TorrentManagerTest {
 
     @Test
     fun timeoutSavesAndPausesEverything() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
         advanceUntilIdle()
         s.engine.emitMetadata(s.lastId(), sintelFiles)
@@ -562,7 +520,7 @@ class TorrentManagerTest {
 
     @Test
     fun checkpointEveryMinuteWhileDownloading() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
         advanceUntilIdle()
         val eid = s.lastId()
@@ -576,9 +534,169 @@ class TorrentManagerTest {
         assertEquals(3L, s.store.load().entries.single().doneBytes)
     }
 
+    /** Added, metadata checked, payload written and finished: the publish ran once. */
+    private fun TestScope.finishedTorrent(s: TorrentTestSetup): String {
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
+        advanceUntilIdle()
+        s.engine.emitMetadata(s.lastId(), sintelFiles)
+        advanceUntilIdle()
+        writePayload(s.entry(id))
+        s.engine.finish(s.lastId())
+        advanceUntilIdle()
+        return id
+    }
+
+    @Test
+    fun retryAfterPublishFailedRepublishesAndCompletes() = runTest {
+        val s = setup(this)
+        s.publishOk = false
+        val id = finishedTorrent(s)
+        assertEquals(TorrentErrorKind.PUBLISH_FAILED, s.only().errorKind)
+        s.publishOk = true
+        s.manager.retry(id)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.COMPLETED, s.only().status)
+        assertNull(s.only().errorKind)
+        assertEquals(setOf("movie.mp4", "en.srt"), s.published.map { it.name }.toSet())
+        assertFalse(File(s.only().saveDir).exists())
+    }
+
+    @Test
+    fun retryAfterARestartRebuildsThePlanFromTheStoredTorrent() = runTest {
+        val first = setup(this)
+        first.publishOk = false
+        val id = finishedTorrent(first)
+        assertNotNull(first.store.readTorrent(id))
+
+        val s = setup(this)
+        s.engine.parsedFiles = sintelFiles
+        s.manager.restore()
+        advanceUntilIdle()
+        assertEquals(TorrentErrorKind.PUBLISH_FAILED, s.only().errorKind)
+        s.manager.retry(id)
+        advanceUntilIdle()
+        assertTrue("readFiles" in s.engine.calls)
+        assertEquals(TorrentStatus.COMPLETED, s.only().status)
+        assertEquals(setOf("Orbis/$secretName" to "movie.mp4", "Orbis/$secretName/sub" to "en.srt"), s.published.map { it.dir to it.name }.toSet())
+    }
+
+    @Test
+    fun retryAfterFileErrorReAddsWithResumeData() = runTest {
+        val s = setup(this)
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
+        advanceUntilIdle()
+        s.engine.emitMetadata(s.lastId(), sintelFiles)
+        advanceUntilIdle()
+        s.engine.resumeBytes = { "before-error".toByteArray() }
+        s.engine.fail(s.lastId(), TorrentErrorKind.FILE_ERROR)
+        advanceUntilIdle()
+        assertFalse(s.engine.started)
+        val addsBefore = s.engine.added.size
+
+        s.manager.retry(id)
+        advanceUntilIdle()
+        assertEquals(addsBefore + 1, s.engine.added.size)
+        val again = s.engine.added.last()
+        assertArrayEquals("before-error".toByteArray(), again.resumeData)
+        assertTrue(again.source is TorrentSource.TorrentFile)
+        assertEquals(TorrentStatus.DOWNLOADING, s.only().status)
+        assertNull(s.only().errorKind)
+        s.engine.emitMetadata(again.id, sintelFiles)
+        advanceUntilIdle()
+        assertTrue(again.id in s.engine.running)
+    }
+
+    @Test
+    fun retryDoesNothingForAFailureWithNothingLeft() = runTest {
+        val s = setup(this)
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
+        advanceUntilIdle()
+        s.engine.emitMetadata(s.lastId(), files(secretName, listOf(secretName, "..", "evil.sh") to 1L))
+        advanceUntilIdle()
+        val adds = s.engine.added.size
+        s.manager.retry(id)
+        advanceUntilIdle()
+        assertEquals(TorrentErrorKind.UNSAFE_METADATA, s.only().errorKind)
+        assertEquals(adds, s.engine.added.size)
+    }
+
+    @Test
+    fun aFailedPublishDeletesTheCopiesOfThatAttempt() = runTest {
+        val s = setup(this)
+        s.failPublishAt = 2
+        val id = finishedTorrent(s)
+        assertEquals(TorrentStatus.FAILED, s.only().status)
+        assertEquals(TorrentErrorKind.PUBLISH_FAILED, s.only().errorKind)
+        val first = s.published.single()
+        assertEquals(listOf(first.handle), s.unpublished)
+        assertTrue("payload kept", File(s.only().saveDir, "$secretName/movie.mp4").isFile)
+
+        // The retry starts clean and keeps what it copies.
+        s.manager.retry(id)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.COMPLETED, s.only().status)
+        assertEquals(listOf(first.handle), s.unpublished)
+    }
+
+    @Test
+    fun aTorrentOfOnlyEmptyFilesCompletes() = runTest {
+        val s = setup(this)
+        s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
+        advanceUntilIdle()
+        val eid = s.lastId()
+        s.engine.completeOnApproval += eid
+        s.engine.emitMetadata(eid, files(secretName, listOf(secretName, "a.txt") to 0L, listOf(secretName, "b.txt") to 0L))
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.COMPLETED, s.only().status)
+        assertEquals(setOf("a.txt", "b.txt"), s.published.map { it.name }.toSet())
+        assertTrue(s.published.all { it.content.isEmpty() && it.dir == "Orbis/$secretName" })
+    }
+
+    @Test
+    fun orphanPayloadsAreReapedAtRestoreAndForeignFoldersStay() = runTest {
+        val s = setup(this)
+        val orphan = File(s.payloadRoot, "0123456789abcdef0123456789abcdef/x").apply { mkdirs() }
+        File(orphan, "part").writeText("x")
+        val keep = File(s.payloadRoot, "keep").apply { mkdirs() }
+        File(keep, "mine.txt").writeText("mine")
+        s.manager.restore()
+        advanceUntilIdle()
+        assertFalse(orphan.parentFile!!.exists())
+        assertTrue(File(keep, "mine.txt").isFile)
+    }
+
+    @Test
+    fun aListedTorrentsPayloadIsNotReaped() = runTest {
+        val first = setup(this)
+        val id = first.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
+        advanceUntilIdle()
+        first.engine.emitMetadata(first.lastId(), sintelFiles)
+        advanceUntilIdle()
+        writePayload(first.entry(id))
+        first.manager.pause(id)
+        advanceUntilIdle()
+
+        val s = setup(this)
+        s.manager.restore()
+        advanceUntilIdle()
+        assertTrue(File(s.entry(id).saveDir, "$secretName/movie.mp4").isFile)
+    }
+
+    @Test
+    fun forgetPrivateReturnsTheIdsThatLeave() = runTest {
+        val s = setup(this)
+        val normal = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
+        val priv = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = true)!!
+        advanceUntilIdle()
+        assertEquals(listOf(priv), s.manager.forgetPrivate())
+        advanceUntilIdle()
+        assertEquals(listOf(normal), s.manager.entries.value.map { it.id })
+        assertEquals(emptyList<String>(), s.manager.forgetPrivate())
+    }
+
     @Test
     fun logsCarryStatusOnly() = runTest {
-        val s = Setup(this)
+        val s = setup(this)
         val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
         val priv = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = true)!!
         advanceUntilIdle()
@@ -598,6 +716,22 @@ class TorrentManagerTest {
         s.manager.remove(priv, deleteFiles = true)
         s.manager.forgetPrivate()
         advanceUntilIdle()
+        // A failed publish rolled back, then retried.
+        s.failPublishAt = s.published.size + 2
+        s.clock += 1
+        val again = finishedTorrent(s)
+        s.manager.retry(again)
+        advanceUntilIdle()
+        // Reaping at the next start.
+        File(s.payloadRoot, "0123456789abcdef0123456789abcdef").mkdirs()
+        File(s.payloadRoot, "keep").mkdirs()
+        val next = TorrentTestSetup(tmp.root, testScheduler).also { scopes += it.scope }
+        next.manager.restore()
+        advanceUntilIdle()
+        assertTrue(s.logs.any { it.startsWith("retry") })
+        assertTrue(s.logs.any { it.startsWith("publish rolled back") })
+        assertTrue(next.logs.any { it.startsWith("orphan payloads reaped") })
+        s.logs += next.logs
 
         assertTrue(s.logs.isNotEmpty())
         val hex40 = Regex("[0-9a-fA-F]{40}")

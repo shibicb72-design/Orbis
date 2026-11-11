@@ -1,5 +1,6 @@
 package com.shibi.orbis.downloads
 
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -25,5 +26,22 @@ class PublicDownloadsTest {
         assertEquals("Download", publicRelativePath(""))
         assertEquals("Download/Orbis/Sintel", publicRelativePath("Orbis/Sintel"))
         assertEquals("Download/Orbis/Sintel/subs", publicRelativePath("/Orbis/Sintel/subs/"))
+    }
+
+    @Test
+    fun theFolderAndPackageAreBoundArgumentsNeverPartOfTheSql() {
+        val sel = publishedSelection("Download/Orbis/Sintel", "com.shibi.orbis")
+        assertEquals("relative_path LIKE ? ESCAPE '\\' AND owner_package_name = ?", sel.selection)
+        assertArrayEquals(arrayOf("Download/Orbis/Sintel/%", "com.shibi.orbis"), sel.args)
+        // A trailing slash makes no difference.
+        assertArrayEquals(sel.args, publishedSelection("Download/Orbis/Sintel/", "com.shibi.orbis").args)
+    }
+
+    @Test
+    fun likeWildcardsInANameMatchOnlyThemselves() {
+        val sel = publishedSelection("Download/Orbis/50%_off' OR 1=1 --", "p")
+        assertEquals("Download/Orbis/50\\%\\_off' OR 1=1 --/%", sel.args[0])
+        assertEquals(sel.selection, publishedSelection("Download/Orbis/x", "p").selection)
+        assertEquals("Download/Orbis/a\\\\b/%", publishedSelection("Download/Orbis/a\\b", "p").args[0])
     }
 }

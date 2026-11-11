@@ -1,5 +1,6 @@
 package com.shibi.orbis.ui.downloads
 
+import android.text.format.DateUtils
 import android.text.format.Formatter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -51,23 +52,64 @@ import com.shibi.orbis.downloads.DownloadEntry
 import com.shibi.orbis.downloads.DownloadIntents
 import com.shibi.orbis.downloads.DownloadManager
 import com.shibi.orbis.downloads.DownloadStatus
+import com.shibi.orbis.torrent.TorrentEntry
+import com.shibi.orbis.torrent.TorrentErrorKind
+import com.shibi.orbis.torrent.TorrentManager
+import com.shibi.orbis.torrent.TorrentStatus
 import com.shibi.orbis.ui.OrbisEmptyState
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
+/** One row of the merged list: a file download or a torrent. Keys never collide ("d:" and "t:" prefixes). */
+private sealed interface ListRow {
+    val key: String
+    val time: Long
+
+    class File(val entry: DownloadEntry) : ListRow {
+        override val key get() = "d:" + entry.id
+        override val time get() = entry.startedAt
+    }
+
+    class Torrent(val entry: TorrentEntry, val model: TorrentRowModel) : ListRow {
+        override val key get() = "t:" + entry.id
+        override val time get() = entry.addedAt
+    }
+}
+
+/**
+ * File downloads and torrents in one list, newest first. [torrents] is null where there are none (screen tests,
+ * a Gecko child process). [log] gets status lines only (see TorrentLog).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DownloadsScreen(manager: DownloadManager, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun DownloadsScreen(
+    manager: DownloadManager,
+    torrents: TorrentManager?,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    log: (String) -> Unit = {},
+) {
     val entries by manager.entries.collectAsStateWithLifecycle()
+    val noTorrents = remember { MutableStateFlow<List<TorrentEntry>>(emptyList()) }
+    val torrentEntries by (torrents?.entries ?: noTorrents).collectAsStateWithLifecycle()
+    val rows =
+        remember(entries, torrentEntries) {
+            val files = entries.map { ListRow.File(it) }
+            val tors = torrentEntries.mapNotNull { e -> TorrentRowModel.from(e)?.let { ListRow.Torrent(e, it) } }
+            (files + tors).sortedByDescending { it.time }
+        }
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var pendingDelete by remember { mutableStateOf<DownloadEntry?>(null) }
+    var pendingRemove by remember { mutableStateOf<TorrentEntry?>(null) }
 
     val chooserOpen = stringResource(R.string.downloads_open_chooser)
     val chooserShare = stringResource(R.string.downloads_share_chooser)
     val msgMissing = stringResource(R.string.downloads_file_missing)
     val msgNoApp = stringResource(R.string.downloads_no_app)
     val msgFailed = stringResource(R.string.downloads_action_failed)
+    val msgSavedPrivate = stringResource(R.string.torrents_state_saved_private)
 
     fun report(result: DownloadIntents.Result) {
         val message =
@@ -105,7 +147,7 @@ fun DownloadsScreen(manager: DownloadManager, onBack: () -> Unit, modifier: Modi
             )
         },
     ) { padding ->
-        if (entries.isEmpty()) {
+        if (rows.isEmpty()) {
             OrbisEmptyState(stringResource(R.string.downloads_empty), Icons.Filled.Download, Modifier.padding(padding))
         } else {
             LazyColumn(
@@ -113,7 +155,30 @@ fun DownloadsScreen(manager: DownloadManager, onBack: () -> Unit, modifier: Modi
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(entries, key = { it.id }) { entry ->
+                items(rows, key = { it.key }) { row ->
+                    if (row is ListRow.Torrent) {
+                        val t = torrents ?: return@items
+                        val entry = row.entry
+                        val savedIn = if (entry.isPrivate) msgSavedPrivate else stringResource(R.string.torrents_state_saved, entry.displayName)
+                        TorrentRow(
+                            model = row.model,
+                            onPause = { t.pause(entry.id) },
+                            onResume = { t.resume(entry.id) },
+                            onRetry = { t.retry(entry.id) },
+                            onOpen = {
+                                scope.launch {
+                                    val result =
+                                        DownloadIntents.openPublished(context, entry, chooserOpen, log) {
+                                            scope.launch { snackbar.showSnackbar(savedIn) }
+                                        }
+                                    report(result)
+                                }
+                            },
+                            onRemove = { pendingRemove = entry },
+                        )
+                        return@items
+                    }
+                    val entry = (row as ListRow.File).entry
                     DownloadRow(
                         entry = entry,
                         onCancel = { manager.cancel(entry.id) },
@@ -157,6 +222,182 @@ fun DownloadsScreen(manager: DownloadManager, onBack: () -> Unit, modifier: Modi
             },
         )
     }
+
+    pendingRemove?.let { entry ->
+        RemoveTorrentDialog(
+            entry = entry,
+            onRemove = { deleteFiles ->
+                torrents?.remove(entry.id, deleteFiles)
+                pendingRemove = null
+            },
+            onDismiss = { pendingRemove = null },
+        )
+    }
+}
+
+/**
+ * An unfinished torrent has no usable files outside the app (they are published only when it finishes), so removing
+ * it deletes what was downloaded. A completed one only leaves the list: its files stay in Download/Orbis/<name>.
+ */
+@Composable
+private fun RemoveTorrentDialog(entry: TorrentEntry, onRemove: (deleteFiles: Boolean) -> Unit, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    val completed = entry.status == TorrentStatus.COMPLETED
+    val title = stringResource(if (completed) R.string.torrents_remove_done_title else R.string.torrents_remove_title)
+    val body =
+        when {
+            completed && entry.isPrivate -> stringResource(R.string.torrents_remove_done_body_private)
+            completed -> stringResource(R.string.torrents_remove_done_body, entry.displayName)
+            entry.doneBytes <= 0 -> stringResource(R.string.torrents_remove_body_nothing)
+            else -> stringResource(R.string.torrents_remove_body, Formatter.formatShortFileSize(context, entry.doneBytes))
+        }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        titleContentColor = onSurface,
+        textContentColor = onSurface,
+        title = { Text(title) },
+        text = { Text(body) },
+        confirmButton = {
+            TextButton(
+                onClick = { onRemove(!completed) },
+                colors = ButtonDefaults.textButtonColors(contentColor = onSurface),
+            ) { Text(stringResource(R.string.torrents_remove)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, colors = ButtonDefaults.textButtonColors(contentColor = onSurface)) {
+                Text(stringResource(R.string.torrents_cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun TorrentRow(
+    model: TorrentRowModel,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onRetry: () -> Unit,
+    onOpen: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val context = LocalContext.current
+    val colors = MaterialTheme.colorScheme
+    // Same neutral actions as a file row: the name and progress carry the hierarchy.
+    val textButton = ButtonDefaults.textButtonColors(contentColor = colors.onSurface)
+    val iconButton = IconButtonDefaults.iconButtonColors(contentColor = colors.onSurface)
+    val secondary = colors.onSurface.copy(alpha = 0.8f)
+    val failed = model.state is RowState.Failed
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = colors.surface,
+        contentColor = colors.onSurface,
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                model.title ?: stringResource(R.string.torrents_private_title),
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                stateText(model),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (failed) colors.error else secondary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val percent = model.percent
+            if (model.state != RowState.Completed && !failed) {
+                if (percent != null) {
+                    LinearProgressIndicator(
+                        progress = { percent / 100f },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = colors.primary,
+                        trackColor = colors.onSurface.copy(alpha = 0.2f),
+                    )
+                } else if (model.indeterminate) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = colors.primary,
+                        trackColor = colors.onSurface.copy(alpha = 0.2f),
+                    )
+                }
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    statsText(context, model),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = secondary,
+                    modifier = Modifier.weight(1f),
+                )
+                if (RowAction.PAUSE in model.actions) {
+                    TextButton(onClick = onPause, colors = textButton) { Text(stringResource(R.string.torrents_pause)) }
+                }
+                if (RowAction.RESUME in model.actions) {
+                    TextButton(onClick = onResume, colors = textButton) { Text(stringResource(R.string.torrents_resume)) }
+                }
+                if (RowAction.RETRY in model.actions) {
+                    TextButton(onClick = onRetry, colors = textButton) { Text(stringResource(R.string.torrents_retry)) }
+                }
+                if (RowAction.OPEN in model.actions) {
+                    IconButton(onClick = onOpen, colors = iconButton) {
+                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = stringResource(R.string.downloads_open))
+                    }
+                }
+                if (RowAction.REMOVE in model.actions) {
+                    IconButton(onClick = onRemove, colors = iconButton) {
+                        Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.torrents_remove))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun stateText(model: TorrentRowModel): String =
+    when (val s = model.state) {
+        RowState.Fetching -> stringResource(R.string.torrents_state_fetching)
+        RowState.Downloading -> stringResource(R.string.torrents_state_downloading)
+        RowState.Checking -> stringResource(R.string.torrents_state_checking)
+        RowState.Seeding -> stringResource(R.string.torrents_state_seeding)
+        RowState.PausedUser -> stringResource(R.string.torrents_state_paused)
+        RowState.PausedQueued -> stringResource(R.string.torrents_state_queued)
+        RowState.PausedTimeout -> stringResource(R.string.torrents_state_paused_timeout)
+        RowState.WaitingWifi -> stringResource(R.string.torrents_state_waiting_wifi)
+        RowState.Publishing -> stringResource(R.string.torrents_state_publishing)
+        RowState.Completed ->
+            model.title?.let { stringResource(R.string.torrents_state_saved, it) } ?: stringResource(R.string.torrents_state_saved_private)
+        is RowState.Failed ->
+            stringResource(
+                when (s.kind) {
+                    TorrentErrorKind.NO_SPACE -> R.string.torrents_failed_no_space
+                    TorrentErrorKind.FILE_ERROR -> R.string.torrents_failed_file
+                    TorrentErrorKind.INVALID_SOURCE, TorrentErrorKind.ENGINE_ERROR -> R.string.torrents_failed_load
+                    TorrentErrorKind.UNSAFE_METADATA -> R.string.torrents_failed_unsafe
+                    TorrentErrorKind.MISSING_DATA -> R.string.torrents_failed_missing
+                    TorrentErrorKind.PUBLISH_FAILED -> R.string.torrents_failed_publish
+                },
+            )
+    }
+
+/** "<done> of <total> · <speed>/s · <n> peers · <eta> left", each part left out when unknown. */
+private fun statsText(context: android.content.Context, model: TorrentRowModel): String {
+    val parts = ArrayList<String>(4)
+    val done = Formatter.formatShortFileSize(context, model.doneBytes)
+    when {
+        model.totalBytes > 0 && model.state == RowState.Completed -> parts += Formatter.formatShortFileSize(context, model.totalBytes)
+        model.totalBytes > 0 -> parts += context.getString(R.string.downloads_progress_known, done, Formatter.formatShortFileSize(context, model.totalBytes))
+        model.doneBytes > 0 -> parts += context.getString(R.string.downloads_progress_unknown, done)
+    }
+    if (model.speedBps > 0) parts += context.getString(R.string.torrents_stats_speed, Formatter.formatShortFileSize(context, model.speedBps))
+    model.peers?.let { parts += context.resources.getQuantityString(R.plurals.torrents_stats_peers, it, it) }
+    model.etaSeconds?.let { parts += context.getString(R.string.torrents_stats_eta, DateUtils.formatElapsedTime(it)) }
+    return parts.joinToString(" · ")
 }
 
 @Composable

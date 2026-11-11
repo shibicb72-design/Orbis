@@ -16,12 +16,14 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.shibi.orbis.AppContainer
 import com.shibi.orbis.clear.ClearState
+import com.shibi.orbis.torrent.TorrentLog
 import com.shibi.orbis.ui.bookmarks.BookmarksScreen
 import com.shibi.orbis.ui.browser.BrowserScreen
 import com.shibi.orbis.ui.downloads.DownloadsScreen
 import com.shibi.orbis.ui.history.HistoryScreen
 import com.shibi.orbis.ui.settings.ClearBrowsingDataScreen
 import com.shibi.orbis.ui.settings.DebugLogScreen
+import com.shibi.orbis.ui.settings.LicencesScreen
 import com.shibi.orbis.ui.settings.SettingsScreen
 import com.shibi.orbis.ui.settings.SitePermissionsScreen
 import com.shibi.orbis.ui.settings.UboOnboardingScreen
@@ -43,6 +45,7 @@ private object Routes {
     const val SitePermissions = "settings/site_permissions"
     const val ClearData = "settings/clear_data"
     const val Passwords = "settings/passwords"
+    const val Licences = "settings/licences"
     const val QrScan = "qr_scan"
 }
 
@@ -164,7 +167,9 @@ fun OrbisRoot(container: AppContainer) {
         composable(Routes.Downloads) {
             DownloadsScreen(
                 manager = container.downloads,
+                torrents = container.torrents,
                 onBack = { nav.popBackStack() },
+                log = TorrentLog.sink(container.debugLog),
             )
         }
         composable(Routes.Passwords) {
@@ -200,7 +205,11 @@ fun OrbisRoot(container: AppContainer) {
                 onOpenClearData = { nav.navigate(Routes.ClearData) },
                 onOpenPasswords = { nav.navigate(Routes.Passwords) },
                 site = container.browserSettings,
+                onOpenLicences = { nav.navigate(Routes.Licences) },
             )
+        }
+        composable(Routes.Licences) {
+            LicencesScreen(onBack = { nav.popBackStack() })
         }
         composable(Routes.ClearData) {
             ClearBrowsingDataScreen(
