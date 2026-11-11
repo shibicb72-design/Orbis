@@ -366,6 +366,8 @@
 
     <string name="menu_cast">Diffuser</string>
     <string name="cast_title">Diffuser</string>
+    <string name="cast_toolbar_idle">Diffuser sur un téléviseur ou une enceinte</string>
+    <string name="cast_toolbar_connected">Diffusion sur %1$s</string>
     <string name="cast_searching">Recherche de téléviseurs et d\'enceintes...</string>
     <string name="cast_no_devices">Aucun appareil trouvé. Allumez le téléviseur ou l\'enceinte et utilisez le même Wi-Fi que ce téléphone.</string>
     <string name="cast_no_media">Cette page n\'a pas de vidéo à diffuser.</string>
