@@ -45,6 +45,11 @@ jobs:
       - name: Engine currency script tests (offline)
         run: python3 -I scripts/test_check_engine_currency.py
 
+      - name: Torrent natives script tests (offline)
+        run: |
+          python3 -I scripts/test_check_torrent_natives.py
+          python3 -I scripts/test_compare_torrent_natives.py
+
       - name: Assemble debug APK, unit tests, lint, and shrink a release APK
         run: |
           chmod +x gradlew
