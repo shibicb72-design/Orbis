@@ -3,15 +3,52 @@
 The machine-readable record is `native/libtorrent4j/versions.env`. `scripts/check_engine_currency.py` reads it, and
 the daily Engine currency workflow compares it with the newest upstream releases. Change both files together.
 
-## What is bundled today (2026-11-11)
+## What is bundled today (security PR 7)
 
 | Component | Version | Source |
 |---|---|---|
-| libtorrent4j (Java API and natives) | 2.1.0-39 | Maven Central, `org.libtorrent4j` (upstream build) |
-| libtorrent | 2.1.0.0 (a 2.1.0-line snapshot, commit `24a3adf`, 2026-01-25) | inside the libtorrent4j native library |
-| OpenSSL | 3.5.5 (27 Jan 2026) | statically linked into the libtorrent4j native library |
+| libtorrent4j Java API | 2.1.0-39 | Maven Central, `org.libtorrent4j:libtorrent4j` (upstream build) |
+| libtorrent4j native library (`libtorrent4j.so`) | built from libtorrent4j `da7d240` (tag `v2.1.0-39`) | ours: `app/src/main/jniLibs/<abi>/`, Torrent natives run 43070920772 on `main` |
+| libtorrent | 2.1.0.0 (a 2.1.0-line snapshot, commit `24a3adf`, 2026-01-25) | inside `libtorrent4j.so` |
+| OpenSSL | 3.5.9 (29 Sep 2026) | statically linked into `libtorrent4j.so` |
 
-How it was measured: the `libtorrent4j-android-arm64-2.1.0-39.jar` and `libtorrent4j-android-x86_64-2.1.0-39.jar`
+Upstream's native jars (`libtorrent4j-android-arm64`, `-arm`, `-x86_64`) are no longer dependencies. The Java jar
+loads the library by name (`System.loadLibrary("torrent4j")`), so `jniLibs/<abi>/libtorrent4j.so` takes their place
+with no code change; the JNI symbol sets are identical to upstream's (see "Result" below).
+
+### Shipped files
+
+From Torrent natives run [43070920772](https://github.com/shibicb72-design/Orbis/actions/runs/43070920772)
+(`workflow_dispatch`, `refs/heads/main`, commit `629c992f834d20aa02af7f2d43b2ef65c272a08d`, runner image ubuntu24
+20261101.360.1, every job green), repeat-1 artifacts, unmodified:
+
+| ABI | File | SHA-256 | size |
+|---|---|---|---|
+| arm64-v8a | `app/src/main/jniLibs/arm64-v8a/libtorrent4j.so` | `ba9096e45f9da3f9c75cd38f8d7f501b5788ddb23f64caef56c7b9ec480e0801` | 15900928 |
+| armeabi-v7a | `app/src/main/jniLibs/armeabi-v7a/libtorrent4j.so` | `f0578398073c79a7ec25182b9f2eefac395cb26425ed33eacf534210924becb2` | 13751940 |
+| x86_64 | `app/src/main/jniLibs/x86_64/libtorrent4j.so` | `9634a939ee35b4dd66850645dbbc6ff9bafdc56877a547010f00e5ea1a019bf1` | 16374728 |
+
+Before they were committed: each `BUILDINFO.json` said `workflow_dispatch`, `refs/heads/main`, that commit and that
+run id; each `.so` matched its `.sha256`, the run's summary table and the repeat-2 build; and
+`scripts/check_torrent_natives.py` (`OpenSSL 3.5.9 29 Sep 2026`, `libtorrent/2.1.0.0`) and
+`scripts/compare_torrent_natives.py` (against upstream's jars, hash-checked) passed on each. The hashes are the same
+as those of PR run 43064341148 at `8dae273` on the same runner image, so the build reproduced across the two runs.
+
+Where it is checked:
+- `native/libtorrent4j/CHECKSUMS.sha256` lists the three files. The Gradle task `verifyTorrentNatives`
+  (`app/build.gradle.kts`, before `preBuild`) hashes every file under `app/src/main/jniLibs/` and fails the build on
+  a mismatch, a missing file or an extra file. That covers local release builds too.
+- Android CI runs `scripts/check_torrent_natives.py --min-openssl <OPENSSL_VERSION from versions.env> --libtorrent
+  2.1.0.0` on the arm64-v8a and x86_64 debug and release APKs and, after a separate `bundleRelease`, on the bundle
+  with `--abis arm64-v8a,armeabi-v7a,x86_64`. A missing library fails it.
+- `native/libtorrent4j/BUILDINFO-<abi>.json` are the run's `BUILDINFO.json` files.
+
+The 32-bit arm library cannot be run on the emulators at hand. It is covered by its version strings, the JNI and
+symbol comparison with upstream and the build itself, not by a device test.
+
+### Before PR 7 (upstream's natives)
+
+Measured 2026-11-11: the `libtorrent4j-android-arm64-2.1.0-39.jar` and `libtorrent4j-android-x86_64-2.1.0-39.jar`
 files from the Gradle cache were unpacked, and `lib/arm64-v8a/libtorrent4j.so` and `lib/x86_64/libtorrent4j.so`
 were byte-scanned (`python -I`, a regex over the file). Both contain the strings `OpenSSL 3.5.5 27 Jan 2026` and
 `libtorrent/2.1.0.0`. Upstream's `swig/android-build/Dockerfile` sets `OPENSSL_VERSION="3.5.5"`, and the libtorrent
@@ -20,8 +57,8 @@ submodule's `version.hpp` defines `LIBTORRENT_VERSION "2.1.0.0"`, which matches.
 ## Upstream state
 
 - libtorrent4j 2.1.0-39 (2026-02-07) is the newest release on Maven Central and GitHub. Upgrading is not possible.
-- The newest OpenSSL 3.5.x tag is `openssl-3.5.9` (2026-09-29). Advisories were fixed in 3.5.6 to 3.5.9, so the
-  bundled 3.5.5 is behind.
+- The newest OpenSSL 3.5.x tag is `openssl-3.5.9` (2026-09-29). Advisories were fixed in 3.5.6 to 3.5.9; upstream's
+  natives (3.5.5) are behind, ours (3.5.9) are current.
 - libtorrent itself has newer tags (`v2.1.1`, `v2.1.2`). Moving to them is a separate PR (7b, OD-4 approved);
   the build pipeline below changes OpenSSL only.
 
@@ -51,11 +88,14 @@ and that a torrent can route traffic to; neither is shown to be exploitable in O
    so that the GeckoView and libtorrent4j checks can be red or green on their own.
 2. Security PR 6 (#28): build the libtorrent4j natives ourselves with OpenSSL 3.5.9 (pipeline only, no app
    change). See "How the natives are built" below.
-3. Security PR 7: ship those natives, update `versions.env` (`OPENSSL_VERSION`, `SOURCE`) and this file, and drop
-   `--warn-only openssl` from the workflow so an OpenSSL release turns it red.
+3. Security PR 7 (done): ship those natives (run 43070920772), update `versions.env` (`OPENSSL_VERSION=3.5.9`,
+   `SOURCE=orbis-ci`, `RUN_ID`) and this file, and drop `--warn-only openssl` from the Engine currency workflow, so
+   an OpenSSL release turns it red.
+4. Security PR 7b: libtorrent 2.1.2 (OD-4), separately.
 
-When the workflow reports a newer 3.5.x after PR 7: rebuild the natives with that version, update `versions.env`
-and this file, and release.
+When the workflow reports a newer 3.5.x: the torrent natives are built by `.github/workflows/torrent-natives.yml`;
+to update OpenSSL change `build.env`, run the workflow, commit the artifacts and `CHECKSUMS.sha256`
+(`native/libtorrent4j/README.md`, "Update OpenSSL"), update `versions.env` and this file, and release.
 
 ## How the natives are built
 

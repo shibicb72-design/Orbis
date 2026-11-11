@@ -22,6 +22,5 @@ jobs:
         with:
           persist-credentials: false
 
-      # --warn-only openssl until the self-built torrent natives ship (security PR 7); then drop it.
       - name: Check engine versions
-        run: python3 -I scripts/check_engine_currency.py --warn-only openssl
+        run: python3 -I scripts/check_engine_currency.py

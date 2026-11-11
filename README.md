@@ -65,6 +65,11 @@ note on how torrents share your IP address. Changes apply at once, also to torre
 The torrent engine is libtorrent (through libtorrent4j). Its native library is loaded the first time a torrent runs,
 never at app start, and the session stops as soon as no torrent is downloading or seeding.
 
+The torrent natives (`app/src/main/jniLibs/<abi>/libtorrent4j.so`, with libtorrent, Boost and OpenSSL inside) are built
+by `.github/workflows/torrent-natives.yml`, not taken from upstream's jars. To update OpenSSL change `build.env`, run
+the workflow, commit the artifacts and `CHECKSUMS.sha256` (`native/libtorrent4j/README.md`). Every build checks the
+committed files against `native/libtorrent4j/CHECKSUMS.sha256` first (`verifyTorrentNatives`).
+
 ## Architecture sketch
 
 - Thin `BrowserEngine` / `BrowserSession` interfaces; UI must not import GeckoView types.
