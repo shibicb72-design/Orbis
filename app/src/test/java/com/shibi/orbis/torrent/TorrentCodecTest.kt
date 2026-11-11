@@ -102,8 +102,8 @@ class TorrentCodecTest {
     @Test
     fun aKeptFolderIsNeverWritten() {
         // Only private entries have one, and those are never written at all; the field is not in the codec either.
-        val text = TorrentCodec.encode(listOf(entry().copy(keptDir = "/downloads/private/Sintel")))
-        assertFalse(text.contains("private/Sintel"))
+        val text = TorrentCodec.encode(listOf(entry().copy(keptDir = "/downloads/.s/Sintel")))
+        assertFalse(text.contains(".s/Sintel"))
         assertNull(TorrentCodec.decode(text).single().keptDir)
         assertTrue(TorrentCodec.decode(TorrentCodec.encode(listOf(entry(isPrivate = true).copy(keptDir = "/k")))).isEmpty())
     }

@@ -232,16 +232,16 @@ class Libtorrent4jEngine(
             emit(TorrentEvent.Error(id, if (source == TorrentSource.FromResumeData) TorrentErrorKind.MISSING_DATA else TorrentErrorKind.INVALID_SOURCE))
             return
         }
-        // Trackers: a .torrent's own (TorrentInfo.bdecode reads only its info dictionary), then no WebSocket one from
-        // any source (a magnet's tr=, resume data on a restore, the file).
-        var wsDropped = 0
+        // Trackers: a .torrent's own (TorrentInfo.bdecode reads only its info dictionary), then only http, https and
+        // udp ones from any source (a magnet's tr=, resume data on a restore, the file): no WebSocket path.
+        var refusedTrackers = 0
         if (source is TorrentSource.TorrentFile) {
             val announce = TorrentTrackers.fromTorrentFile(source.bytes)
-            wsDropped += announce.dropped
+            refusedTrackers += announce.dropped
             addTrackers(p, announce)
         }
-        wsDropped += dropWebSocketTrackers(p)
-        if (wsDropped > 0) log("websocket urls dropped $wsDropped")
+        refusedTrackers += dropRefusedTrackers(p)
+        if (refusedTrackers > 0) log("announce urls dropped $refusedTrackers")
         saveDir.mkdirs()
         p.setSave_path(saveDir.absolutePath)
         val withMetadata = hasInfo(p)
@@ -304,8 +304,8 @@ class Libtorrent4jEngine(
         p.setTracker_tiers(tiers)
     }
 
-    /** Removes every ws:// and wss:// tracker from [p] (tiers kept in line). Returns how many went. */
-    private fun dropWebSocketTrackers(p: add_torrent_params): Int {
+    /** Removes every tracker [TorrentTrackers.isAllowed] refuses from [p] (tiers kept in line). Returns how many went. */
+    private fun dropRefusedTrackers(p: add_torrent_params): Int {
         val urls = p.getTrackers()
         val tiers = p.getTracker_tiers()
         var dropped = 0
@@ -315,7 +315,7 @@ class Libtorrent4jEngine(
         for (i in 0 until urls.size) {
             if (i < tiers.size) tier = tiers[i]
             val url = urls[i]
-            if (TorrentTrackers.isWebSocket(url)) {
+            if (!TorrentTrackers.isAllowed(url)) {
                 dropped++
                 continue
             }
@@ -332,7 +332,13 @@ class Libtorrent4jEngine(
     private fun sessionDiscovery(addingPrivate: Boolean? = null): SessionDiscovery {
         val adding = if (addingPrivate == null) 0 else 1
         val addingPriv = if (addingPrivate == true) 1 else 0
-        return SessionDiscovery.of(settings.dht, settings.lsd, privateTorrents = privateIds.size + addingPriv, torrents = handles.size + adding)
+        return SessionDiscovery.of(
+            settings.dht,
+            settings.lsd,
+            privateTorrents = privateIds.size + addingPriv,
+            torrents = handles.size + adding,
+            previous = appliedSession,
+        )
     }
 
     /**

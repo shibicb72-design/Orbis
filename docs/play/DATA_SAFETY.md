@@ -14,12 +14,13 @@ the app. Data a user sends to websites they visit, through a browser, is not col
     functionality" for search suggestions.
   - Torrent downloads (a magnet link or .torrent file the user confirms) connect directly to other people sharing
     that torrent (peers), to the torrent's trackers, to DHT bootstrap nodes and, only if the user turns local peer
-    discovery on (off by default), to devices on the same network. A private tab's torrents use their trackers
-    only (no DHT, peer exchange or local peer discovery), and WebSocket (WebTorrent) trackers are never contacted. All of them can see the phone's IP address, as for any peer-to-peer download; the
-    pieces of the file are exchanged with peers. Nothing else leaves the device: no account, no analytics, nothing to
+    discovery on (off by default), to devices on the same network. All of them can see the phone's IP address, as
+    for any peer-to-peer download; the pieces of the file are exchanged with peers. A private tab's torrents use
+    their trackers only (no DHT, peer exchange or local peer discovery), and only http, https and udp trackers are
+    contacted (never WebSocket/WebTorrent ones). Nothing else leaves the device: no account, no analytics, nothing to
     the developers. The torrent list stays on the phone (a private tab's torrents are never written to the list on
-    disk; their files stay inside the app and are deleted when private browsing ends unless the user saved them to
-    Downloads, as for a private tab's file downloads). This is the user exchanging a file with peers they chose, as when visiting a website, so no data type is
+    disk; their files stay inside the app and are deleted when private browsing ends unless the user saved them with
+    "Save to Downloads"; a private tab's file downloads are deleted then too, with no such action). This is the user exchanging a file with peers they chose, as when visiting a website, so no data type is
     declared. Play's form has no data type for "IP address seen by peers"; answer No and keep this note for a review.
   - Seeding (uploading pieces of a finished torrent to other people) happens only when the user turns "Stop seeding
     when finished" off in Settings > Torrents; by default nothing is uploaded once a download is finished. DHT and

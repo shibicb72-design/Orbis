@@ -419,7 +419,7 @@
     <string name="cast_connecting">Connecting...</string>
     <string name="cast_close">Close</string>
     <!-- Private-tab files are deleted when private browsing ends (OD-3, security PR 9). English only. -->
-    <string name="browser_private_empty_state_files" translatable="false">Private tab. Pages here stay out of your history, and their cookies and site data are cleared when you close your last private tab. Bookmarks you save are kept. Files downloaded here are deleted then, unless you saved them to your Downloads.</string>
+    <string name="browser_private_empty_state_files" translatable="false">Private tab. Pages here stay out of your history, and their cookies and site data are cleared when you close your last private tab. Bookmarks you save are kept. Files downloaded here are deleted then; only a torrent you saved to your Downloads stays.</string>
     <string name="browser_download_private_note_deleted" translatable="false">This file is deleted when private browsing ends.</string>
     <string name="torrents_sheet_private_kept" translatable="false">From a private tab: uses the torrent\'s trackers only. The files stay inside Orbis, not in your Downloads, and are deleted when private browsing ends unless you save them.</string>
     <string name="torrents_state_kept_private" translatable="false">Kept inside Orbis, not in your Downloads</string>

@@ -26,7 +26,7 @@ class TorrentTestSetup(root: File, scheduler: TestCoroutineScheduler, freeBytes:
     val payloadRoot = File(root, "payload")
 
     /** The private folder of the downloads directory, where finished private torrents are kept. */
-    val keepRoot = File(root, "downloads/private")
+    val keepRoot = File(root, "downloads/" + com.shibi.orbis.downloads.DownloadManager.PRIVATE_DIR)
     val store = TorrentStore(stateDir)
     val logs = CopyOnWriteArrayList<String>()
     val network = FakeTorrentNetwork()

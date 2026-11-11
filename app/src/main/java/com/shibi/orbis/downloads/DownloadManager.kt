@@ -276,7 +276,7 @@ class DownloadManager(
      * A clear made before [restore] has read the stored index also drops what it then reads.
      */
     fun clearIndex(): List<Long> {
-        dropOnFinish.clear()
+        // Private downloads still waiting to settle keep their pending drop: their files are deleted when they do.
         indexCleared.set(true)
         var removed = emptyList<Long>()
         _entries.update { list ->
@@ -547,12 +547,18 @@ class DownloadManager(
     private fun sorted(list: List<DownloadEntry>): List<DownloadEntry> =
         list.sortedWith(compareByDescending<DownloadEntry> { it.startedAt }.thenByDescending { it.id })
 
-    /** Where private downloads are saved: a folder of the downloads directory, so leftovers are easy to find. */
+    /**
+     * Where private downloads are saved: a folder of the downloads directory, so leftovers are easy to find. Its name
+     * shows up in Open and Share URIs, so it says nothing about private browsing.
+     */
     fun privateDir(): File = File(dir(), PRIVATE_DIR)
 
     companion object {
-        /** Below the downloads directory. Private torrents kept inside Orbis live here too, as folders. */
-        const val PRIVATE_DIR = "private"
+        /**
+         * Below the downloads directory. Private torrents kept inside Orbis live here too, as folders. Neutral, and a
+         * name no download can get (DownloadFileNames.sanitize trims leading dots), so a normal download never blocks it.
+         */
+        const val PRIVATE_DIR = ".s"
         private const val BUFFER_SIZE = 32 * 1024
         private const val PROGRESS_INTERVAL_MS = 250L
         private const val MAX_NAME_ATTEMPTS = 1000

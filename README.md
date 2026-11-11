@@ -53,13 +53,14 @@ speed limits, no seeding ratio. The engine listens on a random port picked once 
 own client name, not "Orbis".
 
 Privacy: peers, trackers, DHT bootstrap nodes and (if you turn local peer discovery on) devices on the same network
-can see the phone's IP address, as for any peer-to-peer download. Nothing is sent to the developers. WebSocket
-(WebTorrent) trackers are dropped from every torrent. A private tab's torrents use their trackers only (no DHT, peer
+can see the phone's IP address, as for any peer-to-peer download. Nothing is sent to the developers. Only http, https
+and udp trackers are used; WebSocket (WebTorrent) and every other kind are dropped from every torrent. A private tab's torrents use their trackers only (no DHT, peer
 exchange or local peer discovery; while one runs, local peer discovery is off for the whole session), are never
 written to the torrent list on disk, and leave the list when private browsing ends. A finished one is kept inside
-Orbis (`<app files>/Download/private/<name>`), not published; its row offers "Save to Downloads", which copies it to
+Orbis (`<app files>/Download/.s/<name>`), not published; its row offers "Save to Downloads", which copies it to
 `Download/Orbis/<name>`. When private browsing ends, or at the next start after the process died, every private file
-that was not saved is deleted: partial payloads, finished torrents and private file downloads alike.
+that was not saved is deleted: partial payloads, finished torrents and private file downloads alike (private file
+downloads also live in `Download/.s/`, a neutral name because it shows in Open and Share URIs).
 
 Settings > Torrents: Wi-Fi only, download and upload speed limits (KB/s), stop seeding when finished (off: Orbis
 keeps sharing the finished files until you tap Stop seeding or an optional ratio is reached; they are saved to

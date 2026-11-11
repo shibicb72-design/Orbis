@@ -217,8 +217,8 @@ class DownloadManagerTest {
         assertTrue(e.isPrivate)
         assertEquals(DownloadStatus.COMPLETED, e.status)
         // Saved in the private folder, so leftovers of a dead process are easy to find.
-        assertEquals("hello", File(dir, "private/secret.txt").readText())
-        assertEquals(File(dir, "private/secret.txt").absolutePath, e.filePath)
+        assertEquals("hello", File(dir, "${DownloadManager.PRIVATE_DIR}/secret.txt").readText())
+        assertEquals(File(dir, "${DownloadManager.PRIVATE_DIR}/secret.txt").absolutePath, e.filePath)
         // Listed while private browsing lasts, but the index file names nothing from it.
         assertTrue(store.load().isEmpty())
         assertFalse(indexFile.readText().contains("secret"))
@@ -231,27 +231,27 @@ class DownloadManagerTest {
         val normal = m.start(FakeDownload(contentDisposition = cd("n.txt"), body = { ChunkStream(bytes("n")) }))
         val priv = m.start(FakeDownload(contentDisposition = cd("p.txt"), body = { ChunkStream(bytes("p")) }), isPrivate = true)
         advanceUntilIdle()
-        assertTrue(File(dir, "private/p.txt").isFile)
+        assertTrue(File(dir, "${DownloadManager.PRIVATE_DIR}/p.txt").isFile)
         assertEquals(listOf(priv), m.forgetPrivate())
         advanceUntilIdle()
         assertEquals(listOf(normal), m.entries.value.map { it.id })
         // OD-3: a private-tab file is deleted when private browsing ends.
-        assertFalse(File(dir, "private/p.txt").exists())
+        assertFalse(File(dir, "${DownloadManager.PRIVATE_DIR}/p.txt").exists())
         assertEquals("n", File(dir, "n.txt").readText())
         assertEquals(listOf("n.txt"), store.load().map { it.fileName })
     }
 
     @Test
     fun privateLeftoversOfADeadProcessAreDeletedOnRestoreButNotFolders() = runTest {
-        File(dir, "private/kept-torrent").mkdirs()
-        File(dir, "private/old.pdf").writeText("x")
+        File(dir, "${DownloadManager.PRIVATE_DIR}/kept-torrent").mkdirs()
+        File(dir, "${DownloadManager.PRIVATE_DIR}/old.pdf").writeText("x")
         File(dir, "normal.pdf").writeText("y")
         val m = manager()
         m.restore()
         advanceUntilIdle()
-        assertFalse(File(dir, "private/old.pdf").exists())
+        assertFalse(File(dir, "${DownloadManager.PRIVATE_DIR}/old.pdf").exists())
         // Folders there are private torrents kept inside Orbis: the torrent manager's.
-        assertTrue(File(dir, "private/kept-torrent").isDirectory)
+        assertTrue(File(dir, "${DownloadManager.PRIVATE_DIR}/kept-torrent").isDirectory)
         assertTrue(File(dir, "normal.pdf").isFile)
         assertTrue(logs.contains("private download leftovers deleted 1"))
     }
@@ -267,7 +267,7 @@ class DownloadManagerTest {
         assertEquals(listOf(priv), m.entries.value.map { it.id })
         stream.release()
         waitUntil("private download settled and left") { m.entries.value.isEmpty() }
-        assertFalse("deleted once it settled (OD-3)", File(dir, "private/slow.txt").exists())
+        assertFalse("deleted once it settled (OD-3)", File(dir, "${DownloadManager.PRIVATE_DIR}/slow.txt").exists())
         scope.cancel()
     }
 
@@ -300,7 +300,7 @@ class DownloadManagerTest {
         assertTrue(m.entries.value.isEmpty())
         assertFalse("never listed as settled: $seen", DownloadStatus.COMPLETED in seen)
         assertTrue("no result notification would be posted", reported.isEmpty())
-        assertFalse(File(dir, "private/secret-report.pdf").exists())
+        assertFalse(File(dir, "${DownloadManager.PRIVATE_DIR}/secret-report.pdf").exists())
         assertTrue(dir.walkTopDown().none { it.isFile && it.name.startsWith("secret-report") })
     }
 
@@ -1145,5 +1145,33 @@ class DownloadManagerTest {
     fun withoutAFetcherThereIsNoPause() = runTest {
         val m = manager()
         assertFalse(m.canPause)
+    }
+
+    @Test
+    fun clearingTheListKeepsThePendingDeleteOfARunningPrivateDownload() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO).also { scopeJobs += it.coroutineContext[Job]!! }
+        val m = DownloadManager({ dir }, store, scope, Dispatchers.IO, { logs += it }, { System.currentTimeMillis() })
+        val stream = BlockingStream(bytes("slow"))
+        m.start(FakeDownload(contentDisposition = cd("slow.txt"), contentLength = 4, body = { stream }), isPrivate = true)
+        assertTrue(stream.readStarted.await(5, TimeUnit.SECONDS))
+        assertTrue(m.forgetPrivate().isEmpty())
+        m.clearIndex()
+        stream.release()
+        waitUntil("private download settled and left") { m.entries.value.isEmpty() }
+        waitUntil("its file deleted") { !File(dir, "${DownloadManager.PRIVATE_DIR}/slow.txt").exists() }
+        scope.cancel()
+    }
+
+    @Test
+    fun noDownloadCanTakeThePrivateFolderName() = runTest {
+        val m = manager()
+        val normal = m.start(FakeDownload(contentDisposition = cd(DownloadManager.PRIVATE_DIR), body = { ChunkStream(bytes("n")) }))
+        advanceUntilIdle()
+        assertTrue(m.byId(normal).fileName != DownloadManager.PRIVATE_DIR)
+        assertFalse(File(dir, DownloadManager.PRIVATE_DIR).isFile)
+        val priv = m.start(FakeDownload(contentDisposition = cd("p.txt"), body = { ChunkStream(bytes("p")) }), isPrivate = true)
+        advanceUntilIdle()
+        assertEquals(DownloadStatus.COMPLETED, m.byId(priv).status)
+        assertEquals("p", File(dir, "${DownloadManager.PRIVATE_DIR}/p.txt").readText())
     }
 }

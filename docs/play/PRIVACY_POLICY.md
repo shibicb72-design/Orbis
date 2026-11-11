@@ -12,8 +12,8 @@ estimate records a video id and, when YouTube included one, the title, for a vid
 an ad break or whose ad-break request was blocked. Shorts reel ads are not counted. The dashboard calls this “ad breaks
 avoided (est.)”. Private tabs keep none of these
 after they close, and private tabs are not included in the estimate. Files downloaded in a private tab (file
-downloads and torrents) stay inside Orbis and are deleted when private browsing ends, unless you saved them to your
-Downloads first. You can delete everything in Settings > Clear
+downloads and torrents) stay inside Orbis and are deleted when private browsing ends. Only a torrent you saved with
+"Save to Downloads" first stays; a private file download has no such action (Share it first to keep a copy). You can delete everything in Settings > Clear
 browsing data; the estimate is cleared with browsing history.
 
 ## What leaves your phone, and when
@@ -34,7 +34,7 @@ browsing data; the estimate is cleared with browsing history.
 - **Torrent downloads** (only after you confirm a magnet link or .torrent file): Orbis connects directly to the other
   people sharing that torrent, to its trackers, to DHT bootstrap nodes and, only if you turn local peer discovery on
   (it is off by default), to devices on your network. All of them can see your IP address, and pieces of the file are exchanged with the other people.
-  Nothing else is sent: there is no account and no analytics. WebSocket (WebTorrent) trackers are never contacted.
+  Nothing else is sent: there is no account and no analytics. Only http, https and udp trackers are contacted (never WebSocket/WebTorrent ones).
   A torrent from a private tab uses its trackers only (no DHT, no peer exchange, no local peer discovery), is never
   written to the torrent list on disk, and leaves the list when private browsing ends. Its finished files are kept
   inside Orbis, not in your Downloads; "Save to Downloads" copies them there. Whatever was not saved is deleted when

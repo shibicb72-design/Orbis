@@ -10,23 +10,33 @@ class TorrentTrackersTest {
     private val base = "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Name"
 
     @Test
-    fun webSocketSchemesInAnyCaseAreWebSocket() {
-        assertTrue(TorrentTrackers.isWebSocket("ws://t.example/announce"))
-        assertTrue(TorrentTrackers.isWebSocket("WSS://t.example/announce"))
-        assertTrue(TorrentTrackers.isWebSocket("  wss://t.example"))
-        assertFalse(TorrentTrackers.isWebSocket("udp://t.example:1337"))
-        assertFalse(TorrentTrackers.isWebSocket("https://t.example/announce"))
-        assertFalse(TorrentTrackers.isWebSocket("wsx://t.example"))
+    fun onlyHttpHttpsAndUdpWithSlashesAreAllowed() {
+        assertTrue(TorrentTrackers.isAllowed("udp://t.example:1337"))
+        assertTrue(TorrentTrackers.isAllowed("https://t.example/announce"))
+        assertTrue(TorrentTrackers.isAllowed("HTTP://t.example/announce"))
+        // libtorrent takes the text before the first ':' as the scheme: these all reach its WebSocket branch.
+        for (ws in listOf("ws:x", "wss:/x", "WS:x", "ws://t.example/announce", "WSS://t.example", "wss:")) {
+            assertFalse(ws, TorrentTrackers.isAllowed(ws))
+        }
+        for (other in listOf("file:///x", "javascript:x", "http:x", "https:/x", "udp:", "wsx://t.example", "  udp://t.example:1", "", ":x", "i2p://x")) {
+            assertFalse(other, TorrentTrackers.isAllowed(other))
+        }
+        for (bad in listOf("udp://t.example:1/ a", "http://t.example/\u0000", "http://t.example/\n", "http://t.example/\u202e")) {
+            assertFalse(bad, TorrentTrackers.isAllowed(bad))
+        }
     }
 
     @Test
-    fun stripMagnetDropsEncodedAndPlainWebSocketTrackersOnly() {
+    fun stripMagnetDropsEveryRefusedTrackerUnderEveryTrackerKey() {
         val udp = "tr=udp%3A%2F%2Ft.example%3A1337"
-        val uri = "$base&tr=wss%3A%2F%2Ft.example&$udp&TR=ws://t.example:8000&tr=WSS%3a%2f%2fx"
+        val http = "tr.2=http%3A%2F%2Ft.example%2Fannounce"
+        val uri = "$base&tr=wss%3A%2F%2Ft.example&$udp&TR=ws:x&tr.1=wss:/x&$http&tr=WS%3ax&tr=file%3A%2F%2F%2Fx&tr=javascript:x"
         val r = TorrentTrackers.stripMagnet(uri)
-        assertEquals(3, r.dropped)
-        assertEquals("$base&$udp", r.uri)
+        assertEquals(6, r.dropped)
+        assertEquals("$base&$udp&$http", r.uri)
         assertFalse(r.toString().contains("example"))
+        // Not a tracker key: left alone.
+        assertEquals(0, TorrentTrackers.stripMagnet("$base&tr.x=ws:x&xtr=ws:x").dropped)
     }
 
     @Test
@@ -58,6 +68,18 @@ class TorrentTrackersTest {
         assertEquals(listOf("udp://b.example:1", "https://d.example/announce"), a.urls)
         assertEquals(listOf(0, 1), a.tiers)
         assertEquals(2, a.dropped)
+    }
+
+    @Test
+    fun tiersAreNumberedDenselyAndBadUrlsAreDropped() {
+        val tiers = listOf(listOf("ws:x"), listOf("udp://a.example:1"), listOf("wss:/x", "file:///x"), listOf("http://b.example/ a", "https://c.example/announce"))
+        val a = TorrentTrackers.fromTorrentFile(torrent(null, tiers))
+        assertEquals(listOf("udp://a.example:1", "https://c.example/announce"), a.urls)
+        assertEquals(listOf(0, 1), a.tiers)
+        assertEquals(4, a.dropped)
+        // Hundreds of tiers still give small tier numbers (libtorrent keeps a tier in one byte).
+        val many = (0 until 300).map { listOf("ws:$it") } + listOf(listOf("udp://d.example:1"))
+        assertEquals(listOf(0), TorrentTrackers.fromTorrentFile(torrent(null, many)).tiers)
     }
 
     @Test
@@ -106,9 +128,24 @@ class TorrentTrackersTest {
 
     @Test
     fun theSessionDhtNodeRunsOnlyWhenSomeTorrentCanUseIt() {
-        assertTrue(SessionDiscovery.of(dht = true, lsd = false, privateTorrents = 0, torrents = 0).dht)
         assertTrue(SessionDiscovery.of(dht = true, lsd = false, privateTorrents = 1, torrents = 2).dht)
         assertFalse(SessionDiscovery.of(dht = true, lsd = false, privateTorrents = 2, torrents = 2).dht)
         assertFalse(SessionDiscovery.of(dht = false, lsd = false, privateTorrents = 0, torrents = 2).dht)
+    }
+
+    @Test
+    fun anEmptySessionKeepsWhatItHad() {
+        // The last private-tab torrent left: the DHT node and local peers stay off until the session stops.
+        val privateOnly = SessionDiscovery(dht = false, lsd = false)
+        assertEquals(privateOnly, SessionDiscovery.of(dht = true, lsd = true, privateTorrents = 0, torrents = 0, previous = privateOnly))
+        // A normal session keeps its DHT node at zero torrents (session.dat keeps its DHT table).
+        val normal = SessionDiscovery(dht = true, lsd = true)
+        assertEquals(normal, SessionDiscovery.of(dht = true, lsd = true, privateTorrents = 0, torrents = 0, previous = normal))
+        // Never more than the settings allow.
+        assertEquals(SessionDiscovery(dht = false, lsd = true), SessionDiscovery.of(dht = false, lsd = true, privateTorrents = 0, torrents = 0, previous = normal))
+        // A torrent coming in is judged as usual.
+        assertEquals(normal, SessionDiscovery.of(dht = true, lsd = true, privateTorrents = 0, torrents = 1, previous = privateOnly))
+        // No session before: the settings.
+        assertEquals(normal, SessionDiscovery.of(dht = true, lsd = true, privateTorrents = 0, torrents = 0, previous = null))
     }
 }

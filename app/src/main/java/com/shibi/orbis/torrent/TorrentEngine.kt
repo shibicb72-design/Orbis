@@ -109,9 +109,15 @@ data class SessionDiscovery(val dht: Boolean, val lsd: Boolean) {
          * the torrent's DISABLE_LSD flag, and then connects to it. The DHT node not while every torrent in the
          * session is from a private tab: none of them uses it, and running it tells strangers that this address runs
          * a torrent client.
+         *
+         * An empty session keeps what it had ([previous], never more than the settings allow): the last private-tab
+         * torrent leaving must not start the DHT node just before the session stops, and a normal session must not
+         * stop its DHT node at zero torrents (session.dat would lose its DHT table). Null [previous]: the settings.
          */
-        fun of(dht: Boolean, lsd: Boolean, privateTorrents: Int, torrents: Int): SessionDiscovery =
-            SessionDiscovery(dht = dht && (privateTorrents == 0 || torrents > privateTorrents), lsd = lsd && privateTorrents == 0)
+        fun of(dht: Boolean, lsd: Boolean, privateTorrents: Int, torrents: Int, previous: SessionDiscovery? = null): SessionDiscovery {
+            if (torrents == 0 && previous != null) return SessionDiscovery(dht = previous.dht && dht, lsd = previous.lsd && lsd)
+            return SessionDiscovery(dht = dht && (privateTorrents == 0 || torrents > privateTorrents), lsd = lsd && privateTorrents == 0)
+        }
     }
 }
 

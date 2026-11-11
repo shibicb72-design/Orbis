@@ -151,7 +151,7 @@ class TorrentRowModelTest {
 
     @Test
     fun aKeptPrivateRowOffersSaveToDownloadsAndRemove() {
-        val kept = e(TorrentStatus.COMPLETED, private = true).copy(keptDir = "/downloads/private/x")
+        val kept = e(TorrentStatus.COMPLETED, private = true).copy(keptDir = "/downloads/.s/x")
         val m = model(kept)
         assertEquals(RowState.Kept, m.state)
         assertEquals(setOf(RowAction.SAVE_TO_DOWNLOADS, RowAction.REMOVE), m.actions)

@@ -1466,7 +1466,7 @@ class TorrentManagerTest {
         advanceUntilIdle()
         val uri = (s.engine.added.single().source as TorrentSource.Magnet).uri
         assertEquals(magnet, uri)
-        assertTrue(s.logs.contains("websocket urls dropped 2"))
+        assertTrue(s.logs.contains("announce urls dropped 2"))
         for (line in s.logs) assertFalse(line, line.contains("tracker", ignoreCase = true))
     }
 

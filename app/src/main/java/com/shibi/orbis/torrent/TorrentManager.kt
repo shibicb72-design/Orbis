@@ -25,7 +25,7 @@ class TorrentDirs(
     /** getExternalFilesDir("torrents"), or filesDir/torrents/data when there is no external storage. */
     val payloadRoot: () -> File,
     /**
-     * Where a finished private torrent is kept: the private folder of Orbis's own downloads folder
+     * Where a finished private torrent is kept: the private folder (".s") of Orbis's own downloads folder
      * (DownloadManager.privateDir, the one private file downloads use). Same volume as the payload, so keeping is a
      * rename. Only folders here are torrents'; the files belong to the file downloads.
      */
@@ -164,10 +164,10 @@ class TorrentManager(
             return null
         }
         val id = newId()
-        // No WebSocket tracker gets in (TorrentTrackers); a .torrent's are dropped by the engine, which reads them.
+        // Only http, https and udp trackers get in (TorrentTrackers); a .torrent's are checked by the engine, which reads them.
         val stripped = (requested as? TorrentSource.Magnet)?.let { TorrentTrackers.stripMagnet(it.uri) }
         val source = if (stripped != null && stripped.dropped > 0) TorrentSource.Magnet(stripped.uri) else requested
-        if (stripped != null && stripped.dropped > 0) log("websocket urls dropped ${stripped.dropped}")
+        if (stripped != null && stripped.dropped > 0) log("announce urls dropped ${stripped.dropped}")
         // Resume data alone is only ever used for a restore, never as something new to add.
         val error = if (source == TorrentSource.FromResumeData) TorrentErrorKind.INVALID_SOURCE else TorrentPaths.checkSource(source)
         val name = (source as? TorrentSource.Magnet)?.let { TorrentPaths.magnetDisplayName(it.uri) } ?: TorrentPaths.UNNAMED
