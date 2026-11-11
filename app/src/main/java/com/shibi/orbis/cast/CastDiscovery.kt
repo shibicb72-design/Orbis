@@ -18,11 +18,30 @@ internal data class ChromecastDevice(
  * Values are UTF-8. A trailing NUL, which some devices append, is dropped.
  */
 internal fun parseCastTxt(attributes: Map<String, ByteArray>, serviceName: String): CastTxt {
-    val friendly = txtValue(attributes, "fn")
-    val model = txtValue(attributes, "md")
+    val friendly = displaySafe(txtValue(attributes, "fn"))
+    val model = displaySafe(txtValue(attributes, "md"))
     val id = txtValue(attributes, "id")
-    val name = friendly.ifBlank { serviceName.trim() }.ifBlank { "Chromecast" }
+    val name = friendly.ifBlank { displaySafe(serviceName.trim()) }.ifBlank { "Chromecast" }
     return CastTxt(id = id, name = name, model = model)
+}
+
+/** Longest friendly name or model kept from a TXT record, counted after control and format characters are removed. */
+internal const val CAST_TXT_TEXT_MAX = 64
+
+/** Drops control and format characters (zero-width and bidi marks) and caps the length, for display. */
+private fun displaySafe(text: String): String {
+    val out = StringBuilder(text.length.coerceAtMost(CAST_TXT_TEXT_MAX))
+    var i = 0
+    var kept = 0
+    while (i < text.length && kept < CAST_TXT_TEXT_MAX) {
+        val cp = text.codePointAt(i)
+        i += Character.charCount(cp)
+        val type = Character.getType(cp)
+        if (type == Character.CONTROL.toInt() || type == Character.FORMAT.toInt()) continue
+        out.appendCodePoint(cp)
+        kept += 1
+    }
+    return out.toString().trim()
 }
 
 /**

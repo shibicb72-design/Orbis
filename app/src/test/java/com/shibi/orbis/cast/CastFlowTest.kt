@@ -21,6 +21,63 @@ class CastFlowTest {
         assertFalse(flow.acceptStart(generation))
     }
 
+    private fun ticket(): CastPins.Ticket {
+        val store =
+            object : CastPinStore {
+                override fun get(key: String): String? = null
+                override fun put(key: String, value: String) = Unit
+                override fun remove(key: String) = Unit
+                override fun all(): Map<String, String> = emptyMap()
+            }
+        return (CastPins(store).check("tv-1", "Living Room", byteArrayOf(1, 2, 3), 0) as CastPins.Verdict.NeedsConfirm).ticket
+    }
+
+    @Test
+    fun aTrustQuestionLeavesConnectingAndTheConnectTimeoutNoLongerFires() {
+        val flow = CastFlow()
+        flow.showPicker(youtube = false, searching = false)
+        val generation = flow.beginConnect(0)
+        val pending = PendingTrust("tv-1", "Living Room", CastPins.Reason.KEY_CHANGED, ticket())
+        assertTrue(flow.needsTrust(generation, youtube = false, pending))
+        assertEquals(CastPhase.Picker(youtube = false, searching = false), flow.phase)
+        assertEquals(CastNotice.CONFIRM_DEVICE, flow.notice)
+        assertEquals(pending, flow.trust)
+        // The prompt may stay up past the 15 s connect deadline; the deadline belongs to the attempt that ended.
+        assertFalse(flow.connectExpired(generation, CONNECT_TIMEOUT_MS * 10))
+        assertFalse(flow.acceptStart(generation))
+        // A late question for an attempt that is no longer live is dropped.
+        assertFalse(flow.needsTrust(generation, youtube = false, pending))
+    }
+
+    @Test
+    fun confirmingTakesTheQuestionOnceSoTheReconnectHappensOnce() {
+        val flow = CastFlow()
+        flow.showPicker(youtube = false, searching = false)
+        val pending = PendingTrust("tv-1", "Living Room", CastPins.Reason.FIRST_USE, ticket())
+        flow.needsTrust(flow.beginConnect(0), youtube = false, pending)
+        assertEquals(pending, flow.takeTrust())
+        assertNull(flow.notice)
+        assertNull(flow.trust)
+        assertNull("a second tap does not reconnect again", flow.takeTrust())
+        // The reconnect asks again (the device proved another key): a new question, not an approval.
+        val again = PendingTrust("tv-1", "Living Room", CastPins.Reason.KEY_CHANGED, ticket())
+        assertTrue(flow.needsTrust(flow.beginConnect(1), youtube = false, again))
+        assertEquals(CastPins.Reason.KEY_CHANGED, flow.trust?.reason)
+    }
+
+    @Test
+    fun closingTheSheetOrStartingAnotherConnectDropsTheQuestion() {
+        val flow = CastFlow()
+        flow.showPicker(youtube = false, searching = false)
+        flow.needsTrust(flow.beginConnect(0), youtube = false, PendingTrust("tv-1", "TV", CastPins.Reason.FIRST_USE, ticket()))
+        flow.dismissSheet(hasPlayback = false)
+        assertNull(flow.trust)
+        flow.showPicker(youtube = false, searching = false)
+        flow.needsTrust(flow.beginConnect(0), youtube = false, PendingTrust("tv-1", "TV", CastPins.Reason.FIRST_USE, ticket()))
+        flow.beginConnect(1)
+        assertNull(flow.trust)
+    }
+
     @Test
     fun pageChangeDuringConnectIsIgnoredSoTheStartStillBelongs() {
         val flow = CastFlow()

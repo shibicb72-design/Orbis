@@ -167,21 +167,86 @@ class CastDeviceAuthTest {
     @Test
     fun theIdentityKeyPinLivesAcrossTlsRegenerationAndCatchesAnotherKey() {
         val pins = CastPins(MemoryPinStore())
-        fun connect(tv: TestTv, leaf: ByteArray): CastPins.Verdict {
+        fun connect(tv: TestTv, leaf: ByteArray, now: Long): CastPins.Verdict {
             val key = verifyDeviceAuth(signedResponse(tv, signedLeaf = leaf), nonce, leaf)!!.spki
-            return pins.check("tv-1", key)
+            return pins.check("tv-1", "Living Room", key, now)
         }
         val today = byteArrayOf(0x30, 0x01, 0x01)
         val tomorrow = byteArrayOf(0x30, 0x01, 0x02)
-        assertEquals(CastPins.Verdict.PINNED, connect(TV_A, today))
+        val first = connect(TV_A, today, 0) as CastPins.Verdict.NeedsConfirm
+        assertEquals(CastPins.Reason.FIRST_USE, first.reason)
+        pins.approve(first.ticket, 0)
+        assertEquals(CastPins.Verdict.PINNED, connect(TV_A, today, 1))
         // The receiver regenerated its TLS certificate; the device key is the same.
-        assertEquals(CastPins.Verdict.MATCHED, connect(TV_A, tomorrow))
-        assertEquals(CastPins.Verdict.CHANGED, connect(TV_B, tomorrow))
-        assertEquals(CastPins.Verdict.MATCHED, connect(TV_A, today))
-        pins.forget("tv-1")
-        assertEquals(CastPins.Verdict.PINNED, connect(TV_B, today))
-        assertEquals(CastPins.Verdict.MATCHED, connect(TV_B, tomorrow))
-        assertEquals(CastPins.Verdict.CHANGED, connect(TV_A, today))
+        assertEquals(CastPins.Verdict.MATCHED, connect(TV_A, tomorrow, 2))
+        assertEquals(CastPins.Reason.KEY_CHANGED, (connect(TV_B, tomorrow, 3) as CastPins.Verdict.NeedsConfirm).reason)
+        assertEquals(CastPins.Verdict.MATCHED, connect(TV_A, today, 4))
+    }
+
+    /** What a TV on the far end of the socket sees: every frame Orbis wrote, and its scripted reply. */
+    private class Wire(reply: ByteArray) {
+        val written = ByteArrayOutputStream()
+        val input = reply.inputStream()
+    }
+
+    private fun authFrame(payload: ByteArray): ByteArray =
+        frameCastMessage(
+            CastMessage(CAST_RECEIVER_ID, CAST_SENDER_ID, NS_DEVICE_AUTH, "", payloadType = CastMessage.PAYLOAD_BINARY, payloadBinary = payload),
+        )
+
+    private fun framesIn(bytes: ByteArray): List<CastMessage> {
+        val out = ArrayList<CastMessage>()
+        var offset = 0
+        while (offset < bytes.size) {
+            val length = castDeclaredLength(bytes.copyOfRange(offset, offset + 4))
+            out += decodeCastMessage(bytes.copyOfRange(offset + 4, offset + 4 + length))!!
+            offset += 4 + length
+        }
+        return out
+    }
+
+    @Test
+    fun anUnconfirmedDeviceReceivesOnlyTheDeviceAuthChallenge() {
+        val pins = CastPins(MemoryPinStore())
+        val wire = Wire(authFrame(signedResponse(TV_A)))
+        val result = authenticateCastPeer(wire.input, wire.written, tlsLeaf, nonce, "tv-1", "Living Room", pins) { 0L }
+        assertTrue("first connection asks: $result", result is CastPeerAuth.NeedsTrust)
+        assertEquals(CastPins.Reason.FIRST_USE, (result as CastPeerAuth.NeedsTrust).reason)
+        // The only bytes the device got are the one challenge frame: no CONNECT, no LAUNCH, no media address.
+        assertArrayEquals(frameCastMessage(deviceAuthChallengeMessage(nonce)), wire.written.toByteArray())
+        assertEquals(listOf(NS_DEVICE_AUTH), framesIn(wire.written.toByteArray()).map { it.namespace })
+    }
+
+    @Test
+    fun afterConfirmTheSameKeyAndNameIsTrustedAndAnotherKeyAsksAgain() {
+        val pins = CastPins(MemoryPinStore())
+        val ask = authenticateCastPeer(Wire(authFrame(signedResponse(TV_A))).input, ByteArrayOutputStream(), tlsLeaf, nonce, "tv-1", "Living Room", pins) { 0L }
+        pins.approve((ask as CastPeerAuth.NeedsTrust).ticket, 0L)
+        // The reconnect after "Trust and cast" is answered by a different device: never auto-approved.
+        val impostor = Wire(authFrame(signedResponse(TV_B)))
+        val second = authenticateCastPeer(impostor.input, impostor.written, tlsLeaf, nonce, "tv-1", "Living Room", pins) { 1L }
+        assertTrue(second is CastPeerAuth.NeedsTrust)
+        assertEquals(1, framesIn(impostor.written.toByteArray()).size)
+        // The real TV then proves the approved key.
+        val real = Wire(authFrame(signedResponse(TV_A)))
+        val third = authenticateCastPeer(real.input, real.written, tlsLeaf, nonce, "tv-1", "Living Room", pins) { 2L }
+        assertEquals(CastPeerAuth.Trusted(CastPins.Verdict.PINNED, legacy = false), third)
+        val again = Wire(authFrame(signedResponse(TV_A)))
+        assertEquals(
+            CastPeerAuth.Trusted(CastPins.Verdict.MATCHED, legacy = false),
+            authenticateCastPeer(again.input, again.written, tlsLeaf, nonce, "tv-1", "Living Room", pins) { 3L },
+        )
+    }
+
+    @Test
+    fun aBadOrMissingReplyIsRefusedWithoutTouchingThePins() {
+        val store = MemoryPinStore()
+        val pins = CastPins(store)
+        val forged = Wire(authFrame(signedResponse(certificateOf = TV_A, signer = TV_B.keys)))
+        assertEquals(CastPeerAuth.AuthFailed, authenticateCastPeer(forged.input, forged.written, tlsLeaf, nonce, "tv-1", "TV", pins) { 0L })
+        val silent = Wire(ByteArray(0))
+        assertEquals(CastPeerAuth.AuthNone, authenticateCastPeer(silent.input, silent.written, tlsLeaf, nonce, "tv-1", "TV", pins) { 0L })
+        assertTrue(store.all().isEmpty())
     }
 
     @Test
@@ -250,6 +315,8 @@ class CastDeviceAuthTest {
         override fun remove(key: String) {
             map.remove(key)
         }
+
+        override fun all(): Map<String, String> = map.toMap()
     }
 
     /** Every read times out, as a quiet socket with soTimeout set does. */

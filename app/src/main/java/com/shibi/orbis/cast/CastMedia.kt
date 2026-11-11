@@ -103,12 +103,7 @@ internal fun youtubeMdxStatusRequest(): String = JSONObject().put("type", "getMd
 
 /** The lounge screen id from an `mdxSessionStatus` payload. Null for any other payload or a blank id. */
 internal fun parseMdxScreenId(payload: String): String? {
-    val root =
-        try {
-            JSONObject(payload)
-        } catch (_: Exception) {
-            return null
-        }
+    val root = parseJsonObject(payload) ?: return null
     if (root.optString("type") != "mdxSessionStatus") return null
     return root.optJSONObject("data")?.optString("screenId")?.trim()?.takeIf { it.isNotEmpty() }
 }
@@ -295,12 +290,7 @@ private data class SourceRef(val url: String, val mime: String)
 
 private fun parseProbe(json: String?): Probe? {
     if (json.isNullOrBlank() || json.length > MAX_PROBE_CHARS) return null
-    val root =
-        try {
-            JSONObject(json)
-        } catch (_: Exception) {
-            return null
-        }
+    val root = parseJsonObject(json) ?: return null
     val media = root.optJSONArray("media") ?: JSONArray()
     val elements = ArrayList<ProbeElement>(media.length().coerceAtMost(12))
     for (i in 0 until media.length().coerceAtMost(12)) {

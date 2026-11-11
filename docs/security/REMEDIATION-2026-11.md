@@ -11,10 +11,10 @@ Status values: `open` (nothing merged), `partial` (a first step is merged), `fix
 | Finding | Severity | Summary | Planned branch | Status | PR | Device evidence |
 |---|---|---|---|---|---|---|
 | F-01 | medium | Chromecast pin keyed by an attacker-supplied id; first use pins silently | `opus/sec2-cast-identity` | open | | |
-| F-02 | medium | Torrent natives bundle OpenSSL 3.5.5 and a libtorrent 2.1.0 snapshot | `opus/sec2-engine-currency`, `opus/sec2-torrent-natives-build`, `opus/sec2-torrent-natives-ship` | open | | |
-| F-03 | medium | No routine keeps GeckoView current | `opus/sec2-gecko-160` (first step), `opus/sec2-engine-currency` | open | | |
-| F-04 | low | "Is this our own provider" check can be bypassed | `opus/sec2-local-content-gates` | open | #27 | pending H-D14 |
-| F-05 | low | Top-level loads are only screened for `file:` | `opus/sec2-local-content-gates` | open | #27 | pending H-D1 before/after, H-D14 |
+| F-02 | medium | Torrent natives bundle OpenSSL 3.5.5 and a libtorrent 2.1.0 snapshot | `opus/sec2-engine-currency`, `opus/sec2-torrent-natives-build`, `opus/sec2-torrent-natives-ship` | partial (record and daily monitor in #26; natives still OpenSSL 3.5.5) | #26 | none needed (no app change) |
+| F-03 | medium | No routine keeps GeckoView current | `opus/sec2-gecko-160` (first step), `opus/sec2-engine-currency` | partial (160 shipped by #24; daily Engine currency workflow and 3-day rule in #26; fixed after its first green manual run on main) | #24, #26 | H-D11 (PR 1); no device test for PR 5 |
+| F-04 | low | "Is this our own provider" check can be bypassed | `opus/sec2-local-content-gates` | open | #27 | device-checked 2026-11-11 on API 36 (H-D1, H-D9 before/after; uBO dashboard and panes; error pages) |
+| F-05 | low | Top-level loads are only screened for `file:` | `opus/sec2-local-content-gates` | open | #27 | device-checked 2026-11-11 on API 36 (H-D1, H-D9 before/after; uBO dashboard and panes; error pages) |
 | F-06 | low | Private-tab torrents are published to the public Download folder | `opus/sec2-private-torrents` | open | | |
 | F-07 | low | Clear browsing data does not clear torrents | `opus/sec2-clear-torrents` | open | | |
 | F-08 | low | Deeply nested JSON on the cast channel can crash the app | `opus/sec2-cast-identity` | open | | |

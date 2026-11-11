@@ -35,9 +35,23 @@ enum class CastNotice {
     FAILED,
     YOUTUBE_UNCONFIRMED,
     REJECTED,
-    /** The TV's identity key changed since it was pinned. The sheet offers to forget the TV. */
-    UNTRUSTED,
+    /** A Chromecast must be confirmed before Orbis casts to it. The question is [CastCoordinator.trustPrompt]. */
+    CONFIRM_DEVICE,
 }
+
+/** Why a Chromecast needs the user's confirmation. */
+enum class CastTrustReason {
+    /** Orbis has not cast to this device before. */
+    FIRST_USE,
+
+    /** Another key is trusted under this name or this device id. */
+    KEY_CHANGED,
+
+    /** This device's key is trusted under another name. */
+    RENAMED,
+}
+
+data class CastTrustPrompt(val deviceName: String, val reason: CastTrustReason)
 
 sealed interface CastPhase {
     data object Idle : CastPhase
@@ -79,6 +93,10 @@ class CastCoordinator(
     /** True while a DLNA attempt is using HLS or DASH, which some TVs cannot play. */
     val dlnaFormatNote: StateFlow<Boolean> = _dlnaFormatNote.asStateFlow()
 
+    private val _trustPrompt = MutableStateFlow<CastTrustPrompt?>(null)
+    /** Non-null while [CastNotice.CONFIRM_DEVICE] is shown: answer with [confirmTrust] or [dismissNotice]. */
+    val trustPrompt: StateFlow<CastTrustPrompt?> = _trustPrompt.asStateFlow()
+
     private val flow = CastFlow()
     private var privateTab = false
     private var discovery: Job? = null
@@ -89,8 +107,8 @@ class CastCoordinator(
     private var connectingKind: CastDeviceKind? = null
     private var deviceName: String = ""
     private var connectingDeviceId: String? = null
-    /** The Chromecast whose identity key no longer matches its pin, while [CastNotice.UNTRUSTED] is shown. */
-    private var untrustedDeviceId: String? = null
+    /** The page-pause action of the attempt that is waiting for a trust answer. */
+    private var trustLocalPause: (() -> Unit)? = null
     private var shownTitle: String = ""
     private var youtube = false
     private var connectStartedAt = 0L
@@ -177,7 +195,6 @@ class CastCoordinator(
         log("choose dev=${deviceTag(item.id)} kind=${item.kind} youtube=${chosen is CastTarget.YouTube} gen=$generation")
         connectingKind = item.kind
         connectingDeviceId = item.id
-        untrustedDeviceId = null
         deviceName = item.name
         sync()
         armConnectTimeout(generation, item.kind)
@@ -190,6 +207,7 @@ class CastCoordinator(
                             goal = CastGoal.Media(chosen.media, shownTitle, if (privateTab) null else chosen.media.poster),
                             onReady = { main.post { started(CastDeviceKind.GOOGLE_CAST, generation, onLocalPause) } },
                             onFailed = { reason -> main.post { failAttempt(generation, reason) } },
+                            onNeedsTrust = { reason, ticket, name -> main.post { needsTrust(generation, item.id, name, reason, ticket, onLocalPause) } },
                         )
                     CastDeviceKind.DLNA -> {
                         val renderer = dlnaById[item.id]
@@ -221,6 +239,7 @@ class CastCoordinator(
                     goal = CastGoal.YouTube(chosen.video),
                     onReady = { main.post { started(CastDeviceKind.GOOGLE_CAST, generation, onLocalPause) } },
                     onFailed = { reason -> main.post { failAttempt(generation, reason) } },
+                    onNeedsTrust = { reason, ticket, name -> main.post { needsTrust(generation, item.id, name, reason, ticket, onLocalPause) } },
                 )
             CastTarget.None -> failAttempt(generation)
         }
@@ -274,6 +293,7 @@ class CastCoordinator(
 
     fun disconnect() {
         connectWatch?.cancel()
+        chromecast.cancelTrust()
         poll?.cancel()
         poll = null
         val kind = activeKind
@@ -300,17 +320,33 @@ class CastCoordinator(
         beginDiscovery()
     }
 
+    /** Closes the notice. For [CastNotice.CONFIRM_DEVICE] this is "Cancel": nothing is trusted. */
     fun dismissNotice() {
-        untrustedDeviceId = null
+        if (flow.takeTrust() != null) {
+            chromecast.cancelTrust()
+            log("trust dismissed")
+        }
         flow.showNotice(null)
         sync()
     }
 
-    /** "Forget this TV": drops the identity-key pin, so the next cast to it pins the key it proves then. */
-    fun forgetUntrustedDevice() {
-        val id = untrustedDeviceId ?: return
-        chromecast.forgetPin(id)
-        dismissNotice()
+    /**
+     * "Trust and cast". Connects again; the key is pinned only if the device proves the same key under the same name.
+     * A different key on that connection asks again with its own reason.
+     */
+    fun confirmTrust() {
+        val pending = flow.takeTrust() ?: return
+        val onLocalPause = trustLocalPause ?: {}
+        chromecast.approveTrust(pending.ticket)
+        log("trust approved")
+        sync()
+        if (_devices.value.none { it.id == pending.deviceId && it.kind == CastDeviceKind.GOOGLE_CAST }) {
+            chromecast.cancelTrust()
+            flow.showNotice(CastNotice.FAILED)
+            sync()
+            return
+        }
+        choose(pending.deviceId, onLocalPause)
     }
 
     fun sheetClosed() {
@@ -437,6 +473,30 @@ class CastCoordinator(
             }
     }
 
+    /**
+     * The Chromecast proved a key the user has not trusted under its name. Leaves Connecting the way [failAttempt]
+     * does (the hub has already closed the socket) and asks. An earlier approval is dropped: it belonged to the
+     * connection that just ended, and a new question is never answered for the user.
+     */
+    private fun needsTrust(
+        generation: Int,
+        deviceId: String,
+        checkedName: String,
+        reason: CastPins.Reason,
+        ticket: CastPins.Ticket,
+        onLocalPause: () -> Unit,
+    ) {
+        connectWatch?.cancel()
+        if (!flow.needsTrust(generation, youtube, PendingTrust(deviceId, checkedName, reason, ticket))) return
+        chromecast.cancelTrust()
+        trustLocalPause = onLocalPause
+        connectingKind = null
+        _dlnaFormatNote.value = false
+        chromecast.disconnect()
+        sync()
+        publishDevices(searching = false)
+    }
+
     /** The attempt did not start. A Chromecast session that was opened is closed. */
     private fun failAttempt(
         generation: Int,
@@ -448,11 +508,11 @@ class CastCoordinator(
             when (reason) {
                 CastFailure.YOUTUBE_UNCONFIRMED -> CastNotice.YOUTUBE_UNCONFIRMED
                 CastFailure.REJECTED -> CastNotice.REJECTED
-                CastFailure.UNTRUSTED -> CastNotice.UNTRUSTED
                 else -> CastNotice.FAILED
             }
         if (!flow.failConnect(generation, youtube, notice)) return
-        untrustedDeviceId = if (reason == CastFailure.UNTRUSTED) connectingDeviceId else null
+        // An approval belongs to the reconnect that just failed; it must not stay live for its full two minutes.
+        chromecast.cancelTrust()
         log("session failed reason=$reason gen=$generation ms=${System.currentTimeMillis() - connectStartedAt}")
         connectingKind = null
         _dlnaFormatNote.value = false
@@ -516,7 +576,16 @@ class CastCoordinator(
     private fun sync() {
         _phase.value = flow.phase
         _notice.value = flow.notice
+        _trustPrompt.value = flow.trust?.let { CastTrustPrompt(it.deviceName, it.reason.toPublic()) }
+        if (flow.trust == null) trustLocalPause = null
     }
+
+    private fun CastPins.Reason.toPublic(): CastTrustReason =
+        when (this) {
+            CastPins.Reason.FIRST_USE -> CastTrustReason.FIRST_USE
+            CastPins.Reason.KEY_CHANGED -> CastTrustReason.KEY_CHANGED
+            CastPins.Reason.RENAMED -> CastTrustReason.RENAMED
+        }
 
     private fun clearPlayback() {
         _playback.value = null

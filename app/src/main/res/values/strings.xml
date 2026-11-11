@@ -398,14 +398,17 @@
     <string name="cast_failed">Couldn\'t cast to this device.</string>
     <string name="cast_youtube_unconfirmed">The TV didn\'t start this YouTube video.</string>
     <string name="cast_rejected">The TV refused this cast.</string>
-    <string name="cast_untrusted">This TV\'s identity key changed since you last cast to it. It may be a different device.</string>
-    <string name="cast_forget_tv">Forget this TV</string>
+    <string name="cast_trust_first" translatable="false">First time casting to “%1$s”. Orbis will remember this device and warn you if a different one uses its name.</string>
+    <string name="cast_trust_changed" translatable="false">“%1$s” is not the device Orbis remembers under this name. That is normal after a TV was replaced or reset. If nothing changed, another device on this Wi-Fi may be pretending to be your TV, and it would receive the video address.</string>
+    <string name="cast_trust_renamed" translatable="false">This device was trusted under another name and is now called “%1$s”.</string>
+    <string name="cast_trust_confirm" translatable="false">Trust and cast</string>
+    <string name="cast_trust_cancel" translatable="false">Cancel</string>
     <string name="cast_play">Play</string>
     <string name="cast_pause">Pause</string>
     <string name="cast_disconnect">Disconnect</string>
     <string name="cast_volume">Volume</string>
     <string name="cast_device_chromecast">Chromecast</string>
-    <string name="cast_device_dlna">DLNA</string>
+    <string name="cast_device_dlna">DLNA (not verified)</string>
     <string name="cast_private_title">Casting from a private tab</string>
     <string name="cast_channel">Cast</string>
     <string name="cast_notification_casting">Casting</string>
