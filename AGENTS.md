@@ -25,6 +25,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/gradle-brief.ps1 ass
 ```
 Prints `BUILD OK` or the first failure lines. Full log `%TEMP%\gradle-last.log` (Grep it, never read it whole).
 - Dependency verification is on (`gradle/verification-metadata.xml`, SHA-256). After adding or bumping a dependency or plugin, regenerate it and review the diff: `gradlew.bat --write-verification-metadata sha256 assembleDebug assembleFixture assembleRelease testDebugUnitTest lintDebug`.
+- Engine currency: `.github/workflows/engine-currency.yml` runs daily and goes red when GeckoView/AC, libtorrent4j or the bundled OpenSSL (`native/libtorrent4j/versions.env`) is behind. Ship a GeckoView/AC bump within 3 days of every Firefox release (`docs/play/RELEASE_CHECKLIST.md` section 5).
 - CI actions are pinned to commit SHAs (`# vX.Y.Z` comment); bump both together. The wrapper has a `distributionSha256Sum`; update it with the Gradle version.
 
 ## Design rules
