@@ -13,7 +13,9 @@ Components and sources (official release sources only, HTTPS only):
 Prints one line per component and exits:
   0  everything is current (or only --warn-only components are behind)
   1  a component is behind
-  2  could not check (network failure, unexpected response, missing pom entry)
+  2  could not check (network failure, unexpected response, missing pom entry, a libtorrent4j version of an
+     unknown shape, the two libtorrent4j records disagreeing, or a current version newer than the newest
+     one found, which means the check is looking at the wrong source)
 
 A failed check is not a pass: exit 2 also fails the job.
 
@@ -21,6 +23,7 @@ Usage: check_engine_currency.py [--warn-only COMPONENT ...] [--repo-root DIR]
 """
 
 import argparse
+import http.client
 import os
 import re
 import subprocess
@@ -48,6 +51,8 @@ COMPONENTS = ("browser-engine-gecko", "geckoview-omni", "libtorrent4j", "openssl
 STABLE_AC = re.compile(r"^\d+\.\d+(\.\d+)?$")
 # 2.1.0-39 and 1.2.0.22 are releases; 2.0.4-22-RC1, 2.0.0-beta-1 and 1.2.0.21-alpha1 are not.
 STABLE_LIBTORRENT4J = re.compile(r"^\d+(\.\d+)+(-\d+)?$")
+# Pre-release shapes seen on Maven Central: 1.2.0.1-beta1, 1.2.0.20-RC1, 1.3.0-alpha-1, 2.0.4-22-RC1.
+PRERELEASE_LIBTORRENT4J = re.compile(r"^\d+(\.\d+)+(-\d+)?-(RC|alpha|beta)-?\d+$")
 
 
 class CheckError(Exception):
@@ -99,6 +104,15 @@ def _local(tag):
     return tag.rsplit("}", 1)[-1]
 
 
+def newest_libtorrent4j(versions):
+    """Highest release version; a version of neither a release nor a known pre-release shape is an error."""
+    unknown = [v.strip() for v in versions
+               if not (STABLE_LIBTORRENT4J.match(v.strip()) or PRERELEASE_LIBTORRENT4J.match(v.strip()))]
+    if unknown:
+        raise CheckError("libtorrent4j version of an unknown shape in the metadata: %s" % ", ".join(unknown[:5]))
+    return highest(versions, STABLE_LIBTORRENT4J)
+
+
 def openssl_highest_patch(ls_remote_output, series):
     """Highest 'series.N' from `git ls-remote --tags` output; pre-releases and ^{} lines are ignored."""
     tag = re.compile(r"^refs/tags/openssl-" + re.escape(series) + r"\.(\d+)$")
@@ -117,6 +131,9 @@ def openssl_highest_patch(ls_remote_output, series):
 
 def is_behind(current, newest):
     return version_key(newest) > version_key(current)
+
+
+OK, BEHIND, AHEAD = "ok", "behind", "ahead"
 
 
 def toml_versions(toml_text):
@@ -153,31 +170,40 @@ def evaluate(current, newest):
 
     current: browser-engine-gecko, geckoview-omni, libtorrent4j, openssl.
     newest: the same keys; geckoview-omni is the version newest browser-engine-gecko pins.
-    Returns a list of (component, current, newest, behind) in COMPONENTS order.
+    Returns a list of (component, current, newest, state) in COMPONENTS order; state is OK, BEHIND or AHEAD.
+    AHEAD (current newer than the newest found) applies to the ordered components only.
     """
     rows = []
     for name in COMPONENTS:
         if name == "geckoview-omni":
             # Must equal the exact build the newest AC pins; there is no ordering to trust.
-            behind = current[name] != newest[name]
+            state = BEHIND if current[name] != newest[name] else OK
+        elif is_behind(current[name], newest[name]):
+            state = BEHIND
+        elif is_behind(newest[name], current[name]):
+            state = AHEAD
         else:
-            behind = is_behind(current[name], newest[name])
-        rows.append((name, current[name], newest[name], behind))
+            state = OK
+        rows.append((name, current[name], newest[name], state))
     return rows
 
 
 def report(rows, warn_only):
-    """Output lines and exit code (0 or 1) for evaluated rows."""
+    """Output lines and exit code for evaluated rows: 0, 1 (behind) or 2 (ahead: could not check)."""
     lines = []
     code = 0
-    for name, cur, new, behind in rows:
-        if not behind:
+    for name, cur, new, state in rows:
+        if state == OK:
             status = "OK"
+        elif state == AHEAD:
+            # Ahead of the source means the check is reading the wrong thing; warn-only does not hide it.
+            status = "AHEAD of the newest release found: could not check"
+            code = 2
         elif name in warn_only:
             status = "BEHIND (warning only)"
         else:
             status = "BEHIND"
-            code = 1
+            code = max(code, 1)
         lines.append("%-21s current %-22s newest %-22s %s" % (name, cur, new, status))
     return lines, code
 
@@ -201,7 +227,7 @@ def fetch(url):
     try:
         with opener.open(request, timeout=TIMEOUT_SECONDS) as response:
             body = response.read(MAX_RESPONSE_BYTES + 1)
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as exc:
         raise CheckError("request failed (%s)" % type(exc).__name__) from exc
     if len(body) > MAX_RESPONSE_BYTES:
         raise CheckError("response larger than the 2 MB cap")
@@ -231,7 +257,7 @@ def newest_versions(openssl_series):
     omni = pom_dependency_version(fetch(AC_POM_URL.format(v=ac)), "geckoview-omni")
     if omni is None:
         raise CheckError("browser-engine-gecko %s pom has no geckoview-omni dependency" % ac)
-    lt4j = highest(metadata_versions(fetch(LIBTORRENT4J_METADATA_URL)), STABLE_LIBTORRENT4J)
+    lt4j = newest_libtorrent4j(metadata_versions(fetch(LIBTORRENT4J_METADATA_URL)))
     if lt4j is None:
         raise CheckError("no release libtorrent4j version in the metadata")
     openssl = openssl_highest_patch(ls_remote_tags(openssl_series), openssl_series)
@@ -257,8 +283,12 @@ def current_versions(repo_root):
         "openssl": env.get("OPENSSL_VERSION"),
     }
     missing = [name for name, value in wanted.items() if not value]
-    if missing or not env.get("OPENSSL_SERIES"):
-        raise CheckError("missing version entries: %s" % ", ".join(missing or ["OPENSSL_SERIES"]))
+    missing += [key for key in ("OPENSSL_SERIES", "LIBTORRENT4J_VERSION") if not env.get(key)]
+    if missing:
+        raise CheckError("missing version entries: %s" % ", ".join(missing))
+    if env["LIBTORRENT4J_VERSION"] != wanted["libtorrent4j"]:
+        raise CheckError("versions.env LIBTORRENT4J_VERSION %s differs from libs.versions.toml libtorrent4j %s"
+                         % (env["LIBTORRENT4J_VERSION"], wanted["libtorrent4j"]))
     for name, value in wanted.items():
         try:
             version_key(value)

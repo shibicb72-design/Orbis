@@ -55,12 +55,14 @@ import com.shibi.orbis.engine.BrowserSession
 import com.shibi.orbis.engine.IncomingDownload
 import com.shibi.orbis.engine.SessionHost
 import com.shibi.orbis.engine.SessionInit
+import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.engine.hostOfUrl
 import com.shibi.orbis.engine.isWebUrl
 import com.shibi.orbis.tabs.PendingDownload
 import com.shibi.orbis.ui.browser.DownloadConfirmDialog
 import com.shibi.orbis.ui.browser.SitePromptDialog
 import com.shibi.orbis.ui.browser.shareLink
+import com.shibi.orbis.ui.browser.showsLock
 import com.shibi.orbis.ui.theme.OrbisTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -179,6 +181,18 @@ class CustomTabActivity : ComponentActivity() {
         }
 }
 
+/** The page's host, after a lock only when Gecko reported the page as secure (see showsLock). */
+@Composable
+internal fun CustomTabAddressLine(state: SessionState) {
+    val host = hostOfUrl(state.url).orEmpty().removePrefix("www.")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (showsLock(state)) {
+            Icon(Icons.Filled.Lock, contentDescription = stringResource(R.string.ct_secure), modifier = Modifier.padding(end = 4.dp).height(14.dp))
+        }
+        Text(host, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
 @Composable
 private fun CustomTabScreen(
     session: BrowserSession,
@@ -205,16 +219,10 @@ private fun CustomTabScreen(
                 Row(Modifier.fillMaxWidth().height(56.dp).padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.ct_close)) }
                     Column(Modifier.weight(1f)) {
-                        val host = hostOfUrl(state.url).orEmpty().removePrefix("www.")
                         if (showTitle && !state.title.isNullOrBlank()) {
                             Text(state.title.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (state.url.startsWith("https://")) {
-                                Icon(Icons.Filled.Lock, contentDescription = stringResource(R.string.ct_secure), modifier = Modifier.padding(end = 4.dp).height(14.dp))
-                            }
-                            Text(host, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
-                        }
+                        CustomTabAddressLine(state)
                     }
                     IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.menu_more)) }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
