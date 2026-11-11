@@ -413,7 +413,8 @@ class TorrentManager(
             store.deleteSetAside()
         }
         log("torrent list cleared ${gone.size}")
-        persist()
+        // Before the index is read, writing it would lose the rows that stay; restore() writes it after its filter.
+        if (restored) persist()
         when {
             engineRunning -> forgetSessionOnStop = true
             _entries.value.isEmpty() -> forgetSessionState()

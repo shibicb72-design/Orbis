@@ -415,6 +415,7 @@ class BrowsingDataClearerTest {
     fun theDownloadsCategoryClearsTheTorrentListToo() = runTest {
         val t = TorrentTestSetup(tmp.root, testScheduler)
         try {
+            t.manager.restore()
             // Resume data alone is never a new torrent: the row is FAILED at once.
             val id = t.manager.add(TorrentSource.FromResumeData, isPrivate = false)!!
             advanceUntilIdle()
@@ -435,6 +436,7 @@ class BrowsingDataClearerTest {
     fun withoutTheDownloadsCategoryTheTorrentListStays() = runTest {
         val t = TorrentTestSetup(tmp.root, testScheduler)
         try {
+            t.manager.restore()
             t.manager.add(TorrentSource.FromResumeData, isPrivate = false)
             advanceUntilIdle()
 

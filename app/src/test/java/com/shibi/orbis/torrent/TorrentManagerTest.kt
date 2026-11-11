@@ -1511,6 +1511,7 @@ class TorrentManagerTest {
     @Test
     fun clearTakesFinishedAndFailedRowsAndLeavesEverythingElse() = runTest {
         val s = setup(this)
+        s.manager.restore()
         val completed = finishedTorrent(s)
         s.clock += 1
         s.publishOk = false
@@ -1563,6 +1564,7 @@ class TorrentManagerTest {
     @Test
     fun clearWithAnIdleEngineDropsTheSessionStateAndASetAsideIndex() = runTest {
         val s = setup(this)
+        s.manager.restore()
         finishedTorrent(s)
         assertFalse(s.engine.started)
         assertTrue("the stop wrote it", s.store.sessionFile.isFile)
@@ -1581,6 +1583,7 @@ class TorrentManagerTest {
     @Test
     fun clearWhileTheEngineRunsDropsTheSessionStateAfterTheStopWhenTheListIsEmpty() = runTest {
         val s = setup(this)
+        s.manager.restore()
         val downloading = downloadingTorrent(s)
         s.clock += 1
         finishedTorrent(s)
@@ -1602,6 +1605,7 @@ class TorrentManagerTest {
     @Test
     fun clearWhileTheEngineRunsKeepsTheSessionStateWhenRowsAreLeftAtTheStop() = runTest {
         val s = setup(this)
+        s.manager.restore()
         val downloading = downloadingTorrent(s)
         s.clock += 1
         finishedTorrent(s)
@@ -1618,6 +1622,7 @@ class TorrentManagerTest {
     @Test
     fun aClearedListIsNotRestored() = runTest {
         val first = setup(this)
+        first.manager.restore()
         finishedTorrent(first)
         first.clock += 1
         fileErrorTorrent(first)
@@ -1658,6 +1663,7 @@ class TorrentManagerTest {
     @Test
     fun aKeptPrivateRowLeavesWithTheClearAndItsFilesGoWhenPrivateBrowsingEnds() = runTest {
         val s = setup(this)
+        s.manager.restore()
         val id = keptTorrent(s)
         val kept = File(s.entry(id).keptDir!!)
         assertTrue(File(kept, "movie.mp4").isFile)
