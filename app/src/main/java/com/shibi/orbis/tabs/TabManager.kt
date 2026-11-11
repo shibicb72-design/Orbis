@@ -160,6 +160,15 @@ class TabManager(
      */
     private val historyPending = HashMap<Long, Boolean>()
 
+    /**
+     * The import each tab was asked to load and has not committed yet. History cannot reach it, but the load is about
+     * to read it, so [pruneUnreachableImports] must leave it alone. On a cold start Gecko's content process takes about
+     * two seconds, and the session reports progress (url still empty) all that time; deleting the file then made the
+     * load fail with ERROR_FILE_NOT_FOUND. Cleared when the URL commits; a load that never commits keeps the file until
+     * the tab closes (or the 24 h sweep).
+     */
+    private val importLoading = HashMap<Long, String>()
+
     /** Snapshots queue here and one writer coroutine saves them in order, so an old write can never land last. */
     private val writes = Channel<TabsSnapshot>(Channel.CONFLATED)
     private var writerStarted = false
@@ -354,6 +363,7 @@ class TabManager(
         lastCanGoBack[id] = st.canGoBack
         lastCanGoForward[id] = st.canGoForward
         if (isImportLoadUrl(url)) rememberImport(id, url)
+        if (importLoading[id] == st.url) importLoading.remove(id)
         if (tab.url != url || tab.title != title || tab.desktopMode != st.desktopMode) {
             list[i] = tab.copy(url = url, title = title, desktopMode = st.desktopMode)
             publish()
@@ -376,7 +386,7 @@ class TabManager(
         if (st.canGoBack || st.canGoForward) return
         if (historyPending[id] == true) return
         val shown = importsShown[id] ?: return
-        val drop = shown.filter { it != url }
+        val drop = shown.filter { it != url && it != importLoading[id] }
         if (drop.isEmpty()) return
         shown.removeAll(drop.toSet())
         for (old in drop) releaseIfUnused(old)
@@ -384,6 +394,7 @@ class TabManager(
 
     private fun releaseTabImports(id: Long) {
         val mine = importsShown.remove(id).orEmpty()
+        importLoading.remove(id)
         lastCanGoBack.remove(id)
         lastCanGoForward.remove(id)
         historyPending.remove(id)
@@ -478,6 +489,7 @@ class TabManager(
             val session = ensureSession(current.id)?.session
             if (session != null) {
                 session.setActive(foreground)
+                importLoading[current.id] = url
                 session.loadImportedFile(url)
                 rememberImport(current.id, url)
                 changed()
@@ -494,6 +506,7 @@ class TabManager(
         selectedId = id
         val session = ensureSession(id)?.session
         session?.setActive(foreground)
+        if (session != null) importLoading[id] = url
         session?.loadImportedFile(url)
         rememberImport(id, url)
         changed()
