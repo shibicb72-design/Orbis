@@ -186,6 +186,7 @@ fun OrbisRoot(container: AppContainer) {
                 offerSaveFlow = container.browserSettings.offerSavePasswords,
                 onSetOfferSave = container.browserSettings::setOfferSavePasswords,
                 onBack = { nav.popBackStack() },
+                sensitiveClip = container.sensitiveClip,
             )
         }
         composable(Routes.Settings) {

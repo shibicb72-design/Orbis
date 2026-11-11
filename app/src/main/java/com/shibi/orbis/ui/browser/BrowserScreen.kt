@@ -1191,7 +1191,7 @@ private fun BrowserContent(
         GeneratedPasswordDialog(
             password = pw,
             onCopy = {
-                copySensitive(androidContext, pw, sensitive = true)
+                copySensitive(androidContext, pw, sensitive = true, secrets = container.sensitiveClip)
                 generatedPassword = null
             },
             onAnother = { generatedPassword = generatePassword() },

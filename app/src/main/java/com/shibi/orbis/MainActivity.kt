@@ -98,6 +98,28 @@ class MainActivity : ComponentActivity() {
         app.container.logins.load()
     }
 
+    override fun onResume() {
+        super.onResume()
+        app.container.sensitiveClip.foreground = hasWindowFocus()
+        clearSensitiveClipIfDue()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Android lets only the focused app read the clipboard, so focus, more than resume, is when the check can see it.
+        app.container.sensitiveClip.foreground = hasFocus
+        if (hasFocus) clearSensitiveClipIfDue()
+    }
+
+    override fun onPause() {
+        app.container.sensitiveClip.foreground = false
+        super.onPause()
+    }
+
+    private fun clearSensitiveClipIfDue() {
+        getSystemService(android.content.ClipboardManager::class.java)?.let { app.container.sensitiveClip.clearIfDue(it) }
+    }
+
     /** Width:height of the video that may go picture-in-picture now, or null. */
     private var pipShape: Pair<Long, Long>? = null
 

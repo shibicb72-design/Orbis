@@ -213,6 +213,7 @@
     <string name="passwords_copy_username">Copy username</string>
     <string name="passwords_copy_password">Copy password</string>
     <string name="passwords_copied">Copied</string>
+    <string name="passwords_copied_clears" translatable="false">Copied. Orbis clears it after a minute.</string>
     <string name="passwords_delete">Delete</string>
     <string name="passwords_delete_confirm">Delete the saved password for %1$s?</string>
     <string name="passwords_never_title">Never saved</string>

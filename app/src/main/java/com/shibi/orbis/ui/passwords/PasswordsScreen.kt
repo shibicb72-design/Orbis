@@ -1,5 +1,6 @@
 package com.shibi.orbis.ui.passwords
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.KeyguardManager
 import android.content.ClipData
@@ -66,12 +67,12 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shibi.orbis.R
 import com.shibi.orbis.passwords.LoginManager
+import com.shibi.orbis.passwords.SENSITIVE_CLIP_LABEL
 import com.shibi.orbis.passwords.SavedLogin
+import com.shibi.orbis.passwords.SensitiveClip
 import com.shibi.orbis.ui.secondaryReadingWidth
 import java.util.Locale
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.StateFlow
 
 internal const val PASSWORDS_UNLOCK_TAG = "passwords_unlock"
@@ -104,6 +105,8 @@ fun PasswordsScreen(
     modifier: Modifier = Modifier,
     /** Test hook: start unlocked (Robolectric has no screen lock). */
     startUnlocked: Boolean = false,
+    /** Clears a copied password from the clipboard after a minute; null copies without that (tests). */
+    sensitiveClip: SensitiveClip? = null,
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
@@ -113,33 +116,36 @@ fun PasswordsScreen(
     val offerSave by offerSaveFlow.collectAsStateWithLifecycle()
     val loadFailed by manager.loadFailed.collectAsStateWithLifecycle()
     var unlocked by remember { mutableStateOf(startUnlocked) }
-    // Leaving the app (Home, Recents, another app) locks the list again: a phone handed over later must ask first.
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) unlocked = false }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
     var query by remember { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
     var confirmExport by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<SavedLogin?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
+    // Leaving the app (Home, Recents, another app) locks the list again: a phone handed over later must ask first.
+    // Every open menu and confirmation goes with it, so none can act on the relocked screen.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer =
+            LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_STOP) {
+                    unlocked = false
+                    menu = false
+                    confirmExport = false
+                    deleting = null
+                    confirmReset = false
+                }
+            }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val deviceSecure = remember { context.getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true }
 
     val importLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri == null) return@rememberLauncherForActivityResult
             scope.launch {
-                val text =
-                    withContext(Dispatchers.IO) {
-                        runCatching {
-                            context.contentResolver.openInputStream(uri)?.use { input ->
-                                val bytes = input.readBytesCapped(MAX_IMPORT_BYTES)
-                                bytes?.toString(Charsets.UTF_8)
-                            }
-                        }.getOrNull()
-                    }
+                val resolver = context.contentResolver
+                val text = readPickedText(open = { resolver.openInputStream(uri) }, cap = MAX_IMPORT_BYTES)
                 if (text == null) {
                     Toast.makeText(context, R.string.passwords_import_failed, Toast.LENGTH_SHORT).show()
                 } else {
@@ -153,11 +159,8 @@ fun PasswordsScreen(
             if (uri == null) return@rememberLauncherForActivityResult
             val csv = manager.exportCsv()
             scope.launch {
-                val ok =
-                    withContext(Dispatchers.IO) {
-                        runCatching { context.contentResolver.openOutputStream(uri, "wt")?.use { it.write(csv.toByteArray(Charsets.UTF_8)) } != null }
-                            .getOrDefault(false)
-                    }
+                val resolver = context.contentResolver
+                val ok = writePickedBytes(open = { resolver.openOutputStream(uri, "wt") }, bytes = csv.toByteArray(Charsets.UTF_8))
                 Toast.makeText(context, if (ok) R.string.passwords_exported else R.string.passwords_export_failed, Toast.LENGTH_SHORT).show()
             }
         }
@@ -173,10 +176,15 @@ fun PasswordsScreen(
                 actions = {
                     IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.menu_more)) }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text(stringResource(R.string.passwords_import)) }, onClick = {
-                            menu = false
-                            runCatching { importLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream")) }
-                        })
+                        // Behind the unlock like Export: whoever holds an unlocked phone must not plant logins.
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.passwords_import)) },
+                            enabled = unlocked,
+                            onClick = {
+                                menu = false
+                                runCatching { importLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream")) }
+                            },
+                        )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.passwords_export)) },
                             enabled = unlocked && logins.isNotEmpty(),
@@ -239,7 +247,7 @@ fun PasswordsScreen(
                         if (logins.isEmpty()) {
                             item { Text(stringResource(R.string.passwords_empty), modifier = Modifier.padding(16.dp)) }
                         }
-                        items(shown, key = { it.guid }) { login -> LoginRow(login, onDelete = { deleting = login }) }
+                        items(shown, key = { it.guid }) { login -> LoginRow(login, sensitiveClip, onDelete = { deleting = login }) }
                         if (never.isNotEmpty()) {
                             item {
                                 Text(
@@ -268,7 +276,8 @@ fun PasswordsScreen(
         }
     }
 
-    if (confirmExport) {
+    // The confirmations exist only while unlocked; each action checks again when it is tapped.
+    if (unlocked && confirmExport) {
         AlertDialog(
             onDismissRequest = { confirmExport = false },
             title = { Text(stringResource(R.string.passwords_export)) },
@@ -276,13 +285,13 @@ fun PasswordsScreen(
             confirmButton = {
                 TextButton(onClick = {
                     confirmExport = false
-                    runCatching { exportLauncher.launch("orbis-passwords.csv") }
+                    if (unlocked) runCatching { exportLauncher.launch("orbis-passwords.csv") }
                 }) { Text(stringResource(R.string.passwords_export)) }
             },
             dismissButton = { TextButton(onClick = { confirmExport = false }) { Text(stringResource(R.string.prompt_cancel)) } },
         )
     }
-    if (confirmReset) {
+    if (unlocked && confirmReset) {
         AlertDialog(
             onDismissRequest = { confirmReset = false },
             title = { Text(stringResource(R.string.passwords_reset)) },
@@ -291,7 +300,7 @@ fun PasswordsScreen(
                 TextButton(
                     onClick = {
                         confirmReset = false
-                        manager.resetUnreadableStore()
+                        if (unlocked) manager.resetUnreadableStore()
                     },
                     modifier = Modifier.testTag(PASSWORDS_RESET_CONFIRM_TAG),
                 ) { Text(stringResource(R.string.passwords_reset_confirm)) }
@@ -299,13 +308,13 @@ fun PasswordsScreen(
             dismissButton = { TextButton(onClick = { confirmReset = false }) { Text(stringResource(R.string.prompt_cancel)) } },
         )
     }
-    deleting?.let { login ->
+    deleting?.takeIf { unlocked }?.let { login ->
         AlertDialog(
             onDismissRequest = { deleting = null },
             text = { Text(stringResource(R.string.passwords_delete_confirm, login.host)) },
             confirmButton = {
                 TextButton(onClick = {
-                    manager.delete(login.guid)
+                    if (unlocked) manager.delete(login.guid)
                     deleting = null
                 }) { Text(stringResource(R.string.passwords_delete)) }
             },
@@ -315,7 +324,7 @@ fun PasswordsScreen(
 }
 
 @Composable
-private fun LoginRow(login: SavedLogin, onDelete: () -> Unit) {
+private fun LoginRow(login: SavedLogin, sensitiveClip: SensitiveClip?, onDelete: () -> Unit) {
     val context = LocalContext.current
     var open by remember { mutableStateOf(false) }
     var visible by remember { mutableStateOf(false) }
@@ -339,10 +348,10 @@ private fun LoginRow(login: SavedLogin, onDelete: () -> Unit) {
                     TextButton(onClick = { visible = !visible }) {
                         Text(stringResource(if (visible) R.string.passwords_hide else R.string.passwords_show))
                     }
-                    TextButton(onClick = { copySensitive(context, login.username, sensitive = false) }) { Text(stringResource(R.string.passwords_copy_username)) }
+                    TextButton(onClick = { copySensitive(context, login.username, sensitive = false, secrets = null) }) { Text(stringResource(R.string.passwords_copy_username)) }
                 }
                 Row {
-                    TextButton(onClick = { copySensitive(context, login.password, sensitive = true) }) { Text(stringResource(R.string.passwords_copy_password)) }
+                    TextButton(onClick = { copySensitive(context, login.password, sensitive = true, secrets = sensitiveClip) }) { Text(stringResource(R.string.passwords_copy_password)) }
                     TextButton(onClick = onDelete) { Text(stringResource(R.string.passwords_delete)) }
                 }
             }
@@ -351,26 +360,45 @@ private fun LoginRow(login: SavedLogin, onDelete: () -> Unit) {
     }
 }
 
-private const val SENSITIVE_CLIP_KEY = "android.content.extra.IS_SENSITIVE"
-
-/** Copies to the clipboard; a password is marked sensitive so the system does not preview it (Android 13+). */
-internal fun copySensitive(context: Context, text: String, sensitive: Boolean) {
+/**
+ * Copies to the clipboard. A secret ([sensitive]) is marked so the system does not preview it (Android 13+), and with
+ * [secrets] it is cleared after a minute while it is still the clip ([SensitiveClip]).
+ */
+internal fun copySensitive(context: Context, text: String, sensitive: Boolean, secrets: SensitiveClip?) {
     val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
-    val clip = ClipData.newPlainText("orbis", text)
+    if (sensitive && secrets != null) {
+        secrets.copy(clipboard, text)
+        Toast.makeText(context, R.string.passwords_copied_clears, Toast.LENGTH_SHORT).show()
+        return
+    }
+    val clip = ClipData.newPlainText(if (sensitive) SENSITIVE_CLIP_LABEL else "orbis", text)
     if (sensitive) {
         // ClipDescription.EXTRA_IS_SENSITIVE (API 33); the same key string is honoured by Android 13+ only, harmless below.
-        clip.description.extras = PersistableBundle().apply { putBoolean(SENSITIVE_CLIP_KEY, true) }
+        clip.description.extras = PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE", true) }
     }
     clipboard.setPrimaryClip(clip)
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) Toast.makeText(context, R.string.passwords_copied, Toast.LENGTH_SHORT).show()
 }
 
+/**
+ * What the unlock prompt accepts: on Android 11+ a strong (class 3) biometric or the screen lock (PIN, pattern,
+ * password); a weak biometric alone is not enough. Null on Android 10, which uses setDeviceCredentialAllowed instead.
+ */
+@SuppressLint("InlinedApi") // Plain int constants, only used on API 30+.
+internal fun allowedAuthenticators(sdkInt: Int): Int? =
+    if (sdkInt >= Build.VERSION_CODES.R) {
+        BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+    } else {
+        null
+    }
+
 /** Android's own biometric/screen-lock prompt (no extra library); [onSuccess] runs on the main thread. */
 private fun authenticate(context: Context, title: String, subtitle: String, onSuccess: () -> Unit) {
     val activity = context.findActivity() ?: return
     val builder = BiometricPrompt.Builder(activity).setTitle(title).setSubtitle(subtitle)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        builder.setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+    val allowed = allowedAuthenticators(Build.VERSION.SDK_INT)
+    if (allowed != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        builder.setAllowedAuthenticators(allowed)
     } else {
         @Suppress("DEPRECATION")
         builder.setDeviceCredentialAllowed(true)
@@ -393,16 +421,3 @@ private tailrec fun Context.findActivity(): Activity? =
         is ContextWrapper -> baseContext.findActivity()
         else -> null
     }
-
-/** The stream's bytes, or null when it is larger than [cap]. */
-private fun java.io.InputStream.readBytesCapped(cap: Int): ByteArray? {
-    val out = java.io.ByteArrayOutputStream()
-    val buf = ByteArray(8192)
-    while (true) {
-        val n = read(buf)
-        if (n < 0) break
-        out.write(buf, 0, n)
-        if (out.size() > cap) return null
-    }
-    return out.toByteArray()
-}
