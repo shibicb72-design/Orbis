@@ -22,8 +22,9 @@ interface TorrentEngine {
      * or symlink for it. A torrent with metadata (a .torrent, or resume data that carries it) is added paused and
      * announced with [TorrentEvent.MetadataReceived]; a magnet without metadata runs to fetch it and is paused when it
      * arrives. Nothing is written until the caller has checked the file list and called [approveFiles] (and [resume]).
+     * [isPrivate]: started from a private tab; it never uses local peer discovery (see [TorrentDiscovery.of]).
      */
-    fun add(source: TorrentSource, saveDir: java.io.File, resumeData: ByteArray?): EngineId
+    fun add(source: TorrentSource, saveDir: java.io.File, resumeData: ByteArray?, isPrivate: Boolean): EngineId
 
     fun pause(id: EngineId)
 
@@ -49,6 +50,7 @@ interface TorrentEngine {
     /** Bytes per second; 0 is unlimited. */
     fun setLimits(downBps: Int, upBps: Int)
 
+    /** Applies to every torrent, through [TorrentDiscovery.of]: a private one stays off local peer discovery. */
     fun setDiscovery(dht: Boolean, pex: Boolean, lsd: Boolean)
 
     fun pauseAll()
@@ -66,15 +68,29 @@ interface TorrentEngine {
 value class EngineId(val value: Long)
 
 data class EngineSettings(
+    /** TCP and uTP, IPv4 and IPv6; random per install (TorrentSettingsStore.listenPort), never 6881. */
+    val listenPort: Int,
     val dht: Boolean = true,
     val pex: Boolean = true,
-    val lsd: Boolean = true,
+    val lsd: Boolean = false,
     val downBps: Int = 0,
     val upBps: Int = 0,
     /** No seeding at all: a finished torrent is removed from the session by the manager. */
     val stopSeeding: Boolean = true,
     val maxActive: Int = TorrentLimits.MAX_ACTIVE,
 )
+
+/** Which peer sources one torrent uses. */
+data class TorrentDiscovery(val dht: Boolean, val pex: Boolean, val lsd: Boolean) {
+    companion object {
+        /**
+         * The settings, except that a torrent from a private tab never uses local peer discovery: it would announce
+         * on the local network what is being downloaded. DHT and peer exchange follow the settings (a magnet finds
+         * its peers through them).
+         */
+        fun of(dht: Boolean, pex: Boolean, lsd: Boolean, isPrivate: Boolean): TorrentDiscovery = TorrentDiscovery(dht, pex, lsd && !isPrivate)
+    }
+}
 
 sealed interface TorrentSource {
     class Magnet(val uri: String) : TorrentSource {

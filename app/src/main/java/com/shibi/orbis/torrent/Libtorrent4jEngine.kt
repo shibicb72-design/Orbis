@@ -55,7 +55,6 @@ import org.libtorrent4j.swig.torrent_flags_t
  * Logs carry class names, enum names and numbers only: never a magnet, hash, tracker, name or address.
  */
 class Libtorrent4jEngine(
-    private val userAgent: String,
     /** session.dat: the DHT table and settings, written on [stop] and read back on the next [start]. */
     private val sessionFile: File,
     private val log: (String) -> Unit,
@@ -72,9 +71,12 @@ class Libtorrent4jEngine(
 
     // ---- engine thread only ----
     private var session: SessionManager? = null
-    private var settings = EngineSettings()
+    private var settings = EngineSettings(listenPort = 0) // replaced by the first start, before any torrent is added
     private var ticker: Job? = null
     private val handles = HashMap<Long, TorrentHandle>()
+
+    /** Engine ids of torrents from a private tab: local peer discovery stays off for them whatever the settings say. */
+    private val privateIds = HashSet<Long>()
     private val byHandle = HashMap<Long, EngineId>()
     private val pendingResume = HashMap<Long, CompletableDeferred<ByteArray?>>()
     private val latest = HashMap<EngineId, TorrentSnapshot>()
@@ -112,8 +114,9 @@ class Libtorrent4jEngine(
             val params =
                 runCatching { if (sessionFile.isFile) SessionParams(sessionFile.readBytes()) else null }.getOrNull()
                     ?: SessionParams(SettingsPack())
-            // Our settings go in before the session exists: libtorrent's defaults would start UPnP and NAT-PMP (and
-            // send its own user agent) the moment the session is built. This replaces any settings in session.dat.
+            // Our settings go in before the session exists: libtorrent's defaults would start UPnP and NAT-PMP and
+            // listen on 6881 the moment the session is built. This replaces any settings in session.dat (an older
+            // one may still carry the "Orbis/<version>" user agent; it is not set any more, libtorrent's own goes out).
             params.setSettings(pack(settings))
             // Files go through plain read/write: mmap on Android's external storage is not worth the risk.
             params.setPosixDiskIO()
@@ -153,6 +156,7 @@ class Libtorrent4jEngine(
             session = null
             handles.clear()
             byHandle.clear()
+            privateIds.clear()
             pendingResume.values.forEach { it.complete(null) }
             pendingResume.clear()
             latest.clear()
@@ -161,13 +165,13 @@ class Libtorrent4jEngine(
         }
     }
 
-    override fun add(source: TorrentSource, saveDir: File, resumeData: ByteArray?): EngineId {
+    override fun add(source: TorrentSource, saveDir: File, resumeData: ByteArray?, isPrivate: Boolean): EngineId {
         val id = EngineId(nextId.incrementAndGet())
-        post { doAdd(id, source, saveDir, resumeData) }
+        post { doAdd(id, source, saveDir, resumeData, isPrivate) }
         return id
     }
 
-    private suspend fun doAdd(id: EngineId, source: TorrentSource, saveDir: File, resumeData: ByteArray?) {
+    private suspend fun doAdd(id: EngineId, source: TorrentSource, saveDir: File, resumeData: ByteArray?, isPrivate: Boolean) {
         val s = session
         if (s == null) {
             emit(TorrentEvent.Error(id, TorrentErrorKind.ENGINE_ERROR))
@@ -215,7 +219,7 @@ class Libtorrent4jEngine(
                 // accept) are not wanted either, so nothing at all is created before the list is rejected.
                 flags.and_(TorrentFlags.PAUSED.inv()).and_(TorrentFlags.STOP_WHEN_READY.inv()).or_(TorrentFlags.DEFAULT_DONT_DOWNLOAD)
             }
-        flags = discoveryFlags(flags)
+        flags = discoveryFlags(flags, isPrivate)
         p.setFlags(flags)
         // No file is wanted until the manager approved the list: libtorrent then creates no empty file, folder or
         // symlink under the torrent's own names. For a magnet the list is longer than any accepted torrent; libtorrent
@@ -233,17 +237,19 @@ class Libtorrent4jEngine(
         val handle = TorrentHandle(h)
         handles[id.value] = handle
         byHandle[h.id()] = id
+        if (isPrivate) privateIds += id.value
         log("added ${id.value} metadata=$withMetadata")
         if (withMetadata) announceMetadata(id, handle)
     }
 
     private fun hasInfo(p: add_torrent_params): Boolean = runCatching { p.ti_ptr()?.is_valid() == true }.getOrDefault(false)
 
-    private fun discoveryFlags(f: torrent_flags_t): torrent_flags_t {
+    private fun discoveryFlags(f: torrent_flags_t, isPrivate: Boolean): torrent_flags_t {
+        val d = TorrentDiscovery.of(settings.dht, settings.pex, settings.lsd, isPrivate)
         var flags = f
-        flags = if (settings.dht) flags.and_(TorrentFlags.DISABLE_DHT.inv()) else flags.or_(TorrentFlags.DISABLE_DHT)
-        flags = if (settings.pex) flags.and_(TorrentFlags.DISABLE_PEX.inv()) else flags.or_(TorrentFlags.DISABLE_PEX)
-        flags = if (settings.lsd) flags.and_(TorrentFlags.DISABLE_LSD.inv()) else flags.or_(TorrentFlags.DISABLE_LSD)
+        flags = if (d.dht) flags.and_(TorrentFlags.DISABLE_DHT.inv()) else flags.or_(TorrentFlags.DISABLE_DHT)
+        flags = if (d.pex) flags.and_(TorrentFlags.DISABLE_PEX.inv()) else flags.or_(TorrentFlags.DISABLE_PEX)
+        flags = if (d.lsd) flags.and_(TorrentFlags.DISABLE_LSD.inv()) else flags.or_(TorrentFlags.DISABLE_LSD)
         return flags
     }
 
@@ -298,6 +304,7 @@ class Libtorrent4jEngine(
     override fun remove(id: EngineId, deleteFiles: Boolean) {
         post {
             val h = handles.remove(id.value) ?: return@post
+            privateIds -= id.value
             runCatching { byHandle.remove(h.swig().id()) }
             pendingResume.remove(h.swig().id())?.complete(null)
             latest.remove(id)
@@ -358,10 +365,11 @@ class Libtorrent4jEngine(
         post {
             settings = settings.copy(dht = dht, pex = pex, lsd = lsd)
             session?.applySettings(pack(settings))
-            handles.values.forEach { h ->
-                if (pex) h.unsetFlags(TorrentFlags.DISABLE_PEX) else h.setFlags(TorrentFlags.DISABLE_PEX)
-                if (dht) h.unsetFlags(TorrentFlags.DISABLE_DHT) else h.setFlags(TorrentFlags.DISABLE_DHT)
-                if (lsd) h.unsetFlags(TorrentFlags.DISABLE_LSD) else h.setFlags(TorrentFlags.DISABLE_LSD)
+            handles.forEach { (key, h) ->
+                val d = TorrentDiscovery.of(dht, pex, lsd, isPrivate = key in privateIds)
+                if (d.pex) h.unsetFlags(TorrentFlags.DISABLE_PEX) else h.setFlags(TorrentFlags.DISABLE_PEX)
+                if (d.dht) h.unsetFlags(TorrentFlags.DISABLE_DHT) else h.setFlags(TorrentFlags.DISABLE_DHT)
+                if (d.lsd) h.unsetFlags(TorrentFlags.DISABLE_LSD) else h.setFlags(TorrentFlags.DISABLE_LSD)
             }
         }
     }
@@ -378,10 +386,14 @@ class Libtorrent4jEngine(
 
     private fun pack(s: EngineSettings): SettingsPack {
         val p = SettingsPack()
-        p.setString(settings_pack.string_types.user_agent.swigValue(), userAgent)
-        p.listenInterfaces(TorrentLimits.LISTEN_INTERFACES)
+        // No user_agent, peer_fingerprint or handshake_client_version: libtorrent's own defaults go out, so Orbis
+        // looks like any libtorrent client.
+        p.listenInterfaces("0.0.0.0:${s.listenPort},[::]:${s.listenPort}")
         p.setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), false)
         p.setBoolean(settings_pack.bool_types.enable_natpmp.swigValue(), false)
+        // libtorrent's default, stated so it cannot drift: a torrent may not point tracker or web seed requests at
+        // this phone's own loopback services (only /announce paths there, no web seed query strings).
+        p.setBoolean(settings_pack.bool_types.ssrf_mitigation.swigValue(), true)
         p.setEnableDht(s.dht)
         p.setEnableLsd(s.lsd)
         p.setMaxMetadataSize(TorrentLimits.MAX_METADATA_BYTES)
