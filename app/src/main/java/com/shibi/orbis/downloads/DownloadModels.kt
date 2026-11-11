@@ -20,8 +20,8 @@ data class DownloadEntry(
     val filePath: String?,
     val startedAt: Long,
     /**
-     * Started from a private tab: never written to the index file, has no source host, and leaves the list (the file
-     * stays) when private browsing ends.
+     * Started from a private tab: never written to the index file, has no source host, is saved in
+     * DownloadManager.privateDir, and leaves the list, its file deleted, when private browsing ends (OD-3).
      */
     val isPrivate: Boolean = false,
 )

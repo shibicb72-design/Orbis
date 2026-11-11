@@ -148,4 +148,18 @@ class TorrentRowModelTest {
         assertFalse(RowAction.STOP_SEEDING in model(e(TorrentStatus.DOWNLOADING)).actions)
         assertFalse(RowAction.STOP_SEEDING in model(e(TorrentStatus.COMPLETED)).actions)
     }
+
+    @Test
+    fun aKeptPrivateRowOffersSaveToDownloadsAndRemove() {
+        val kept = e(TorrentStatus.COMPLETED, private = true).copy(keptDir = "/downloads/.s/x")
+        val m = model(kept)
+        assertEquals(RowState.Kept, m.state)
+        assertEquals(setOf(RowAction.SAVE_TO_DOWNLOADS, RowAction.REMOVE), m.actions)
+        assertEquals(100, m.percent)
+        assertNull(m.title)
+        // Saved to Downloads (no kept folder any more): the usual completed row.
+        assertEquals(RowState.Completed, model(e(TorrentStatus.COMPLETED, private = true)).state)
+        // A normal torrent never reads as kept.
+        assertEquals(RowState.Completed, model(e(TorrentStatus.COMPLETED).copy(keptDir = "/x")).state)
+    }
 }

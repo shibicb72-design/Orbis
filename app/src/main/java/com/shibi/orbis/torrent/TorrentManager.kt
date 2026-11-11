@@ -3,6 +3,7 @@ package com.shibi.orbis.torrent
 import com.shibi.orbis.downloads.DownloadFileNames
 import java.io.File
 import java.io.IOException
+import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.security.SecureRandom
@@ -23,6 +24,12 @@ import kotlinx.coroutines.withContext
 class TorrentDirs(
     /** getExternalFilesDir("torrents"), or filesDir/torrents/data when there is no external storage. */
     val payloadRoot: () -> File,
+    /**
+     * Where a finished private torrent is kept: the private folder (".s") of Orbis's own downloads folder
+     * (DownloadManager.privateDir, the one private file downloads use). Same volume as the payload, so keeping is a
+     * rename. Only folders here are torrents'; the files belong to the file downloads.
+     */
+    val keepRoot: () -> File,
     val freeBytes: (File) -> Long = { it.usableSpace },
 ) {
     fun saveDir(id: String, isPrivate: Boolean): File = File(if (isPrivate) privateRoot() else payloadRoot(), id)
@@ -62,8 +69,10 @@ interface TorrentPublisher {
  * saved first) as soon as nothing is downloading. Engine ids are per session; entry ids are 16 random bytes.
  *
  * Private entries (from a private tab) never reach the disk except as payload: no index line, no resume data, no
- * metadata file. Their payload sits under payloadRoot/private/ and is deleted by [forgetPrivate] or, after the
- * process died, by the next [restore].
+ * metadata file. Their payload sits under payloadRoot/private/. A finished one is never published on its own: its
+ * files are moved into [TorrentDirs.keepRoot] ("kept inside Orbis", like a private file download) and reach
+ * Download/Orbis only when the user taps Save to Downloads ([saveKept]) or Save and remove. Whatever was not saved,
+ * payload or kept copy, is deleted by [forgetPrivate] (OD-3) or, after the process died, by the next [restore].
  *
  * Logs carry enum names and numbers only: never a magnet, hash, tracker, name or path.
  */
@@ -149,12 +158,16 @@ class TorrentManager(
      * Adds a torrent. Returns its id, or null when the list is full. A source that breaks a limit becomes a FAILED
      * entry right away. [isPrivate]: nothing about it is written to disk but its payload, and [forgetPrivate] drops it.
      */
-    fun add(source: TorrentSource, isPrivate: Boolean): String? {
+    fun add(requested: TorrentSource, isPrivate: Boolean): String? {
         if (_entries.value.size >= TorrentLimits.MAX_ENTRIES) {
             log("add refused, list full")
             return null
         }
         val id = newId()
+        // Only http, https and udp trackers get in (TorrentTrackers); a .torrent's are checked by the engine, which reads them.
+        val stripped = (requested as? TorrentSource.Magnet)?.let { TorrentTrackers.stripMagnet(it.uri) }
+        val source = if (stripped != null && stripped.dropped > 0) TorrentSource.Magnet(stripped.uri) else requested
+        if (stripped != null && stripped.dropped > 0) log("announce urls dropped ${stripped.dropped}")
         // Resume data alone is only ever used for a restore, never as something new to add.
         val error = if (source == TorrentSource.FromResumeData) TorrentErrorKind.INVALID_SOURCE else TorrentPaths.checkSource(source)
         val name = (source as? TorrentSource.Magnet)?.let { TorrentPaths.magnetDisplayName(it.uri) } ?: TorrentPaths.UNNAMED
@@ -205,13 +218,14 @@ class TorrentManager(
      * Takes the torrent off the list. [deleteFiles]: its payload goes too; otherwise it stays in the torrents folder.
      * A finished torrent that is not saved yet (seeding, or finished and paused or waiting for Wi-Fi): without
      * [deleteFiles] it is saved to Download/Orbis first
-     * ("Save and remove") and leaves the list when the copy is done.
+     * ("Save and remove", private ones too: the user asked for it) and leaves the list when the copy is done.
+     * A private torrent kept inside Orbis loses its kept files.
      */
     fun remove(id: String, deleteFiles: Boolean) = locked {
         val e = find(id) ?: return@locked
         if (finishedUnsaved(e) && !deleteFiles) {
             removeAfterPublish += id
-            finishAndPublish(id)
+            finish(id, publish = true)
             log("removed ${e.status.name}, publishing")
             persist()
             reconcile()
@@ -220,11 +234,15 @@ class TorrentManager(
         detach(id, deleteFiles)
         _entries.update { list -> list.filterNot { it.id == id } }
         forgetMemory(id)
-        // A private payload is never kept: nothing could ever reach it again.
+        // A private payload or kept copy is never left: nothing could ever reach it again. One being saved right now
+        // is deleted by its job when the copy is done.
         val deletePayload = deleteFiles || e.isPrivate
         withContext(io) {
             store.deleteState(id)
-            if (deletePayload && e.status != TorrentStatus.PUBLISHING) deletePayload(File(e.saveDir))
+            if (e.status != TorrentStatus.PUBLISHING) {
+                if (deletePayload) deletePayload(File(e.saveDir))
+                e.keptDir?.let { deleteKept(File(it)) }
+            }
         }
         log("removed ${e.status.name} files=$deleteFiles")
         persist()
@@ -232,7 +250,8 @@ class TorrentManager(
     }
 
     /**
-     * Tries a failed torrent again. PUBLISH_FAILED copies the finished files again; NO_SPACE, FILE_ERROR and
+     * Tries a failed torrent again. PUBLISH_FAILED copies the finished files again (a private one is kept inside
+     * Orbis again); NO_SPACE, FILE_ERROR and
      * ENGINE_ERROR continue the download from its resume data. Any other failure has nothing left to retry.
      */
     fun retry(id: String) = locked {
@@ -243,7 +262,7 @@ class TorrentManager(
                 set(id) { it.copy(status = TorrentStatus.PUBLISHING, errorKind = null) }
                 log("retry ${kind.name}")
                 persist()
-                launchPublish(id)
+                if (e.isPrivate) launchKeep(id) else launchPublish(id)
             }
             TorrentErrorKind.NO_SPACE, TorrentErrorKind.FILE_ERROR, TorrentErrorKind.ENGINE_ERROR -> {
                 log("retry ${kind.name}")
@@ -257,7 +276,10 @@ class TorrentManager(
         }
     }
 
-    /** "Stop seeding" on a seeding row: it leaves the session and is saved to Download/Orbis now. */
+    /**
+     * "Stop seeding" on a seeding row: it leaves the session and is saved to Download/Orbis now (a private one is
+     * kept inside Orbis).
+     */
     fun stopSeeding(id: String) = locked {
         if (!finishSeeding(id)) return@locked
         log("stop seeding USER")
@@ -266,9 +288,44 @@ class TorrentManager(
     }
 
     /**
-     * Private browsing ended: every private torrent leaves the list and its partial files are deleted. A seeding one
-     * is finished: it is saved to Download/Orbis like a private file download, then its payload is deleted. Returns
-     * the ids that leave, so their notifications can go too.
+     * "Save to Downloads" on a private torrent kept inside Orbis: its files are copied to Download/Orbis/<name>, with
+     * the same paths a normal torrent's get, and the kept copy is deleted. A failed copy leaves the kept files as they
+     * were (the row offers the button again).
+     */
+    fun saveKept(id: String) = locked {
+        val e = find(id) ?: return@locked
+        val keptPath = e.keptDir
+        if (!e.isPrivate || e.status != TorrentStatus.COMPLETED || keptPath == null) return@locked
+        set(id) { it.copy(status = TorrentStatus.PUBLISHING) }
+        val kept = File(keptPath)
+        val plan = plans[id]
+        scope.launch {
+            val ok = withContext(io) { publishFiles(kept, keptFiles(kept, plan), e.displayName) }
+            lock.withLock {
+                if (find(id) == null) {
+                    // Left the list meanwhile (removed, or private browsing ended): a finished copy is the user's, the
+                    // kept files go.
+                    withContext(io) { deleteKept(kept) }
+                    return@withLock
+                }
+                if (ok) {
+                    withContext(io) { deleteKept(kept) }
+                    plans.remove(id)
+                    set(id) { it.copy(status = TorrentStatus.COMPLETED, keptDir = null, publishedPath = "Download/Orbis/${it.displayName}") }
+                    log("kept saved")
+                } else {
+                    set(id) { it.copy(status = TorrentStatus.COMPLETED) }
+                    log("kept save failed")
+                }
+            }
+        }
+    }
+
+    /**
+     * Private browsing ended: every private torrent leaves the list and every file of it that was not saved to
+     * Download/Orbis is deleted (OD-3): partial payloads, finished ones still seeding, paused or waiting, and the
+     * files kept inside Orbis. One being copied to Download/Orbis right now finishes its copy (the user asked for
+     * it), then what is left of it goes. Returns the ids that leave, so their notifications can go too.
      */
     fun forgetPrivate(): List<String> {
         val ids = _entries.value.filter { it.isPrivate }.map { it.id }
@@ -279,23 +336,21 @@ class TorrentManager(
     private fun dropPrivate() = locked {
         val gone = _entries.value.filter { it.isPrivate }
         if (gone.isEmpty()) return@locked
-        // Seeding, or finished and paused / waiting for Wi-Fi / stopped by Android: the files are complete.
-        val seeding = gone.filter { finishedUnsaved(it) }
-        val saved = seeding.map { it.id }.toSet()
+        // Seeding, or finished and paused / waiting for Wi-Fi / stopped by Android: complete, but never saved.
+        val finished = gone.count { finishedUnsaved(it) }
         for (e in gone) {
-            val seeds = e.id in saved
-            // A finished torrent's files are complete: flushed, kept for the copy, published after it left the list.
-            if (seeds) attached[e.id]?.let { checkpoint(e.id, it) }
-            detach(e.id, deleteFiles = !seeds)
-            if (seeds) launchPublish(e.id, captured = e.copy(status = TorrentStatus.PUBLISHING), capturedPlan = plans[e.id])
+            detach(e.id, deleteFiles = true)
             forgetMemory(e.id)
         }
         _entries.update { list -> list.filterNot { it.isPrivate } }
         withContext(io) {
-            // One still publishing (or seeding) finishes its copy first; the publish job deletes its payload afterwards.
-            gone.filter { it.status != TorrentStatus.PUBLISHING && it.id !in saved }.forEach { deletePayload(File(it.saveDir)) }
+            // One being kept or copied right now: its job deletes what is left of it when it is done.
+            gone.filter { it.status != TorrentStatus.PUBLISHING }.forEach { e ->
+                deletePayload(File(e.saveDir))
+                e.keptDir?.let { deleteKept(File(it)) }
+            }
         }
-        if (seeding.isNotEmpty()) log("seeding dropped, publishing ${seeding.size}")
+        if (finished > 0) log("seeding dropped, deleted $finished")
         log("private torrents dropped ${gone.size}")
         reconcile()
     }
@@ -412,7 +467,7 @@ class TorrentManager(
             reconcile()
             return
         }
-        finishAndPublish(entry.id)
+        finish(entry.id)
         log("finished")
         persist()
         reconcile()
@@ -420,14 +475,15 @@ class TorrentManager(
 
     /**
      * The finish path: resume data is flushed (so the copy reads complete files), the torrent leaves the session with
-     * its files kept, and they are copied to Download/Orbis. The caller persists and reconciles.
+     * its files kept, and they are copied to Download/Orbis, or for a private torrent moved inside Orbis
+     * ([launchKeep]) unless [publish] (the user's "Save and remove"). The caller persists and reconciles.
      */
-    private suspend fun finishAndPublish(id: String) {
+    private suspend fun finish(id: String, publish: Boolean = false) {
         attached[id]?.let { checkpoint(id, it) }
         detach(id, deleteFiles = false)
         seeded.remove(id)
         set(id) { it.copy(status = TorrentStatus.PUBLISHING, doneBytes = it.totalBytes.coerceAtLeast(it.doneBytes), downBps = 0, upBps = 0, peers = 0, seeds = 0, etaSeconds = null) }
-        launchPublish(id)
+        if (find(id)?.isPrivate == true && !publish) launchKeep(id) else launchPublish(id)
     }
 
     /** Finished but not saved yet; [seeded] also knows one whose live byte count lags. */
@@ -437,7 +493,7 @@ class TorrentManager(
     /** A SEEDING torrent takes the finish path. False when [id] is not seeding (gone, paused, already saving). */
     private suspend fun finishSeeding(id: String): Boolean {
         if (find(id)?.status != TorrentStatus.SEEDING) return false
-        finishAndPublish(id)
+        finish(id)
         return true
     }
 
@@ -537,7 +593,7 @@ class TorrentManager(
             // restart): every seeding torrent is saved now, so the setting means what it says.
             val seeding = _entries.value.filter { it.status == TorrentStatus.SEEDING }.map { it.id }
             if (seeding.isNotEmpty()) {
-                seeding.forEach { finishAndPublish(it) }
+                seeding.forEach { finish(it) }
                 log("stop seeding SETTING ${seeding.size}")
                 persist()
             }
@@ -658,20 +714,22 @@ class TorrentManager(
     // ---- publishing ----
 
     /**
-     * Copies [id]'s files to Download/Orbis. [captured]: the entry as it was when it left the list in the same locked
-     * step (a seeding private torrent at the end of private browsing), with its [capturedPlan].
+     * Copies [id]'s files to Download/Orbis. Called under the lock: the entry and its plan are taken now, so the copy
+     * goes on even if the entry leaves the list meanwhile.
      */
-    private fun launchPublish(id: String, captured: TorrentEntry? = null, capturedPlan: TorrentPaths.Plan? = null) {
+    private fun launchPublish(id: String) {
+        val entry = find(id) ?: return
+        val known = plans[id]
         scope.launch {
-            val entry = captured ?: lock.withLock { find(id) } ?: return@launch
-            val plan = capturedPlan ?: lock.withLock { plans[id] } ?: storedPlan(entry)
+            val plan = known ?: storedPlan(entry)
             val saveDir = File(entry.saveDir)
-            val ok = withContext(io) { publishFiles(saveDir, entry.displayName, plan) }
+            val ok = withContext(io) { publishFiles(saveDir, payloadFiles(saveDir, plan), entry.displayName) }
             lock.withLock {
                 val still = find(id)
                 if (still == null) {
-                    // Dropped meanwhile (private browsing ended): the copy is the user's, the payload goes.
-                    withContext(io) { if (ok) deletePayload(saveDir) }
+                    // Left the list meanwhile (removed, or private browsing ended): a finished copy is the user's, the
+                    // payload goes. A private payload always goes (OD-3): nothing could reach it again.
+                    withContext(io) { if (ok || entry.isPrivate) deletePayload(saveDir) }
                     return@withLock
                 }
                 val thenRemove = removeAfterPublish.remove(id)
@@ -698,6 +756,40 @@ class TorrentManager(
         }
     }
 
+    /**
+     * A finished private torrent: its files are moved from the payload into a new folder under
+     * [TorrentDirs.keepRoot] ([keepFiles]) and the row reads "Kept inside Orbis". Nothing goes to MediaStore. Called
+     * under the lock, like [launchPublish]. Its plan stays in memory for [saveKept].
+     */
+    private fun launchKeep(id: String) {
+        val entry = find(id) ?: return
+        val plan = plans[id]
+        scope.launch {
+            val saveDir = File(entry.saveDir)
+            val kept = withContext(io) { keepFiles(saveDir, entry.displayName, plan) }
+            lock.withLock {
+                if (find(id) == null) {
+                    // Left the list meanwhile (removed, or private browsing ended): nothing of it stays (OD-3).
+                    withContext(io) {
+                        kept?.let { deleteKept(it) }
+                        deletePayload(saveDir)
+                    }
+                    return@withLock
+                }
+                if (kept != null) {
+                    withContext(io) { deletePayload(saveDir) }
+                    set(id) { it.copy(status = TorrentStatus.COMPLETED, keptDir = kept.absolutePath, publishedPath = null) }
+                    log("kept")
+                } else {
+                    // The payload is as it was (a partial move was moved back); Retry keeps it again.
+                    set(id) { it.copy(status = TorrentStatus.FAILED, errorKind = TorrentErrorKind.PUBLISH_FAILED) }
+                    log("keep failed")
+                }
+                persist()
+            }
+        }
+    }
+
     /** After a restart the plan is gone: it is rebuilt from the stored .torrent when there is one (never for a private entry). */
     private suspend fun storedPlan(entry: TorrentEntry): TorrentPaths.Plan? {
         if (entry.isPrivate) return null
@@ -706,15 +798,47 @@ class TorrentManager(
         return (TorrentPaths.plan(files) as? TorrentPaths.Result.Ok)?.plan
     }
 
+    /** One finished file: where it is, its path below Download/Orbis/<name>/, its declared size (-1 unknown). */
+    private class FinishedFile(val file: File, val publishPath: String, val size: Long)
+
+    /** The payload's files as the plan places them; without a plan (restored mid-publish) the folder is the truth. */
+    private fun payloadFiles(saveDir: File, plan: TorrentPaths.Plan?): List<FinishedFile> =
+        if (plan != null) {
+            plan.relativePaths.indices.mapNotNull { i ->
+                val rel = plan.relativePaths[i] ?: return@mapNotNull null
+                val pub = plan.publishPaths[i] ?: return@mapNotNull null
+                FinishedFile(File(saveDir, rel), pub, plan.sizes.getOrElse(i) { -1L })
+            }
+        } else {
+            val found = saveDir.walkTopDown().filter { it.isFile && !it.name.endsWith(".parts") }.toList()
+            val rels = found.map { it.relativeTo(saveDir).invariantSeparatorsPath }
+            val top = rels.firstOrNull()?.substringBefore('/', "")
+            val stripTop = !top.isNullOrEmpty() && rels.all { it.startsWith("$top/") }
+            found.zip(rels.map { if (stripTop) it.substringAfter('/') else it }).map { (f, p) -> FinishedFile(f, p, -1L) }
+        }
+
     /**
-     * Blocking. Every file is checked to be inside [saveDir], a regular file and (when the plan knows it) exactly its
-     * declared size before it is copied: a missing or short file fails the whole publish, and every copy this attempt
-     * made is deleted again, so Download/Orbis never holds half a torrent and a retry starts clean. A copy that was reused
-     * (it existed before this attempt) is never deleted by the rollback.
+     * A kept folder's files: it already has the publish layout (no top folder of the torrent's own), so each file's
+     * path in it is its publish path. Without a plan the folder is walked as it is, nothing stripped.
      */
-    private fun publishFiles(saveDir: File, displayName: String, plan: TorrentPaths.Plan?): Boolean {
+    private fun keptFiles(kept: File, plan: TorrentPaths.Plan?): List<FinishedFile> =
+        if (plan != null) {
+            plan.publishPaths.indices.mapNotNull { i ->
+                val pub = plan.publishPaths[i] ?: return@mapNotNull null
+                FinishedFile(File(kept, pub), pub, plan.sizes.getOrElse(i) { -1L })
+            }
+        } else {
+            kept.walkTopDown().filter { it.isFile }.map { FinishedFile(it, it.relativeTo(kept).invariantSeparatorsPath, -1L) }.toList()
+        }
+
+    /**
+     * Blocking. Every file is checked ([checkFinished]) before it is copied: a missing or short file fails the whole
+     * publish, and every copy this attempt made is deleted again, so Download/Orbis never holds half a torrent and a
+     * retry starts clean. A copy that was reused (it existed before this attempt) is never deleted by the rollback.
+     */
+    private fun publishFiles(root: File, files: List<FinishedFile>, displayName: String): Boolean {
         val made = ArrayList<TorrentPublisher.Published>()
-        val ok = publishAll(saveDir, displayName, plan, made)
+        val ok = publishAll(root, files, displayName, made)
         val own = made.filterNot { it.reused }
         if (!ok && own.isNotEmpty()) {
             for (p in own) {
@@ -725,35 +849,85 @@ class TorrentManager(
         return ok
     }
 
-    private fun publishAll(saveDir: File, displayName: String, plan: TorrentPaths.Plan?, made: MutableList<TorrentPublisher.Published>): Boolean {
-        val files: List<Triple<File, String, Long>> =
-            if (plan != null) {
-                plan.relativePaths.indices.mapNotNull { i ->
-                    val rel = plan.relativePaths[i] ?: return@mapNotNull null
-                    val pub = plan.publishPaths[i] ?: return@mapNotNull null
-                    Triple(File(saveDir, rel), pub, plan.sizes.getOrElse(i) { -1L })
-                }
-            } else {
-                // Restored mid-publish: the plan is gone, the folder is the truth.
-                val found = saveDir.walkTopDown().filter { it.isFile && !it.name.endsWith(".parts") }.toList()
-                val rels = found.map { it.relativeTo(saveDir).invariantSeparatorsPath }
-                val top = rels.firstOrNull()?.substringBefore('/', "")
-                val stripTop = !top.isNullOrEmpty() && rels.all { it.startsWith("$top/") }
-                found.zip(rels.map { if (stripTop) it.substringAfter('/') else it }).map { (f, p) -> Triple(f, p, -1L) }
-            }
+    private fun publishAll(root: File, files: List<FinishedFile>, displayName: String, made: MutableList<TorrentPublisher.Published>): Boolean {
         if (files.isEmpty()) return false
-        for ((file, pub, size) in files) {
-            if (!DownloadFileNames.isInside(saveDir, file)) return false
-            if (Files.isSymbolicLink(file.toPath()) || !Files.isRegularFile(file.toPath(), LinkOption.NOFOLLOW_LINKS)) {
-                // Only an empty file may be absent (libtorrent writes nothing for it): it is created empty, so the
-                // folder and the file exist in Downloads too. Anything else is missing data.
-                if (size != 0L || file.exists() || !createEmpty(saveDir, file)) return false
-            }
-            if (size >= 0 && file.length() != size) return false
-            val (dir, name) = TorrentPaths.publishTarget(displayName, pub)
-            made += publisher.publish(file, dir, name) ?: return false
+        for (f in files) {
+            if (!checkFinished(root, f)) return false
+            val (dir, name) = TorrentPaths.publishTarget(displayName, f.publishPath)
+            made += publisher.publish(f.file, dir, name) ?: return false
         }
         return true
+    }
+
+    /**
+     * [f] is inside [root], a regular file (not a symlink) and, when the size is known, exactly that size. Only an
+     * empty file may be absent (libtorrent writes nothing for it): it is created empty, so the folder and the file
+     * exist in Downloads too. Anything else is missing data.
+     */
+    private fun checkFinished(root: File, f: FinishedFile): Boolean {
+        val file = f.file
+        if (!DownloadFileNames.isInside(root, file)) return false
+        if (Files.isSymbolicLink(file.toPath()) || !Files.isRegularFile(file.toPath(), LinkOption.NOFOLLOW_LINKS)) {
+            if (f.size != 0L || file.exists() || !createEmpty(root, file)) return false
+        }
+        return f.size < 0 || file.length() == f.size
+    }
+
+    /**
+     * Blocking. Moves a finished private torrent's files from [saveDir] into a new folder under
+     * [TorrentDirs.keepRoot] named [displayName] (already safe), " (1)", " (2)" ... when taken, each to its publish
+     * path. Every file passes the publish checks first; every target must stay inside the new folder. A move is a
+     * rename on the same volume, else a copy and a delete. On any failure the files already moved go back and the new
+     * folder is deleted, so nothing is left under the keep root. Returns the folder, or null.
+     */
+    private fun keepFiles(saveDir: File, displayName: String, plan: TorrentPaths.Plan?): File? {
+        // A private entry never outlives its process, so its plan is always in memory; without it nothing is moved.
+        if (plan == null) return null
+        val files = payloadFiles(saveDir, plan)
+        if (files.isEmpty() || !files.all { checkFinished(saveDir, it) }) return null
+        val folder = runCatching { newKeepFolder(displayName) }.getOrNull() ?: return null
+        val moved = ArrayList<Pair<File, File>>()
+        try {
+            for (f in files) {
+                val target = File(folder, f.publishPath)
+                if (!DownloadFileNames.isInside(folder, target)) throw IOException("outside")
+                target.parentFile?.mkdirs()
+                if (!DownloadFileNames.isInside(folder, target)) throw IOException("outside")
+                moveFile(f.file, target)
+                moved += f.file to target
+            }
+            return folder
+        } catch (e: Exception) {
+            for ((from, to) in moved.asReversed()) runCatching { moveFile(to, from) }
+            deleteKept(folder)
+            return null
+        }
+    }
+
+    /** A new, empty folder below the keep root, made unique like a file download's name. Null when none can be made. */
+    private fun newKeepFolder(displayName: String): File? {
+        val root = dirs.keepRoot()
+        if (!root.isDirectory && !root.mkdirs() && !root.isDirectory) return null
+        for (n in 0 until MAX_KEEP_NAME_ATTEMPTS) {
+            val folder = File(root, if (n == 0) displayName else "$displayName ($n)")
+            if (!DownloadFileNames.isInside(root, folder) || folder.canonicalFile.parentFile != root.canonicalFile) return null
+            // mkdir fails when anything of that name exists (a kept folder or a private file download).
+            if (folder.mkdir()) return folder
+        }
+        return null
+    }
+
+    /** Never replaces anything: a rename where it can, else a copy then a delete. */
+    private fun moveFile(from: File, to: File) {
+        try {
+            Files.move(from.toPath(), to.toPath(), LinkOption.NOFOLLOW_LINKS)
+        } catch (e: FileAlreadyExistsException) {
+            throw e
+        } catch (e: IOException) {
+            // AtomicMoveNotSupportedException included. No REPLACE_EXISTING: an existing target fails the copy too.
+            Files.copy(from.toPath(), to.toPath(), LinkOption.NOFOLLOW_LINKS)
+            Files.delete(from.toPath())
+        }
     }
 
     // ---- files ----
@@ -766,6 +940,15 @@ class TorrentManager(
             file.createNewFile()
             DownloadFileNames.isInside(saveDir, file) && Files.isRegularFile(file.toPath(), LinkOption.NOFOLLOW_LINKS)
         }.getOrDefault(false)
+
+    /** Deletes a kept folder, but only one strictly below the keep root, without following symlinks. Never throws. */
+    private fun deleteKept(dir: File) {
+        try {
+            if (DownloadFileNames.isInside(dirs.keepRoot(), dir)) deleteTree(dir) else log("kept outside root, kept")
+        } catch (e: Exception) {
+            log("kept delete failed: ${e.javaClass.simpleName}")
+        }
+    }
 
     /**
      * Leftovers of a process that died: private payloads (never in the index), payload folders no entry owns (no code
@@ -795,6 +978,19 @@ class TorrentManager(
             if (foreign > 0) log("payload root kept $foreign foreign")
         }
         runCatching { store.storedIds().filter { it !in known }.forEach { store.deleteState(it) } }
+        // Kept private torrents whose private browsing ended with the process (OD-3). Only folders: the files there
+        // are private file downloads, which the download manager cleans.
+        runCatching {
+            val owned = _entries.value.mapNotNull { it.keptDir }.toSet()
+            var n = 0
+            dirs.keepRoot().listFiles()?.forEach { d ->
+                if (Files.isDirectory(d.toPath(), LinkOption.NOFOLLOW_LINKS) && d.absolutePath !in owned) {
+                    deleteKept(d)
+                    n++
+                }
+            }
+            if (n > 0) log("kept leftovers deleted $n")
+        }
     }
 
     /** Deletes a payload folder, but only one inside the payload root. Never throws. */
@@ -865,5 +1061,8 @@ class TorrentManager(
     private companion object {
         /** What [newId] makes: 16 bytes in lowercase hex. */
         val ID_PATTERN = Regex("[0-9a-f]{32}")
+
+        /** Like a file download's name counter. */
+        const val MAX_KEEP_NAME_ATTEMPTS = 1000
     }
 }

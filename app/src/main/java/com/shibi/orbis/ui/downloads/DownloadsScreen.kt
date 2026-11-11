@@ -171,6 +171,7 @@ fun DownloadsScreen(
                             onResume = { t.resume(entry.id) },
                             onRetry = { t.retry(entry.id) },
                             onStopSeeding = { t.stopSeeding(entry.id) },
+                            onSaveToDownloads = { t.saveKept(entry.id) },
                             onOpen = {
                                 scope.launch {
                                     val result =
@@ -244,7 +245,7 @@ fun DownloadsScreen(
 /**
  * An unfinished torrent has no usable files outside the app (they are published only when it finishes), so removing
  * it deletes what was downloaded. A completed one only leaves the list: its files stay in Download/Orbis/<name>.
- * A finished one that is not saved yet (seeding, or paused or waiting for Wi-Fi after it finished): "Save and remove"
+ * A private one kept inside Orbis takes its kept files with it. A finished one that is not saved yet (seeding, or paused or waiting for Wi-Fi after it finished): "Save and remove"
  * copies it to Download/Orbis first, "Delete" does not.
  */
 @Composable
@@ -281,9 +282,12 @@ private fun RemoveTorrentDialog(entry: TorrentEntry, onRemove: (deleteFiles: Boo
         return
     }
     val completed = entry.status == TorrentStatus.COMPLETED
+    // Kept inside Orbis: removing it deletes those files, nothing else holds them.
+    val kept = completed && entry.isPrivate && entry.keptDir != null
     val title = stringResource(if (completed) R.string.torrents_remove_done_title else R.string.torrents_remove_title)
     val body =
         when {
+            kept -> stringResource(R.string.torrents_remove_kept_body_private)
             completed && entry.isPrivate -> stringResource(R.string.torrents_remove_done_body_private)
             completed -> stringResource(R.string.torrents_remove_done_body, entry.displayName)
             entry.doneBytes <= 0 -> stringResource(R.string.torrents_remove_body_nothing)
@@ -298,7 +302,7 @@ private fun RemoveTorrentDialog(entry: TorrentEntry, onRemove: (deleteFiles: Boo
         text = { Text(body) },
         confirmButton = {
             TextButton(
-                onClick = { onRemove(!completed) },
+                onClick = { onRemove(!completed || kept) },
                 colors = ButtonDefaults.textButtonColors(contentColor = onSurface),
             ) { Text(stringResource(R.string.torrents_remove)) }
         },
@@ -319,6 +323,7 @@ private fun TorrentRow(
     onOpen: () -> Unit,
     onRemove: () -> Unit,
     onStopSeeding: () -> Unit = {},
+    onSaveToDownloads: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
@@ -349,7 +354,7 @@ private fun TorrentRow(
                 overflow = TextOverflow.Ellipsis,
             )
             val percent = model.percent
-            if (model.state != RowState.Completed && !failed) {
+            if (model.state != RowState.Completed && model.state != RowState.Kept && !failed) {
                 if (percent != null) {
                     LinearProgressIndicator(
                         progress = { percent / 100f },
@@ -384,6 +389,9 @@ private fun TorrentRow(
                 if (RowAction.RETRY in model.actions) {
                     TextButton(onClick = onRetry, colors = textButton) { Text(stringResource(R.string.torrents_retry)) }
                 }
+                if (RowAction.SAVE_TO_DOWNLOADS in model.actions) {
+                    TextButton(onClick = onSaveToDownloads, colors = textButton) { Text(stringResource(R.string.torrents_action_save_to_downloads)) }
+                }
                 if (RowAction.OPEN in model.actions) {
                     IconButton(onClick = onOpen, colors = iconButton) {
                         Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = stringResource(R.string.downloads_open))
@@ -413,6 +421,7 @@ private fun stateText(model: TorrentRowModel): String =
         RowState.PausedTimeout -> stringResource(R.string.torrents_state_paused_timeout)
         RowState.WaitingWifi -> stringResource(R.string.torrents_state_waiting_wifi)
         RowState.Publishing -> stringResource(R.string.torrents_state_publishing)
+        RowState.Kept -> stringResource(R.string.torrents_state_kept_private)
         RowState.Completed ->
             model.title?.let { stringResource(R.string.torrents_state_saved, it) } ?: stringResource(R.string.torrents_state_saved_private)
         is RowState.Failed ->
@@ -437,7 +446,7 @@ private fun statsText(context: android.content.Context, model: TorrentRowModel):
     val done = Formatter.formatShortFileSize(context, model.doneBytes)
     val seeding = model.state as? RowState.Seeding
     when {
-        model.totalBytes > 0 && (model.state == RowState.Completed || seeding != null) -> parts += Formatter.formatShortFileSize(context, model.totalBytes)
+        model.totalBytes > 0 && (model.state == RowState.Completed || model.state == RowState.Kept || seeding != null) -> parts += Formatter.formatShortFileSize(context, model.totalBytes)
         model.totalBytes > 0 -> parts += context.getString(R.string.downloads_progress_known, done, Formatter.formatShortFileSize(context, model.totalBytes))
         model.doneBytes > 0 -> parts += context.getString(R.string.downloads_progress_unknown, done)
     }

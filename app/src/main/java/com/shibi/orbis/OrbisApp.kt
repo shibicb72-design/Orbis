@@ -258,7 +258,8 @@ class OrbisApp : Application() {
             TorrentManager(
                 engine = Libtorrent4jEngine(torrentStore.sessionFile, torrentLog),
                 store = torrentStore,
-                dirs = TorrentDirs(payloadRoot = { getExternalFilesDir("torrents") ?: File(filesDir, "torrents/data") }),
+                // A finished private torrent is kept where private file downloads go (F-06).
+                dirs = TorrentDirs(payloadRoot = { getExternalFilesDir("torrents") ?: File(filesDir, "torrents/data") }, keepRoot = downloads::privateDir),
                 scope = appScope,
                 io = Dispatchers.IO,
                 log = torrentLog,

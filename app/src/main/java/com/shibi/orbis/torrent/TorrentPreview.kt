@@ -79,7 +79,7 @@ object TorrentPreview {
         return if (walk(tree)) out else null
     }
 
-    private sealed interface Node {
+    internal sealed interface Node {
         class Int(val value: Long) : Node
 
         class Str(private val bytes: ByteArray, val start: kotlin.Int, val length: kotlin.Int) : Node {
@@ -97,11 +97,11 @@ object TorrentPreview {
         class Dict(val map: Map<String, Node>) : Node
     }
 
-    private class Malformed : Exception() {
+    internal class Malformed : Exception() {
         override fun fillInStackTrace(): Throwable = this
     }
 
-    private class Reader(private val b: ByteArray) {
+    internal class Reader(private val b: ByteArray) {
         private var pos = 0
         private var tokens = 0
 

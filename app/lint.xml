@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <lint>
     <!--
-        Owner rule: new strings are English only; es, fr and de are not edited any more. Two keys that English no
-        longer has stay in those files untouched; only those two are excused from ExtraTranslation.
+        Owner rule: new strings are English only; es, fr and de are not edited any more. Keys that English no
+        longer has stay in those files untouched; only those are excused from ExtraTranslation.
     -->
     <issue id="ExtraTranslation">
         <ignore regexp="&quot;cast_(untrusted|forget_tv)&quot;" />
+        <!-- Security PR 9: replaced by English-only keys whose text says private-tab files are deleted (OD-3). -->
+        <ignore regexp="&quot;(torrents_sheet_private|browser_download_private_note|browser_private_empty_state)&quot;" />
     </issue>
 </lint>

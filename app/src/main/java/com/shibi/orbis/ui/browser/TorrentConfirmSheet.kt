@@ -264,7 +264,7 @@ fun TorrentConfirmSheet(model: TorrentConfirmModel, onDownload: () -> Unit, onCa
                 )
             }
             if (model.isPrivate) {
-                Text(stringResource(R.string.torrents_sheet_private), style = MaterialTheme.typography.bodyMedium, color = secondary)
+                Text(stringResource(R.string.torrents_sheet_private_kept), style = MaterialTheme.typography.bodyMedium, color = secondary)
             }
             if (model.showFirstUseNote) {
                 Surface(
