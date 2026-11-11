@@ -29,6 +29,7 @@ Prints `BUILD OK` or the first failure lines. Full log `%TEMP%\gradle-last.log` 
 ## Design rules
 - HARD: no dark-on-dark or light-on-light text. Every surface sets its content colour from its own container; check light and dark themes.
 - UI must not import `org.mozilla.geckoview.*` — only `engine/GeckoEngineImpl.kt` may.
+- Nothing may import `org.libtorrent4j.*` — only `torrent/Libtorrent4jEngine.kt` may (its classes load the native library; everything else talks to `TorrentEngine`).
 
 ## Delegation (token budget)
 - Builds/tests -> `gradle-runner` (Haiku). Search -> `Explore` (Haiku).

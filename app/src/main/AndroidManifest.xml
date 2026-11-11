@@ -217,6 +217,12 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Torrents: the same dataSync pattern as DownloadService. Not exported: the debug add intent needs adb root. -->
+        <service
+            android:name=".torrent.TorrentService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.downloads"

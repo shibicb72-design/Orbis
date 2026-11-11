@@ -1,0 +1,144 @@
+package com.shibi.orbis.torrent
+
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+
+/**
+ * The torrent session behind a thin interface: no Android and no libtorrent types, so [TorrentManager] runs on the JVM
+ * with a fake. Only [Libtorrent4jEngine] implements it for real (and only it may import org.libtorrent4j).
+ *
+ * Every call returns at once and never blocks on native code: the real engine posts the work onto its own thread.
+ * Calls are applied in the order they were made. An id the engine no longer knows is ignored.
+ */
+interface TorrentEngine {
+    /** Starts the session (loads the native library the first time). Calling it while started only applies [settings]. */
+    fun start(settings: EngineSettings)
+
+    /** Saves the session state and ends the session; every [EngineId] becomes unknown. */
+    fun stop()
+
+    /**
+     * Adds a torrent saving into [saveDir]. A torrent with metadata (a .torrent, or resume data that carries it) is
+     * added paused and announced with [TorrentEvent.MetadataReceived]; a magnet without metadata starts fetching it and
+     * pauses itself when it arrives. Either way nothing is downloaded before the caller has checked the file list and
+     * called [resume].
+     */
+    fun add(source: TorrentSource, saveDir: java.io.File, resumeData: ByteArray?): EngineId
+
+    fun pause(id: EngineId)
+
+    fun resume(id: EngineId)
+
+    fun remove(id: EngineId, deleteFiles: Boolean)
+
+    /** Renames file [index] to [relativePath] (below the save directory, '/' separated). Before resume only. */
+    fun renameFiles(id: EngineId, relativePaths: Map<Int, String>)
+
+    /** Flushes what was written and returns the resume data; null when the torrent is unknown or the save failed. */
+    suspend fun saveResumeData(id: EngineId): ByteArray?
+
+    /** Bytes per second; 0 is unlimited. */
+    fun setLimits(downBps: Int, upBps: Int)
+
+    fun setDiscovery(dht: Boolean, pex: Boolean, lsd: Boolean)
+
+    fun pauseAll()
+
+    fun resumeAll()
+
+    /** About once a second while the session runs; empty when it does not. */
+    val snapshots: StateFlow<Map<EngineId, TorrentSnapshot>>
+
+    val events: SharedFlow<TorrentEvent>
+}
+
+/** The engine's handle on one torrent, valid for one session only. Never the info hash. */
+@JvmInline
+value class EngineId(val value: Long)
+
+data class EngineSettings(
+    val dht: Boolean = true,
+    val pex: Boolean = true,
+    val lsd: Boolean = true,
+    val downBps: Int = 0,
+    val upBps: Int = 0,
+    /** No seeding at all: a finished torrent is removed from the session by the manager. */
+    val stopSeeding: Boolean = true,
+    val maxActive: Int = TorrentLimits.MAX_ACTIVE,
+)
+
+sealed interface TorrentSource {
+    class Magnet(val uri: String) : TorrentSource {
+        override fun toString(): String = "Magnet"
+    }
+
+    class TorrentFile(val bytes: ByteArray) : TorrentSource {
+        override fun toString(): String = "TorrentFile(${bytes.size})"
+    }
+
+    /** Everything comes from the resume data passed with it (a magnet restored before its metadata arrived). */
+    object FromResumeData : TorrentSource {
+        override fun toString(): String = "FromResumeData"
+    }
+}
+
+class TorrentFileEntry(
+    /** As the torrent names it, before any sanitising, top folder included for a multi-file torrent. */
+    val pathSegments: List<String>,
+    val size: Long,
+    val isSymlink: Boolean = false,
+    val isPadFile: Boolean = false,
+) {
+    override fun toString(): String = "TorrentFileEntry(size=$size)"
+}
+
+class TorrentFiles(
+    val name: String,
+    val totalBytes: Long,
+    val pieceCount: Int,
+    val files: List<TorrentFileEntry>,
+) {
+    override fun toString(): String = "TorrentFiles(files=${files.size}, pieces=$pieceCount)"
+}
+
+enum class EngineState { CHECKING, FETCHING_METADATA, DOWNLOADING, FINISHED, SEEDING, PAUSED }
+
+data class TorrentSnapshot(
+    val state: EngineState,
+    val totalBytes: Long,
+    val doneBytes: Long,
+    val downBps: Long,
+    val upBps: Long,
+    val peers: Int,
+    val seeds: Int,
+    val etaSeconds: Long?,
+    val ratio: Float,
+    val hasMetadata: Boolean,
+)
+
+enum class TorrentErrorKind {
+    INVALID_SOURCE,
+    UNSAFE_METADATA,
+    NO_SPACE,
+    FILE_ERROR,
+    ENGINE_ERROR,
+    MISSING_DATA,
+    PUBLISH_FAILED,
+}
+
+sealed interface TorrentEvent {
+    val id: EngineId
+
+    /** [torrentFile] is the bencoded metadata, kept so the torrent can be restored without fetching it again. */
+    class MetadataReceived(override val id: EngineId, val files: TorrentFiles, val torrentFile: ByteArray?) : TorrentEvent {
+        override fun toString(): String = "MetadataReceived"
+    }
+
+    class Finished(override val id: EngineId) : TorrentEvent {
+        override fun toString(): String = "Finished"
+    }
+
+    class Error(override val id: EngineId, val kind: TorrentErrorKind) : TorrentEvent {
+        override fun toString(): String = "Error(${kind.name})"
+    }
+}

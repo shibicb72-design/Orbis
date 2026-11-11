@@ -18,4 +18,12 @@ class PublicDownloadsTest {
         )
         assertEquals(listOf(4L), newlyCompleted(list, handled = setOf(1L)).map { it.id })
     }
+
+    @Test
+    fun relativePathIsDownloadOrAFolderBelowIt() {
+        assertEquals("Download", publicRelativePath(null))
+        assertEquals("Download", publicRelativePath(""))
+        assertEquals("Download/Orbis/Sintel", publicRelativePath("Orbis/Sintel"))
+        assertEquals("Download/Orbis/Sintel/subs", publicRelativePath("/Orbis/Sintel/subs/"))
+    }
 }

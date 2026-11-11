@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Torrent notification (the torrent screens come in a later change). -->
+    <string name="torrents_notif_channel_name">Torrents</string>
+    <string name="torrents_notif_channel_description">Progreso de las descargas de torrents</string>
+    <string name="torrents_notif_starting">Iniciando torrent</string>
+    <string name="torrents_notif_running">Descargando torrent</string>
+    <string name="torrents_notif_private">Descarga privada</string>
+    <string name="torrents_notif_private_many">Descargas privadas (%d)</string>
+    <string name="torrents_notif_fetching">Obteniendo datos del torrent</string>
+    <string name="torrents_notif_progress">%1$d%% · %2$s/s</string>
+    <string name="torrents_notif_public_text">Descargando torrents</string>
+    <plurals name="torrents_notif_many_title">
+        <item quantity="one">%d torrent</item>
+        <item quantity="many">%d torrents</item>
+        <item quantity="other">%d torrents</item>
+    </plurals>
+    <string name="torrents_pause">Pausar</string>
+    <string name="torrents_pause_all">Pausar todo</string>
+    <string name="torrents_cancel">Cancelar</string>
+</resources>

@@ -350,4 +350,13 @@ class DownloadFileNamesTest {
         assertFalse("sibling sharing a name prefix", DownloadFileNames.isInside(dir, File(sibling, "x.txt")))
         assertFalse(DownloadFileNames.isInside(dir, File(dir.parentFile, "x.txt")))
     }
+
+    @Test
+    fun safeNameMakesOneSegmentSafe() {
+        assertEquals("movie.mp4", DownloadFileNames.safeName("movie.mp4"))
+        assertEquals("_NUL.txt", DownloadFileNames.safeName("NUL.txt"))
+        assertEquals("ab", DownloadFileNames.safeName("a\u202Eb"))
+        assertEquals("", DownloadFileNames.safeName(" .. "))
+        assertTrue(DownloadFileNames.safeName("y".repeat(300)).toByteArray().size <= DownloadFileNames.MAX_NAME_BYTES)
+    }
 }
