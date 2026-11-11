@@ -242,7 +242,8 @@ class TorrentManager(
         val a = attached[id] ?: return
         when (event) {
             is TorrentEvent.MetadataReceived -> onMetadata(entry, a, event)
-            is TorrentEvent.Finished -> onFinished(entry, a)
+            // Only a torrent whose file list was checked can be finished; anything else is not ours to publish.
+            is TorrentEvent.Finished -> if (a.metadataOk) onFinished(entry, a) else log("finished before metadata check, ignored")
             is TorrentEvent.Error -> fail(id, event.kind)
         }
     }

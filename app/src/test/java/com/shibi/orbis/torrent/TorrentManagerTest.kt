@@ -131,6 +131,20 @@ class TorrentManagerTest {
     }
 
     @Test
+    fun finishedBeforeTheFileListIsCheckedIsIgnored() = runTest {
+        val s = Setup(this)
+        s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)
+        advanceUntilIdle()
+        // A magnet runs on its own until its metadata arrives (no stop_when_ready, which kept it paused).
+        assertTrue(s.engine.calls.none { it.startsWith("pause") })
+        s.engine.finish(s.lastId())
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.FETCHING_METADATA, s.only().status)
+        assertTrue(s.published.isEmpty())
+        assertTrue(s.engine.removed.isEmpty())
+    }
+
+    @Test
     fun publishFailureKeepsThePayload() = runTest {
         val s = Setup(this)
         s.publishOk = false

@@ -200,9 +200,11 @@ class Libtorrent4jEngine(
         p.setSave_path(saveDir.absolutePath)
         val withMetadata = hasInfo(p)
         // Never auto-managed: the manager decides what runs. With metadata it waits paused for the file check; a
-        // magnet fetches metadata and stops itself once ready (stop_when_ready), before a single piece is requested.
+        // magnet runs to fetch metadata and is paused the moment it arrives (see METADATA_RECEIVED). Not
+        // stop_when_ready: libtorrent counts downloading_metadata as a transferring state, so a magnet with that flag
+        // pauses itself straight out of checking_resume_data and never fetches anything.
         var flags = p.getFlags().and_(TorrentFlags.AUTO_MANAGED.inv()).and_(TorrentFlags.SEED_MODE.inv())
-        flags = if (withMetadata) flags.or_(TorrentFlags.PAUSED) else flags.and_(TorrentFlags.PAUSED.inv()).or_(TorrentFlags.STOP_WHEN_READY)
+        flags = if (withMetadata) flags.or_(TorrentFlags.PAUSED) else flags.and_(TorrentFlags.PAUSED.inv()).and_(TorrentFlags.STOP_WHEN_READY.inv())
         flags = discoveryFlags(flags)
         p.setFlags(flags)
         ec.clear()
@@ -215,6 +217,7 @@ class Libtorrent4jEngine(
         val handle = TorrentHandle(h)
         handles[id.value] = handle
         byHandle[h.id()] = id
+        log("added ${id.value} metadata=$withMetadata")
         if (withMetadata) announceMetadata(id, handle)
     }
 
@@ -260,7 +263,6 @@ class Libtorrent4jEngine(
     override fun resume(id: EngineId) {
         post {
             val h = handles[id.value] ?: return@post
-            h.unsetFlags(TorrentFlags.STOP_WHEN_READY)
             h.unsetFlags(TorrentFlags.AUTO_MANAGED)
             h.resume()
         }
@@ -323,10 +325,7 @@ class Libtorrent4jEngine(
 
     override fun resumeAll() {
         post {
-            handles.values.forEach {
-                it.unsetFlags(TorrentFlags.STOP_WHEN_READY)
-                it.resume()
-            }
+            handles.values.forEach { it.resume() }
         }
     }
 
@@ -354,12 +353,24 @@ class Libtorrent4jEngine(
             AlertType.STATE_UPDATE -> {
                 val updates = (alert as StateUpdateAlert).status().map { st -> st.swig().getHandle().id() to snapshotOf(st) }
                 post {
-                    for ((key, snap) in updates) byHandle[key]?.let { latest[it] = snap }
+                    for ((key, snap) in updates) {
+                        val id = byHandle[key] ?: continue
+                        val before = latest[id]
+                        // Status only: the engine id, the state and counts.
+                        if (before == null || before.state != snap.state || before.hasMetadata != snap.hasMetadata) {
+                            log("torrent ${id.value} ${snap.state.name} metadata=${snap.hasMetadata} peers=${snap.peers}")
+                        }
+                        latest[id] = snap
+                    }
                     _snapshots.value = latest.toMap()
                 }
             }
             AlertType.METADATA_RECEIVED -> {
-                val key = (alert as TorrentAlert<*>).handle().swig().id()
+                val alertHandle = (alert as TorrentAlert<*>).handle()
+                val key = alertHandle.swig().id()
+                // Pause right here, before the post: torrent_handle calls are thread-safe and the alert's handle is
+                // valid during this callback. The fewer pieces requested under unchecked names, the better.
+                alertHandle.pause()
                 post {
                     val id = byHandle[key] ?: return@post
                     // The alert's handle dies with the alert: use the one add_torrent returned.
