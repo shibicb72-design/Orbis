@@ -1,6 +1,7 @@
 package com.shibi.orbis.downloads
 
 import com.shibi.orbis.engine.IncomingDownload
+import com.shibi.orbis.engine.resumeValidator
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
@@ -34,6 +35,7 @@ private class FakeDownload(
     override val contentType: String? = null,
     override val contentLength: Long = -1,
     private val body: () -> InputStream? = { null },
+    override val validator: String? = null,
 ) : IncomingDownload {
     var openCalls = 0
     var discardCalls = 0
@@ -946,6 +948,7 @@ class DownloadManagerTest {
         override val contentLength: Long,
         override val startOffset: Long,
         private val stream: InputStream,
+        override val validator: String? = null,
     ) : IncomingDownload {
         override val contentDisposition: String? = null
         override val contentType: String? = null
@@ -953,7 +956,7 @@ class DownloadManagerTest {
         override fun discard() {}
     }
 
-    private fun TestScope.pausableManager(fetch: suspend (String, Long, Boolean) -> IncomingDownload?): DownloadManager {
+    private fun TestScope.pausableManager(fetch: suspend (String, Long, Boolean, String?) -> IncomingDownload?): DownloadManager {
         val io = StandardTestDispatcher(testScheduler)
         val job = SupervisorJob().also { scopeJobs += it }
         return DownloadManager({ dir }, store, CoroutineScope(io + job), io, { logs += it }, { tick += tickStep; tick }, { null }, fetch)
@@ -965,7 +968,7 @@ class DownloadManagerTest {
         var requested: Pair<String, Long>? = null
         lateinit var m: DownloadManager
         var id = 0L
-        m = pausableManager { url, from, _ ->
+        m = pausableManager { url, from, _, _ ->
             requested = url to from
             RangedDownload(url, data.size - from, from, ChunkStream(data.copyOfRange(from.toInt(), data.size)))
         }
@@ -992,7 +995,7 @@ class DownloadManagerTest {
         val data = ByteArray(24) { (it * 3).toByte() }
         lateinit var m: DownloadManager
         var id = 0L
-        m = pausableManager { url, _, _ -> RangedDownload(url, data.size.toLong(), 0L, ChunkStream(data)) }
+        m = pausableManager { url, _, _, _ -> RangedDownload(url, data.size.toLong(), 0L, ChunkStream(data)) }
         val first = ChunkStream(data, chunk = 4, onRead = { n -> if (n == 2) m.pause(id) })
         id = m.start(FakeDownload(contentDisposition = cd("q.bin"), contentLength = 24, body = { first }))
         advanceUntilIdle()
@@ -1007,7 +1010,7 @@ class DownloadManagerTest {
         val data = ByteArray(24)
         lateinit var m: DownloadManager
         var id = 0L
-        m = pausableManager { _, _, _ -> null }
+        m = pausableManager { _, _, _, _ -> null }
         val first = ChunkStream(data, chunk = 4, onRead = { n -> if (n == 2) m.pause(id) })
         id = m.start(FakeDownload(contentDisposition = cd("c.bin"), contentLength = 24, body = { first }))
         advanceUntilIdle()
@@ -1015,6 +1018,105 @@ class DownloadManagerTest {
         advanceUntilIdle()
         assertEquals(DownloadStatus.CANCELLED, m.byId(id).status)
         assertFalse(File(dir, "c.bin.part").exists())
+    }
+
+    @Test
+    fun theFirstResponsesValidatorIsSentAsIfRangeOnResume() = runTest {
+        val data = ByteArray(40) { it.toByte() }
+        val sent = mutableListOf<String?>()
+        lateinit var m: DownloadManager
+        var id = 0L
+        m = pausableManager { url, from, _, ifRange ->
+            sent += ifRange
+            RangedDownload(url, data.size - from, from, ChunkStream(data.copyOfRange(from.toInt(), data.size)), "\"v1\"")
+        }
+        val first = ChunkStream(data, chunk = 4, onRead = { n -> if (n == 3) m.pause(id) })
+        id = m.start(FakeDownload(contentDisposition = cd("v.bin"), contentLength = 40, body = { first }, validator = "\"v1\""))
+        advanceUntilIdle()
+        m.resume(id)
+        advanceUntilIdle()
+        assertEquals(listOf<String?>("\"v1\""), sent)
+        assertEquals(DownloadStatus.COMPLETED, m.byId(id).status)
+        assertTrue(data.contentEquals(File(dir, "v.bin").readBytes()))
+    }
+
+    @Test
+    fun noIfRangeIsSentWhenTheServerGaveNoValidator() = runTest {
+        val data = ByteArray(24) { it.toByte() }
+        val sent = mutableListOf<String?>()
+        lateinit var m: DownloadManager
+        var id = 0L
+        m = pausableManager { url, from, _, ifRange ->
+            sent += ifRange
+            RangedDownload(url, data.size - from, from, ChunkStream(data.copyOfRange(from.toInt(), data.size)))
+        }
+        val first = ChunkStream(data, chunk = 4, onRead = { n -> if (n == 2) m.pause(id) })
+        id = m.start(FakeDownload(contentDisposition = cd("n.bin"), contentLength = 24, body = { first }))
+        advanceUntilIdle()
+        m.resume(id)
+        advanceUntilIdle()
+        assertEquals(listOf<String?>(null), sent)
+        assertEquals(DownloadStatus.COMPLETED, m.byId(id).status)
+    }
+
+    @Test
+    fun aChangedFileAfterPauseIsRewrittenFromZeroNotSpliced() = runTest {
+        val old = ByteArray(24) { 1 }
+        val changed = ByteArray(30) { 2 }
+        lateinit var m: DownloadManager
+        var id = 0L
+        // The server answers If-Range with the whole new file: a 200, so the start offset is 0.
+        m = pausableManager { url, _, _, _ -> RangedDownload(url, changed.size.toLong(), 0L, ChunkStream(changed), "\"v2\"") }
+        val first = ChunkStream(old, chunk = 4, onRead = { n -> if (n == 2) m.pause(id) })
+        id = m.start(FakeDownload(contentDisposition = cd("s.bin"), contentLength = 24, body = { first }, validator = "\"v1\""))
+        advanceUntilIdle()
+        assertEquals(DownloadStatus.PAUSED, m.byId(id).status)
+        assertTrue(File(dir, "s.bin.part").length() > 0)
+        m.resume(id)
+        advanceUntilIdle()
+        val done = m.byId(id)
+        assertEquals(DownloadStatus.COMPLETED, done.status)
+        assertTrue(changed.contentEquals(File(dir, "s.bin").readBytes()))
+        assertEquals(30L, done.totalBytes)
+    }
+
+    @Test
+    fun aRangeOfAFileWhoseValidatorChangedFailsInsteadOfSplicing() = runTest {
+        val data = ByteArray(24) { it.toByte() }
+        lateinit var m: DownloadManager
+        var id = 0L
+        m = pausableManager { url, from, _, _ ->
+            RangedDownload(url, data.size - from, from, ChunkStream(data.copyOfRange(from.toInt(), data.size)), "\"v2\"")
+        }
+        val first = ChunkStream(data, chunk = 4, onRead = { n -> if (n == 2) m.pause(id) })
+        id = m.start(FakeDownload(contentDisposition = cd("r.bin"), contentLength = 24, body = { first }, validator = "\"v1\""))
+        advanceUntilIdle()
+        m.resume(id)
+        advanceUntilIdle()
+        assertEquals(DownloadStatus.FAILED, m.byId(id).status)
+        assertFalse(File(dir, "r.bin").exists())
+        assertFalse(File(dir, "r.bin.part").exists())
+    }
+
+    @Test
+    fun resumeAppendsOnlyForTheSameFileAtTheSameOffset() {
+        assertTrue(resumeAppends(10, "\"a\"", 10, "\"a\""))
+        assertTrue(resumeAppends(10, null, 10, null))
+        assertTrue(resumeAppends(10, "\"a\"", 10, null))
+        assertFalse(resumeAppends(10, "\"a\"", 10, "\"b\""))
+        assertFalse(resumeAppends(10, "\"a\"", 0, "\"a\""))
+        assertFalse(resumeAppends(10, null, 5, null))
+        assertFalse(resumeAppends(0, null, 0, null))
+    }
+
+    @Test
+    fun resumeValidatorPrefersAStrongEtag() {
+        val date = "Wed, 21 Oct 2026 07:28:00 GMT"
+        assertEquals("\"abc\"", resumeValidator("\"abc\"", date))
+        assertEquals(date, resumeValidator("W/\"abc\"", date))
+        assertNull(resumeValidator("W/\"abc\"", null))
+        assertNull(resumeValidator(null, null))
+        assertNull(resumeValidator(" ", "x\r\nSet-Cookie: a=b"))
     }
 
     @Test

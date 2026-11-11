@@ -126,8 +126,21 @@ internal fun resolveControlUrl(locationUrl: String, control: String): String? {
             return null
         }
     if (!resolved.startsWith("http://") && !resolved.startsWith("https://")) return null
+    // The control URL must name the same device that served the description, by IP literal (no DNS lookup).
+    val host = uriHost(resolved) ?: return null
+    if (!isIpLiteral(host) || !sameHost(host, uriHost(locationUrl))) return null
     return resolved
 }
+
+/** The host of [url] without IPv6 brackets, or null when it has none or does not parse. */
+internal fun uriHost(url: String): String? =
+    try {
+        URI(url).host?.removePrefix("[")?.removeSuffix("]")?.takeIf { it.isNotEmpty() }
+    } catch (_: Exception) {
+        null
+    }
+
+internal fun sameHost(a: String, b: String?): Boolean = b != null && a.equals(b, ignoreCase = true)
 
 /** DIDL-Lite document for SetAVTransportURI. The title and URL are escaped. */
 internal fun buildDidlLite(media: CastableMedia): String {
@@ -340,7 +353,7 @@ internal fun locationHostMatchesSource(location: String, source: InetAddress): B
     return parsed.address.contentEquals(source.address)
 }
 
-private fun isIpLiteral(host: String): Boolean {
+internal fun isIpLiteral(host: String): Boolean {
     if (host.matches(Regex("""\d{1,3}(\.\d{1,3}){3}"""))) return true
     if (!host.contains(':')) return false
     return host.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' || it == ':' || it == '.' }

@@ -39,8 +39,11 @@ class DownloadManager(
     private val log: (String) -> Unit,
     private val now: () -> Long,
     private val extensionForMime: (String) -> String? = { null },
-    /** Fetches the rest of a paused download (see BrowserEngine.fetchFrom); null turns pause and resume off. */
-    private val fetchFrom: (suspend (url: String, fromByte: Long, isPrivate: Boolean) -> IncomingDownload?)? = null,
+    /**
+     * Fetches the rest of a paused download (see BrowserEngine.fetchFrom), sending `ifRange` as If-Range when it is not
+     * null; null turns pause and resume off.
+     */
+    private val fetchFrom: (suspend (url: String, fromByte: Long, isPrivate: Boolean, ifRange: String?) -> IncomingDownload?)? = null,
     /**
      * A private download that was still running when private browsing ended has settled and left the list (see
      * [forgetPrivate]). Called with its id on the thread that finished it, so its result notification can go too.
@@ -84,8 +87,18 @@ class DownloadManager(
 
     private class Reservation(val name: String, val finalFile: File, val partFile: File, val keys: List<String>)
 
-    /** A paused download: its address (memory only), its part file and the bytes in it. */
-    private class Paused(val url: String, val reservation: Reservation, val received: Long, val total: Long, val isPrivate: Boolean)
+    /**
+     * A paused download: its address (memory only), its part file, the bytes in it, and the [validator] of the response
+     * those bytes came from (null when the server sent none).
+     */
+    private class Paused(
+        val url: String,
+        val reservation: Reservation,
+        val received: Long,
+        val total: Long,
+        val isPrivate: Boolean,
+        val validator: String?,
+    )
 
     private val pausedDownloads = ConcurrentHashMap<Long, Paused>()
 
@@ -187,7 +200,7 @@ class DownloadManager(
         val p = pausedDownloads.remove(id) ?: return
         _entries.update { list -> list.map { if (it.id == id) it.copy(status = DownloadStatus.IN_PROGRESS) else it } }
         scope.launch(io) {
-            val body = runCatching { fetch(p.url, p.received, p.isPrivate) }.getOrNull()
+            val body = runCatching { fetch(p.url, p.received, p.isPrivate, p.validator) }.getOrNull()
             if (body == null) {
                 p.reservation.partFile.delete()
                 release(p.reservation)
@@ -294,6 +307,8 @@ class DownloadManager(
         var status = DownloadStatus.FAILED
         var received = 0L
         var append = false
+        var expected = a.total
+        var validator = a.download.validator
         try {
             val d = dir()
             if (!d.isDirectory && !d.mkdirs() && !d.isDirectory) throw IOException("downloads directory unavailable")
@@ -305,10 +320,20 @@ class DownloadManager(
             val r = resumed?.reservation ?: reserve(d, a.baseName)
             reservation = r
             if (resumed == null) publishTarget(a.id, r)
-            // Continue the part file only when the server sent exactly the missing bytes; otherwise start over.
-            if (resumed != null && resumed.received > 0 && a.download.startOffset == resumed.received) {
-                append = true
-                received = resumed.received
+            // Continue the part file only when the server sent exactly the missing bytes of the same file; otherwise
+            // start over, which needs the whole file (a 200), never a range of a file that changed.
+            if (resumed != null) {
+                if (resumeAppends(resumed.received, resumed.validator, a.download.startOffset, a.download.validator)) {
+                    append = true
+                    received = resumed.received
+                    validator = resumed.validator
+                } else {
+                    if (a.download.startOffset != 0L) throw IOException("resume mismatch")
+                    expected = a.download.contentLength.coerceAtLeast(-1L)
+                    val newTotal = expected
+                    _entries.update { list -> list.map { if (it.id == a.id) it.copy(totalBytes = newTotal, receivedBytes = 0L) else it } }
+                    log("download restarted from the beginning")
+                }
             }
             checkActive(a)
 
@@ -337,7 +362,7 @@ class DownloadManager(
                 out.fd.sync()
             }
             // A body shorter (or longer) than the announced length is a truncated or tampered download.
-            if (a.total >= 0 && received != a.total) throw IOException("length mismatch")
+            if (expected >= 0 && received != expected) throw IOException("length mismatch")
             moveIntoPlace(r.partFile, r.finalFile)
             status = DownloadStatus.COMPLETED
         } catch (e: CancellationException) {
@@ -359,7 +384,7 @@ class DownloadManager(
             val r = reservation
             if (status == DownloadStatus.PAUSED && r != null) {
                 // Kept: the part file and its reserved name wait for resume.
-                pausedDownloads[a.id] = Paused(a.download.url, r, received, a.total, a.isPrivate)
+                pausedDownloads[a.id] = Paused(a.download.url, r, received, expected, a.isPrivate, validator)
             } else {
                 if (status != DownloadStatus.COMPLETED) r?.partFile?.delete()
                 r?.let { release(it) }
@@ -498,4 +523,14 @@ class DownloadManager(
         const val PROGRESS_INTERVAL_MS = 250L
         const val MAX_NAME_ATTEMPTS = 1000
     }
+}
+
+/**
+ * Whether a resumed response continues the part file: the server sent the range that starts at [received] (a 206 for
+ * exactly the missing bytes), and when both responses carry a validator it is unchanged. A server that honours If-Range
+ * answers a changed file with a 200 (start offset 0), so this is false and the download starts over.
+ */
+internal fun resumeAppends(received: Long, savedValidator: String?, startOffset: Long, responseValidator: String?): Boolean {
+    if (received <= 0 || startOffset != received) return false
+    return savedValidator == null || responseValidator == null || responseValidator == savedValidator
 }
