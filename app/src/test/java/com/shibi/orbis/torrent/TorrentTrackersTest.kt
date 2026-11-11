@@ -71,6 +71,32 @@ class TorrentTrackersTest {
     }
 
     @Test
+    fun onlyPrintableAsciiIsAllowed() {
+        // URLDecoder turns a non-UTF-8 byte into U+FFFD; libtorrent would keep the raw byte.
+        assertFalse(TorrentTrackers.isAllowed("http://a/\uFFFD"))
+        assertFalse(TorrentTrackers.isAllowed("http://\u00e4.example/announce"))
+        assertTrue(TorrentTrackers.isAllowed("http://xn--4ca.example/announce?a=1&b=~"))
+    }
+
+    @Test
+    fun stripMagnetDropsNonUtf8AndTheBareTrDotKey() {
+        val udp = "tr=udp%3A%2F%2Ft.example%3A1337"
+        val r = TorrentTrackers.stripMagnet("$base&tr=http%3A%2F%2Fa%2F%FF&tr.=ws:x&$udp&tr.=http%3A%2F%2Fa%2F%FF")
+        assertEquals(3, r.dropped)
+        assertEquals("$base&$udp", r.uri)
+    }
+
+    @Test
+    fun aTorrentWhoseAnnounceHoldsANonUtf8ByteGivesNoTracker() {
+        val url = "http://a.example/".toByteArray() + byteArrayOf(0xFF.toByte())
+        val head = "d8:announce${url.size}:".toByteArray()
+        val tail = "4:infod6:lengthi1e4:name1:aee".toByteArray()
+        val a = TorrentTrackers.fromTorrentFile(head + url + tail)
+        assertTrue(a.urls.isEmpty())
+        assertEquals(1, a.dropped)
+    }
+
+    @Test
     fun tiersAreNumberedDenselyAndBadUrlsAreDropped() {
         val tiers = listOf(listOf("ws:x"), listOf("udp://a.example:1"), listOf("wss:/x", "file:///x"), listOf("http://b.example/ a", "https://c.example/announce"))
         val a = TorrentTrackers.fromTorrentFile(torrent(null, tiers))

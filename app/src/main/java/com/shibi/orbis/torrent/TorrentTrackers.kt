@@ -24,14 +24,17 @@ object TorrentTrackers {
 
     /**
      * The scheme, the text before the first ':' as libtorrent reads it, is exactly http, https or udp (any case), and
-     * "://" follows. No control character, space or other whitespace anywhere.
+     * "://" follows. Every character is printable ASCII ('!'..'~'): no space, no control or format character, and
+     * nothing outside ASCII. A byte that is not UTF-8 (a magnet's %FF) decodes to U+FFFD here while libtorrent keeps
+     * the raw byte, and such a string must never come back through JNI (NewStringUTF); refusing all non-ASCII closes
+     * that. Real trackers are ASCII (a non-ASCII host is sent as punycode).
      */
     fun isAllowed(url: String): Boolean {
         val colon = url.indexOf(':')
         if (colon <= 0) return false
         if (url.substring(0, colon).lowercase(Locale.ROOT) !in ALLOWED_SCHEMES) return false
         if (!url.startsWith("://", colon)) return false
-        return url.none { it.isWhitespace() || it.isISOControl() || Character.getType(it) == Character.FORMAT.toInt() }
+        return url.all { it in '!'..'~' }
     }
 
     /** A magnet without the trackers [isAllowed] refuses, and how many went. */
@@ -39,11 +42,14 @@ object TorrentTrackers {
         override fun toString(): String = "StrippedMagnet(dropped=$dropped)"
     }
 
-    /** `tr` or `tr.<digits>`, in any case: the keys libtorrent reads trackers from (src/magnet_uri.cpp:300-306). */
+    /**
+     * `tr`, `tr.` or `tr.<digits>`, in any case: every key libtorrent reads a tracker from (src/magnet_uri.cpp:300-306,
+     * which takes "tr." with nothing after it too).
+     */
     private fun isTrackerKey(key: String): Boolean {
         val k = key.lowercase(Locale.ROOT)
         if (k == "tr") return true
-        return k.length > 3 && k.startsWith("tr.") && k.substring(3).all { it in '0'..'9' }
+        return k.length >= 3 && k.startsWith("tr.") && k.substring(3).all { it in '0'..'9' }
     }
 
     /** Removes every tracker parameter [isAllowed] refuses. Everything else is kept as it was, in order. */
