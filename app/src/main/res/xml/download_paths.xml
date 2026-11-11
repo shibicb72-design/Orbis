@@ -5,6 +5,8 @@
      getExternalFilesDir. camera_capture/ holds the temp the camera app writes a photo into. -->
 <paths>
     <external-files-path name="downloads_external" path="Download/" />
+    <!-- Torrent payloads while they download (getExternalFilesDir("torrents")); finished ones go to Download/Orbis. -->
+    <external-files-path name="torrents" path="torrents/" />
     <files-path name="downloads_internal" path="downloads/" />
     <cache-path name="camera_capture" path="camera_capture/" />
 </paths>

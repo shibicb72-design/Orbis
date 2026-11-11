@@ -102,6 +102,15 @@ object DownloadFileNames {
             false
         }
 
+    /**
+     * One path segment from untrusted metadata (a torrent's file or folder name) made safe on its own: [sanitize], then
+     * the reserved-name guard and the [MAX_NAME_BYTES] cap that [resolve] applies. "" when nothing usable remains.
+     */
+    fun safeName(raw: String): String {
+        val s = sanitize(raw)
+        return if (s.isEmpty()) "" else capLength(guardReserved(s))
+    }
+
     /** "name.ext" -> "name (n).ext"; used when the plain name is already taken. */
     fun withCounter(name: String, n: Int): String {
         val dot = name.lastIndexOf('.')

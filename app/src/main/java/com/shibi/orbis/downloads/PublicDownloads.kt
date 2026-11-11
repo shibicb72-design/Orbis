@@ -2,23 +2,23 @@ package com.shibi.orbis.downloads
 
 import android.content.ContentValues
 import android.content.Context
-import android.os.Environment
 import android.provider.MediaStore
 import java.io.File
 
 /**
  * Puts a copy of a finished download in the phone's public Download folder (Files app, other apps), through
  * MediaStore: no storage permission is needed. Blocking IO: call off the main thread. Returns false on any failure;
- * the file in Orbis's own folder is untouched either way.
+ * the file in Orbis's own folder is untouched either way. [subPath] (already sanitised, '/'-separated, e.g.
+ * "Orbis/Sintel") puts it in a folder below Download.
  */
-internal fun copyToPublicDownloads(context: Context, file: File, displayName: String, mimeType: String): Boolean {
+internal fun copyToPublicDownloads(context: Context, file: File, displayName: String, mimeType: String, subPath: String? = null): Boolean {
     if (!file.isFile) return false
     val resolver = context.contentResolver
     val values =
         ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, displayName)
             put(MediaStore.Downloads.MIME_TYPE, mimeType.ifBlank { "application/octet-stream" })
-            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            put(MediaStore.Downloads.RELATIVE_PATH, publicRelativePath(subPath))
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
     val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
@@ -32,6 +32,13 @@ internal fun copyToPublicDownloads(context: Context, file: File, displayName: St
         false
     }
 }
+
+/** "Download" or "Download/<subPath>": MediaStore's RELATIVE_PATH for [copyToPublicDownloads]. */
+internal fun publicRelativePath(subPath: String?): String =
+    if (subPath.isNullOrEmpty()) DOWNLOAD_DIR else DOWNLOAD_DIR + "/" + subPath.trim('/')
+
+/** Environment.DIRECTORY_DOWNLOADS, spelled out: the android.jar stub leaves it null in JVM tests. */
+private const val DOWNLOAD_DIR = "Download"
 
 /**
  * Which entries just finished and should be copied: newly COMPLETED (not already [handled]), not private. Pure, for

@@ -20,6 +20,14 @@ import com.shibi.orbis.downloads.DownloadForegroundController
 import com.shibi.orbis.downloads.DownloadManager
 import com.shibi.orbis.downloads.DownloadNotifications
 import com.shibi.orbis.downloads.DownloadStore
+import com.shibi.orbis.torrent.AndroidTorrentNetwork
+import com.shibi.orbis.torrent.Libtorrent4jEngine
+import com.shibi.orbis.torrent.TorrentDirs
+import com.shibi.orbis.torrent.TorrentForegroundController
+import com.shibi.orbis.torrent.TorrentLog
+import com.shibi.orbis.torrent.TorrentManager
+import com.shibi.orbis.torrent.TorrentSettings
+import com.shibi.orbis.torrent.TorrentStore
 import com.shibi.orbis.engine.AndroidPermissionBroker
 import com.shibi.orbis.engine.BrowserEngine
 import com.shibi.orbis.engine.FileSitePermissionStore
@@ -71,6 +79,10 @@ class OrbisApp : Application() {
 
     /** Keeps the process alive while downloads run. Null in Gecko child processes, like [container]. */
     var downloadForeground: DownloadForegroundController? = null
+        private set
+
+    /** Keeps the process alive while torrents run. Null in Gecko child processes, like [container]. */
+    var torrentForeground: TorrentForegroundController? = null
         private set
 
     override fun onCreate() {
@@ -173,6 +185,7 @@ class OrbisApp : Application() {
         logins.load()
         engine.logins = LoginBridgeImpl(logins) { browserSettings.offerSavePasswords.value }
         var downloadsRef: DownloadManager? = null
+        var torrentsRef: TorrentManager? = null
         // The tab manager creates NO session here: sessions appear only once the browser screen asks for them, which
         // is after the onboarding decision. restore() only reads the stored tab list.
         val tabs =
@@ -192,6 +205,8 @@ class OrbisApp : Application() {
                     // The private entries leave the list; their result notifications must not stay in the shade.
                     downloadsRef?.let { DownloadNotifications.cancelResults(this@OrbisApp, it.forgetPrivate()) }
                     browserSettings.forgetPrivate()
+                    // Private torrents leave the list and their partial files are deleted.
+                    torrentsRef?.forgetPrivate()
                 },
                 releaseImport = { url ->
                     appScope.launch(Dispatchers.IO) {
@@ -219,6 +234,28 @@ class OrbisApp : Application() {
                 onPrivateDropped = { id -> DownloadNotifications.cancelResults(this@OrbisApp, listOf(id)) },
             )
         downloadsRef = downloads
+        // Torrents: restore() below only reads the index; the native engine starts with the first active torrent.
+        val torrentLog = TorrentLog.sink(debugLog)
+        val torrentStore = TorrentStore(File(filesDir, "torrents"))
+        val torrents =
+            TorrentManager(
+                engine = Libtorrent4jEngine("Orbis/" + BuildConfig.VERSION_NAME, torrentStore.sessionFile, torrentLog),
+                store = torrentStore,
+                dirs = TorrentDirs(payloadRoot = { getExternalFilesDir("torrents") ?: File(filesDir, "torrents/data") }),
+                scope = appScope,
+                io = Dispatchers.IO,
+                log = torrentLog,
+                // Settings UI comes later: the owner's defaults (Wi-Fi only, stop seeding, DHT/PeX/LSD on, no limits).
+                settings = MutableStateFlow(TorrentSettings()),
+                network = AndroidTorrentNetwork(this),
+                now = System::currentTimeMillis,
+                publisher = { file, dir, name ->
+                    val ext = name.substringAfterLast('.', "").lowercase()
+                    val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
+                    com.shibi.orbis.downloads.copyToPublicDownloads(this, file, name, mime, dir)
+                },
+            )
+        torrentsRef = torrents
         // Finished downloads also go to the phone's Download folder (setting; never a private tab's). Only downloads
         // that finish while Orbis runs: the ones already listed at start are taken as handled.
         appScope.launch {
@@ -338,6 +375,7 @@ class OrbisApp : Application() {
         stats.load()
         container.privacyStats = stats
         container.youtubeAdSavings = youtubeAds
+        container.torrents = torrents
         engine.onContentBlocked = { kind, uri, isPrivate -> stats.recordBlocked(kind, uri, isPrivate) }
         appScope.launch {
             val uid = android.os.Process.myUid()
@@ -363,6 +401,14 @@ class OrbisApp : Application() {
                 scope = appScope,
                 log = { debugLog.log("Downloads", it) },
             ).also { it.start() }
+        torrents.restore()
+        torrentForeground =
+            TorrentForegroundController(
+                context = this,
+                torrents = torrents,
+                scope = appScope,
+                log = torrentLog,
+            ).also { it.start() }
         ubo.start()
     }
 
@@ -382,6 +428,8 @@ class AppContainer(
     var privacyStats: com.shibi.orbis.stats.PrivacyStats? = null,
     /** Estimated time saved from blocked YouTube ads; set by the app after creation. Cleared with browsing history. */
     var youtubeAdSavings: com.shibi.orbis.youtube.YoutubeAdSavings? = null,
+    /** Torrent downloads; set by the app after creation. */
+    var torrents: com.shibi.orbis.torrent.TorrentManager? = null,
     val engine: BrowserEngine,
     val ubo: UboOnboardingController,
     /** Owns every tab and session; outlives screens, so Settings never destroys a page. */
