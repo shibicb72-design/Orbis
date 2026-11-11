@@ -60,7 +60,8 @@ import com.shibi.orbis.engine.isWebUrl
 import com.shibi.orbis.tabs.PendingDownload
 import com.shibi.orbis.ui.browser.DownloadConfirmDialog
 import com.shibi.orbis.ui.browser.SitePromptDialog
-import com.shibi.orbis.ui.browser.shareLink
+import com.shibi.orbis.ui.browser.PageShareDialogs
+import com.shibi.orbis.ui.browser.rememberPageShare
 import com.shibi.orbis.ui.theme.OrbisTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -195,6 +196,7 @@ private fun CustomTabScreen(
     val prompt by session.prompts.collectAsStateWithLifecycle()
     val download by pendingDownload.collectAsStateWithLifecycle()
     var menuOpen by remember { mutableStateOf(false) }
+    val pageShare = rememberPageShare()
     // The app's color when it gave one; its content color is chosen for contrast (never dark on dark).
     val bar = toolbarArgb?.let { Color(it) } ?: MaterialTheme.colorScheme.surfaceContainer
     val onBar = toolbarArgb?.let { Color(contentColorOn(it)) } ?: MaterialTheme.colorScheme.onSurface
@@ -228,7 +230,7 @@ private fun CustomTabScreen(
                         })
                         DropdownMenuItem(text = { Text(stringResource(R.string.menu_share)) }, enabled = isWebUrl(state.url), onClick = {
                             menuOpen = false
-                            shareLink(context, state.url, state.title)
+                            pageShare.onShare(session, state.url, state.title)
                         })
                         DropdownMenuItem(text = { Text(stringResource(R.string.ct_copy_link)) }, enabled = isWebUrl(state.url), onClick = {
                             menuOpen = false
@@ -270,6 +272,7 @@ private fun CustomTabScreen(
         )
     }
     prompt?.let { SitePromptDialog(it) }
+    PageShareDialogs(pageShare)
     download?.let { pending ->
         DownloadConfirmDialog(
             pending = pending,
