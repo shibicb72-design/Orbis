@@ -20,7 +20,7 @@ import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -56,6 +56,8 @@ import com.shibi.orbis.cast.CastCoordinator
 import com.shibi.orbis.cast.CastDeviceKind
 import com.shibi.orbis.cast.CastNotice
 import com.shibi.orbis.cast.CastPhase
+import com.shibi.orbis.cast.CastTrustPrompt
+import com.shibi.orbis.cast.CastTrustReason
 import com.shibi.orbis.engine.BrowserSession
 
 /** Cast icon kept on top of a fullscreen video. Its surface carries its own content colour. */
@@ -128,6 +130,7 @@ internal fun CastSheet(
     val playback by coordinator.playback.collectAsStateWithLifecycle()
     val notice by coordinator.notice.collectAsStateWithLifecycle()
     val dlnaFormatNote by coordinator.dlnaFormatNote.collectAsStateWithLifecycle()
+    val trustPrompt by coordinator.trustPrompt.collectAsStateWithLifecycle()
     val askNotifications = rememberNotificationPermissionRequest()
     val askNearby = rememberCastNearbyPermission { coordinator.rediscover() }
     LaunchedEffect(session, pageUrl, tabId) {
@@ -173,28 +176,19 @@ internal fun CastSheet(
                 Text(stringResource(R.string.cast_dlna_adaptive), style = MaterialTheme.typography.bodyMedium)
             }
             notice?.let { item ->
-                Surface(
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text(stringResource(castNoticeText(item)), style = MaterialTheme.typography.bodyMedium)
-                        if (castNoticeOffersForget(item)) {
-                            // The buttons take the container's content colour so they stay readable on errorContainer.
-                            val buttonColors = ButtonDefaults.textButtonColors(contentColor = LocalContentColor.current)
-                            Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                TextButton(onClick = coordinator::dismissNotice, colors = buttonColors) {
-                                    Text(stringResource(R.string.prompt_cancel))
-                                }
-                                TextButton(
-                                    onClick = coordinator::forgetUntrustedDevice,
-                                    colors = buttonColors,
-                                    modifier = Modifier.testTag(CAST_FORGET_TV_TAG),
-                                ) { Text(stringResource(R.string.cast_forget_tv)) }
-                            }
-                        }
+                val text = castNoticeText(item)
+                if (text != null) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(text), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(12.dp))
+                    }
+                } else {
+                    trustPrompt?.let { prompt ->
+                        CastTrustQuestion(prompt, onConfirm = coordinator::confirmTrust, onCancel = coordinator::dismissNotice)
                     }
                 }
             }
@@ -315,10 +309,61 @@ private fun CastControls(playback: com.shibi.orbis.cast.CastPlayback, coordinato
     )
 }
 
-internal const val CAST_FORGET_TV_TAG = "cast_forget_tv"
+internal const val CAST_TRUST_CONFIRM_TAG = "cast_trust_confirm"
+internal const val CAST_TRUST_CANCEL_TAG = "cast_trust_cancel"
+internal const val CAST_TRUST_TEXT_TAG = "cast_trust_text"
+
+/**
+ * The question for [CastNotice.CONFIRM_DEVICE], drawn on the sheet's own container. A changed key is a warning: its
+ * text takes the scheme's error colour (paired with the surface the sheet sits on) and "Cancel" is the filled button.
+ * A first cast or a rename is neutral: content-colour text and "Trust and cast" filled.
+ */
+@Composable
+internal fun CastTrustQuestion(
+    prompt: CastTrustPrompt,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val warning = prompt.reason == CastTrustReason.KEY_CHANGED
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            stringResource(castTrustText(prompt.reason), prompt.deviceName),
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (warning) MaterialTheme.colorScheme.error else LocalContentColor.current,
+            modifier = Modifier.testTag(CAST_TRUST_TEXT_TAG),
+        )
+        Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (warning) {
+                TextButton(onClick = onConfirm, modifier = Modifier.testTag(CAST_TRUST_CONFIRM_TAG)) {
+                    Text(stringResource(R.string.cast_trust_confirm))
+                }
+                Button(onClick = onCancel, modifier = Modifier.testTag(CAST_TRUST_CANCEL_TAG)) {
+                    Text(stringResource(R.string.cast_trust_cancel))
+                }
+            } else {
+                TextButton(onClick = onCancel, modifier = Modifier.testTag(CAST_TRUST_CANCEL_TAG)) {
+                    Text(stringResource(R.string.cast_trust_cancel))
+                }
+                Button(onClick = onConfirm, modifier = Modifier.testTag(CAST_TRUST_CONFIRM_TAG)) {
+                    Text(stringResource(R.string.cast_trust_confirm))
+                }
+            }
+        }
+    }
+}
 
 @StringRes
-internal fun castNoticeText(notice: CastNotice): Int =
+internal fun castTrustText(reason: CastTrustReason): Int =
+    when (reason) {
+        CastTrustReason.FIRST_USE -> R.string.cast_trust_first
+        CastTrustReason.KEY_CHANGED -> R.string.cast_trust_changed
+        CastTrustReason.RENAMED -> R.string.cast_trust_renamed
+    }
+
+/** The notice text, or null for [CastNotice.CONFIRM_DEVICE], which is drawn by [CastTrustQuestion]. */
+@StringRes
+internal fun castNoticeText(notice: CastNotice): Int? =
     when (notice) {
         CastNotice.NO_MEDIA -> R.string.cast_no_media
         CastNotice.NO_DEVICES -> R.string.cast_no_devices
@@ -326,11 +371,8 @@ internal fun castNoticeText(notice: CastNotice): Int =
         CastNotice.FAILED -> R.string.cast_failed
         CastNotice.YOUTUBE_UNCONFIRMED -> R.string.cast_youtube_unconfirmed
         CastNotice.REJECTED -> R.string.cast_rejected
-        CastNotice.UNTRUSTED -> R.string.cast_untrusted
+        CastNotice.CONFIRM_DEVICE -> null
     }
-
-/** Only a changed identity key offers "Forget this TV" and "Cancel". */
-internal fun castNoticeOffersForget(notice: CastNotice): Boolean = notice == CastNotice.UNTRUSTED
 
 private fun clock(seconds: Double): String {
     val total = seconds.toLong().coerceAtLeast(0)

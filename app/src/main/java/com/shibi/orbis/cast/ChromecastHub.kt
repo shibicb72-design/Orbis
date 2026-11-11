@@ -6,6 +6,7 @@ import android.os.Looper
 import com.shibi.orbis.youtube.HttpsLoungeTransport
 import com.shibi.orbis.youtube.LoungeClient
 import java.io.InputStream
+import java.io.OutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -29,8 +30,8 @@ internal data class CastLinkStatus(
 /**
  * One Chromecast session over CASTV2, plus the mDNS list that feeds the sheet.
  * The TLS trust decision exists only for this socket and only after the address has been checked to be a private LAN
- * host. It is not installed as the process trust manager. The TV is identified by its deviceauth key, pinned per device
- * (see [openCastSocket]).
+ * host. It is not installed as the process trust manager. The TV is identified by its deviceauth key, which the user
+ * confirms once per key and name before anything is sent to it (see [authenticateCastPeer] and [CastPins]).
  * [log] receives secret-free "Cast" lines (see CastLogging.kt).
  */
 internal class ChromecastHub(context: Context, private val log: (String) -> Unit = {}) {
@@ -73,6 +74,7 @@ internal class ChromecastHub(context: Context, private val log: (String) -> Unit
         goal: CastGoal,
         onReady: () -> Unit,
         onFailed: (CastFailure) -> Unit,
+        onNeedsTrust: (CastPins.Reason, CastPins.Ticket) -> Unit,
     ) {
         val device = devices().firstOrNull { it.id == deviceId }
         if (device == null) {
@@ -87,24 +89,29 @@ internal class ChromecastHub(context: Context, private val log: (String) -> Unit
         Thread({
             if (!isCurrent(epoch)) return@Thread
             val connectStart = System.currentTimeMillis()
-            val opened = openCastSocket(device.address, device.id, pins) { LanBind.bind(appContext, it) }
+            val opened = openCastSocket(device.address, device.id, device.name, pins) { LanBind.bind(appContext, it) }
             val connectMs = System.currentTimeMillis() - connectStart
             when (opened) {
-                CastSocketOpen.Untrusted -> log("connect dev=$dev untrusted")
+                is CastSocketOpen.NeedsTrust -> log("connect dev=$dev trust needed reason=${opened.reason.name}")
                 CastSocketOpen.AuthFailed -> log("connect dev=$dev deviceauth failed")
                 CastSocketOpen.AuthNone -> log("connect dev=$dev deviceauth none")
                 CastSocketOpen.Failed -> log("connect dev=$dev failed lan=${isLocalLanAddress(device.address)} ms=$connectMs")
                 is CastSocketOpen.Opened ->
                     log(
                         "connect dev=$dev tls=ok deviceauth=ok${if (opened.legacy) " legacy" else ""} " +
-                            "pin=${opened.pin.name.lowercase()} ms=$connectMs",
+                            "pin=${if (opened.pin == CastPins.Verdict.PINNED) "pinned" else "matched"} ms=$connectMs",
                     )
             }
             val socket = (opened as? CastSocketOpen.Opened)?.socket
             if (socket == null || !isCurrent(epoch)) {
                 runCatching { socket?.close() }
-                val reason = if (opened == CastSocketOpen.Untrusted) CastFailure.UNTRUSTED else CastFailure.GENERIC
-                if (isCurrent(epoch)) main.post { onFailed(reason) }
+                if (isCurrent(epoch)) {
+                    if (opened is CastSocketOpen.NeedsTrust) {
+                        main.post { onNeedsTrust(opened.reason, opened.ticket) }
+                    } else {
+                        main.post { onFailed(CastFailure.GENERIC) }
+                    }
+                }
                 return@Thread
             }
             val session = Live(epoch, device, goal, machine, socket, inbox)
@@ -118,34 +125,36 @@ internal class ChromecastHub(context: Context, private val log: (String) -> Unit
             var ready = false
             var cause = "localStop"
             try {
-                apply(session, machine.start(System.currentTimeMillis()), onReady, onFailed) { ready = true }
-                while (isCurrent(epoch) && !session.localStop) {
-                    drain(session)
-                    if (!isCurrent(epoch) || session.localStop) break
-                    when (val read = readCastFrame(socket.inputStream)) {
-                        Read.Tick -> apply(session, machine.onClock(System.currentTimeMillis()), onReady, onFailed) { ready = true }
-                        Read.Closed -> {
-                            cause = "closed"
-                            break
-                        }
-                        is Read.Frame -> {
-                            logRx(session, read.message.namespace, read.message.payloadUtf8)
-                            apply(
-                                session,
-                                machine.onFrame(
-                                    CastFrame(read.message.sourceId, read.message.destinationId, read.message.namespace, read.message.payloadUtf8),
-                                    System.currentTimeMillis(),
-                                ),
-                                onReady,
-                                onFailed,
-                            ) { ready = true }
+                val crash = { if (isCurrent(epoch) && !session.localStop && !ready) main.post { onFailed(CastFailure.GENERIC) } }
+                cause = runGuardedCastSession(onCrash = crash) {
+                    var loopCause = "localStop"
+                    apply(session, machine.start(System.currentTimeMillis()), onReady, onFailed) { ready = true }
+                    while (isCurrent(epoch) && !session.localStop) {
+                        drain(session)
+                        if (!isCurrent(epoch) || session.localStop) break
+                        when (val read = readCastFrame(socket.inputStream)) {
+                            Read.Tick -> apply(session, machine.onClock(System.currentTimeMillis()), onReady, onFailed) { ready = true }
+                            Read.Closed -> {
+                                loopCause = "closed"
+                                break
+                            }
+                            is Read.Frame -> {
+                                logRx(session, read.message.namespace, read.message.payloadUtf8)
+                                apply(
+                                    session,
+                                    machine.onFrame(
+                                        CastFrame(read.message.sourceId, read.message.destinationId, read.message.namespace, read.message.payloadUtf8),
+                                        System.currentTimeMillis(),
+                                    ),
+                                    onReady,
+                                    onFailed,
+                                ) { ready = true }
+                            }
                         }
                     }
+                    if (loopCause == "localStop" && !session.localStop) loopCause = "replaced"
+                    loopCause
                 }
-                if (cause == "localStop" && !session.localStop) cause = "replaced"
-            } catch (e: Exception) {
-                cause = "error err=${errName(e)}"
-                if (isCurrent(epoch) && !session.localStop && !ready) main.post { onFailed(CastFailure.GENERIC) }
             } finally {
                 log("session ended cause=$cause dev=$dev ready=$ready")
                 runCatching { socket.close() }
@@ -190,11 +199,10 @@ internal class ChromecastHub(context: Context, private val log: (String) -> Unit
 
     fun hasSession(): Boolean = synchronized(this) { live != null }
 
-    /** Drops the identity-key pin for [deviceId]. The next cast to it pins the key it proves then. */
-    fun forgetPin(deviceId: String) {
-        pins.forget(deviceId)
-        log("pin forgotten dev=${deviceTag(deviceId)}")
-    }
+    /** The user tapped "Trust and cast". The next connection pins [ticket]'s key and name if the device proves them again. */
+    fun approveTrust(ticket: CastPins.Ticket) = pins.approve(ticket, System.currentTimeMillis())
+
+    fun cancelTrust() = pins.cancelApproval()
 
     private fun command(block: (CastSession) -> List<CastEffect>) {
         val session = synchronized(this) { live } ?: return
@@ -364,8 +372,8 @@ internal const val CAST_FRAME_DEADLINE_MS = 5_000L
 internal sealed interface CastSocketOpen {
     /** [pin] is [CastPins.Verdict.PINNED] or [CastPins.Verdict.MATCHED]. [legacy]: see [DeviceIdentity.legacy]. */
     data class Opened(val socket: SSLSocket, val pin: CastPins.Verdict, val legacy: Boolean) : CastSocketOpen
-    /** The device proved an identity key other than the one pinned for its id. */
-    data object Untrusted : CastSocketOpen
+    /** The device proved its key, but this key and name are not trusted yet. The socket is closed; ask the user. */
+    data class NeedsTrust(val reason: CastPins.Reason, val ticket: CastPins.Ticket) : CastSocketOpen
     /** The deviceauth reply was an AuthError, malformed, or its signature or nonce did not check out. */
     data object AuthFailed : CastSocketOpen
     /** No deviceauth reply within [DEVICE_AUTH_TIMEOUT_MS], or the TV closed the socket first. */
@@ -376,11 +384,17 @@ internal sealed interface CastSocketOpen {
 /**
  * TLS to a discovered LAN host on the Cast port, then device authentication before anything else is sent. TLS accepts
  * any non-empty chain for this socket only: the receiver's TLS leaf is self-signed and regenerated every day or two. The
- * receiver then signs a fresh nonce || that leaf's DER with its device key; the device certificate's public key is
- * pinned for [deviceId] on first use and must match on later connections (see [CastPins]). [bind] attaches the socket
- * to Wi-Fi before connect. Fails for any address that is not a private LAN host.
+ * receiver then signs a fresh nonce || that leaf's DER with its device key; see [authenticateCastPeer] for what is
+ * trusted. [bind] attaches the socket to Wi-Fi before connect. Fails for any address that is not a private LAN host.
+ * Only [CastSocketOpen.Opened] leaves the socket open.
  */
-internal fun openCastSocket(address: InetAddress, deviceId: String, pins: CastPins, bind: (Socket) -> Unit): CastSocketOpen {
+internal fun openCastSocket(
+    address: InetAddress,
+    deviceId: String,
+    name: String,
+    pins: CastPins,
+    bind: (Socket) -> Unit,
+): CastSocketOpen {
     if (!isLocalLanAddress(address)) return CastSocketOpen.Failed
     var socket: SSLSocket? = null
     var outcome: CastSocketOpen = CastSocketOpen.Failed
@@ -400,19 +414,12 @@ internal fun openCastSocket(address: InetAddress, deviceId: String, pins: CastPi
         val tlsLeafDer = opening.session.peerCertificates.first().encoded
         opening.soTimeout = 400
         val nonce = ByteArray(DEVICE_AUTH_NONCE_BYTES).also(random::nextBytes)
-        opening.outputStream.write(frameCastMessage(deviceAuthChallengeMessage(nonce)))
-        opening.outputStream.flush()
-        val reply = awaitDeviceAuthReply(opening.inputStream)
-        val identity = reply?.let { verifyDeviceAuth(it, nonce, tlsLeafDer) }
         outcome =
-            when {
-                reply == null -> CastSocketOpen.AuthNone
-                identity == null -> CastSocketOpen.AuthFailed
-                else ->
-                    when (val verdict = pins.check(deviceId, identity.spki)) {
-                        CastPins.Verdict.CHANGED -> CastSocketOpen.Untrusted
-                        else -> CastSocketOpen.Opened(opening, verdict, identity.legacy)
-                    }
+            when (val peer = authenticateCastPeer(opening.inputStream, opening.outputStream, tlsLeafDer, nonce, deviceId, name, pins)) {
+                is CastPeerAuth.Trusted -> CastSocketOpen.Opened(opening, peer.pin, peer.legacy)
+                is CastPeerAuth.NeedsTrust -> CastSocketOpen.NeedsTrust(peer.reason, peer.ticket)
+                CastPeerAuth.AuthFailed -> CastSocketOpen.AuthFailed
+                CastPeerAuth.AuthNone -> CastSocketOpen.AuthNone
             }
     } catch (_: Exception) {
         outcome = CastSocketOpen.Failed
@@ -420,6 +427,56 @@ internal fun openCastSocket(address: InetAddress, deviceId: String, pins: CastPi
     if (outcome !is CastSocketOpen.Opened) runCatching { socket?.close() }
     return outcome
 }
+
+internal sealed interface CastPeerAuth {
+    /** [pin] is [CastPins.Verdict.MATCHED] or [CastPins.Verdict.PINNED]. */
+    data class Trusted(val pin: CastPins.Verdict, val legacy: Boolean) : CastPeerAuth
+    data class NeedsTrust(val reason: CastPins.Reason, val ticket: CastPins.Ticket) : CastPeerAuth
+    data object AuthFailed : CastPeerAuth
+    data object AuthNone : CastPeerAuth
+}
+
+/**
+ * The part of [openCastSocket] after the TLS handshake. Writes exactly one frame, the deviceauth challenge for
+ * [nonce], and reads the reply. A device that proves a key is then checked against [pins] under [name]: only
+ * [CastPeerAuth.Trusted] lets the caller send anything else, so no media request reaches a device the user has not
+ * confirmed. The signature covers the nonce and [tlsLeafDer], so a key proved here cannot be relayed by a middle device.
+ */
+internal fun authenticateCastPeer(
+    input: InputStream,
+    output: OutputStream,
+    tlsLeafDer: ByteArray,
+    nonce: ByteArray,
+    deviceId: String,
+    name: String,
+    pins: CastPins,
+    nowMs: () -> Long = { System.currentTimeMillis() },
+): CastPeerAuth {
+    output.write(frameCastMessage(deviceAuthChallengeMessage(nonce)))
+    output.flush()
+    val reply = awaitDeviceAuthReply(input, nowMs) ?: return CastPeerAuth.AuthNone
+    val identity = verifyDeviceAuth(reply, nonce, tlsLeafDer) ?: return CastPeerAuth.AuthFailed
+    return when (val verdict = pins.check(deviceId, name, identity.spki, nowMs())) {
+        is CastPins.Verdict.NeedsConfirm -> CastPeerAuth.NeedsTrust(verdict.reason, verdict.ticket)
+        else -> CastPeerAuth.Trusted(verdict, identity.legacy)
+    }
+}
+
+/**
+ * Runs one session's read loop and returns how it ended. An exception or a [StackOverflowError] (a payload nested
+ * deeper than the JSON scan caught) ends the session: [onCrash] runs and the cause names the error class. Other errors,
+ * such as [OutOfMemoryError], are not caught.
+ */
+internal fun runGuardedCastSession(onCrash: () -> Unit, loop: () -> String): String =
+    try {
+        loop()
+    } catch (e: Exception) {
+        onCrash()
+        "error err=${errName(e)}"
+    } catch (_: StackOverflowError) {
+        onCrash()
+        "error err=StackOverflowError"
+    }
 
 /**
  * One CASTV2 frame from [input]. A timeout before the first byte is [Read.Tick], so the session thread can run the

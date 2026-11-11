@@ -1,9 +1,10 @@
 package com.shibi.orbis.youtube
 
+import com.shibi.orbis.cast.parseJsonArray
+import com.shibi.orbis.cast.parseJsonObject
 import java.net.URLEncoder
 import java.util.Random
 import org.json.JSONArray
-import org.json.JSONObject
 
 /*
  * YouTube lounge (MDX) client: hands a video to a TV's YouTube app through YouTube's own servers, the way the YouTube
@@ -62,12 +63,7 @@ internal fun loungeTokenRequest(screenId: String): LoungeRequest =
 /** `screens[0].loungeToken`, or null when the response has no token. */
 internal fun parseLoungeToken(body: String): String? {
     if (body.length > LOUNGE_MAX_RESPONSE_CHARS) return null
-    val root =
-        try {
-            JSONObject(body)
-        } catch (_: Exception) {
-            return null
-        }
+    val root = parseJsonObject(body) ?: return null
     val screen = root.optJSONArray("screens")?.optJSONObject(0) ?: return null
     return screen.optString("loungeToken").trim().takeIf { it.isNotEmpty() }
 }
@@ -144,12 +140,7 @@ internal fun parseLoungeChunks(body: String): LoungeChunks? {
         if (start < 0) break
         val end = matchingBracket(body, start)
         if (end < 0) break
-        val array =
-            try {
-                JSONArray(body.substring(start, end + 1))
-            } catch (_: Exception) {
-                null
-            }
+        val array = parseJsonArray(body.substring(start, end + 1))
         if (array != null) {
             chunks += 1
             for (i in 0 until array.length()) {

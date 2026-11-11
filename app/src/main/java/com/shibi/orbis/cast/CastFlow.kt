@@ -11,7 +11,15 @@ private fun sticky(notice: CastNotice?): Boolean =
         notice == CastNotice.YOUTUBE_NEEDS_GOOGLE ||
         notice == CastNotice.YOUTUBE_UNCONFIRMED ||
         notice == CastNotice.REJECTED ||
-        notice == CastNotice.UNTRUSTED
+        notice == CastNotice.CONFIRM_DEVICE
+
+/** A device that proved a key the user has not trusted under its name yet, while [CastNotice.CONFIRM_DEVICE] is up. */
+internal class PendingTrust(
+    val deviceId: String,
+    val deviceName: String,
+    val reason: CastPins.Reason,
+    val ticket: CastPins.Ticket,
+)
 
 /**
  * Cast sheet transitions that do not touch the network. [CastCoordinator] performs the device work these decisions
@@ -22,7 +30,15 @@ internal class CastFlow {
     var phase: CastPhase = CastPhase.Idle
         private set
 
+    /** Any notice other than [CastNotice.CONFIRM_DEVICE] drops [trust]. */
     var notice: CastNotice? = null
+        private set(value) {
+            field = value
+            if (value != CastNotice.CONFIRM_DEVICE) trust = null
+        }
+
+    /** The trust question on screen. Non-null only while [notice] is [CastNotice.CONFIRM_DEVICE]. */
+    var trust: PendingTrust? = null
         private set
 
     /** The page that was classified. Cleared when the private tab it came from is closed. */
@@ -85,6 +101,23 @@ internal class CastFlow {
     fun connectExpired(generation: Int, nowMs: Long, timeoutMs: Long = CONNECT_TIMEOUT_MS): Boolean {
         if (generation != connectGeneration || phase != CastPhase.Connecting) return false
         return nowMs - connectStartedAt >= timeoutMs
+    }
+
+    /**
+     * The device must be confirmed first. Leaves Connecting like a failure, so the connect timeout no longer applies,
+     * and keeps [pending] for [takeTrust]. False when [generation] is no longer the live attempt.
+     */
+    fun needsTrust(generation: Int, youtube: Boolean, pending: PendingTrust): Boolean {
+        if (!failConnect(generation, youtube, CastNotice.CONFIRM_DEVICE)) return false
+        trust = pending
+        return true
+    }
+
+    /** The user answered the trust question. Returns it once and clears the notice. */
+    fun takeTrust(): PendingTrust? {
+        val pending = trust ?: return null
+        notice = null
+        return pending
     }
 
     fun failConnect(generation: Int, youtube: Boolean, failure: CastNotice = CastNotice.FAILED): Boolean {

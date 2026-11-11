@@ -359,6 +359,22 @@ class CastProtocolTest {
         assertEquals("10.0.0.8", unnamed?.id)
     }
 
+    @Test
+    fun castTxtDropsInvisibleCharactersAndCapsNameAndModelForDisplay() {
+        val attributes =
+            mapOf(
+                "fn" to ("‮Living​ Room\u0007" + "x".repeat(100)).toByteArray(),
+                "md" to ("Chrome‍cast" + "y".repeat(100)).toByteArray(),
+                "id" to "abc".toByteArray(),
+            )
+        val parsed = parseCastTxt(attributes, "Living-Room")
+        assertEquals(CAST_TXT_TEXT_MAX, parsed.name.length)
+        assertTrue(parsed.name.startsWith("Living Room" + "x"))
+        assertEquals(CAST_TXT_TEXT_MAX, parsed.model.length)
+        assertTrue(parsed.model.startsWith("Chromecast" + "y"))
+        assertEquals("Chromecast", parseCastTxt(mapOf("fn" to "​‎".toByteArray()), "").name)
+    }
+
     private fun media(
         position: Double = 0.0,
         mime: String = "video/mp4",
