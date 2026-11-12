@@ -50,8 +50,15 @@ private class FullScreenSession : BrowserSession by NoSession {
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = android.app.Application::class)
 class MediaCenterTest {
-    private fun tab(id: Long, playing: Boolean, private: Boolean = false, video: Boolean = false, w: Long = 0, h: Long = 0) =
-        MediaTab(id, private, MediaState(playing, title = "Song $id", artist = "Band", hasVideo = video, videoWidth = w, videoHeight = h), NoSession)
+    private fun tab(
+        id: Long,
+        playing: Boolean,
+        private: Boolean = false,
+        video: Boolean = false,
+        w: Long = 0,
+        h: Long = 0,
+        session: BrowserSession = NoSession,
+    ) = MediaTab(id, private, MediaState(playing, title = "Song $id", artist = "Band", hasVideo = video, videoWidth = w, videoHeight = h), session)
 
     @Test
     fun aPlayingTabWinsTheSelectedOneFirst() {
@@ -70,19 +77,21 @@ class MediaCenterTest {
     }
 
     @Test
-    fun pictureInPictureOnlyForAPlayingFullscreenVideo() {
-        assertEquals(1280L to 720L, pipShapeOf(tab(1, true, video = true, w = 1280, h = 720), fullScreen = true))
-        assertEquals("size unknown", 16L to 9L, pipShapeOf(tab(1, true, video = true), fullScreen = true))
-        assertNull("not fullscreen", pipShapeOf(tab(1, true, video = true), fullScreen = false))
-        assertNull("paused", pipShapeOf(tab(1, false, video = true), fullScreen = true))
-        assertNull("audio only", pipShapeOf(tab(1, true), fullScreen = true))
+    fun pictureInPictureForMediaPlayingInTheSelectedFullscreenTab() {
+        assertEquals(1280L to 720L, pipShapeOf(tab(1, true, video = true, w = 1280, h = 720), NoSession, fullScreen = true))
+        assertEquals("size unknown", 16L to 9L, pipShapeOf(tab(1, true, video = true), NoSession, fullScreen = true))
+        assertEquals("site player container fullscreen: no video reported", 16L to 9L, pipShapeOf(tab(1, true), NoSession, fullScreen = true))
+        assertNull("not fullscreen", pipShapeOf(tab(1, true, video = true), NoSession, fullScreen = false))
+        assertNull("paused", pipShapeOf(tab(1, false, video = true), NoSession, fullScreen = true))
+        assertNull("media of a background tab", pipShapeOf(tab(1, true, video = true), FullScreenSession(), fullScreen = true))
+        assertNull("no media", pipShapeOf(null, NoSession, fullScreen = true))
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun pictureInPictureFollowsFullscreenEvenWhenTheMediaDoesNotChange() = runTest {
         val session = FullScreenSession()
-        val media = MutableStateFlow<MediaTab?>(tab(1, true, video = true, w = 1280, h = 720))
+        val media = MutableStateFlow<MediaTab?>(tab(1, true, video = true, w = 1280, h = 720, session = session))
         val shapes = mutableListOf<Pair<Long, Long>?>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             pipShapes(media, MutableStateFlow(session)).collect { shapes += it }
@@ -90,20 +99,47 @@ class MediaCenterTest {
         session.fullScreen(true)
         session.fullScreen(false)
         session.fullScreen(true)
-        media.value = tab(1, false, video = true, w = 1280, h = 720)
+        media.value = tab(1, false, video = true, w = 1280, h = 720, session = session)
         assertEquals(listOf(null, 1280L to 720L, null, 1280L to 720L, null), shapes)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun pictureInPictureFollowsTheSelectedTabsFullscreen() = runTest {
-        val fullScreenTab = FullScreenSession().apply { fullScreen(true) }
-        val selected = MutableStateFlow<BrowserSession?>(FullScreenSession())
+    fun containerFullscreenWithMediaPlayingArmsPictureInPicture() = runTest {
+        // A site's own player container goes fullscreen: the engine reports page fullscreen but never a video.
+        val session = FullScreenSession()
         val shapes = mutableListOf<Pair<Long, Long>?>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            pipShapes(MutableStateFlow(tab(1, true, video = true)), selected).collect { shapes += it }
+            pipShapes(MutableStateFlow(tab(1, true, session = session)), MutableStateFlow(session)).collect { shapes += it }
         }
-        selected.value = fullScreenTab
+        session.fullScreen(true)
+        session.fullScreen(false)
+        assertEquals(listOf(null, 16L to 9L, null), shapes)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun pausedMediaInAFullscreenPageDoesNotArmPictureInPicture() = runTest {
+        val session = FullScreenSession().apply { fullScreen(true) }
+        val shapes = mutableListOf<Pair<Long, Long>?>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            pipShapes(MutableStateFlow(tab(1, false, session = session)), MutableStateFlow(session)).collect { shapes += it }
+        }
+        assertEquals(listOf<Pair<Long, Long>?>(null), shapes)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun pictureInPictureFollowsTheSelectedTab() = runTest {
+        val playing = FullScreenSession().apply { fullScreen(true) }
+        val other = FullScreenSession().apply { fullScreen(true) }
+        val selected = MutableStateFlow<BrowserSession?>(other)
+        val shapes = mutableListOf<Pair<Long, Long>?>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            pipShapes(MutableStateFlow(tab(1, true, video = true, session = playing)), selected).collect { shapes += it }
+        }
+        // The media plays in a background tab while another fullscreen tab is selected: no PiP.
+        selected.value = playing
         selected.value = null
         assertEquals(listOf(null, 16L to 9L, null), shapes)
     }

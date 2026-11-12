@@ -1,6 +1,7 @@
 package com.shibi.orbis
 
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.runtime.getValue
@@ -13,6 +14,7 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import com.shibi.orbis.downloads.DownloadNotifications
 import com.shibi.orbis.engine.ImportResult
@@ -34,6 +36,9 @@ import kotlinx.coroutines.withContext
 import com.shibi.orbis.privacy.PrivacyWindowController
 import com.shibi.orbis.privacy.PrivacyWindowOps
 import com.shibi.orbis.ui.OrbisRoot
+import com.shibi.orbis.engine.BrowserSession
+import com.shibi.orbis.media.PipWindowExit
+import com.shibi.orbis.media.onPipWindowClosed
 import com.shibi.orbis.media.pipAspectRatio
 import com.shibi.orbis.media.pipShapes
 import com.shibi.orbis.ui.BackKeyWindowCallback
@@ -61,9 +66,9 @@ class MainActivity : ComponentActivity() {
                 .distinctUntilChanged()
                 .collect { (anyPrivate, sensitive) -> applyPrivacyWindow(anyPrivate, sensitive) }
         }
-        // Picture-in-picture: a fullscreen video that is playing shrinks into a window when the user leaves (Home).
+        // Picture-in-picture: a fullscreen page playing media shrinks into a window when the user leaves (Home).
         lifecycleScope.launch {
-            pipShapes(app.container.media.current, app.container.tabs.selected.map { it.session })
+            pipShapes(app.container.media.current, app.container.tabs.selected.map { it.session }.distinctUntilChanged())
                 .collect { shape ->
                     pipShape = shape
                     applyPipParams()
@@ -94,6 +99,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        // Also set here, so a missed mode callback cannot leave the toolbar hidden.
+        app.container.pictureInPicture.value = isInPictureInPictureMode
         app.startedActivities.onStart()
         // No-op once loaded; retries a load that failed (e.g. Keystore briefly unavailable).
         app.container.logins.load()
@@ -101,6 +108,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        pipExit.onResume()
+        app.container.pictureInPicture.value = isInPictureInPictureMode
         app.container.sensitiveClip.foreground = hasWindowFocus()
         clearSensitiveClipIfDue()
     }
@@ -119,6 +128,34 @@ class MainActivity : ComponentActivity() {
 
     private fun clearSensitiveClipIfDue() {
         getSystemService(android.content.ClipboardManager::class.java)?.let { app.container.sensitiveClip.clearIfDue(it) }
+    }
+
+    /** The user closed the picture-in-picture window: that ends playback, it does not move it to the background. */
+    /** The tab whose media played in the picture-in-picture window; set when the window opens. */
+    private var pipSession: BrowserSession? = null
+
+    private val pipExit =
+        PipWindowExit {
+            onPipWindowClosed(
+                noneStarted = app.startedActivities.noneStarted,
+                pausePipMedia = { pipSession?.mediaPause() },
+                sleepSelectedTab = { app.container.tabs.setForeground(false, keepPlayingMedia = false) },
+            )
+            pipSession = null
+        }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        app.container.pictureInPicture.value = isInPictureInPictureMode
+        if (isInPictureInPictureMode) pipSession = app.container.media.current.value?.session
+        val state = lifecycle.currentState
+        val activity =
+            when {
+                state.isAtLeast(Lifecycle.State.RESUMED) -> PipWindowExit.Activity.RESUMED
+                state.isAtLeast(Lifecycle.State.STARTED) -> PipWindowExit.Activity.STARTED
+                else -> PipWindowExit.Activity.STOPPED
+            }
+        pipExit.onPipModeChanged(isInPictureInPictureMode, activity)
     }
 
     /** Width:height of the video that may go picture-in-picture now, or null. */
@@ -142,8 +179,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         // Invisible: the selected page must not keep running at foreground priority, unless another instance is
-        // started (a link opened right after Back starts one before this one stops; see StartedActivities).
+        // started (a link opened right after Back starts one before this one stops; see StartedActivities). First, so
+        // a closed PiP window below already knows whether another instance is started.
         app.startedActivities.onStop()
+        pipExit.onStop()
         // The process can be killed any time after this; make sure the tab list is on its way to disk.
         app.container.tabs.flush()
         app.container.bookmarks.flush()

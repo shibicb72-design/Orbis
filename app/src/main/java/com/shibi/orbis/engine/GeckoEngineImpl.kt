@@ -299,6 +299,7 @@ class GeckoEngineImpl(
             reader.install(created)
             castExtension.install(created)
             youtubeAdObserver.install(created)
+            YoutubePipExtension.install(created) { debugLog.log("GeckoEngine", it) }
             // Without a prompt delegate, WebExtensionController.install() hangs forever.
             created.webExtensionController.setPromptDelegate(extensionHost.promptDelegate)
             runtime = created

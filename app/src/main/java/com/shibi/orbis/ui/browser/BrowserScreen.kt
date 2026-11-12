@@ -319,6 +319,8 @@ private fun BrowserContent(
     var generatedPassword by remember { mutableStateOf<String?>(null) }
     val pageShare = rememberPageShare()
     val toolbarBottom by container.browserSettings.toolbarBottom.collectAsStateWithLifecycle()
+    // A picture-in-picture window shows only the page: no toolbar, tab strip or Cast button.
+    val inPip by container.pictureInPicture.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbars = remember { SnackbarHostState() }
     val closedMessage = stringResource(R.string.tabs_closed_snackbar)
@@ -962,7 +964,7 @@ private fun BrowserContent(
                 }
             }
             val stripWidthDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
-            if (!fullScreen && showsTabStrip(stripWidthDp)) {
+            if (!fullScreen && !inPip && showsTabStrip(stripWidthDp)) {
                 TabStrip(
                     tabs = tabList,
                     onSelect = tabs::select,
@@ -973,7 +975,7 @@ private fun BrowserContent(
                     },
                 )
             }
-            if (!fullScreen && !toolbarBottom) chrome()
+            if (!fullScreen && !inPip && !toolbarBottom) chrome()
             Box(
                 Modifier
                     .weight(1f)
@@ -1037,7 +1039,7 @@ private fun BrowserContent(
                     )
                 }
                 SnackbarHost(snackbars, Modifier.align(Alignment.BottomCenter))
-                if (fullScreen) {
+                if (fullScreen && !inPip) {
                     CastFullscreenButton(
                         casting = casting != null,
                         onClick = { castOpen = true },
@@ -1135,7 +1137,7 @@ private fun BrowserContent(
                     )
                 }
             }
-            if (!fullScreen && toolbarBottom) chrome()
+            if (!fullScreen && !inPip && toolbarBottom) chrome()
         }
     }
 

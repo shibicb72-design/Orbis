@@ -29,10 +29,10 @@ class LicencesScreenTest {
     val rule = createComposeRule()
 
     @Test
-    fun listsThirteenComponentsAndExpandsTheLibtorrentText() {
+    fun listsFourteenComponentsAndExpandsTheLibtorrentText() {
         rule.setContent { MaterialTheme { LicencesScreen(onBack = {}) } }
         rule.waitForIdle()
-        assertEquals(13, Licences.entries.size)
+        assertEquals(14, Licences.entries.size)
         for (entry in Licences.entries) {
             rule.onNode(hasScrollAction()).performScrollToNode(hasText(entry.name))
             rule.onNodeWithText(entry.name).assertExists()
@@ -43,6 +43,12 @@ class LicencesScreenTest {
         rule.onNodeWithText("Source code: https://github.com/paullouisageneau/libdatachannel/tree/a4d3211da33bc1114ae50d2dd12f4186b67aaba4").assertExists()
         rule.onNode(hasScrollAction()).performScrollToNode(hasText("libjuice"))
         rule.onNodeWithText("Source code: https://github.com/paullouisageneau/libjuice/tree/5948a4162d37bc213d6051b67ee2876ccc5a99a6").assertExists()
+        // The YouTube picture-in-picture fix (MPL-2.0) points at the Firefox file it is adapted from.
+        rule.onNode(hasScrollAction()).performScrollToNode(hasText("Firefox webcompat: YouTube picture-in-picture fix"))
+        rule.onNodeWithText(
+            "Source code: https://github.com/mozilla-firefox/firefox/blob/e98e47c20429bdabcd34f5b550bdbcb2d432a0a2/browser/extensions/webcompat/" +
+                "injections/js/bug1956165-www.youtube.com-picture-in-picture-fix.js",
+        ).assertExists()
         rule.onNode(hasScrollAction()).performScrollToNode(hasText("libtorrent"))
         rule.onAllNodesWithText("Redistribution and use", substring = true).assertCountEquals(0)
         rule.onNodeWithText("libtorrent").performClick()

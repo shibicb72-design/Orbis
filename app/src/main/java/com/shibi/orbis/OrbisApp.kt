@@ -508,6 +508,9 @@ class AppContainer(
      */
     val pendingExternalUrl = MutableStateFlow<String?>(null)
 
+    /** The activity is shown as a picture-in-picture window; the browser hides its toolbar and buttons there. */
+    val pictureInPicture = MutableStateFlow(false)
+
     /**
      * A torrent another app handed over (a `content:` .torrent or a magnet: link). Set by MainActivity or
      * LinkRouterActivity, taken by BrowserScreen into the confirm sheet once onboarding and Clear browsing data are done.

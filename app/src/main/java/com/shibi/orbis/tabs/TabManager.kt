@@ -428,12 +428,13 @@ class TabManager(
      * Called from Activity.onStart/onStop. An invisible session should be inactive so its page does not keep running
      * at foreground priority. Every other operation here activates the selected session only while [foreground].
      */
-    fun setForeground(value: Boolean) {
+    fun setForeground(value: Boolean, keepPlayingMedia: Boolean = true) {
         foreground = value
         val session = list.firstOrNull { it.id == selectedId }?.session
         // Background playback: a tab playing media stays active when the app goes to the background, so the audio (or a
-        // picture-in-picture video) keeps going. Paused or silent pages are put to sleep as before.
-        if (!value && session?.state?.value?.media?.playing == true) return
+        // picture-in-picture video) keeps going. Paused or silent pages are put to sleep as before. [keepPlayingMedia]
+        // false (the picture-in-picture window was closed) puts it to sleep too.
+        if (!value && keepPlayingMedia && session?.state?.value?.media?.playing == true) return
         session?.setActive(value)
     }
 
