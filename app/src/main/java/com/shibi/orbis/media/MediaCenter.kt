@@ -5,13 +5,16 @@ import com.shibi.orbis.engine.MediaState
 import com.shibi.orbis.tabs.TabManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 
 /** The tab whose media the notification, lock screen and picture-in-picture control. */
@@ -71,6 +74,16 @@ fun pipShapeOf(tab: MediaTab?, fullScreen: Boolean): Pair<Long, Long>? {
     val m = tab?.media ?: return null
     if (!fullScreen || !m.playing || !m.hasVideo) return null
     return if (m.videoWidth > 0 && m.videoHeight > 0) m.videoWidth to m.videoHeight else 16L to 9L
+}
+
+/**
+ * [pipShapeOf] kept current: recomputed when the media changes and when the selected tab enters or leaves fullscreen.
+ * Fullscreen must be followed too, because entering or leaving it often leaves the media itself unchanged.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+fun pipShapes(media: Flow<MediaTab?>, selectedSession: Flow<BrowserSession?>): Flow<Pair<Long, Long>?> {
+    val fullScreen = selectedSession.flatMapLatest { s -> s?.state?.map { it.fullScreen } ?: flowOf(false) }
+    return combine(media, fullScreen.distinctUntilChanged(), ::pipShapeOf).distinctUntilChanged()
 }
 
 /** Android accepts picture-in-picture ratios between 1:2.39 and 2.39:1; anything outside is clamped. */

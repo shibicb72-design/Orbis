@@ -35,7 +35,7 @@ import com.shibi.orbis.privacy.PrivacyWindowController
 import com.shibi.orbis.privacy.PrivacyWindowOps
 import com.shibi.orbis.ui.OrbisRoot
 import com.shibi.orbis.media.pipAspectRatio
-import com.shibi.orbis.media.pipShapeOf
+import com.shibi.orbis.media.pipShapes
 import com.shibi.orbis.ui.BackKeyWindowCallback
 import com.shibi.orbis.ui.theme.OrbisTheme
 import kotlinx.coroutines.flow.combine
@@ -63,13 +63,16 @@ class MainActivity : ComponentActivity() {
         }
         // Picture-in-picture: a fullscreen video that is playing shrinks into a window when the user leaves (Home).
         lifecycleScope.launch {
-            app.container.media.current
-                .map { pipShapeOf(it, app.container.tabs.selected.value.session?.state?.value?.fullScreen == true) }
-                .distinctUntilChanged()
+            pipShapes(app.container.media.current, app.container.tabs.selected.map { it.session })
                 .collect { shape ->
                     pipShape = shape
                     applyPipParams()
                 }
+        }
+        // Fullscreen can rotate and resize the window after the shape was set; the source hint follows the new size.
+        window.decorView.addOnLayoutChangeListener { _, l, t, r, b, oldL, oldT, oldR, oldB ->
+            val resized = r - l != oldR - oldL || b - t != oldB - oldT
+            if (resized && pipShape != null && !isInPictureInPictureMode) applyPipParams()
         }
         // A recreated activity (savedInstanceState != null) or one resumed from Recents still carries the intent
         // that started it; reading it again would reopen a link the user already dealt with.

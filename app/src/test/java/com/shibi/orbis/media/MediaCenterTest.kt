@@ -6,8 +6,13 @@ import com.shibi.orbis.engine.MediaState
 import com.shibi.orbis.engine.SessionHost
 import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.engine.SitePrompt
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -34,6 +39,12 @@ private object NoSession : BrowserSession {
     override fun setActive(active: Boolean) = Unit
     override fun savedState(): String? = null
     override fun close() = Unit
+}
+
+/** A session whose fullscreen flag the test flips. */
+private class FullScreenSession : BrowserSession by NoSession {
+    override val state = MutableStateFlow(SessionState())
+    fun fullScreen(on: Boolean) = state.update { it.copy(fullScreen = on) }
 }
 
 @RunWith(RobolectricTestRunner::class)
@@ -65,6 +76,36 @@ class MediaCenterTest {
         assertNull("not fullscreen", pipShapeOf(tab(1, true, video = true), fullScreen = false))
         assertNull("paused", pipShapeOf(tab(1, false, video = true), fullScreen = true))
         assertNull("audio only", pipShapeOf(tab(1, true), fullScreen = true))
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun pictureInPictureFollowsFullscreenEvenWhenTheMediaDoesNotChange() = runTest {
+        val session = FullScreenSession()
+        val media = MutableStateFlow<MediaTab?>(tab(1, true, video = true, w = 1280, h = 720))
+        val shapes = mutableListOf<Pair<Long, Long>?>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            pipShapes(media, MutableStateFlow(session)).collect { shapes += it }
+        }
+        session.fullScreen(true)
+        session.fullScreen(false)
+        session.fullScreen(true)
+        media.value = tab(1, false, video = true, w = 1280, h = 720)
+        assertEquals(listOf(null, 1280L to 720L, null, 1280L to 720L, null), shapes)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun pictureInPictureFollowsTheSelectedTabsFullscreen() = runTest {
+        val fullScreenTab = FullScreenSession().apply { fullScreen(true) }
+        val selected = MutableStateFlow<BrowserSession?>(FullScreenSession())
+        val shapes = mutableListOf<Pair<Long, Long>?>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            pipShapes(MutableStateFlow(tab(1, true, video = true)), selected).collect { shapes += it }
+        }
+        selected.value = fullScreenTab
+        selected.value = null
+        assertEquals(listOf(null, 16L to 9L, null), shapes)
     }
 
     @Test
