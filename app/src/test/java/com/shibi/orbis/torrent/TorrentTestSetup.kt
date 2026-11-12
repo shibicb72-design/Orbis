@@ -21,13 +21,13 @@ class FakeTorrentNetwork : TorrentNetwork {
 class TorrentTestSetup(root: File, scheduler: TestCoroutineScheduler, freeBytes: Long = Long.MAX_VALUE / 4) {
     class Published(val content: String, val dir: String, val name: String, val handle: String)
 
-    val engine = FakeTorrentEngine()
     val stateDir = File(root, "state")
     val payloadRoot = File(root, "payload")
 
     /** The private folder of the downloads directory, where finished private torrents are kept. */
     val keepRoot = File(root, "downloads/" + com.shibi.orbis.downloads.DownloadManager.PRIVATE_DIR)
     val store = TorrentStore(stateDir)
+    val engine = FakeTorrentEngine(sessionFile = store.sessionFile)
     val logs = CopyOnWriteArrayList<String>()
     val network = FakeTorrentNetwork()
     val settings = MutableStateFlow(TorrentSettings())
@@ -46,6 +46,9 @@ class TorrentTestSetup(root: File, scheduler: TestCoroutineScheduler, freeBytes:
 
     /** Fails the publish of the n-th file (1-based, counted over every attempt); 0 never. */
     var failPublishAt = 0
+
+    /** Runs as each file's publish starts (the row is PUBLISHING, the copy not done). */
+    var onPublish: () -> Unit = {}
     private var publishCount = 0
     var clock = 1_000L
 
@@ -66,6 +69,7 @@ class TorrentTestSetup(root: File, scheduler: TestCoroutineScheduler, freeBytes:
             publisher =
                 object : TorrentPublisher {
                     override fun publish(file: File, relativeDir: String, displayName: String): TorrentPublisher.Published? {
+                        onPublish()
                         publishCount++
                         if (!publishOk || publishCount == failPublishAt) return null
                         val handle = "content://media/external/downloads/$publishCount"

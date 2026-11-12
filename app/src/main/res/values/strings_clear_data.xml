@@ -10,7 +10,6 @@
     <string name="clear_cookies_summary">Signs you out of most sites. Pages that are open may keep showing until you reload them. A download in progress may stop.</string>
     <string name="clear_cache">Cached images and files</string>
     <string name="clear_downloads">Downloads list</string>
-    <string name="clear_downloads_summary">Only the list. Downloaded files stay on your device, and running downloads stay listed.</string>
     <string name="clear_tabs">Open tabs</string>
     <string name="clear_tabs_summary">Normal tabs only. Private tabs stay open.</string>
     <string name="clear_bookmarks_section">Cannot be undone</string>

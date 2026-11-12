@@ -8,5 +8,7 @@
         <ignore regexp="&quot;cast_(untrusted|forget_tv)&quot;" />
         <!-- Security PR 9: replaced by English-only keys whose text says private-tab files are deleted (OD-3). -->
         <ignore regexp="&quot;(torrents_sheet_private|browser_download_private_note|browser_private_empty_state)&quot;" />
+        <!-- Security PR 10: replaced by an English-only key that says the list covers torrents too (F-07). -->
+        <ignore regexp="&quot;clear_downloads_summary&quot;" />
     </issue>
 </lint>
