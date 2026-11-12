@@ -227,6 +227,15 @@ class MainTest(unittest.TestCase):
             code, out = self.run_main([("libtorrent4j.so", fake_so("x86_64", *GOOD))], "--checksums", missing)
         self.assertEqual(code, 2, out)
 
+    def test_checksums_malformed_is_usage_error(self):
+        with tempfile.TemporaryDirectory() as root:
+            bad = os.path.join(root, "CHECKSUMS.sha256")
+            with open(bad, "w", encoding="utf-8") as handle:
+                handle.write("not-a-hash  app/src/main/jniLibs/x86_64/libtorrent4j.so\n")
+            code, out = self.run_main([("libtorrent4j.so", fake_so("x86_64", *GOOD))], "--checksums", bad)
+        self.assertEqual(code, 2, out)
+        self.assertIn("could not check", out)
+
     def test_json_output(self):
         with tempfile.TemporaryDirectory() as root:
             so, out_json = os.path.join(root, "libtorrent4j.so"), os.path.join(root, "v.json")
