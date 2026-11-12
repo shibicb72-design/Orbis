@@ -16,6 +16,10 @@ Upstream's native jars (`libtorrent4j-android-arm64`, `-arm`, `-x86_64`) are no 
 loads the library by name (`System.loadLibrary("torrent4j")`), so `jniLibs/<abi>/libtorrent4j.so` takes their place
 with no code change; the JNI symbol sets are identical to upstream's (see "Result" below).
 
+The shipped files below still have OpenSSL built with `no-threads`, as upstream's do. Since the threads change
+(difference g, PR #46) the pipeline builds OpenSSL with thread support; those libraries ship only from a
+`workflow_dispatch` run on `main`, in a separate PR that also updates this table.
+
 ### Shipped files
 
 From Torrent natives run [43070920772](https://github.com/shibicb72-design/Orbis/actions/runs/43070920772)
@@ -197,10 +201,10 @@ Upstream: `aldenml/libtorrent4j` `.github/workflows/android.yml` at `da7d240`, j
 | Upstream step | Ours | Difference |
 |---|---|---|
 | `actions/checkout@v5`, `submodules: recursive`, branch head | `git init`, fetch exactly `LIBTORRENT4J_COMMIT`, `git submodule update --init --recursive`, assert both commits | (d) pinned commit instead of the branch head |
-| `env` `BOOST_DOT_VERSION 1.90.0`, `NDK_VERSION r29`, `OPENSSL_VERSION 3.5.5`, `OPENSSL_NO_OPTS` | `build.env`: same Boost, NDK and `OPENSSL_NO_OPTS`; `OPENSSL_VERSION=3.5.9` | (a) OpenSSL 3.5.5 -> 3.5.9 |
+| `env` `BOOST_DOT_VERSION 1.90.0`, `NDK_VERSION r29`, `OPENSSL_VERSION 3.5.5`, `OPENSSL_NO_OPTS` | `build.env`: same Boost and NDK; `OPENSSL_VERSION=3.5.9`; `OPENSSL_NO_OPTS` without `no-threads` | (a) OpenSSL 3.5.5 -> 3.5.9; (g) OpenSSL with thread support |
 | setup boost: `wget` from archives.boost.io, `tar xzf`, `mv`, `./bootstrap.sh` | `curl` (HTTPS only) from the same URL, SHA-256 check, then the same commands | (b) checksum check; `curl --proto =https` instead of `wget -nv` |
 | setup ndk: `wget` from dl.google.com, `unzip -qq`, `mv` | same URL, size + SHA-1 + SHA-256 check, same commands | (b) |
-| setup openssl: `wget https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz`; `CC`/`AR`/`LD`/`RANLIB` from the NDK; `./Configure <target> ${OPENSSL_NO_OPTS} <abi flags> -fPIC --prefix=...`; `make`; `make install_sw`; x86_64: `mv openssl/lib64 openssl/lib` | same environment plus `SOURCE_DATE_EPOCH=${OPENSSL_SOURCE_DATE_EPOCH}`, same `Configure` line per ABI, same `make` calls, same `lib64` move; tarball from the GitHub release | (a), (b), (f); the tarball URL is OpenSSL's GitHub release (byte-identical to the www.openssl.org file, checked 2026-11-11) |
+| setup openssl: `wget https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz`; `CC`/`AR`/`LD`/`RANLIB` from the NDK; `./Configure <target> ${OPENSSL_NO_OPTS} <abi flags> -fPIC --prefix=...`; `make`; `make install_sw`; x86_64: `mv openssl/lib64 openssl/lib` | same environment plus `SOURCE_DATE_EPOCH=${OPENSSL_SOURCE_DATE_EPOCH}`, same `Configure` line per ABI (without `no-threads`), same `make` calls, then a check that `configuration.h` defines `OPENSSL_THREADS`, same `lib64` move; tarball from the GitHub release | (a), (b), (f), (g); the tarball URL is OpenSSL's GitHub release (byte-identical to the www.openssl.org file, checked 2026-11-11) |
 | build: exports `ANDROID_TOOLCHAIN`, `BOOST_ROOT`, `OPENSSL_ROOT`, `LIBTORRENT_ROOT`, `CXX`, `CC`, `AR`, `LD`, `RANLIB`; `cd swig`; `b2 -j2 --user-config=config/android-<x>-config.jam variant=release toolset=<t> target-os=android location=bin/release/android/<abi>` | same exports, same `b2` line | none. Upstream's `alias ranlib=...` line is left out: aliases are not expanded in a non-interactive shell, so it does nothing there either |
 | strip: `llvm-objcopy --only-keep-debug`, then `llvm-strip --strip-unneeded -x` (`-g` added for arm) | same commands and flags per ABI | none |
 | dependencies: `llvm-readelf -d` | same, saved to the log | none |
@@ -213,8 +217,42 @@ takes the embedded `built on:` time from it (`gmtime($ENV{'SOURCE_DATE_EPOCH'} /
 `OPENSSL_SOURCE_DATE_EPOCH=1790640000`, is 2026-09-29T00:00:00Z, the 3.5.9 release date. It changes that one
 string and no upstream file.
 
+(g) `no-threads` is removed from `OPENSSL_NO_OPTS`; every other option is upstream's. The same change is proposed
+upstream in aldenml/libtorrent4j#315 (open, not reviewed as of 2026-11-12). Sources, read 2026-11-12:
+- Why. libtorrent `24a3adf` calls OpenSSL from several threads at once. `hasher` and `hasher256`
+  (`src/hasher.cpp`: `EVP_MD_CTX_new`, `EVP_DigestInit_ex(..., EVP_sha1() / EVP_sha256())`, `EVP_MD_CTX_free`) run
+  on the disk threads (`src/mmap_disk_io.cpp`, `do_hash`; pools sized by `aio_threads`, default 10, and
+  `hashing_threads`, default 1, `src/settings_pack.cpp`), on the network thread, and on any thread that parses a
+  torrent (`src/torrent_info.cpp:1027-1028`; Orbis calls `TorrentInfo.bdecode` from `Libtorrent4jEngine.kt`).
+  `aux::crypto_random_bytes()` calls `RAND_bytes()` (`src/random.cpp`), for example for the DHT secrets
+  (`src/kademlia/node.cpp:116`). libtorrent4j builds with `<webtorrent>on` (`swig/Jamfile`), so libdatachannel's
+  OpenSSL DTLS code is linked in and runs on its own threads. OpenSSL 3.5.9 `INSTALL.md`, "Notes on
+  multi-threading": where `Configure` knows the options, threads are on by default and `no-threads` "should never
+  be necessary". With `no-threads`, `crypto/threads_none.c` is built: no-op locks, one global slot for
+  "thread-local" data, and `include/internal/refcount.h` falls back to plain `++`/`--` reference counts.
+- Nothing else is needed. `build.sh` configures with `linux-armv4`, `linux-aarch64` and `linux-x86_64` (upstream's
+  targets, not the `android-*` ones). In OpenSSL 3.5.9 `Configurations/10-main.conf` all three inherit
+  `linux-generic32`: `thread_scheme => "pthreads"`, `cflags => threads("-pthread")`, `ex_libs => add("-ldl",
+  threads("-pthread"))`; `linux-armv4` inherits `linux-latomic`, which adds `threads("-latomic")` to `ex_libs`.
+  `android-arm`, `android-arm64` and `android-x86_64` (`Configurations/15-android.conf`) inherit the same
+  `linux-generic32`; only `android-x86`, not built here, adds `-latomic`. So `Configure` turns threads on by
+  itself (`$auto_threads`, `Configure` lines 1570-1591) and writes `OPENSSL_THREADS` into `configuration.h`
+  (line 1617). `INSTALL.md` asks for `threads` plus a system option such as `-D_REENTRANT` only on systems where
+  `Configure` does not know them; this is not one. Clang defines `_REENTRANT` itself under `-pthread` on Linux and
+  Android targets (`clang/lib/Basic/Targets/OSTargets.h`, `LinuxTargetInfo::getOSDefines`). The atomics in
+  `crypto/threads_pthread.c` and `refcount.h` are the compiler's `__atomic` builtins. The `-latomic` and
+  `-pthread` in `ex_libs` apply to OpenSSL's own programs, not to the `b2` link of `libtorrent4j.so`; the built
+  libraries import no `__atomic_*` function and their `DT_NEEDED` is unchanged (run 43140935475).
+- `thread-pool` and `default-thread-pool` follow `threads` and are now on (OpenSSL's default). OpenSSL starts no
+  thread of its own unless the application calls `OSSL_set_max_threads()` or uses QUIC's thread-assisted mode;
+  `git grep` finds neither in libtorrent `24a3adf`, its libdatachannel, libjuice and usrsctp submodules, or
+  libtorrent4j's `swig/` and `src/` at `da7d240`. The only effect on the library's interface is the import change
+  below.
+- `build.sh` stops if `configuration.h` does not define `OPENSSL_THREADS` and prints the line to the log.
+
 Upstream hides the OpenSSL `make` output (`&> /dev/null`); ours writes it to a log file and prints its tail on a
-failure. That affects logging only. Compiler flags, `b2` arguments, NDK, Boost and API level (28) are upstream's;
+failure. That affects logging only. Compiler flags (except the `-pthread` that `Configure` adds to OpenSSL's
+for (g)), `b2` arguments, NDK, Boost and API level (28) are upstream's;
 the user-config files were read and do not mention OpenSSL (the build checks that again), so the upstream tree is
 built untouched.
 
@@ -227,8 +265,11 @@ Not proven: that upstream's Maven jars were produced by this `android.yml` (like
 - `scripts/compare_torrent_natives.py --abi <abi>`: downloads upstream's native jar for the ABI from Maven Central,
   checks the jar SHA-256 and the inner `.so` SHA-256 against `build.env`, then requires the same exported
   `Java_org_libtorrent4j_swig_*` set, the same `JNI_OnLoad` presence, the same full exported dynamic symbol set
-  (name, binding, type, visibility), the same imported symbol set, and the same ELF class, machine and
-  `DT_NEEDED` list. The size difference is reported only.
+  (name, binding, type, visibility), and the same ELF class, machine and `DT_NEEDED` list. The imported symbol
+  set must be upstream's with exactly the OpenSSL threads change applied (`THREADS_IMPORT_CHANGE` in the script,
+  difference g): `gmtime_r`, `pthread_attr_destroy`, `pthread_attr_init`, `pthread_attr_setdetachstate`,
+  `pthread_equal` and `pthread_exit` added, `gmtime` removed. Any other difference fails, and so does a library
+  without that change (a `no-threads` OpenSSL). The size difference is reported only.
 - `buildinfo.py summary --require-identical` (summary job): every ABI's two builds must be byte-identical.
 - `scripts/check_16kb_alignment.py --strict` on arm64-v8a and x86_64.
 
@@ -264,6 +305,24 @@ Where upstream's binaries came from: the released `.so` files embed source paths
 `built on: Sat Feb  7 22:37:2x 2026 UTC`. That is the directory layout of upstream's `android.yml` on a GitHub
 runner (not the Dockerfile route), on the day of the 2.1.0-39 release. This supports, but does not prove, that the
 Maven jars were built by that workflow.
+
+### Result with thread support (PR #46, run 43140935475 at `86f7f31`, `pull_request`, not shipped)
+
+| ABI | SHA-256 (repeat 1 = repeat 2) | size | upstream size | JNI / exported / imported symbols, ours (upstream) |
+|---|---|---|---|---|
+| arm64-v8a | `f89748e987ad237f85dfeb41d1fc1fa46e65761240abccf2e15603ace08f5d45` | 15917336 | 15883152 (+0.22%) | 3659 / 7303 / 280 (3659 / 7303 / 275) |
+| armeabi-v7a | `ac79d372b9ab219d8bf87767d48272178b117b106a103282dd566a9b159e6313` | 13766304 | 13734884 (+0.23%) | 3659 / 7248 / 270 (3659 / 7248 / 265) |
+| x86_64 | `dbaf0fd5da46202fd90c0c79416961cca896aafe00a1a1e86be5f62c97eb47f9` | 16385928 | 16358808 (+0.17%) | 3659 / 7328 / 277 (3659 / 7328 / 272) |
+
+All six builds succeeded and each ABI's two repeats are byte-identical. The OpenSSL string is unchanged
+(`OpenSSL 3.5.9 29 Sep 2026`), and so are `libtorrent/2.1.0.0`, the JNI and exported symbol sets and `DT_NEEDED`.
+The imports differ from upstream's by the same seven names on all three ABIs: `gmtime_r`, `pthread_attr_destroy`,
+`pthread_attr_init`, `pthread_attr_setdetachstate`, `pthread_equal`, `pthread_exit` added, `gmtime` removed. In
+that run the comparison still required identical imports and failed on this; the rule above was added with the
+sources for each name, and later runs must pass it. Evidence that thread support is on: each build log prints
+`#  define OPENSSL_THREADS` from `configuration.h`; the embedded `compiler:` string (`OpenSSL_version(OPENSSL_CFLAGS)`)
+contains `-pthread`, upstream's does not; `gmtime_r` and `pthread_equal` are referenced only by code built when
+`OPENSSL_THREADS` is defined (`crypto/o_time.c`, `crypto/threads_pthread.c`).
 
 ### What "reproducible" means here
 

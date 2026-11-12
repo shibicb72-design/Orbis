@@ -19,8 +19,8 @@ upstream release.
 
 The workflow is `.github/workflows/torrent-natives.yml`. It builds arm64-v8a, armeabi-v7a and x86_64, each twice,
 and for every build checks the version strings (`scripts/check_torrent_natives.py`), compares the library with
-upstream's released one (`scripts/compare_torrent_natives.py`: same JNI symbols, same ELF class and machine, same
-`DT_NEEDED`) and checks 16 KB alignment for the 64-bit libraries. Artifacts `libtorrent4j-<abi>-<repeat>` hold the
+upstream's released one (`scripts/compare_torrent_natives.py`: same JNI and exported symbols, same ELF class and
+machine, same `DT_NEEDED`, and upstream's imports with exactly the OpenSSL threads change) and checks 16 KB alignment for the 64-bit libraries. Artifacts `libtorrent4j-<abi>-<repeat>` hold the
 `.so`, its `.sha256` and `BUILDINFO.json`; the run summary has all hashes in one table.
 
 ## Rule
@@ -70,6 +70,11 @@ every build and every APK and bundle to `CHECKSUMS.sha256`; this rule ties `CHEC
      `RUN_ID`), and the OpenSSL version in `app/.../about/Licences.kt` (`LicencesTest` checks it).
    - Update `docs/security/NATIVE-VERSIONS.md`. Android CI then checks the version strings in every APK and the
      bundle.
+
+OpenSSL is built with thread support: `OPENSSL_NO_OPTS` is upstream's without `no-threads`, and `build.sh` stops if
+`configuration.h` lacks `OPENSSL_THREADS` (`docs/security/NATIVE-VERSIONS.md`, difference g). The import
+comparison expects the changes that brings (`THREADS_IMPORT_CHANGE` in `scripts/compare_torrent_natives.py`); if a
+new OpenSSL version changes them, update that set with the source of each name.
 
 Only OpenSSL changes in such an update. The libtorrent4j commit, the libtorrent commit, Boost and the NDK stay
 upstream's unless a separate, reviewed change moves them.

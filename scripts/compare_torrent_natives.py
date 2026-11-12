@@ -9,8 +9,10 @@ Then, reading the ELF dynamic symbol table directly (no binutils):
   * the set of exported Java_org_libtorrent4j_swig_* symbols must be identical (the Java jar from Maven Central
     and our library must fit together); a difference fails,
   * JNI_OnLoad must be exported by both or by neither; a difference fails,
-  * the full exported dynamic symbol set (name, binding, type, visibility) and the imported (undefined) symbol
-    set must be identical; a difference fails (only OpenSSL changes, so neither should move),
+  * the full exported dynamic symbol set (name, binding, type, visibility) must be identical; a difference fails,
+  * the imported (undefined) symbol set must be upstream's with exactly the THREADS_IMPORT_CHANGE applied (our
+    OpenSSL is built with thread support, upstream's with no-threads); any other difference, or a missing part
+    of that change, fails,
   * ELF class, machine and the DT_NEEDED list must be identical; a difference fails,
   * the file size difference is reported as a percentage (no threshold).
 
@@ -47,6 +49,22 @@ DT_SONAME = 14
 SHN_UNDEF = 0
 EXPORTED_BINDS = (1, 2, 10)        # STB_GLOBAL, STB_WEAK, STB_GNU_UNIQUE
 EXPORTED_VISIBILITIES = (0, 3)     # STV_DEFAULT, STV_PROTECTED
+
+# How building OpenSSL with thread support changes the imports (build.env OPENSSL_NO_OPTS without no-threads;
+# docs/security/NATIVE-VERSIONS.md, difference g). Upstream's OpenSSL is configured with no-threads. Where each
+# name comes from in OpenSSL 3.5.9, all compiled only when threads are on:
+#   gmtime_r instead of gmtime: crypto/o_time.c, OPENSSL_gmtime() uses gmtime_r() if OPENSSL_THREADS is defined.
+#   pthread_equal: crypto/threads_pthread.c, CRYPTO_THREAD_compare_id(); also crypto/thread/arch/thread_posix.c.
+#   pthread_attr_init, pthread_attr_setdetachstate, pthread_attr_destroy, pthread_exit:
+#     crypto/thread/arch/thread_posix.c, OpenSSL's internal threads (thread pool, QUIC).
+# The other pthread functions OpenSSL uses (mutex, rwlock, once, key, cond, create, self) are imported by
+# upstream's library already, through libc++, Boost and libtorrent. Found in Torrent natives run 43140935475,
+# identical for arm64-v8a, armeabi-v7a and x86_64.
+THREADS_IMPORT_CHANGE = {
+    "added": frozenset({"gmtime_r", "pthread_attr_destroy", "pthread_attr_init", "pthread_attr_setdetachstate",
+                        "pthread_equal", "pthread_exit"}),
+    "removed": frozenset({"gmtime"}),
+}
 
 
 class CompareError(Exception):
@@ -149,8 +167,11 @@ def jni_symbols(exported):
     return {name for name in exported if name.startswith(JNI_PREFIX)}
 
 
-def compare(ours, upstream, ours_size, upstream_size, limit=20):
-    """Compare two read_elf() results. Returns (report_lines, failures)."""
+def compare(ours, upstream, ours_size, upstream_size, limit=20, import_change=THREADS_IMPORT_CHANGE):
+    """Compare two read_elf() results. Returns (report_lines, failures).
+
+    import_change: {"added": names, "removed": names}; ours must import exactly upstream's set with it applied.
+    """
     lines = []
     failures = []
 
@@ -185,19 +206,34 @@ def compare(ours, upstream, ours_size, upstream_size, limit=20):
     if ours_onload != up_onload:
         failures.append("JNI_OnLoad present in one library only")
 
-    for key, label, message in (("exported_full", "exported", "exported dynamic symbol sets differ"),
-                                ("imported", "imported", "imported (undefined) symbol sets differ")):
-        only_ours = sorted(ours[key] - upstream[key])
-        only_up = sorted(upstream[key] - ours[key])
-        same = not (only_ours or only_up)
-        lines.append("%-12s ours %d upstream %d, only in ours %d, only in upstream %d %s" % (
-            label, len(ours[key]), len(upstream[key]), len(only_ours), len(only_up), "same set" if same else "DIFF"))
-        for item in only_ours[:limit]:
-            lines.append("  only in ours:     %s" % (item,))
-        for item in only_up[:limit]:
-            lines.append("  only in upstream: %s" % (item,))
-        if not same:
-            failures.append(message)
+    only_ours = sorted(ours["exported_full"] - upstream["exported_full"])
+    only_up = sorted(upstream["exported_full"] - ours["exported_full"])
+    same = not (only_ours or only_up)
+    lines.append("%-12s ours %d upstream %d, only in ours %d, only in upstream %d %s" % (
+        "exported", len(ours["exported_full"]), len(upstream["exported_full"]), len(only_ours), len(only_up),
+        "same set" if same else "DIFF"))
+    for item in only_ours[:limit]:
+        lines.append("  only in ours:     %s" % (item,))
+    for item in only_up[:limit]:
+        lines.append("  only in upstream: %s" % (item,))
+    if not same:
+        failures.append("exported dynamic symbol sets differ")
+
+    added, removed = import_change["added"], import_change["removed"]
+    expected = (upstream["imported"] - removed) | added
+    only_ours = sorted(ours["imported"] - expected)
+    only_expected = sorted(expected - ours["imported"])
+    same = not (only_ours or only_expected)
+    lines.append("%-12s ours %d upstream %d, upstream %s %s, only in ours %d, only in expected %d %s" % (
+        "imported", len(ours["imported"]), len(upstream["imported"]),
+        "+" + ",".join(sorted(added)) if added else "+none", "-" + ",".join(sorted(removed)) if removed else "-none",
+        len(only_ours), len(only_expected), "expected set" if same else "DIFF"))
+    for item in only_ours[:limit]:
+        lines.append("  only in ours:     %s" % (item,))
+    for item in only_expected[:limit]:
+        lines.append("  only in expected: %s" % (item,))
+    if not same:
+        failures.append("imported (undefined) symbol set is not upstream's with the OpenSSL threads change")
     lines.append("size         ours %d upstream %d bytes, %s" % (ours_size, upstream_size, size_change(ours_size, upstream_size)))
     return lines, failures
 
@@ -316,6 +352,8 @@ def main(argv=None):
             "jni_symbols_upstream": len(jni_symbols(upstream["exported"])),
             "exported_ours": len(ours["exported_full"]), "exported_upstream": len(upstream["exported_full"]),
             "imported_ours": len(ours["imported"]), "imported_upstream": len(upstream["imported"]),
+            "imported_expected_change": {"added": sorted(THREADS_IMPORT_CHANGE["added"]),
+                                         "removed": sorted(THREADS_IMPORT_CHANGE["removed"])},
             "needed_ours": ours["needed"], "needed_upstream": upstream["needed"],
             "failures": failures,
         }
