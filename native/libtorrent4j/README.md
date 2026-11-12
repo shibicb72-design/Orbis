@@ -14,7 +14,7 @@ upstream release.
 | `build.sh` | Builds one ABI: fetches the pinned commit, asserts the submodule commit, downloads and hash-checks each archive, then runs the steps of upstream's `android.yml` job for that ABI. |
 | `buildinfo.py` | Writes `BUILDINFO.json` per build and the hash table of a run. |
 | `versions.env` | What the app bundles today, and the workflow run it came from (read by the daily Engine currency check and by Android CI). |
-| `CHECKSUMS.sha256` | SHA-256 of every file under `app/src/main/jniLibs/`, with the run id and commit in the header. The Gradle task `verifyTorrentNatives` checks it before every build: a changed, missing or extra file fails it. |
+| `CHECKSUMS.sha256` | SHA-256 of every file under `app/src/main/jniLibs/`, with the run id and commit in the header. The Gradle task `verifyTorrentNatives` checks it before every build: a changed, missing or extra file fails it, and so does a `jniLibs` directory in any other source set. Android CI checks every APK and the bundle against it (`check_torrent_natives.py --checksums`). |
 | `BUILDINFO-<abi>.json` | The shipped run's `BUILDINFO.json` for each ABI, unmodified. |
 
 The workflow is `.github/workflows/torrent-natives.yml`. It builds arm64-v8a, armeabi-v7a and x86_64, each twice,
@@ -31,6 +31,25 @@ is green. Before using an artifact, check its `BUILDINFO.json`: `workflow.event`
 `pull_request` run: a pull request from a fork runs its own `build.sh` and can upload artifacts with the same
 names. Never commit a library built anywhere else (not on a laptop, not from a Docker image), and never edit a
 committed library.
+
+## Review rule: run provenance
+
+Any diff that touches `app/src/main/jniLibs/**` or `native/libtorrent4j/CHECKSUMS.sha256` gets this check from
+the reviewer before approval, whoever wrote it. `<run>` is `RUN_ID` in `versions.env` and the run id in the
+`CHECKSUMS.sha256` header; the two must be equal.
+
+1. `gh run view <run> --json workflowName,event,headBranch,headSha,conclusion`: `Torrent natives`,
+   `workflow_dispatch`, `main`, a `headSha` on `main` (`git merge-base --is-ancestor <headSha> origin/main`),
+   `success`. The commit in the `CHECKSUMS.sha256` header is that `headSha`.
+2. `gh run download <run> -n libtorrent4j-<abi>-1` for each ABI, each into a new, empty directory. The artifact's
+   `libtorrent4j.so` has the SHA-256 that `CHECKSUMS.sha256` lists and is byte-identical to the file in the diff;
+   its `BUILDINFO.json` is byte-identical to `BUILDINFO-<abi>.json` and says `workflow_dispatch`,
+   `refs/heads/main`, that commit and that run id.
+3. The run's summary table shows repeat 1 and repeat 2 identical for every ABI.
+
+A diff that fails any step, or that adds a native library anywhere but `app/src/main/jniLibs/<abi>/`, is not
+approved. The Gradle task `verifyTorrentNatives` and Android CI (`check_torrent_natives.py --checksums`) then tie
+every build and every APK and bundle to `CHECKSUMS.sha256`; this rule ties `CHECKSUMS.sha256` to the run.
 
 ## Update OpenSSL
 

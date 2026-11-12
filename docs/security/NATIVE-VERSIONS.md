@@ -37,10 +37,15 @@ as those of PR run 43064341148 at `8dae273` on the same runner image, so the bui
 Where it is checked:
 - `native/libtorrent4j/CHECKSUMS.sha256` lists the three files. The Gradle task `verifyTorrentNatives`
   (`app/build.gradle.kts`, before `preBuild`) hashes every file under `app/src/main/jniLibs/` and fails the build on
-  a mismatch, a missing file or an extra file. That covers local release builds too.
+  a mismatch, a missing file or an extra file. That covers local release builds too. A `jniLibs` directory in any
+  source set other than `main` (`app/src/debug/jniLibs`, ...) fails it as well.
 - Android CI runs `scripts/check_torrent_natives.py --min-openssl <OPENSSL_VERSION from versions.env> --libtorrent
-  2.1.0.0` on the arm64-v8a and x86_64 debug and release APKs and, after a separate `bundleRelease`, on the bundle
-  with `--abis arm64-v8a,armeabi-v7a,x86_64`. A missing library fails it.
+  2.1.0.0 --checksums native/libtorrent4j/CHECKSUMS.sha256` on the arm64-v8a and x86_64 debug and release APKs and,
+  after a separate `bundleRelease`, on the bundle with `--abis arm64-v8a,armeabi-v7a,x86_64`. A missing library
+  fails it, and so does a packaged `lib/<abi>/libtorrent4j.so` that is not byte for byte the file
+  `CHECKSUMS.sha256` lists for its ABI. The release checklist runs the same command before an upload.
+- Review rule: a diff touching `app/src/main/jniLibs/**` or `CHECKSUMS.sha256` gets the run-provenance check in
+  `native/libtorrent4j/README.md` ("Review rule") before approval.
 - `native/libtorrent4j/BUILDINFO-<abi>.json` are the run's `BUILDINFO.json` files.
 
 The 32-bit arm library cannot be run on the emulators at hand. It is covered by its version strings, the JNI and
@@ -59,8 +64,9 @@ submodule's `version.hpp` defines `LIBTORRENT_VERSION "2.1.0.0"`, which matches.
 - libtorrent4j 2.1.0-39 (2026-02-07) is the newest release on Maven Central and GitHub. Upgrading is not possible.
 - The newest OpenSSL 3.5.x tag is `openssl-3.5.9` (2026-09-29). Advisories were fixed in 3.5.6 to 3.5.9; upstream's
   natives (3.5.5) are behind, ours (3.5.9) are current.
-- libtorrent itself has newer tags (`v2.1.1`, `v2.1.2`). Moving to them is a separate PR (7b, OD-4 approved);
-  the build pipeline below changes OpenSSL only.
+- libtorrent itself has newer tags (`v2.1.1`, `v2.1.2`). Moving to them was PR 7b (OD-4 approved). It is stopped:
+  the libtorrent4j 2.1.0-39 bindings do not fit libtorrent 2.1.2 without a libtorrent4j fork. See "libtorrent
+  2.1.2 (PR 7b): stopped" below. The build pipeline changes OpenSSL only.
 
 ## What the OpenSSL update fixes, plainly
 
@@ -74,13 +80,20 @@ What is known about reaching them:
   `swig/Jamfile` builds with `<webtorrent>on`.
 - libtorrent at `24a3adf` hands `ws://` and `wss://` tracker URLs to that code when built with WebTorrent support
   (`src/tracker_manager.cpp:310-311`, `protocol == "ws" || protocol == "wss"` under `TORRENT_USE_RTC`).
-- Orbis does not filter tracker URLs by scheme.
-- So a torrent or magnet link that names a WebSocket tracker can lead the engine into DTLS handshakes with remote
-  peers through this OpenSSL. Whether the conditions of CVE-2026-84782 are met there is not verified, and it was not
-  exercised on a device. Whether `PKCS7_verify()` (CVE-2026-45447) is reachable is not checked.
+- Since #35, Orbis filters tracker URLs by scheme before the engine sees them: `TorrentTrackers.isAllowed`
+  (`app/src/main/java/com/shibi/orbis/torrent/TorrentTrackers.kt`) lets in only `http://`, `https://` and `udp://`,
+  judged by the text before the first ':' as libtorrent does, so no `ws:`/`wss:` spelling gets in. It is applied to
+  a magnet's `tr` keys, to a `.torrent` file's announce list and to the trackers in resume data
+  (`Libtorrent4jEngine.kt`, `dropRefusedTrackers`). Before #35 there was no such filter.
+- So on `main` a torrent or magnet link can no longer name a WebSocket tracker, and the WebTorrent path (the
+  libdatachannel DTLS transport on this OpenSSL) is not reached through trackers. The code is still compiled in.
+  Whether any other route reaches it is not verified, and it was not exercised on a device. Whether the conditions of
+  CVE-2026-84782 would be met on that path is not verified. Whether `PKCS7_verify()` (CVE-2026-45447) is reachable
+  is not checked.
 
-This update is upkeep of a network-facing library. One of the two High advisories is in code that is compiled in
-and that a torrent can route traffic to; neither is shown to be exploitable in Orbis.
+This update is upkeep of a network-facing library. One of the two High advisories is in code that is compiled in;
+since #35 torrents cannot route traffic to it through a WebSocket tracker. Neither is shown to be exploitable in
+Orbis.
 
 ## Plan
 
@@ -91,7 +104,66 @@ and that a torrent can route traffic to; neither is shown to be exploitable in O
 3. Security PR 7 (done): ship those natives (run 43070920772), update `versions.env` (`OPENSSL_VERSION=3.5.9`,
    `SOURCE=orbis-ci`, `RUN_ID`) and this file, and drop `--warn-only openssl` from the Engine currency workflow, so
    an OpenSSL release turns it red.
-4. Security PR 7b: libtorrent 2.1.2 (OD-4), separately.
+4. Security PR 7b: libtorrent 2.1.2 (OD-4). Stopped before any build (below): it needs a libtorrent4j fork, a new
+   owner decision. Its other half, the #37 follow-ups (checksum check on the packaged libraries, no `jniLibs`
+   outside `src/main`, the review rule), shipped on its own.
+
+### libtorrent 2.1.2 (PR 7b): stopped
+
+Checked 2026-11-11 by reading the sources (no build was run): libtorrent `24a3adf` (what ships) against tag `v2.1.2`
+(`6da363d2994f17c0b3c0450d124cf73a31a73847`, 727 commits later), and libtorrent4j `da7d240` (`v2.1.0-39`, still
+upstream's `master`).
+
+- The committed JNI source does not compile unedited. `swig/libtorrent_jni.cpp:3552` (from `%extend renamed_files`
+  in `swig/libtorrent/file_storage.i:64-66`) calls `renamed_files::export_filenames()` with no argument. In
+  `v2.1.2` that function is `export_filenames(file_storage const& fs) const` (`include/libtorrent/file_storage.hpp`),
+  with no default. Fixing it means editing the `.i` file and regenerating the bindings, and the Java method
+  `export_filenames_ex()` would change too: a libtorrent4j fork.
+- The Java jar reads some values from the library and computes the rest. In the generated `settings_pack.java` a
+  name that has an initializer in the header is read through JNI (`libtorrent_jni.settings_pack_user_agent_get()`);
+  every other name is the previous value plus one, computed in Java. `v2.1.2` inserts `natpmp_gateway` before `webtorrent_stun_server`
+  and `natpmp_lease_duration` before `min_websocket_announce_interval`, so in the old jar those two names, and
+  `webtorrent_connection_timeout` and the three `max_*_setting_internal` names, would address the wrong native
+  setting. `allow_multiple_connections_per_pid`, `apply_filter_to_dht` and `max_webtorrent_offers` are appended.
+  None of the names `Libtorrent4jEngine.kt` sets moves (`enable_upnp`, `enable_natpmp`, `ssrf_mitigation`,
+  `enable_dht`, `enable_lsd`, `listen_interfaces`, `max_metadata_size`, rate limits, `active_downloads`,
+  `active_seeds`, `stop_tracker_timeout`, and `alert_mask` and `dht_bootstrap_nodes` set by `SessionManager`), but
+  the jar's own `SettingsPack.getWebtorrentStunServer()` and `setWebtorrentStunServer()` would.
+- Alert types: no existing number moves; `v2.1.2` adds `file_priorities_alert` (105), `file_status_alert` (106)
+  and `ip_ban_alert` (107), and `num_alert_types` goes from 105 to 108. The jar sizes its tables from the native
+  `num_alert_types` but fills entries 0 to 104 only, so `AlertType.fromSwig(107)` returns null and
+  `SessionManager`'s alert loop switches on it (a `NullPointerException` on the `SessionManager-alertsLoop`
+  thread). `ip_ban_alert` is in the `ip_block` category, which `SessionManager` always enables, and `v2.1.2` posts
+  it when an incoming peer names an info-hash the DHT made up (`peer_connection.cpp:1333`,
+  `session_impl::ban_ip`). The exception is not caught: the loop runs on a plain `Thread`, and Orbis sets no default
+  uncaught-exception handler, so Android's default handler would kill the app process. With DHT on, a remote peer
+  could then crash Orbis. Not run; read from the code.
+- Torrent flags: no value moves (`disable_v1_hashes = 25_bit` is added). The WebSocket tracker path is still chosen
+  by the text before the first ':' (`tracker_manager.cpp:290`, `ws`/`wss` at `:326`), and the magnet `tr` key rules
+  are unchanged (`magnet_uri.cpp:305-307`, `:314`), so the tracker allowlist from #30/#35 still holds. The
+  `deps/json` submodule is gone and the Jamfile no longer links Boost.JSON; not built.
+
+What staying on `24a3adf` leaves unfixed. `24a3adf..v2.1.2` contains these memory-safety fixes, by commit. Each
+one is **not assessed for reachability in Orbis**:
+
+- `ca4e621c2`: out-of-bounds write in `hash_picker::hashes_rejected` on block hash requests.
+- `507c60005`: use-after-free in the uTP failure socket shutdown path.
+- `634105823` (bounds check in `merkle_tree`) and related merkle tree and proof fixes: `58f793b4c` (stricter check
+  in `merkle_validate_and_insert_proofs()`), `aa07b2349` (`merkle_tree::add_hashes()`), `114f65efc`
+  (`merkle_tree::get_hashes()` edge case).
+- `7c0b819ae` (loading a hybrid torrent with no pieces) and `56382ae79` (bdecode on a truncated list or dict):
+  out-of-bounds reads.
+- `578c9c987`: stack buffer overflow in the DHT `canonical_string` on a large salt. In the shipped snapshot an
+  incoming DHT put already rejects a salt over 64 bytes (`src/kademlia/node.cpp:1000` at `24a3adf`).
+- `4ec307a31` (signed overflow computing bitfield sizes in `read_resume_data`), `6e37fc954` (socks5 auth
+  credential bounds), `ad48c19b3` and `8184fdbc3` (bound WebSocket RTC offers; offer IDs exactly 20 bytes).
+
+No published GitHub security advisory or CVE was found for any of them (checked 2026-11-11: the repository
+security advisories of `arvidn/libtorrent` list none, and the GitHub advisory database has no libtorrent entry for
+them).
+
+What would unblock it: an upstream libtorrent4j release built on libtorrent 2.1.2 (Java jar and bindings
+together), or an owner decision to maintain a fork.
 
 When the workflow reports a newer 3.5.x: the torrent natives are built by `.github/workflows/torrent-natives.yml`;
 to update OpenSSL change `build.env`, run the workflow, commit the artifacts and `CHECKSUMS.sha256`

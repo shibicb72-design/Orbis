@@ -13,13 +13,20 @@ Exits 1 when:
   * a library has no OpenSSL or no libtorrent version string,
   * more than one distinct OpenSSL version string is found (in one library or across them),
   * the OpenSSL version is below --min-openssl,
-  * the libtorrent version differs from --libtorrent.
-Exits 2 on a usage error or an unreadable input.
+  * the libtorrent version differs from --libtorrent,
+  * with --checksums: a library's SHA-256 differs from the CHECKSUMS.sha256 entry for its ABI
+    (`<sha256>  .../<abi>/libtorrent4j.so`), or its ABI has no entry.
+Exits 2 on a usage error, an unreadable input or an unreadable checksums file.
 
-Usage: check_torrent_natives.py [--min-openssl X.Y.Z] [--libtorrent A.B.C.D] [--abis a,b] [--json OUT] INPUT ...
+With --checksums the libraries inside an APK or AAB must be the committed files byte for byte (packaging must not
+change them). That ties the packaged library to the run recorded in CHECKSUMS.sha256, not only to its version strings.
+
+Usage: check_torrent_natives.py [--min-openssl X.Y.Z] [--libtorrent A.B.C.D] [--abis a,b] [--checksums FILE]
+                                [--json OUT] INPUT ...
 """
 
 import argparse
+import hashlib
 import json
 import re
 import struct
@@ -32,6 +39,8 @@ LIBTORRENT_RE = re.compile(rb"libtorrent/(\d+\.\d+\.\d+\.\d+)")
 ELF_MACHINE_ABI = {40: "armeabi-v7a", 183: "arm64-v8a", 62: "x86_64", 3: "x86"}
 APK_LIB_RE = re.compile(r"^lib/([^/]+)/" + re.escape(LIB_NAME) + r"$")
 AAB_LIB_RE = re.compile(r"^base/lib/([^/]+)/" + re.escape(LIB_NAME) + r"$")
+CHECKSUM_LINE_RE = re.compile(r"^([0-9a-f]{64}) [ *](\S+)$")
+CHECKSUM_LIB_RE = re.compile(r"(?:^|/)([^/]+)/" + re.escape(LIB_NAME) + r"$")
 
 
 class InputError(Exception):
@@ -112,6 +121,54 @@ def evaluate(libraries, min_openssl=None, libtorrent=None, abis=()):
     return lines, problems
 
 
+def parse_checksums(text):
+    """{abi: sha256} from CHECKSUMS.sha256 text: every `<sha256>  <path>/<abi>/libtorrent4j.so` line.
+
+    Comments (#) and blank lines are skipped. Raises ValueError on a malformed line, on a libtorrent4j.so path
+    without an ABI directory, on an ABI listed twice, or when no libtorrent4j.so is listed at all.
+    """
+    expected = {}
+    for number, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = CHECKSUM_LINE_RE.match(line)
+        if not match:
+            raise ValueError("line %d is not '<sha256>  <path>'" % number)
+        lib = CHECKSUM_LIB_RE.search(match.group(2))
+        if not lib:
+            if match.group(2).endswith(LIB_NAME):
+                raise ValueError("line %d: %s has no ABI directory" % (number, LIB_NAME))
+            continue
+        abi = lib.group(1)
+        if abi in expected:
+            raise ValueError("line %d: %s listed twice" % (number, abi))
+        expected[abi] = match.group(1)
+    if not expected:
+        raise ValueError("no %s listed" % LIB_NAME)
+    return expected
+
+
+def check_hashes(libraries, expected):
+    """Compare each library's SHA-256 with the expected one for its ABI.
+
+    libraries: [(source, abi, sha256)]; expected: {abi: sha256}. Returns (report_lines, problems).
+    """
+    lines = []
+    problems = []
+    for source, abi, digest in libraries:
+        want = expected.get(abi)
+        if want is None:
+            lines.append("%-12s %s: SHA-256 %s, no entry" % (abi, source, digest))
+            problems.append("%s (%s): no SHA-256 listed for this ABI" % (abi, source))
+        elif digest != want:
+            lines.append("%-12s %s: SHA-256 %s, expected %s" % (abi, source, digest, want))
+            problems.append("%s (%s): SHA-256 %s, expected %s" % (abi, source, digest, want))
+        else:
+            lines.append("%-12s %s: SHA-256 %s, matches" % (abi, source, digest))
+    return lines, problems
+
+
 # ---------------------------------------------------------------------------
 # File access
 # ---------------------------------------------------------------------------
@@ -143,6 +200,7 @@ def main(argv=None):
     parser.add_argument("--min-openssl", help="lowest acceptable OpenSSL version, e.g. 3.5.9")
     parser.add_argument("--libtorrent", help="required libtorrent version, e.g. 2.1.0.0")
     parser.add_argument("--abis", default="", help="comma-separated ABIs that must each have the library")
+    parser.add_argument("--checksums", help="CHECKSUMS.sha256: each library must match the entry for its ABI")
     parser.add_argument("--json", help="write the found version strings to this file")
     args = parser.parse_args(argv)
 
@@ -150,6 +208,15 @@ def main(argv=None):
         if value and not re.match(pattern, value):
             parser.error("bad version: %s" % value)
     abis = [a.strip() for a in args.abis.split(",") if a.strip()]
+
+    expected = None
+    if args.checksums:
+        try:
+            with open(args.checksums, encoding="utf-8") as handle:
+                expected = parse_checksums(handle.read())
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            print("could not check: %s: %s" % (args.checksums, exc))
+            return 2
 
     try:
         loaded = [lib for path in args.inputs for lib in load(path)]
@@ -159,6 +226,11 @@ def main(argv=None):
 
     libraries = [(source, abi) + scan(data) for source, abi, data in loaded]
     lines, problems = evaluate(libraries, args.min_openssl, args.libtorrent, abis)
+    if expected is not None:
+        hash_lines, hash_problems = check_hashes(
+            [(source, abi, hashlib.sha256(data).hexdigest()) for source, abi, data in loaded], expected)
+        lines += hash_lines
+        problems += hash_problems
     for line in lines:
         print(line)
     if args.json:
