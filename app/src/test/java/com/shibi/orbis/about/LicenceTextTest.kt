@@ -123,7 +123,9 @@ class LicenceTextTest {
 
     @Test
     fun theAssetsAreUntouched() {
-        // SHA-256 of each asset as published (LF line ends, as git stores them), equal to origin/main 58002cf.
+        // SHA-256 of each asset as published (LF line ends, as git stores them), equal to origin/main 58002cf; the
+        // last five equal the LICENSE files at the submodule commits in native/libtorrent4j/BUILDINFO-<abi>.json
+        // (libdatachannel and libjuice publish the same file).
         val expected =
             mapOf(
                 LicenceKind.APACHE_2_0 to "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
@@ -131,6 +133,11 @@ class LicenceTextTest {
                 LicenceKind.BSL_1_0 to "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
                 LicenceKind.MIT to "2e9e1fc1ea3cb3fb2431c5250b653c29e2977545fa7e77ae6f741a0611767f04",
                 LicenceKind.MPL_2_0 to "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+                LicenceKind.MPL_2_0_LIBDATACHANNEL to "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85",
+                LicenceKind.MPL_2_0_LIBJUICE to "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85",
+                LicenceKind.BSD_3_CLAUSE_USRSCTP to "fa53711b25af4b9a9b8dadfea3cb38166ec4b96760c8d62b284055554537d9ef",
+                LicenceKind.MIT_PLOG to "e4d01796524cbc13b1571a1f0914823c6a23b316ba039e7014f47a4eef7fd4c3",
+                LicenceKind.BSD_3_CLAUSE_TRY_SIGNAL to "18a7c1435a7a7ebc120a181c7309d0d7dfcbec76be4950ff23c9aa37f9c93725",
             )
         assertEquals(LicenceKind.entries.toSet(), expected.keys)
         for ((kind, sha) in expected) {
