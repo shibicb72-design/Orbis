@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import com.shibi.orbis.cast.CastTrustPrompt
 import com.shibi.orbis.cast.CastTrustReason
 import com.shibi.orbis.settings.AppTheme
+import com.shibi.orbis.ui.passTapGuard
 import com.shibi.orbis.ui.theme.OrbisTheme
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -140,6 +141,11 @@ class CastTrustSheetTest {
         rule.waitForIdle()
         assertEquals(0, confirms)
         assertEquals(1, cancels)
+        // At once the confirm button does nothing (F-15 tap guard); after the delay it answers.
+        rule.onNodeWithTag(CAST_TRUST_CONFIRM_TAG).performClick()
+        rule.waitForIdle()
+        assertEquals(0, confirms)
+        rule.passTapGuard()
         rule.onNodeWithTag(CAST_TRUST_CONFIRM_TAG).performClick()
         rule.waitForIdle()
         assertEquals(1, confirms)

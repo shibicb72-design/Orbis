@@ -57,6 +57,8 @@ import com.shibi.orbis.torrent.TorrentErrorKind
 import com.shibi.orbis.torrent.TorrentManager
 import com.shibi.orbis.torrent.TorrentSettings
 import com.shibi.orbis.torrent.TorrentStatus
+import com.shibi.orbis.ui.GuardedTextButton
+import com.shibi.orbis.ui.ObscuredTouchFilter
 import com.shibi.orbis.ui.OrbisEmptyState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -211,9 +213,13 @@ fun DownloadsScreen(
             titleContentColor = onSurface,
             textContentColor = onSurface,
             title = { Text(stringResource(R.string.downloads_delete_confirm_title)) },
-            text = { Text(stringResource(R.string.downloads_delete_confirm_body)) },
+            text = {
+                ObscuredTouchFilter()
+                Text(stringResource(R.string.downloads_delete_confirm_body))
+            },
             confirmButton = {
-                TextButton(
+                GuardedTextButton(
+                    guardKey = entry.id,
                     onClick = {
                         manager.delete(entry.id)
                         pendingDelete = null
@@ -261,6 +267,7 @@ private fun RemoveTorrentDialog(entry: TorrentEntry, onRemove: (deleteFiles: Boo
             textContentColor = onSurface,
             title = { Text(stringResource(R.string.torrents_remove_title)) },
             text = {
+                ObscuredTouchFilter()
                 Text(
                     if (entry.isPrivate) {
                         stringResource(R.string.torrents_remove_seeding_body_private)
@@ -270,11 +277,12 @@ private fun RemoveTorrentDialog(entry: TorrentEntry, onRemove: (deleteFiles: Boo
                 )
             },
             confirmButton = {
-                TextButton(onClick = { onRemove(false) }, colors = buttons) { Text(stringResource(R.string.torrents_remove_save)) }
+                GuardedTextButton(guardKey = entry.id, onClick = { onRemove(false) }, colors = buttons) { Text(stringResource(R.string.torrents_remove_save)) }
             },
             dismissButton = {
                 Row {
-                    TextButton(onClick = { onRemove(true) }, colors = buttons) { Text(stringResource(R.string.torrents_remove_delete)) }
+                    // Delete is not Cancel: it is guarded like the confirm button.
+                    GuardedTextButton(guardKey = entry.id, onClick = { onRemove(true) }, colors = buttons) { Text(stringResource(R.string.torrents_remove_delete)) }
                     TextButton(onClick = onDismiss, colors = buttons) { Text(stringResource(R.string.torrents_cancel)) }
                 }
             },
@@ -299,9 +307,13 @@ private fun RemoveTorrentDialog(entry: TorrentEntry, onRemove: (deleteFiles: Boo
         titleContentColor = onSurface,
         textContentColor = onSurface,
         title = { Text(title) },
-        text = { Text(body) },
+        text = {
+            ObscuredTouchFilter()
+            Text(body)
+        },
         confirmButton = {
-            TextButton(
+            GuardedTextButton(
+                guardKey = entry.id,
                 onClick = { onRemove(!completed || kept) },
                 colors = ButtonDefaults.textButtonColors(contentColor = onSurface),
             ) { Text(stringResource(R.string.torrents_remove)) }

@@ -37,6 +37,8 @@ import com.shibi.orbis.engine.SaveLoginChoice
 import com.shibi.orbis.engine.FilePickStage
 import com.shibi.orbis.engine.SitePermissionKind
 import com.shibi.orbis.engine.SitePrompt
+import com.shibi.orbis.ui.ObscuredTouchFilter
+import com.shibi.orbis.ui.GuardedTextButton
 
 /**
  * The dialog for one site prompt. The title names the origin the browser itself committed ([SitePrompt.originHost]);
@@ -150,7 +152,8 @@ fun SitePromptDialog(prompt: SitePrompt) {
                         stringResource(R.string.open_app_title_any)
                     },
                 onDismiss = prompt::dismiss,
-                confirmButton = { TextButton(onClick = prompt::open) { Text(stringResource(R.string.open_app_open)) } },
+                confirmButton = { GuardedTextButton(guardKey = prompt, onClick = prompt::open) { Text(stringResource(R.string.open_app_open)) } },
+                obscuredFilter = true,
                 dismissButton = {
                     TextButton(onClick = prompt::stay) {
                         Text(stringResource(if (prompt.webLink) R.string.open_app_stay else R.string.prompt_cancel))
@@ -167,10 +170,11 @@ fun SitePromptDialog(prompt: SitePrompt) {
                 title = stringResource(if (prompt.isUpdate) R.string.login_update_title else R.string.login_save_title, prompt.originHost),
                 onDismiss = prompt::dismiss,
                 confirmButton = {
-                    TextButton(onClick = { prompt.answer(SaveLoginChoice.SAVE) }) {
+                    GuardedTextButton(guardKey = prompt, onClick = { prompt.answer(SaveLoginChoice.SAVE) }) {
                         Text(stringResource(if (prompt.isUpdate) R.string.login_update else R.string.login_save))
                     }
                 },
+                obscuredFilter = true,
                 dismissButton = {
                     Row {
                         if (!prompt.isUpdate) {
@@ -236,10 +240,11 @@ private fun SitePermissionDialog(prompt: SitePrompt.SitePermission) {
         title = stringResource(R.string.perm_prompt_title, prompt.origin),
         onDismiss = prompt::dismiss,
         confirmButton = {
-            TextButton(onClick = { prompt.allow(prompt.offerRemember && rememberChoice) }) {
+            GuardedTextButton(guardKey = prompt, onClick = { prompt.allow(prompt.offerRemember && rememberChoice) }) {
                 Text(stringResource(R.string.perm_prompt_allow))
             }
         },
+        obscuredFilter = true,
         dismissButton = {
             TextButton(onClick = { prompt.deny(prompt.offerRemember && rememberChoice) }) {
                 Text(stringResource(R.string.perm_prompt_deny))
@@ -416,12 +421,16 @@ private fun PromptDialog(
     onDismiss: () -> Unit,
     confirmButton: @Composable () -> Unit,
     dismissButton: (@Composable () -> Unit)? = null,
+    /** Drop taps that come through another app's window on top (the prompts that grant something). */
+    obscuredFilter: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
+            // Composed inside the dialog, so it filters the dialog's own window.
+            if (obscuredFilter) ObscuredTouchFilter()
             Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) { content() }
         },
         confirmButton = confirmButton,
