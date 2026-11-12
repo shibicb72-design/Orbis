@@ -38,6 +38,7 @@ gradlew.bat :app:assembleR8check    # the same shrunk build, own app id, debug-s
 - [ ] Upload `app-release.aab` to Internal testing first, then Closed testing, then Production.
 
 ## 4. Policy notes
+- Requires Android 12 or newer (minSdk 31).
 - targetSdk 36 meets Play's current target API requirement.
 - Extensions: only uBlock Origin from addons.mozilla.org. Play allows browsers to run web content and extensions
   (JavaScript); no native code is downloaded.

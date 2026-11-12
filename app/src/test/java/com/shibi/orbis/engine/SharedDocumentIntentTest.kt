@@ -17,7 +17,7 @@ import org.robolectric.annotation.Config
  * API 33 typed getter is buggy, so both API levels go through IntentCompat inside runCatching.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29, 33], application = android.app.Application::class)
+@Config(sdk = [31, 33], application = android.app.Application::class)
 class SharedDocumentIntentTest {
     private val document = Uri.parse("content://com.whatsapp.provider.media/item/1")
 

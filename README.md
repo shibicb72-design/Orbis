@@ -1,9 +1,9 @@
 # Orbis
 
-Open-source Android phone browser. No monetization, no ads in the product.
+Open-source Android phone browser. No monetization, no ads in the product. Orbis needs Android 12 or newer.
 
 **Package:** `com.shibi.orbis`  
-**SDK:** minSdk 29, targetSdk 36, compileSdk 37.2 (required by GeckoView/AC 160; platform `platforms;android-37.2`)  
+**SDK:** minSdk 31, targetSdk 36, compileSdk 37.2 (required by GeckoView/AC 160; platform `platforms;android-37.2`)  
 **License (our code):** [MPL-2.0](LICENSE)  
 **Repo:** https://github.com/shibicb72-design/Orbis
 

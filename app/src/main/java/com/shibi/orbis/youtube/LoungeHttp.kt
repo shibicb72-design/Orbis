@@ -36,7 +36,7 @@ internal class HttpsLoungeTransport : LoungeTransport {
     }
 
     private fun readCapped(input: InputStream, cap: Int): String {
-        // minSdk 29: no InputStream.readNBytes.
+        // InputStream.readNBytes is API 33; minSdk is 31.
         val out = ByteArrayOutputStream()
         val buf = ByteArray(4096)
         while (out.size() < cap) {

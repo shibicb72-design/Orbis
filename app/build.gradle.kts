@@ -26,7 +26,7 @@ val uploadKeystore: File? =
 android {
     namespace = "com.shibi.orbis"
     // GeckoView/AC 160 AAR metadata requires Android API 37.2+ (platform package platforms;android-37.2).
-    // House targetSdk stays 36; minSdk stays 29.
+    // House targetSdk stays 36; minSdk is 31 (Android 12, owner decision 2026-11-11).
     compileSdk {
         version = release(37) {
             minorApiLevel = 2
@@ -35,7 +35,7 @@ android {
 
     defaultConfig {
         applicationId = "com.shibi.orbis"
-        minSdk = 29
+        minSdk = 31
         targetSdk = 36
         versionCode = 20
         versionName = "0.7.0"
