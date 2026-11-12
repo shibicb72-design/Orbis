@@ -15,13 +15,13 @@ import org.robolectric.annotation.Config
 /** The clipboard clear for copied passwords: only our clip, only after a minute, only while Orbis is in front. */
 class ClipVerdictTest {
     private fun verdict(
-        pending: String? = "t1",
+        pending: Boolean = true,
         copiedAt: Long = 0L,
         now: Long = SENSITIVE_CLIP_LIFETIME_MS,
         readable: Boolean = true,
-        clipToken: String? = "t1",
+        ours: Boolean = true,
         foreground: Boolean = true,
-    ) = clipVerdict(pending, copiedAt, now, readable, clipToken, foreground)
+    ) = clipVerdict(pending, copiedAt, now, readable, ours, foreground)
 
     @Test
     fun clearsOurClipOnceItsTimeIsUp() {
@@ -37,20 +37,19 @@ class ClipVerdictTest {
 
     @Test
     fun neverClearsAClipTheUserReplaced() {
-        assertEquals(ClipVerdict.FORGET, verdict(clipToken = "other"))
-        assertEquals(ClipVerdict.FORGET, verdict(clipToken = null))
-        assertEquals("replaced even before the minute", ClipVerdict.FORGET, verdict(now = 1L, clipToken = null))
+        assertEquals(ClipVerdict.FORGET, verdict(ours = false))
+        assertEquals("replaced even before the minute", ClipVerdict.FORGET, verdict(now = 1L, ours = false))
     }
 
     @Test
     fun waitsWhileInTheBackgroundOrTheClipboardIsUnreadable() {
         assertEquals(ClipVerdict.WAIT, verdict(foreground = false))
-        assertEquals("unreadable is not replaced", ClipVerdict.WAIT, verdict(readable = false, clipToken = null))
+        assertEquals("unreadable is not replaced", ClipVerdict.WAIT, verdict(readable = false, ours = false))
     }
 
     @Test
     fun nothingPendingDoesNothing() {
-        assertEquals(ClipVerdict.NONE, verdict(pending = null))
+        assertEquals(ClipVerdict.NONE, verdict(pending = false))
     }
 }
 
@@ -103,6 +102,32 @@ class SensitiveClipTest {
         clipboard.setPrimaryClip(ClipData.newPlainText("orbis-secret", "hunter2"))
         secrets.clearIfDue(clipboard)
         assertEquals("hunter2", clipText())
+    }
+
+    /**
+     * The emulator's host clipboard sync puts back a copy of the clip within milliseconds: same text, label "host
+     * clipboard", its own extras, no token (seen on API 36, H-D20). It still holds the secret, so it is still cleared.
+     */
+    @Test
+    fun aSystemCopyOfTheSecretWithoutTheTokenIsStillCleared() {
+        secrets.copy(clipboard, "hunter2")
+        val echo = ClipData.newPlainText("host clipboard", "hunter2")
+        echo.description.extras = android.os.PersistableBundle().apply { putBoolean("com.android.systemui.SUPPRESS_CLIPBOARD_OVERLAY", true) }
+        clipboard.setPrimaryClip(echo)
+        secrets.clearIfDue(clipboard)
+        assertEquals("not forgotten, and too early", "hunter2", clipText())
+        clock += SENSITIVE_CLIP_LIFETIME_MS
+        scheduled.single().second()
+        assertFalse(clipboard.hasPrimaryClip() && clipText() == "hunter2")
+    }
+
+    @Test
+    fun aClipWithOtherTextAndNoTokenIsNeverTouched() {
+        secrets.copy(clipboard, "hunter2")
+        clipboard.setPrimaryClip(ClipData.newPlainText("host clipboard", "hunter3"))
+        clock += SENSITIVE_CLIP_LIFETIME_MS
+        secrets.clearIfDue(clipboard)
+        assertEquals("hunter3", clipText())
     }
 
     @Test
