@@ -89,6 +89,9 @@ class OrbisApp : Application() {
     var torrentForeground: TorrentForegroundController? = null
         private set
 
+    /** Started MainActivity instances; they can overlap (see [StartedActivities]). */
+    val startedActivities = StartedActivities()
+
     override fun onCreate() {
         super.onCreate()
         // Gecko child processes (":tab", ":gpu", ...) run this too; they must not create a runtime or container.
