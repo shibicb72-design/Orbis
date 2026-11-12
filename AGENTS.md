@@ -9,6 +9,7 @@ Open-source Android browser (Path B: GeckoView + Mozilla Android Components). Pr
 - `app/debug.keystore` is DEBUG-ONLY and NON-SECRET (android / androiddebugkey), shared house pattern. Never for Play.
 - **APKs for Shibi always from `main` only.** Builds always via the Gradle wrapper (`gradlew.bat` / `scripts/gradle-brief.ps1`).
 - Orbis **has INTERNET** (and ACCESS_NETWORK_STATE) — it is a browser. Do not strip those permissions.
+- Torrent natives: a diff touching `app/src/main/jniLibs/**` or `native/libtorrent4j/CHECKSUMS.sha256` is approved only after the run-provenance check in `native/libtorrent4j/README.md` ("Review rule"). Natives ship only from a green `workflow_dispatch` run of Torrent natives on `main`; never from a `pull_request` run.
 
 ## Project map
 - Single module `:app`, package / applicationId `com.shibi.orbis` (minSdk 31, targetSdk 36, compileSdk **37** required by GeckoView/AC 160, JDK 17).

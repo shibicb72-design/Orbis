@@ -47,6 +47,8 @@ import com.shibi.orbis.engine.isImageAction
 import com.shibi.orbis.tabs.LinkMenuRequest
 import com.shibi.orbis.tabs.PendingDownload
 import com.shibi.orbis.tabs.pageMenu
+import com.shibi.orbis.ui.GuardedTextButton
+import com.shibi.orbis.ui.ObscuredTouchFilter
 
 /**
  * Asks before anything is written to disk, so a page cannot fill the device by triggering downloads. The name shown is
@@ -71,6 +73,7 @@ fun DownloadConfirmDialog(pending: PendingDownload, onConfirm: () -> Unit, onCan
         onDismissRequest = onCancel,
         title = { Text(stringResource(R.string.browser_download_title)) },
         text = {
+            ObscuredTouchFilter()
             Column {
                 Text(name, fontWeight = FontWeight.Bold, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 Text(
@@ -93,7 +96,7 @@ fun DownloadConfirmDialog(pending: PendingDownload, onConfirm: () -> Unit, onCan
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.browser_download_start)) } },
+        confirmButton = { GuardedTextButton(guardKey = pending, onClick = onConfirm) { Text(stringResource(R.string.browser_download_start)) } },
         dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.prompt_cancel)) } },
         containerColor = MaterialTheme.colorScheme.surface,
         titleContentColor = MaterialTheme.colorScheme.onSurface,
