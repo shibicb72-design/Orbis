@@ -178,6 +178,10 @@ echo "== setup openssl ${OPENSSL_VERSION} (${OPENSSL_TARGET})"
   make > "${LOGS}/openssl-make.log" 2>&1 || { tail -n 80 "${LOGS}/openssl-make.log"; exit 1; }
   make install_sw > "${LOGS}/openssl-install.log" 2>&1 || { tail -n 50 "${LOGS}/openssl-install.log"; exit 1; }
   cd ..
+  # Not in upstream (difference g): OpenSSL must have thread support. Configure writes OPENSSL_THREADS into
+  # configuration.h unless threads are disabled; stop if it is missing. The matching line goes to the log.
+  grep -E '^# *define OPENSSL_THREADS$' "${PWD}/openssl/include/openssl/configuration.h" \
+    || die "OpenSSL was configured without thread support (no OPENSSL_THREADS in configuration.h)"
   if [ "${OPENSSL_LIB64_MOVE}" = yes ]; then
     mv "${PWD}/openssl/lib64" "${PWD}/openssl/lib"
   fi
