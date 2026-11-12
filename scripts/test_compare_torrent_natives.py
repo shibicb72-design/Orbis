@@ -85,16 +85,21 @@ JNI_A = "Java_org_libtorrent4j_swig_libtorrent_1jni_new_1session"
 JNI_B = "Java_org_libtorrent4j_swig_libtorrent_1jni_delete_1session"
 NEEDED = ["libdl.so", "libm.so", "libc.so"]
 UPSTREAM_SYMBOLS = [(JNI_A, True, GLOBAL, DEFAULT), (JNI_B, True, GLOBAL, DEFAULT), ("SSL_new", True, GLOBAL, DEFAULT),
-                    ("memcpy", False, GLOBAL, DEFAULT)]
+                    ("memcpy", False, GLOBAL, DEFAULT), ("gmtime", False, GLOBAL, DEFAULT)]
+# Ours: upstream's symbols with the OpenSSL threads import change applied.
+OURS_SYMBOLS = ([s for s in UPSTREAM_SYMBOLS if s[0] not in ctn.THREADS_IMPORT_CHANGE["removed"]]
+                + [(name, False, GLOBAL, DEFAULT) for name in sorted(ctn.THREADS_IMPORT_CHANGE["added"])])
+IMPORT_FAIL = "imported (undefined) symbol set is not upstream's with the OpenSSL threads change"
 
-# Fixture 1: an upstream-like 64-bit library. Fixture 2: a 32-bit ARM library.
-FIXTURE_64 = make_elf(True, EM_AARCH64, UPSTREAM_SYMBOLS, NEEDED)
-FIXTURE_32 = make_elf(False, EM_ARM, UPSTREAM_SYMBOLS, NEEDED)
+# An upstream-like 64-bit library, ours as a 64-bit library, and ours as a 32-bit ARM library.
+UPSTREAM_64 = make_elf(True, EM_AARCH64, UPSTREAM_SYMBOLS, NEEDED)
+OURS_64 = make_elf(True, EM_AARCH64, OURS_SYMBOLS, NEEDED)
+OURS_32 = make_elf(False, EM_ARM, OURS_SYMBOLS, NEEDED)
 
 
 class ReadElfTest(unittest.TestCase):
     def test_reads_64_bit_fixture(self):
-        info = ctn.read_elf(FIXTURE_64)
+        info = ctn.read_elf(UPSTREAM_64)
         self.assertEqual(info["class"], 64)
         self.assertEqual(info["machine"], EM_AARCH64)
         self.assertEqual(info["exported"], {JNI_A, JNI_B, "SSL_new"})
@@ -102,7 +107,7 @@ class ReadElfTest(unittest.TestCase):
         self.assertEqual(info["soname"], "libtorrent4j.so")
 
     def test_reads_32_bit_fixture(self):
-        info = ctn.read_elf(FIXTURE_32)
+        info = ctn.read_elf(OURS_32)
         self.assertEqual(info["class"], 32)
         self.assertEqual(info["machine"], EM_ARM)
         self.assertEqual(info["exported"], {JNI_A, JNI_B, "SSL_new"})
@@ -120,61 +125,81 @@ class ReadElfTest(unittest.TestCase):
 
     def test_truncated(self):
         with self.assertRaises(ctn.CompareError):
-            ctn.read_elf(FIXTURE_64[:200])
+            ctn.read_elf(UPSTREAM_64[:200])
 
 
 class CompareTest(unittest.TestCase):
-    def run_compare(self, ours_bytes, upstream_bytes=FIXTURE_64):
+    def run_compare(self, ours_bytes, upstream_bytes=UPSTREAM_64):
         return ctn.compare(ctn.read_elf(ours_bytes), ctn.read_elf(upstream_bytes), len(ours_bytes), len(upstream_bytes))
 
-    def test_identical_passes(self):
-        lines, failures = self.run_compare(FIXTURE_64)
+    def test_threads_import_change_passes(self):
+        lines, failures = self.run_compare(OURS_64)
         self.assertEqual(failures, [])
         self.assertTrue(any("same set" in line for line in lines))
+        self.assertTrue(any(line.startswith("imported") and line.endswith("expected set") for line in lines))
+
+    def test_upstream_imports_unchanged_fail(self):
+        # A no-threads OpenSSL again: upstream's exact imports are no longer accepted.
+        lines, failures = self.run_compare(UPSTREAM_64)
+        self.assertEqual(failures, [IMPORT_FAIL])
+        self.assertTrue(any("only in ours:     gmtime" in line for line in lines))
+        self.assertTrue(any("only in expected: pthread_equal" in line for line in lines))
+
+    def test_partial_threads_change_fails(self):
+        ours = make_elf(True, EM_AARCH64, [s for s in OURS_SYMBOLS if s[0] != "pthread_exit"], NEEDED)
+        lines, failures = self.run_compare(ours)
+        self.assertEqual(failures, [IMPORT_FAIL])
+        self.assertTrue(any("only in expected: pthread_exit" in line for line in lines))
+
+    def test_empty_import_change_compares_exactly(self):
+        up = ctn.read_elf(UPSTREAM_64)
+        _, failures = ctn.compare(up, up, 1, 1, import_change={"added": frozenset(), "removed": frozenset()})
+        self.assertEqual(failures, [])
 
     def test_extra_non_jni_export_fails(self):
-        ours = make_elf(True, EM_AARCH64, UPSTREAM_SYMBOLS + [("SSL_new_ex", True, GLOBAL, DEFAULT)], NEEDED)
+        ours = make_elf(True, EM_AARCH64, OURS_SYMBOLS + [("SSL_new_ex", True, GLOBAL, DEFAULT)], NEEDED)
         lines, failures = self.run_compare(ours)
         self.assertEqual(failures, ["exported dynamic symbol sets differ"])
         self.assertTrue(any("only in ours:     ('SSL_new_ex'" in line for line in lines))
 
     def test_export_binding_change_fails(self):
-        symbols = [(n, d, WEAK if n == "SSL_new" else b, v) for n, d, b, v in UPSTREAM_SYMBOLS]
+        symbols = [(n, d, WEAK if n == "SSL_new" else b, v) for n, d, b, v in OURS_SYMBOLS]
         _, failures = self.run_compare(make_elf(True, EM_AARCH64, symbols, NEEDED))
         self.assertEqual(failures, ["exported dynamic symbol sets differ"])
 
     def test_imported_set_difference_fails(self):
-        ours = make_elf(True, EM_AARCH64, UPSTREAM_SYMBOLS + [("getrandom", False, GLOBAL, DEFAULT)], NEEDED)
-        _, failures = self.run_compare(ours)
-        self.assertEqual(failures, ["imported (undefined) symbol sets differ"])
+        ours = make_elf(True, EM_AARCH64, OURS_SYMBOLS + [("getrandom", False, GLOBAL, DEFAULT)], NEEDED)
+        lines, failures = self.run_compare(ours)
+        self.assertEqual(failures, [IMPORT_FAIL])
+        self.assertTrue(any("only in ours:     getrandom" in line for line in lines))
 
     def test_reads_imported(self):
-        self.assertEqual(ctn.read_elf(FIXTURE_64)["imported"], {"memcpy"})
+        self.assertEqual(ctn.read_elf(UPSTREAM_64)["imported"], {"memcpy", "gmtime"})
 
     def test_missing_jni_symbol_fails(self):
-        ours = make_elf(True, EM_AARCH64, UPSTREAM_SYMBOLS[1:], NEEDED)
+        ours = make_elf(True, EM_AARCH64, OURS_SYMBOLS[1:], NEEDED)
         lines, failures = self.run_compare(ours)
         self.assertIn("Java_org_libtorrent4j_swig_* symbol sets differ", failures)
         self.assertTrue(any(("only in upstream: " + JNI_A) in line for line in lines))
 
     def test_extra_jni_symbol_fails(self):
         extra = "Java_org_libtorrent4j_swig_libtorrent_1jni_extra"
-        ours = make_elf(True, EM_AARCH64, UPSTREAM_SYMBOLS + [(extra, True, GLOBAL, DEFAULT)], NEEDED)
+        ours = make_elf(True, EM_AARCH64, OURS_SYMBOLS + [(extra, True, GLOBAL, DEFAULT)], NEEDED)
         _, failures = self.run_compare(ours)
         self.assertIn("Java_org_libtorrent4j_swig_* symbol sets differ", failures)
 
     def test_jni_onload_in_one_only_fails(self):
-        ours = make_elf(True, EM_AARCH64, UPSTREAM_SYMBOLS + [("JNI_OnLoad", True, GLOBAL, DEFAULT)], NEEDED)
+        ours = make_elf(True, EM_AARCH64, OURS_SYMBOLS + [("JNI_OnLoad", True, GLOBAL, DEFAULT)], NEEDED)
         _, failures = self.run_compare(ours)
         self.assertIn("JNI_OnLoad present in one library only", failures)
 
     def test_needed_difference_fails(self):
-        ours = make_elf(True, EM_AARCH64, UPSTREAM_SYMBOLS, NEEDED + ["liblog.so"])
+        ours = make_elf(True, EM_AARCH64, OURS_SYMBOLS, NEEDED + ["liblog.so"])
         _, failures = self.run_compare(ours)
         self.assertIn("DT_NEEDED list differs", failures)
 
     def test_class_and_machine_difference_fails(self):
-        _, failures = self.run_compare(FIXTURE_32)
+        _, failures = self.run_compare(OURS_32)
         self.assertIn("ELF class differs", failures)
         self.assertIn("ELF machine differs", failures)
 
@@ -193,12 +218,12 @@ def make_jar(abi, so_bytes):
 
 class UpstreamJarTest(unittest.TestCase):
     def setUp(self):
-        self.jar = make_jar("arm64-v8a", FIXTURE_64)
+        self.jar = make_jar("arm64-v8a", UPSTREAM_64)
         self.jar_sha = hashlib.sha256(self.jar).hexdigest()
-        self.so_sha = hashlib.sha256(FIXTURE_64).hexdigest()
+        self.so_sha = hashlib.sha256(UPSTREAM_64).hexdigest()
 
     def test_hashes_match(self):
-        self.assertEqual(ctn.upstream_library(self.jar, "arm64-v8a", self.jar_sha, self.so_sha), FIXTURE_64)
+        self.assertEqual(ctn.upstream_library(self.jar, "arm64-v8a", self.jar_sha, self.so_sha), UPSTREAM_64)
 
     def test_jar_hash_mismatch(self):
         with self.assertRaises(ctn.CompareError):
@@ -215,13 +240,13 @@ class UpstreamJarTest(unittest.TestCase):
 
 class MainTest(unittest.TestCase):
     def run_main(self, ours_bytes):
-        jar = make_jar("arm64-v8a", FIXTURE_64)
+        jar = make_jar("arm64-v8a", UPSTREAM_64)
         with tempfile.TemporaryDirectory() as root:
             env = os.path.join(root, "build.env")
             with open(env, "w", encoding="utf-8") as handle:
                 handle.write("UPSTREAM_JAR_VERSION=2.1.0-39\nUPSTREAM_JAR_SHA256_arm64-v8a=%s\n"
                              "UPSTREAM_SO_SHA256_arm64-v8a=%s\n" % (hashlib.sha256(jar).hexdigest(),
-                                                                   hashlib.sha256(FIXTURE_64).hexdigest()))
+                                                                   hashlib.sha256(UPSTREAM_64).hexdigest()))
             jar_path, ours_path = os.path.join(root, "up.jar"), os.path.join(root, "ours.so")
             with open(jar_path, "wb") as handle:
                 handle.write(jar)
@@ -231,10 +256,10 @@ class MainTest(unittest.TestCase):
                 return ctn.main([ours_path, "--abi", "arm64-v8a", "--build-env", env, "--upstream-jar", jar_path])
 
     def test_main_ok(self):
-        self.assertEqual(self.run_main(FIXTURE_64), 0)
+        self.assertEqual(self.run_main(OURS_64), 0)
 
     def test_main_difference(self):
-        self.assertEqual(self.run_main(make_elf(True, EM_AARCH64, UPSTREAM_SYMBOLS[1:], NEEDED)), 1)
+        self.assertEqual(self.run_main(make_elf(True, EM_AARCH64, OURS_SYMBOLS[1:], NEEDED)), 1)
 
     def test_main_unreadable_ours(self):
         self.assertEqual(self.run_main(b"not an elf file at all, just text padding" * 3), 2)
