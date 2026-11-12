@@ -428,4 +428,6 @@
     <string name="torrents_remove_kept_body_private" translatable="false">The files kept inside Orbis are deleted.</string>
     <!-- Clear browsing data > Downloads list covers torrents too (F-07, security PR 10). English only. -->
     <string name="clear_downloads_summary_torrents" translatable="false">Finished and failed downloads and torrents leave the list. Downloaded files stay on your device; only a failed torrent\'s partial data is deleted. Running downloads and torrents stay listed.</string>
+    <!-- Settings > About > Open-source licences: where a component's source code is, at the commit Orbis ships (MPL-2.0 3.2). English only. -->
+    <string name="licences_source" translatable="false">Source code: %1$s</string>
 </resources>

@@ -29,14 +29,20 @@ class LicencesScreenTest {
     val rule = createComposeRule()
 
     @Test
-    fun listsEightComponentsAndExpandsTheLibtorrentText() {
+    fun listsThirteenComponentsAndExpandsTheLibtorrentText() {
         rule.setContent { MaterialTheme { LicencesScreen(onBack = {}) } }
         rule.waitForIdle()
-        assertEquals(8, Licences.entries.size)
+        assertEquals(13, Licences.entries.size)
         for (entry in Licences.entries) {
             rule.onNode(hasScrollAction()).performScrollToNode(hasText(entry.name))
             rule.onNodeWithText(entry.name).assertExists()
         }
+        // The MPL-2.0 components inside the natives say where their source is, at the shipped commit.
+        rule.onNode(hasScrollAction()).performScrollToNode(hasText("libdatachannel"))
+        rule.onNodeWithText("Version 0.24.1 + 2 commits (a4d3211) · Mozilla Public License 2.0").assertExists()
+        rule.onNodeWithText("Source code: https://github.com/paullouisageneau/libdatachannel/tree/a4d3211da33bc1114ae50d2dd12f4186b67aaba4").assertExists()
+        rule.onNode(hasScrollAction()).performScrollToNode(hasText("libjuice"))
+        rule.onNodeWithText("Source code: https://github.com/paullouisageneau/libjuice/tree/5948a4162d37bc213d6051b67ee2876ccc5a99a6").assertExists()
         rule.onNode(hasScrollAction()).performScrollToNode(hasText("libtorrent"))
         rule.onAllNodesWithText("Redistribution and use", substring = true).assertCountEquals(0)
         rule.onNodeWithText("libtorrent").performClick()

@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.shibi.orbis.R
 import com.shibi.orbis.about.LicenceEntry
+import com.shibi.orbis.about.LicenceFamily
 import com.shibi.orbis.about.LicenceKind
 import com.shibi.orbis.about.LicenceNote
 import com.shibi.orbis.about.LicenceText
@@ -118,10 +119,11 @@ private fun LicenceCard(entry: LicenceEntry) {
                     val details =
                         listOfNotNull(
                             entry.version?.let { stringResource(R.string.licences_version, it) },
-                            stringResource(licenceName(entry.licence)),
+                            stringResource(licenceName(entry.licence.family)),
                         ).joinToString(" · ")
                     Text(details, style = MaterialTheme.typography.bodySmall, color = secondary)
                     entry.note?.let { Text(stringResource(noteText(it)), style = MaterialTheme.typography.bodySmall, color = secondary) }
+                    entry.source?.let { Text(stringResource(R.string.licences_source, it), style = MaterialTheme.typography.bodySmall, color = secondary) }
                 }
                 Icon(
                     if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
@@ -177,13 +179,13 @@ private suspend fun readLicence(context: Context, kind: LicenceKind): List<Licen
     }
 
 @StringRes
-private fun licenceName(kind: LicenceKind): Int =
-    when (kind) {
-        LicenceKind.BSD_3_CLAUSE -> R.string.licence_bsd_3
-        LicenceKind.MIT -> R.string.licence_mit
-        LicenceKind.BSL_1_0 -> R.string.licence_bsl
-        LicenceKind.APACHE_2_0 -> R.string.licence_apache
-        LicenceKind.MPL_2_0 -> R.string.licence_mpl
+private fun licenceName(family: LicenceFamily): Int =
+    when (family) {
+        LicenceFamily.BSD_3_CLAUSE -> R.string.licence_bsd_3
+        LicenceFamily.MIT -> R.string.licence_mit
+        LicenceFamily.BSL_1_0 -> R.string.licence_bsl
+        LicenceFamily.APACHE_2_0 -> R.string.licence_apache
+        LicenceFamily.MPL_2_0 -> R.string.licence_mpl
     }
 
 @StringRes
