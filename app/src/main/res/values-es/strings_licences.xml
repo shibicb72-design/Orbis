@@ -15,5 +15,6 @@
     <string name="licence_note_reader">Vista de lectura</string>
     <string name="licence_note_framework">Base de la app e interfaz</string>
     <string name="licence_note_qr">Lector de códigos QR</string>
+    <string name="licence_note_youtube_pip">Corrección de imagen en imagen para YouTube</string>
     <string name="licences_preformatted">Algunas partes conservan su formato original: desplázalas hacia los lados.</string>
 </resources>

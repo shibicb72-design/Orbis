@@ -36,6 +36,7 @@ import kotlinx.coroutines.withContext
 import com.shibi.orbis.privacy.PrivacyWindowController
 import com.shibi.orbis.privacy.PrivacyWindowOps
 import com.shibi.orbis.ui.OrbisRoot
+import com.shibi.orbis.media.PipWindowExit
 import com.shibi.orbis.media.pipAspectRatio
 import com.shibi.orbis.media.pipShapes
 import com.shibi.orbis.ui.BackKeyWindowCallback
@@ -96,6 +97,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        // Also set here, so a missed mode callback cannot leave the toolbar hidden.
+        app.container.pictureInPicture.value = isInPictureInPictureMode
         app.container.tabs.setForeground(true)
         app.downloadForeground?.onAppForeground()
         app.torrentForeground?.onAppForeground()
@@ -105,7 +108,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        leftPipWindow = false
+        pipExit.onResume()
+        app.container.pictureInPicture.value = isInPictureInPictureMode
         app.container.sensitiveClip.foreground = hasWindowFocus()
         clearSensitiveClipIfDue()
     }
@@ -126,25 +130,24 @@ class MainActivity : ComponentActivity() {
         getSystemService(android.content.ClipboardManager::class.java)?.let { app.container.sensitiveClip.clearIfDue(it) }
     }
 
-    /** Left picture-in-picture, and not yet back in the full window: closing the PiP window stops the activity next. */
-    private var leftPipWindow = false
+    /** The user closed the picture-in-picture window: that ends playback, it does not move it to the background. */
+    private val pipExit =
+        PipWindowExit {
+            app.container.tabs.selected.value.session?.mediaPause()
+            app.container.tabs.setForeground(false, keepPlayingMedia = false)
+        }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         app.container.pictureInPicture.value = isInPictureInPictureMode
-        if (isInPictureInPictureMode) return
-        // Expanding the window resumes the activity; closing it stops the activity. Either can be reported first.
-        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
-            leftPipWindow = true
-        } else {
-            stopAfterPipClosed()
-        }
-    }
-
-    /** The user closed the picture-in-picture window: that ends playback, it does not move it to the background. */
-    private fun stopAfterPipClosed() {
-        app.container.media.pause()
-        app.container.tabs.setForeground(false, keepPlayingMedia = false)
+        val state = lifecycle.currentState
+        val activity =
+            when {
+                state.isAtLeast(Lifecycle.State.RESUMED) -> PipWindowExit.Activity.RESUMED
+                state.isAtLeast(Lifecycle.State.STARTED) -> PipWindowExit.Activity.STARTED
+                else -> PipWindowExit.Activity.STOPPED
+            }
+        pipExit.onPipModeChanged(isInPictureInPictureMode, activity)
     }
 
     /** Width:height of the video that may go picture-in-picture now, or null. */
@@ -167,10 +170,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        if (leftPipWindow) {
-            leftPipWindow = false
-            stopAfterPipClosed()
-        }
+        pipExit.onStop()
         // Invisible: the selected page must not keep running at foreground priority.
         app.container.tabs.setForeground(false)
         app.downloadForeground?.onAppBackground()

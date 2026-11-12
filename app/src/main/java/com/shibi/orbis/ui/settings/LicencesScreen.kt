@@ -197,4 +197,5 @@ private fun noteText(note: LicenceNote): Int =
         LicenceNote.READER_VIEW -> R.string.licence_note_reader
         LicenceNote.APP_FRAMEWORK -> R.string.licence_note_framework
         LicenceNote.QR_SCANNER -> R.string.licence_note_qr
+        LicenceNote.YOUTUBE_PIP -> R.string.licence_note_youtube_pip
     }

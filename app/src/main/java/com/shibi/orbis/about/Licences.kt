@@ -27,7 +27,7 @@ enum class LicenceKind(val assetName: String, val family: LicenceFamily) {
 enum class LicenceFamily { BSD_3_CLAUSE, MIT, BSL_1_0, APACHE_2_0, MPL_2_0 }
 
 /** What a component does in Orbis, shown under its name. */
-enum class LicenceNote { TORRENT_ENGINE, INSIDE_LIBTORRENT4J, BROWSER_ENGINE, READER_VIEW, APP_FRAMEWORK, QR_SCANNER }
+enum class LicenceNote { TORRENT_ENGINE, INSIDE_LIBTORRENT4J, BROWSER_ENGINE, READER_VIEW, APP_FRAMEWORK, QR_SCANNER, YOUTUBE_PIP }
 
 /**
  * One open-source component the app ships. [version] is null where many libraries of one family ship together.
@@ -59,6 +59,9 @@ object Licences {
     const val USRSCTP_COMMIT = "fec583d54493f879d2ae44a743423bf8a04371ab"
     const val PLOG_COMMIT = "94899e0b926ac1b0f4750bfbd495167b4a6ae9ef"
     const val TRY_SIGNAL_COMMIT = "105cce59972f925a33aa6b1c3109e4cd3caf583d"
+
+    /** Firefox commit of the webcompat file assets/extensions/yt-pip/pip.js is adapted from. */
+    const val FIREFOX_YT_PIP_COMMIT = "e98e47c20429bdabcd34f5b550bdbcb2d432a0a2"
 
     val entries: List<LicenceEntry> =
         listOf(
@@ -108,6 +111,15 @@ object Licences {
             ),
             LicenceEntry("GeckoView / Android Components", ANDROID_COMPONENTS_VERSION, LicenceKind.MPL_2_0, LicenceNote.BROWSER_ENGINE),
             LicenceEntry("Readability", null, LicenceKind.APACHE_2_0, LicenceNote.READER_VIEW),
+            // assets/extensions/yt-pip/pip.js, adapted from Firefox's webcompat intervention for bug 1956165.
+            LicenceEntry(
+                "Firefox webcompat: YouTube picture-in-picture fix",
+                FIREFOX_YT_PIP_COMMIT.take(7),
+                LicenceKind.MPL_2_0,
+                LicenceNote.YOUTUBE_PIP,
+                "https://github.com/mozilla-firefox/firefox/blob/$FIREFOX_YT_PIP_COMMIT/browser/extensions/webcompat/injections/js/" +
+                    "bug1956165-www.youtube.com-picture-in-picture-fix.js",
+            ),
             LicenceEntry("AndroidX / Kotlin", null, LicenceKind.APACHE_2_0, LicenceNote.APP_FRAMEWORK),
             LicenceEntry("ZXing", ZXING_VERSION, LicenceKind.APACHE_2_0, LicenceNote.QR_SCANNER),
         )

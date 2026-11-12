@@ -2,11 +2,11 @@
   "manifest_version": 2,
   "name": "Orbis YouTube picture-in-picture",
   "version": "1.0",
-  "description": "Stops mobile YouTube from leaving fullscreen and pausing when Orbis shrinks the page into a picture-in-picture window. Reads and sends nothing.",
+  "description": "Stops mobile YouTube from leaving fullscreen and pausing when Orbis shrinks the page into a picture-in-picture window. Stores and sends nothing.",
   "browser_specific_settings": { "gecko": { "id": "yt-pip@orbis.shibi.com" } },
   "content_scripts": [
     {
-      "matches": ["*://*.youtube.com/*", "*://youtube.com/*"],
+      "matches": ["*://*.youtube.com/*"],
       "js": ["pip.js"],
       "run_at": "document_start",
       "all_frames": false

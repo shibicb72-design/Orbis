@@ -49,6 +49,7 @@ class LicencesTest {
                 "try_signal",
                 "GeckoView / Android Components",
                 "Readability",
+                "Firefox webcompat: YouTube picture-in-picture fix",
                 "AndroidX / Kotlin",
                 "ZXing",
             ),

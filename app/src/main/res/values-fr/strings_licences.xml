@@ -15,5 +15,6 @@
     <string name="licence_note_reader">Mode lecture</string>
     <string name="licence_note_framework">Socle de l\'appli et interface</string>
     <string name="licence_note_qr">Lecteur de codes QR</string>
+    <string name="licence_note_youtube_pip">Correctif image dans l\'image pour YouTube</string>
     <string name="licences_preformatted">Certaines parties gardent leur mise en page d\'origine : faites-les défiler sur le côté.</string>
 </resources>

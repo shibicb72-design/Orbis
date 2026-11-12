@@ -15,5 +15,6 @@
     <string name="licence_note_reader">Leseansicht</string>
     <string name="licence_note_framework">App-Grundlage und Oberfläche</string>
     <string name="licence_note_qr">QR-Code-Scanner</string>
+    <string name="licence_note_youtube_pip">YouTube-Bild-im-Bild-Korrektur</string>
     <string name="licences_preformatted">Manche Teile behalten ihr ursprüngliches Layout: Wische sie zur Seite.</string>
 </resources>
