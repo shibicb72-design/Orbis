@@ -599,12 +599,6 @@ private class GeckoBrowserSession(
     /** What the tab layer last asked for. Applied once the session is open, which a popup child is not yet. */
     private var wantActive = false
 
-    /**
-     * The view that shows this session now. Two activity instances can briefly overlap (Back finished one, a link
-     * started the next): the newest view takes the session, and only the view that has it may release it.
-     */
-    private var shownIn: java.lang.ref.WeakReference<GeckoView>? = null
-
     private var latestSessionState: GeckoSession.SessionState? = null
 
     /** Page URL that [SessionState.title] belongs to. YouTube's SPA updates the address and the title separately. */
@@ -2079,14 +2073,7 @@ private class GeckoBrowserSession(
             runCatching { geckoView.releaseSession() }
                 .onFailure { debugLog.log("GeckoSession", "release before attach failed: ${it.javaClass.simpleName}") }
         }
-        // A session has one display: take it from the older view that still shows it.
-        val previous = shownIn?.get()
-        if (previous != null && previous !== geckoView && previous.session === session) {
-            runCatching { previous.releaseSession() }
-                .onFailure { debugLog.log("GeckoSession", "release from older view failed: ${it.javaClass.simpleName}") }
-        }
         geckoView.setSession(session)
-        shownIn = java.lang.ref.WeakReference(geckoView)
         // Selection menu with Search and Share (GeckoView's own one has neither); needs the activity for its toolbar.
         if (session.selectionActionDelegate !is OrbisSelectionDelegate) {
             activityOf(contentView.context)?.let { activity ->
@@ -2097,13 +2084,9 @@ private class GeckoBrowserSession(
 
     override fun detachFrom(contentView: View) {
         val geckoView = contentView as? GeckoView ?: return
-        // An older view (an activity that is finishing) must not take the session away from the newer one.
-        val holder = shownIn?.get()
-        if (holder != null && holder !== geckoView) return
         if (geckoView.session === session) {
             runCatching { geckoView.releaseSession() }
                 .onFailure { debugLog.log("GeckoSession", "release failed: ${it.javaClass.simpleName}") }
-            shownIn = null
         }
     }
 

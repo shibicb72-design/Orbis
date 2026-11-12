@@ -105,9 +105,11 @@ class TabStripComposeTest {
         assertEquals("tab 1 starts with the primary border", primary and RGB, topStrokeArgb(1) and RGB)
         rule.onNodeWithTag(tabChipTag(2)).performClick()
         // The border colour is animated: the first frame after the click can still carry the old colour. Let the
-        // animation finish before reading pixels.
+        // animation finish, then wait until a frame with tab 2's border has been drawn: on a slow CI runner the
+        // captured pixels lagged behind (run 43280637189), so a fixed clock step alone was not enough.
         rule.mainClock.advanceTimeBy(1_000)
         rule.waitForIdle()
+        rule.waitUntil(timeoutMillis = 5_000) { topStrokeArgb(2) and RGB == primary and RGB }
         assertNotEquals("tab 1 kept the primary border $primary", primary and RGB, topStrokeArgb(1) and RGB)
         assertEquals("tab 2 border", primary and RGB, topStrokeArgb(2) and RGB)
     }

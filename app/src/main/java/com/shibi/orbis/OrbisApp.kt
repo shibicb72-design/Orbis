@@ -89,8 +89,18 @@ class OrbisApp : Application() {
     var torrentForeground: TorrentForegroundController? = null
         private set
 
-    /** Started MainActivity instances; they can overlap (see [StartedActivities]). */
-    val startedActivities = StartedActivities()
+    /** Started MainActivity instances, which can overlap, and the foreground and background that follow from them. */
+    val startedActivities =
+        StartedActivities { foreground ->
+            container.tabs.setForeground(foreground)
+            if (foreground) {
+                downloadForeground?.onAppForeground()
+                torrentForeground?.onAppForeground()
+            } else {
+                downloadForeground?.onAppBackground()
+                torrentForeground?.onAppBackground()
+            }
+        }
 
     override fun onCreate() {
         super.onCreate()
