@@ -129,15 +129,27 @@ android {
 // Torrent natives: src/main/jniLibs/<abi>/libtorrent4j.so are the unmodified artifacts of one Torrent natives workflow
 // run on main (native/libtorrent4j/README.md). Before every build, each file under src/main/jniLibs is hashed and
 // compared with native/libtorrent4j/CHECKSUMS.sha256; a changed byte, a missing file or an extra file fails the build.
+// A jniLibs directory in any other source set (src/debug, src/release, src/<flavour>, ...) fails it too: AGP would
+// package it next to, or instead of, the checked files.
 val verifyTorrentNatives = tasks.register("verifyTorrentNatives") {
     group = "verification"
-    description = "Checks src/main/jniLibs against native/libtorrent4j/CHECKSUMS.sha256."
+    description = "Checks src/main/jniLibs against native/libtorrent4j/CHECKSUMS.sha256; no other src/*/jniLibs."
     val repoRoot = rootProject.layout.projectDirectory.asFile
+    val srcDir = layout.projectDirectory.dir("src").asFile
     val jniLibs = layout.projectDirectory.dir("src/main/jniLibs").asFile
     val checksums = rootProject.layout.projectDirectory.file("native/libtorrent4j/CHECKSUMS.sha256").asFile
     inputs.file(checksums)
     inputs.files(jniLibs)
     doLast {
+        val otherJniLibs = srcDir.listFiles().orEmpty().filter { it.isDirectory && it.name != "main" }
+            .map { File(it, "jniLibs") }.filter { it.exists() }
+            .map { it.relativeTo(repoRoot).invariantSeparatorsPath }.sorted()
+        if (otherJniLibs.isNotEmpty()) {
+            throw GradleException(
+                "Native libraries belong in app/src/main/jniLibs only (native/libtorrent4j/README.md). Remove: " +
+                    otherJniLibs.joinToString(", "),
+            )
+        }
         val hexSha256 = Regex("[0-9a-f]{64}")
         val expected = mutableMapOf<String, String>()
         checksums.readLines().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }.forEach { line ->

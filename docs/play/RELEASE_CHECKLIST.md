@@ -20,8 +20,10 @@ gradlew.bat :app:assembleR8check    # the same shrunk build, own app id, debug-s
 - Smoke test the r8check APK: first run, a page, tabs, settings, uBlock Origin install, passwords, a download.
 - After `bundleRelease`, run
   `python scripts/check_torrent_natives.py app/build/outputs/bundle/release/app-release.aab --min-openssl <version>
-  --libtorrent 2.1.0.0 --abis arm64-v8a,armeabi-v7a,x86_64` (`<version>` is `OPENSSL_VERSION` in
-  `native/libtorrent4j/versions.env`); it must pass before upload.
+  --libtorrent 2.1.0.0 --abis arm64-v8a,armeabi-v7a,x86_64 --checksums native/libtorrent4j/CHECKSUMS.sha256`
+  (`<version>` is `OPENSSL_VERSION` in `native/libtorrent4j/versions.env`); it must pass before upload. It checks the
+  version strings and that each packaged `lib/<abi>/libtorrent4j.so` is byte for byte the file `CHECKSUMS.sha256`
+  lists. Run it the same way on any APK that goes out (`app-<abi>-release.apk`, `--abis <abi>`).
 
 ## 3. Play Console (Owner)
 - [ ] Developer account: https://play.google.com/console (one-time US$25 registration fee, identity verification).

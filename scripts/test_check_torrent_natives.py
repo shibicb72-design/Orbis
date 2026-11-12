@@ -2,6 +2,7 @@
 """Offline tests for check_torrent_natives.py. Run: python3 -I scripts/test_check_torrent_natives.py"""
 
 import contextlib
+import hashlib
 import importlib.util
 import io
 import os
@@ -97,6 +98,38 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(problems, ["no libtorrent4j.so in the inputs"])
 
 
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+class ChecksumsTest(unittest.TestCase):
+    def test_parse_repository_layout(self):
+        text = ("# header\n\n"
+                "%s  app/src/main/jniLibs/arm64-v8a/libtorrent4j.so\n"
+                "%s *app/src/main/jniLibs/x86_64/libtorrent4j.so\n"
+                "%s  app/src/main/jniLibs/x86_64/libother.so\n") % ("a" * 64, "b" * 64, "c" * 64)
+        self.assertEqual(ctn.parse_checksums(text), {"arm64-v8a": "a" * 64, "x86_64": "b" * 64})
+
+    def test_parse_the_committed_file(self):
+        path = os.path.join(_HERE, os.pardir, "native", "libtorrent4j", "CHECKSUMS.sha256")
+        with open(path, encoding="utf-8") as handle:
+            self.assertEqual(sorted(ctn.parse_checksums(handle.read())), ["arm64-v8a", "armeabi-v7a", "x86_64"])
+
+    def test_parse_rejects(self):
+        for text in ("nothing listed\n", "# only a comment\n",
+                     "%s  libtorrent4j.so\n" % ("a" * 64),
+                     "%s  a/x86_64/libtorrent4j.so\n%s  b/x86_64/libtorrent4j.so\n" % ("a" * 64, "b" * 64),
+                     "%s  a/x86_64/libtorrent4j.so\n" % ("A" * 64)):
+            with self.assertRaises(ValueError, msg=text):
+                ctn.parse_checksums(text)
+
+    def test_check_hashes(self):
+        expected = {"x86_64": "a" * 64}
+        self.assertEqual(ctn.check_hashes([("s", "x86_64", "a" * 64)], expected)[1], [])
+        self.assertIn("expected " + "a" * 64, ctn.check_hashes([("s", "x86_64", "b" * 64)], expected)[1][0])
+        self.assertIn("no SHA-256 listed", ctn.check_hashes([("s", "arm64-v8a", "a" * 64)], expected)[1][0])
+
+
 class MainTest(unittest.TestCase):
     """The three input layouts end to end."""
 
@@ -146,6 +179,53 @@ class MainTest(unittest.TestCase):
     def test_unreadable_input(self):
         code, _ = self.run_main([("notes.txt", b"hello")])
         self.assertEqual(code, 2)
+
+    def checksums_file(self, root, entries):
+        path = os.path.join(root, "CHECKSUMS.sha256")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("# run 1\n")
+            for abi, data in entries:
+                handle.write("%s  app/src/main/jniLibs/%s/libtorrent4j.so\n" % (sha(data), abi))
+        return path
+
+    def test_checksums_match_in_apk_and_aab(self):
+        libs_by_abi = {abi: fake_so(abi, *GOOD) for abi in MACHINE}
+        with tempfile.TemporaryDirectory() as root:
+            sums = self.checksums_file(root, libs_by_abi.items())
+            apk = {"lib/x86_64/libtorrent4j.so": libs_by_abi["x86_64"]}
+            code, out = self.run_main([("app.apk", apk)], "--abis", "x86_64", "--checksums", sums)
+            self.assertEqual(code, 0, out)
+            self.assertIn("matches", out)
+            aab = {"base/lib/%s/libtorrent4j.so" % abi: data for abi, data in libs_by_abi.items()}
+            code, out = self.run_main([("app.aab", aab)], "--abis", "arm64-v8a,armeabi-v7a,x86_64",
+                                      "--checksums", sums)
+            self.assertEqual(code, 0, out)
+
+    def test_checksums_mismatch_fails(self):
+        # Same version strings, other bytes: the version check alone passes, the checksum check does not.
+        committed = fake_so("arm64-v8a", *GOOD)
+        packaged = fake_so("arm64-v8a", "rebuilt", *GOOD)
+        with tempfile.TemporaryDirectory() as root:
+            sums = self.checksums_file(root, [("arm64-v8a", committed)])
+            apk = {"lib/arm64-v8a/libtorrent4j.so": packaged}
+            code, out = self.run_main([("app.apk", apk)], "--min-openssl", "3.5.9", "--checksums", sums)
+            self.assertEqual(code, 1, out)
+            self.assertIn("FAIL: arm64-v8a", out)
+            code, out = self.run_main([("app.apk", apk)], "--min-openssl", "3.5.9")
+            self.assertEqual(code, 0, out)
+
+    def test_checksums_abi_not_listed_fails(self):
+        with tempfile.TemporaryDirectory() as root:
+            sums = self.checksums_file(root, [("arm64-v8a", fake_so("arm64-v8a", *GOOD))])
+            code, out = self.run_main([("libtorrent4j.so", fake_so("x86_64", *GOOD))], "--checksums", sums)
+            self.assertEqual(code, 1, out)
+            self.assertIn("no SHA-256 listed", out)
+
+    def test_checksums_unreadable_is_usage_error(self):
+        with tempfile.TemporaryDirectory() as root:
+            missing = os.path.join(root, "CHECKSUMS.sha256")
+            code, out = self.run_main([("libtorrent4j.so", fake_so("x86_64", *GOOD))], "--checksums", missing)
+        self.assertEqual(code, 2, out)
 
     def test_json_output(self):
         with tempfile.TemporaryDirectory() as root:

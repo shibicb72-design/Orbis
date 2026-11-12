@@ -92,7 +92,8 @@ jobs:
 
       # The torrent natives are ours (app/src/main/jniLibs, native/libtorrent4j/CHECKSUMS.sha256). Each debug and
       # release APK must carry libtorrent4j.so for its ABI, with at least the OpenSSL that versions.env records and
-      # libtorrent 2.1.0.0. A missing library fails the step.
+      # libtorrent 2.1.0.0, and byte for byte the file CHECKSUMS.sha256 lists for that ABI (packaging must change
+      # nothing). A missing library fails the step.
       - name: Torrent natives in the APKs
         run: |
           set -euo pipefail
@@ -104,7 +105,8 @@ jobs:
               test "${#apks[@]}" -eq 1
               test -f "${apks[0]}"
               python3 -I scripts/check_torrent_natives.py --min-openssl "$min_openssl" --libtorrent 2.1.0.0 \
-                --abis "$abi" "${apks[0]}" | tee -a "$GITHUB_STEP_SUMMARY"
+                --abis "$abi" --checksums native/libtorrent4j/CHECKSUMS.sha256 "${apks[0]}" \
+                | tee -a "$GITHUB_STEP_SUMMARY"
             done
           done
 
@@ -119,5 +121,6 @@ jobs:
           min_openssl="$(sed -n 's/^OPENSSL_VERSION=//p' native/libtorrent4j/versions.env)"
           test -n "$min_openssl"
           python3 -I scripts/check_torrent_natives.py --min-openssl "$min_openssl" --libtorrent 2.1.0.0 \
-            --abis arm64-v8a,armeabi-v7a,x86_64 app/build/outputs/bundle/release/app-release.aab \
+            --abis arm64-v8a,armeabi-v7a,x86_64 --checksums native/libtorrent4j/CHECKSUMS.sha256 \
+            app/build/outputs/bundle/release/app-release.aab \
             | tee -a "$GITHUB_STEP_SUMMARY"
