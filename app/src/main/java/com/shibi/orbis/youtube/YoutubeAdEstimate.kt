@@ -516,6 +516,6 @@ private fun queryMap(raw: String): Map<String, String> {
     return out
 }
 
-/** [URLDecoder.decode] with a [Charset] is API 33. minSdk is 29, so the charset-name overload is the one that runs. */
+/** [URLDecoder.decode] with a [Charset] is API 33. minSdk is 31, so the charset-name overload is the one that runs. */
 @Suppress("DEPRECATION")
 private fun urlDecode(s: String): String = runCatching { URLDecoder.decode(s, "UTF-8") }.getOrDefault(s)

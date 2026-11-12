@@ -5,7 +5,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import androidx.core.net.toUri
 
@@ -271,7 +270,7 @@ internal class ExternalApps(private val context: Context) {
     fun launch(target: AppTarget): Boolean {
         val base = target.intent ?: return false
         val intent = Intent(base).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && base.scheme in setOf("http", "https")) {
+        if (base.scheme in setOf("http", "https")) {
             // Never bounce a web link to another browser: if no app takes it, it stays here.
             intent.addFlags(Intent.FLAG_ACTIVITY_REQUIRE_NON_BROWSER)
         }

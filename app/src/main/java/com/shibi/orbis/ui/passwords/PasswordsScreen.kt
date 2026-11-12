@@ -1,6 +1,5 @@
 package com.shibi.orbis.ui.passwords
 
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.KeyguardManager
 import android.content.ClipData
@@ -391,28 +390,17 @@ internal fun copySensitive(context: Context, text: String, sensitive: Boolean, s
 }
 
 /**
- * What the unlock prompt accepts: on Android 11+ a strong (class 3) biometric or the screen lock (PIN, pattern,
- * password); a weak biometric alone is not enough. Null on Android 10, which uses setDeviceCredentialAllowed instead.
+ * What the unlock prompt accepts: a strong (class 3) biometric or the screen lock (PIN, pattern, password); a weak
+ * biometric alone is not enough.
  */
-@SuppressLint("InlinedApi") // Plain int constants, only used on API 30+.
-internal fun allowedAuthenticators(sdkInt: Int): Int? =
-    if (sdkInt >= Build.VERSION_CODES.R) {
-        BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
-    } else {
-        null
-    }
+internal fun allowedAuthenticators(): Int =
+    BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
 
 /** Android's own biometric/screen-lock prompt (no extra library); [onSuccess] runs on the main thread. */
 private fun authenticate(context: Context, title: String, subtitle: String, onSuccess: () -> Unit) {
     val activity = context.findActivity() ?: return
     val builder = BiometricPrompt.Builder(activity).setTitle(title).setSubtitle(subtitle)
-    val allowed = allowedAuthenticators(Build.VERSION.SDK_INT)
-    if (allowed != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        builder.setAllowedAuthenticators(allowed)
-    } else {
-        @Suppress("DEPRECATION")
-        builder.setDeviceCredentialAllowed(true)
-    }
+    builder.setAllowedAuthenticators(allowedAuthenticators())
     val failed = runCatching {
         builder.build().authenticate(
             CancellationSignal(),

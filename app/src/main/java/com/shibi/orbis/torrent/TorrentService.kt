@@ -62,7 +62,7 @@ class TorrentService : Service() {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
             )
         } catch (e: IllegalStateException) {
-            // ForegroundServiceStartNotAllowedException (API 31+) is an IllegalStateException.
+            // ForegroundServiceStartNotAllowedException is an IllegalStateException.
             startRefused(controller, startId)
             return false
         } catch (e: SecurityException) {

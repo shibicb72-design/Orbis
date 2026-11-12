@@ -5,7 +5,6 @@ import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import com.shibi.orbis.torrent.TorrentPublisher
@@ -52,19 +51,13 @@ internal fun publishTorrentFile(context: Context, file: File, displayName: Strin
     val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.SIZE, MediaStore.MediaColumns.IS_PENDING)
     val rows =
         runCatching {
-            val cursor =
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    val query =
-                        Bundle().apply {
-                            putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
-                            putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, args)
-                            putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_INCLUDE)
-                        }
-                    resolver.query(collection, projection, query, null)
-                } else {
-                    @Suppress("DEPRECATION")
-                    resolver.query(MediaStore.setIncludePending(collection), projection, selection, args, null)
+            val query =
+                Bundle().apply {
+                    putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
+                    putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, args)
+                    putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_INCLUDE)
                 }
+            val cursor = resolver.query(collection, projection, query, null)
             cursor?.use { c ->
                 val out = ArrayList<PublishRow>()
                 while (c.moveToNext()) out += PublishRow(c.getLong(0), c.getLong(1), pending = c.getInt(2) != 0)

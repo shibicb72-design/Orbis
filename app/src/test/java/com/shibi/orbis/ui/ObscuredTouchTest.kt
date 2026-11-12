@@ -22,13 +22,13 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowDialog
 
 /**
- * F-15 on Android 10 and 11, where the system does not block taps through other apps' windows: a real touch on the
- * site-permission prompt's Allow button, sent through the dialog window as Android would, is dropped when it carries
- * FLAG_WINDOW_IS_OBSCURED and answers when it does not.
+ * F-15: Android 12+ still passes taps through sufficiently translucent overlays (at or below 80% opacity). A real
+ * touch on the site-permission prompt's Allow button, sent through the dialog window as Android would, is dropped
+ * when it carries FLAG_WINDOW_IS_OBSCURED and answers when it does not.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29, 30], application = android.app.Application::class)
-class ObscuredTouchOldAndroidTest {
+@Config(sdk = [31, 35], application = android.app.Application::class)
+class ObscuredTouchTest {
     @get:Rule(order = 0)
     val registration = ComposeActivityRegistration()
 
