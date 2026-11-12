@@ -1,6 +1,7 @@
 package com.shibi.orbis
 
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.runtime.getValue
@@ -13,6 +14,7 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import com.shibi.orbis.downloads.DownloadNotifications
 import com.shibi.orbis.engine.ImportResult
@@ -103,6 +105,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        leftPipWindow = false
         app.container.sensitiveClip.foreground = hasWindowFocus()
         clearSensitiveClipIfDue()
     }
@@ -121,6 +124,27 @@ class MainActivity : ComponentActivity() {
 
     private fun clearSensitiveClipIfDue() {
         getSystemService(android.content.ClipboardManager::class.java)?.let { app.container.sensitiveClip.clearIfDue(it) }
+    }
+
+    /** Left picture-in-picture, and not yet back in the full window: closing the PiP window stops the activity next. */
+    private var leftPipWindow = false
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        app.container.pictureInPicture.value = isInPictureInPictureMode
+        if (isInPictureInPictureMode) return
+        // Expanding the window resumes the activity; closing it stops the activity. Either can be reported first.
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            leftPipWindow = true
+        } else {
+            stopAfterPipClosed()
+        }
+    }
+
+    /** The user closed the picture-in-picture window: that ends playback, it does not move it to the background. */
+    private fun stopAfterPipClosed() {
+        app.container.media.pause()
+        app.container.tabs.setForeground(false, keepPlayingMedia = false)
     }
 
     /** Width:height of the video that may go picture-in-picture now, or null. */
@@ -143,6 +167,10 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        if (leftPipWindow) {
+            leftPipWindow = false
+            stopAfterPipClosed()
+        }
         // Invisible: the selected page must not keep running at foreground priority.
         app.container.tabs.setForeground(false)
         app.downloadForeground?.onAppBackground()

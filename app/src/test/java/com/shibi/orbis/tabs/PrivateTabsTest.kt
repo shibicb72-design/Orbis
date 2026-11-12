@@ -384,6 +384,17 @@ class PrivateTabsTest {
     }
 
     @Test
+    fun closingThePictureInPictureWindowPutsAPlayingTabToSleep() {
+        val m = manager()
+        m.openSelected()
+        m.setForeground(true)
+        val s = created[0]
+        s._state.value = s._state.value.copy(media = com.shibi.orbis.engine.MediaState(playing = true))
+        m.setForeground(false, keepPlayingMedia = false)
+        assertEquals(false, s.active)
+    }
+
+    @Test
     fun imageMenuOffersImageActionsInTheModeOfItsTab() {
         val m = manager()
         m.openSelected()
