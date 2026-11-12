@@ -33,3 +33,13 @@ class PipWindowExit(private val onClosed: () -> Unit) {
         onClosed()
     }
 }
+
+/**
+ * What closing the picture-in-picture window does: pause the media that played in it, and put the selected tab to
+ * sleep only when no activity instance is started. A new instance may already be on screen (a link opened right after
+ * the window closed); its page must stay active.
+ */
+fun onPipWindowClosed(noneStarted: Boolean, pausePipMedia: () -> Unit, sleepSelectedTab: () -> Unit) {
+    pausePipMedia()
+    if (noneStarted) sleepSelectedTab()
+}

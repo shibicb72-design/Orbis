@@ -1003,7 +1003,10 @@ private fun BrowserContent(
                     update = { view ->
                         contentView = view
                         val target = session
-                        if (target != null && attached.session !== target) {
+                        // A finishing activity (Back) can still be composed after a link started the next one; it must
+                        // not take the selected session from the new activity's view.
+                        val finishing = view.context.findActivity()?.isFinishing == true
+                        if (target != null && attached.session !== target && !finishing) {
                             attached.session?.detachFrom(view)
                             target.attachTo(view)
                             attached.session = target
