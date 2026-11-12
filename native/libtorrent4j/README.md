@@ -57,8 +57,9 @@ every build and every APK and bundle to `CHECKSUMS.sha256`; this rule ties `CHEC
    `.sha256` file OpenSSL publishes next to the tarball (GitHub release assets, or `https://www.openssl.org/source/`).
    Set `OPENSSL_SOURCE_DATE_EPOCH` to 00:00:00 UTC of that release's date (`date -u -d YYYY-MM-DD +%s`).
 2. Open a PR. The workflow runs on it (`pull_request`, paths under `native/libtorrent4j/`). This run is a test only.
-3. Every job must be green: the version strings show the new OpenSSL, the symbol sets equal upstream's, and the
-   two builds of each ABI are byte-identical.
+3. Every job must be green: the version strings show the new OpenSSL, the JNI and exported symbol sets equal
+   upstream's, the imports differ from upstream's by exactly the documented `THREADS_IMPORT_CHANGE`, and the two
+   builds of each ABI are byte-identical.
 4. Merge the PR. Then run the workflow on `main` (Actions > Torrent natives > Run workflow, branch `main`). Ship
    only that run's repeat-1 artifacts, after checking the run is green and `BUILDINFO.json` says
    `workflow_dispatch`, `refs/heads/main` and a commit on `main` (see "Rule"). Shipping is a separate PR:

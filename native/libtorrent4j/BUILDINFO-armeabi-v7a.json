@@ -5,7 +5,20 @@
     "exported_ours": 7248,
     "exported_upstream": 7248,
     "failures": [],
-    "imported_ours": 265,
+    "imported_expected_change": {
+      "added": [
+        "gmtime_r",
+        "pthread_attr_destroy",
+        "pthread_attr_init",
+        "pthread_attr_setdetachstate",
+        "pthread_equal",
+        "pthread_exit"
+      ],
+      "removed": [
+        "gmtime"
+      ]
+    },
+    "imported_ours": 270,
     "imported_upstream": 265,
     "jni_symbols_ours": 3659,
     "jni_symbols_upstream": 3659,
@@ -19,9 +32,9 @@
       "libm.so",
       "libc.so"
     ],
-    "ours_sha256": "f0578398073c79a7ec25182b9f2eefac395cb26425ed33eacf534210924becb2",
-    "ours_size": 13751940,
-    "size_change": "+0.12%",
+    "ours_sha256": "ac79d372b9ab219d8bf87767d48272178b117b106a103282dd566a9b159e6313",
+    "ours_size": 13766304,
+    "size_change": "+0.23%",
     "upstream_jar_url": "https://repo1.maven.org/maven2/org/libtorrent4j/libtorrent4j-android-arm/2.1.0-39/libtorrent4j-android-arm-2.1.0-39.jar",
     "upstream_size": 13734884,
     "upstream_so_sha256": "f8fbe9f7ba3703092d05bbd8ea39b75227cbd3b84c43aeefa5798464e018863c"
@@ -39,7 +52,7 @@
     "NDK_SIZE": "783549481",
     "NDK_URL": "https://dl.google.com/android/repository/android-ndk-r29-linux.zip",
     "NDK_VERSION": "r29",
-    "OPENSSL_NO_OPTS": "no-deprecated no-shared no-makedepend no-static-engine no-stdio no-posix-io no-threads no-ui-console no-zlib no-zlib-dynamic -fno-strict-aliasing -fvisibility=hidden -O3",
+    "OPENSSL_NO_OPTS": "no-deprecated no-shared no-makedepend no-static-engine no-stdio no-posix-io no-ui-console no-zlib no-zlib-dynamic -fno-strict-aliasing -fvisibility=hidden -O3",
     "OPENSSL_SHA256": "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a",
     "OPENSSL_SOURCE_DATE_EPOCH": "1790640000",
     "OPENSSL_URL": "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz",
@@ -66,8 +79,8 @@
     "image_version": "20261101.360.1",
     "label": "ubuntu-24.04"
   },
-  "sha256": "f0578398073c79a7ec25182b9f2eefac395cb26425ed33eacf534210924becb2",
-  "size": 13751940,
+  "sha256": "ac79d372b9ab219d8bf87767d48272178b117b106a103282dd566a9b159e6313",
+  "size": 13766304,
   "submodules": [
     "24a3adf35d3e689bde700371337aad61b160bafa swig/deps/libtorrent (v2.0.11-674-g24a3adf35)",
     "a57d4d36923c5fafa9698e14be16b8bc2913700a swig/deps/libtorrent/deps/asio-gnutls (heads/master)",
@@ -82,12 +95,12 @@
     "94dc46cccb6fec42072cb193b8a92a1dc84efca0 swig/deps/libtorrent/simulation/libsimulator (remotes/origin/set_option-38-g94dc46c)"
   ],
   "workflow": {
-    "commit": "629c992f834d20aa02af7f2d43b2ef65c272a08d",
+    "commit": "3edb9b9907c9d6334e9990a75c7b45b2b00dea33",
     "event": "workflow_dispatch",
-    "head_commit": "629c992f834d20aa02af7f2d43b2ef65c272a08d",
+    "head_commit": "3edb9b9907c9d6334e9990a75c7b45b2b00dea33",
     "ref": "refs/heads/main",
     "repository": "shibicb72-design/Orbis",
     "run_attempt": "1",
-    "run_id": "43070920772"
+    "run_id": "43144313707"
   }
 }

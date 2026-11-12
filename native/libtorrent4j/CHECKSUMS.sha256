@@ -1,7 +1,7 @@
 # SHA-256 of every committed libtorrent4j.so. Checked by the Gradle task verifyTorrentNatives (runs before every build).
-# Source: workflow run 43070920772 (Torrent natives, workflow_dispatch on refs/heads/main) at commit
-# 629c992f834d20aa02af7f2d43b2ef65c272a08d, repeat-1 artifacts, unmodified. Runner image ubuntu24 20261101.360.1.
-# https://github.com/shibicb72-design/Orbis/actions/runs/43070920772
-ba9096e45f9da3f9c75cd38f8d7f501b5788ddb23f64caef56c7b9ec480e0801  app/src/main/jniLibs/arm64-v8a/libtorrent4j.so
-f0578398073c79a7ec25182b9f2eefac395cb26425ed33eacf534210924becb2  app/src/main/jniLibs/armeabi-v7a/libtorrent4j.so
-9634a939ee35b4dd66850645dbbc6ff9bafdc56877a547010f00e5ea1a019bf1  app/src/main/jniLibs/x86_64/libtorrent4j.so
+# Source: workflow run 43144313707 (Torrent natives, workflow_dispatch on refs/heads/main) at commit
+# 3edb9b9907c9d6334e9990a75c7b45b2b00dea33, repeat-1 artifacts, unmodified. Runner image ubuntu24 20261101.360.1.
+# https://github.com/shibicb72-design/Orbis/actions/runs/43144313707
+f89748e987ad237f85dfeb41d1fc1fa46e65761240abccf2e15603ace08f5d45  app/src/main/jniLibs/arm64-v8a/libtorrent4j.so
+ac79d372b9ab219d8bf87767d48272178b117b106a103282dd566a9b159e6313  app/src/main/jniLibs/armeabi-v7a/libtorrent4j.so
+dbaf0fd5da46202fd90c0c79416961cca896aafe00a1a1e86be5f62c97eb47f9  app/src/main/jniLibs/x86_64/libtorrent4j.so
