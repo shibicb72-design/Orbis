@@ -61,9 +61,9 @@ class MainActivity : ComponentActivity() {
                 .distinctUntilChanged()
                 .collect { (anyPrivate, sensitive) -> applyPrivacyWindow(anyPrivate, sensitive) }
         }
-        // Picture-in-picture: a fullscreen video that is playing shrinks into a window when the user leaves (Home).
+        // Picture-in-picture: a fullscreen page playing media shrinks into a window when the user leaves (Home).
         lifecycleScope.launch {
-            pipShapes(app.container.media.current, app.container.tabs.selected.map { it.session })
+            pipShapes(app.container.media.current, app.container.tabs.selected.map { it.session }.distinctUntilChanged())
                 .collect { shape ->
                     pipShape = shape
                     applyPipParams()

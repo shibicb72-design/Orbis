@@ -69,10 +69,14 @@ class MediaCenter(private val tabs: TabManager, scope: CoroutineScope) {
     fun stop() = _current.value?.session?.mediaStop()
 }
 
-/** The video shape for picture-in-picture: only a playing video in page fullscreen; 16:9 when the size is unknown. */
-fun pipShapeOf(tab: MediaTab?, fullScreen: Boolean): Pair<Long, Long>? {
+/**
+ * The shape for picture-in-picture: media playing in the selected tab while that tab's page is fullscreen; the video's
+ * size when known, else 16:9. The page, not only the video element, may be fullscreen (a site's own player container),
+ * and then the engine never reports a video, so a fullscreen page playing only audio arms it too.
+ */
+fun pipShapeOf(tab: MediaTab?, selected: BrowserSession?, fullScreen: Boolean): Pair<Long, Long>? {
     val m = tab?.media ?: return null
-    if (!fullScreen || !m.playing || !m.hasVideo) return null
+    if (!fullScreen || !m.playing || tab.session !== selected) return null
     return if (m.videoWidth > 0 && m.videoHeight > 0) m.videoWidth to m.videoHeight else 16L to 9L
 }
 
@@ -82,8 +86,11 @@ fun pipShapeOf(tab: MediaTab?, fullScreen: Boolean): Pair<Long, Long>? {
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 fun pipShapes(media: Flow<MediaTab?>, selectedSession: Flow<BrowserSession?>): Flow<Pair<Long, Long>?> {
-    val fullScreen = selectedSession.flatMapLatest { s -> s?.state?.map { it.fullScreen } ?: flowOf(false) }
-    return combine(media, fullScreen.distinctUntilChanged(), ::pipShapeOf).distinctUntilChanged()
+    val selectedFullScreen =
+        selectedSession.flatMapLatest { s -> s?.state?.map { s to it.fullScreen } ?: flowOf(null to false) }
+            .distinctUntilChanged()
+    return combine(media, selectedFullScreen) { tab, (s, fullScreen) -> pipShapeOf(tab, s, fullScreen) }
+        .distinctUntilChanged()
 }
 
 /** Android accepts picture-in-picture ratios between 1:2.39 and 2.39:1; anything outside is clamped. */
