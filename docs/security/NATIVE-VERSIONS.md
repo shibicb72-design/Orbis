@@ -8,7 +8,7 @@ the daily Engine currency workflow compares it with the newest upstream releases
 | Component | Version | Source |
 |---|---|---|
 | libtorrent4j Java API | 2.1.0-39 | Maven Central, `org.libtorrent4j:libtorrent4j` (upstream build) |
-| libtorrent4j native library (`libtorrent4j.so`) | built from libtorrent4j `da7d240` (tag `v2.1.0-39`) | ours: `app/src/main/jniLibs/<abi>/`, Torrent natives run 43070920772 on `main` |
+| libtorrent4j native library (`libtorrent4j.so`) | built from libtorrent4j `da7d240` (tag `v2.1.0-39`) | ours: `app/src/main/jniLibs/<abi>/`, Torrent natives run 43144313707 on `main` |
 | libtorrent | 2.1.0.0 (a 2.1.0-line snapshot, commit `24a3adf`, 2026-01-25) | inside `libtorrent4j.so` |
 | OpenSSL | 3.5.9 (29 Sep 2026) | statically linked into `libtorrent4j.so` |
 
@@ -16,27 +16,28 @@ Upstream's native jars (`libtorrent4j-android-arm64`, `-arm`, `-x86_64`) are no 
 loads the library by name (`System.loadLibrary("torrent4j")`), so `jniLibs/<abi>/libtorrent4j.so` takes their place
 with no code change; the JNI symbol sets are identical to upstream's (see "Result" below).
 
-The shipped files below still have OpenSSL built with `no-threads`, as upstream's do. Since the threads change
-(difference g, PR #46) the pipeline builds OpenSSL with thread support; those libraries ship only from a
-`workflow_dispatch` run on `main`, in a separate PR that also updates this table.
+The shipped files below have OpenSSL built with thread support (difference g, PR #46); upstream's are built with
+`no-threads`. The natives shipped in PR 7 (run 43070920772 at `629c992`) were the `no-threads` build; they are
+replaced by these.
 
 ### Shipped files
 
-From Torrent natives run [43070920772](https://github.com/shibicb72-design/Orbis/actions/runs/43070920772)
-(`workflow_dispatch`, `refs/heads/main`, commit `629c992f834d20aa02af7f2d43b2ef65c272a08d`, runner image ubuntu24
+From Torrent natives run [43144313707](https://github.com/shibicb72-design/Orbis/actions/runs/43144313707)
+(`workflow_dispatch`, `refs/heads/main`, commit `3edb9b9907c9d6334e9990a75c7b45b2b00dea33`, runner image ubuntu24
 20261101.360.1, every job green), repeat-1 artifacts, unmodified:
 
 | ABI | File | SHA-256 | size |
 |---|---|---|---|
-| arm64-v8a | `app/src/main/jniLibs/arm64-v8a/libtorrent4j.so` | `ba9096e45f9da3f9c75cd38f8d7f501b5788ddb23f64caef56c7b9ec480e0801` | 15900928 |
-| armeabi-v7a | `app/src/main/jniLibs/armeabi-v7a/libtorrent4j.so` | `f0578398073c79a7ec25182b9f2eefac395cb26425ed33eacf534210924becb2` | 13751940 |
-| x86_64 | `app/src/main/jniLibs/x86_64/libtorrent4j.so` | `9634a939ee35b4dd66850645dbbc6ff9bafdc56877a547010f00e5ea1a019bf1` | 16374728 |
+| arm64-v8a | `app/src/main/jniLibs/arm64-v8a/libtorrent4j.so` | `f89748e987ad237f85dfeb41d1fc1fa46e65761240abccf2e15603ace08f5d45` | 15917336 |
+| armeabi-v7a | `app/src/main/jniLibs/armeabi-v7a/libtorrent4j.so` | `ac79d372b9ab219d8bf87767d48272178b117b106a103282dd566a9b159e6313` | 13766304 |
+| x86_64 | `app/src/main/jniLibs/x86_64/libtorrent4j.so` | `dbaf0fd5da46202fd90c0c79416961cca896aafe00a1a1e86be5f62c97eb47f9` | 16385928 |
 
 Before they were committed: each `BUILDINFO.json` said `workflow_dispatch`, `refs/heads/main`, that commit and that
 run id; each `.so` matched its `.sha256`, the run's summary table and the repeat-2 build; and
 `scripts/check_torrent_natives.py` (`OpenSSL 3.5.9 29 Sep 2026`, `libtorrent/2.1.0.0`) and
-`scripts/compare_torrent_natives.py` (against upstream's jars, hash-checked) passed on each. The hashes are the same
-as those of PR run 43064341148 at `8dae273` on the same runner image, so the build reproduced across the two runs.
+`scripts/compare_torrent_natives.py` (against upstream's jars, hash-checked; imports with exactly the threads
+change) passed on each. The hashes are the same as those of PR #46's green `pull_request` run 43142616124 at
+`a92d283` (head `abb173c`) on the same runner image, so the build reproduced across the two runs.
 
 Where it is checked:
 - `native/libtorrent4j/CHECKSUMS.sha256` lists the three files. The Gradle task `verifyTorrentNatives`
@@ -107,7 +108,8 @@ Orbis.
    change). See "How the natives are built" below.
 3. Security PR 7 (done): ship those natives (run 43070920772), update `versions.env` (`OPENSSL_VERSION=3.5.9`,
    `SOURCE=orbis-ci`, `RUN_ID`) and this file, and drop `--warn-only openssl` from the Engine currency workflow, so
-   an OpenSSL release turns it red.
+   an OpenSSL release turns it red. Since then the shipped natives are the thread-support build of #46 (run
+   43144313707).
 4. Security PR 7b: libtorrent 2.1.2 (OD-4). Stopped before any build (below): it needs a libtorrent4j fork, a new
    owner decision. Its other half, the #37 follow-ups (checksum check on the packaged libraries, no `jniLibs`
    outside `src/main`, the review rule), shipped on its own.
@@ -218,7 +220,7 @@ takes the embedded `built on:` time from it (`gmtime($ENV{'SOURCE_DATE_EPOCH'} /
 string and no upstream file.
 
 (g) `no-threads` is removed from `OPENSSL_NO_OPTS`; every other option is upstream's. The same change is proposed
-upstream in aldenml/libtorrent4j#315 (open, not reviewed as of 2026-11-12). Sources, read 2026-11-12:
+upstream in aldenml/libtorrent4j#315 (open as of 2026-11-12; no maintainer review (one automated Copilot comment)). Sources, read 2026-11-12:
 - Why. libtorrent `24a3adf` calls OpenSSL from several threads at once. `hasher` and `hasher256`
   (`src/hasher.cpp`: `EVP_MD_CTX_new`, `EVP_DigestInit_ex(..., EVP_sha1() / EVP_sha256())`, `EVP_MD_CTX_free`) run
   on the disk threads (`src/mmap_disk_io.cpp`, `do_hash`; pools sized by `aio_threads`, default 10, and
@@ -236,7 +238,7 @@ upstream in aldenml/libtorrent4j#315 (open, not reviewed as of 2026-11-12). Sour
   threads("-pthread"))`; `linux-armv4` inherits `linux-latomic`, which adds `threads("-latomic")` to `ex_libs`.
   `android-arm`, `android-arm64` and `android-x86_64` (`Configurations/15-android.conf`) inherit the same
   `linux-generic32`; only `android-x86`, not built here, adds `-latomic`. So `Configure` turns threads on by
-  itself (`$auto_threads`, `Configure` lines 1570-1591) and writes `OPENSSL_THREADS` into `configuration.h`
+  itself (`$auto_threads`, `Configure` lines 1570-1592) and writes `OPENSSL_THREADS` into `configuration.h`
   (line 1617). `INSTALL.md` asks for `threads` plus a system option such as `-D_REENTRANT` only on systems where
   `Configure` does not know them; this is not one. Clang defines `_REENTRANT` itself under `-pthread` on Linux and
   Android targets (`clang/lib/Basic/Targets/OSTargets.h`, `LinuxTargetInfo::getOSDefines`). The atomics in
@@ -306,7 +308,7 @@ Where upstream's binaries came from: the released `.so` files embed source paths
 runner (not the Dockerfile route), on the day of the 2.1.0-39 release. This supports, but does not prove, that the
 Maven jars were built by that workflow.
 
-### Result with thread support (PR #46, run 43140935475 at `86f7f31`, `pull_request`, not shipped)
+### Result with thread support (PR #46, run 43140935475 at `86f7f31`, `pull_request`, not shipped; shipped from run 43144313707)
 
 | ABI | SHA-256 (repeat 1 = repeat 2) | size | upstream size | JNI / exported / imported symbols, ours (upstream) |
 |---|---|---|---|---|
