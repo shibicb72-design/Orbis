@@ -8,7 +8,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 
 /** Scripted [TorrentEngine] for JVM tests: records every call; the test plays libtorrent with emitMetadata/advance/finish/fail. */
-class FakeTorrentEngine : TorrentEngine {
+class FakeTorrentEngine(
+    /** Where stop() writes the session state, as the real engine does; null writes nothing. */
+    private val sessionFile: File? = null,
+) : TorrentEngine {
     class Added(val id: EngineId, val source: TorrentSource, val saveDir: File, val resumeData: ByteArray?, val isPrivate: Boolean)
 
     val added = ArrayList<Added>()
@@ -54,12 +57,18 @@ class FakeTorrentEngine : TorrentEngine {
 
     override fun stop() {
         calls += "stop"
+        if (started) sessionFile?.let { it.parentFile?.mkdirs(); it.writeText("session") }
         started = false
         known.clear()
         privateIds.clear()
         discovery.clear()
         running.clear()
         _snapshots.value = emptyMap()
+    }
+
+    override fun forgetSessionState() {
+        calls += "forgetSessionState"
+        if (!started) sessionFile?.delete()
     }
 
     override fun add(source: TorrentSource, saveDir: File, resumeData: ByteArray?, isPrivate: Boolean): EngineId {

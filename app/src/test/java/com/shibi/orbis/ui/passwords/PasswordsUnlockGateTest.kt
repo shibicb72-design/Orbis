@@ -32,32 +32,22 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** What the unlock prompt accepts on each Android version. */
+/** What the unlock prompt accepts. */
 class AllowedAuthenticatorsTest {
     @Test
-    fun android11AndLaterNeedAStrongBiometricOrTheScreenLock() {
-        val strongOrLock = Authenticators.BIOMETRIC_STRONG or Authenticators.DEVICE_CREDENTIAL
-        for (sdk in listOf(30, 31, 33, 35, 36)) assertEquals("sdk $sdk", strongOrLock, allowedAuthenticators(sdk))
+    fun aStrongBiometricOrTheScreenLockIsNeeded() {
+        assertEquals(Authenticators.BIOMETRIC_STRONG or Authenticators.DEVICE_CREDENTIAL, allowedAuthenticators())
     }
 
     @Test
     fun aWeakBiometricIsNeverEnough() {
-        for (sdk in 30..36) {
-            val allowed = allowedAuthenticators(sdk)!!
-            assertEquals("sdk $sdk", 0, allowed and Authenticators.BIOMETRIC_WEAK and Authenticators.BIOMETRIC_STRONG.inv())
-        }
-    }
-
-    @Test
-    fun android10UsesTheDeviceCredentialFlagInstead() {
-        assertNull(allowedAuthenticators(29))
+        assertEquals(0, allowedAuthenticators() and Authenticators.BIOMETRIC_WEAK and Authenticators.BIOMETRIC_STRONG.inv())
     }
 }
 

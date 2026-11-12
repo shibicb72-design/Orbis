@@ -53,8 +53,8 @@ class DownloadService : Service() {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
             )
         } catch (e: IllegalStateException) {
-            // ForegroundServiceStartNotAllowedException (API 31+) is an IllegalStateException; the class itself
-            // does not exist on API 29-30, so it cannot be named in a catch clause.
+            // ForegroundServiceStartNotAllowedException is an IllegalStateException; catching the parent also
+            // covers any other refusal of the same type.
             startRefused(controller, startId)
             return
         } catch (e: SecurityException) {

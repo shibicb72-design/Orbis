@@ -127,24 +127,16 @@ class MainActivity : ComponentActivity() {
         val (w, h) = pipShape ?: return null
         // The page fills the window in fullscreen, so the whole window is where the video comes from.
         val source = window.decorView.let { Rect(0, 0, it.width, it.height) }
-        return PictureInPictureParams.Builder().setAspectRatio(pipAspectRatio(w, h)).setSourceRectHint(source).apply {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) setAutoEnterEnabled(true)
-        }.build()
+        return PictureInPictureParams.Builder().setAspectRatio(pipAspectRatio(w, h)).setSourceRectHint(source)
+            .setAutoEnterEnabled(true)
+            .build()
     }
 
     private fun applyPipParams() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12+: entering is automatic while a shape is set; clearing it turns auto-enter off.
-            runCatching {
-                setPictureInPictureParams(pipParams() ?: PictureInPictureParams.Builder().setAutoEnterEnabled(false).build())
-            }
+        // Entering is automatic while a shape is set; clearing it turns auto-enter off.
+        runCatching {
+            setPictureInPictureParams(pipParams() ?: PictureInPictureParams.Builder().setAutoEnterEnabled(false).build())
         }
-    }
-
-    override fun onUserLeaveHint() {
-        super.onUserLeaveHint()
-        // Before Android 12 the app enters picture-in-picture itself when the user presses Home.
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) pipParams()?.let { runCatching { enterPictureInPictureMode(it) } }
     }
 
     override fun onStop() {

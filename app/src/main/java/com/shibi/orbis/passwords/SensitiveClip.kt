@@ -1,11 +1,13 @@
 package com.shibi.orbis.passwords
 
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.os.Handler
 import android.os.Looper
 import android.os.PersistableBundle
 import android.os.SystemClock
+import java.security.MessageDigest
 import java.util.UUID
 
 /** How long a copied secret may stay on the clipboard before Orbis clears it. */
@@ -28,7 +30,7 @@ internal enum class ClipVerdict {
     /** Ours may still be there, but it is too early, Orbis is not in front, or the clipboard cannot be read now. */
     WAIT,
 
-    /** The clipboard holds something else: the user replaced our clip. Never touch it. */
+    /** The clipboard holds something else: the user replaced our secret. Never touch it. */
     FORGET,
 
     /** Our clip is still there and its time is up. */
@@ -36,22 +38,22 @@ internal enum class ClipVerdict {
 }
 
 /**
- * The decision behind [SensitiveClip.clearIfDue]. [clipToken] is the token found on the current primary clip, or null
- * when the clip carries none; [clipReadable] is false when no clip could be read at all (empty, or Android withheld
- * it because Orbis is not focused), which is never taken as "replaced".
+ * The decision behind [SensitiveClip.clearIfDue]. [clipIsOurs]: the current primary clip still holds the secret Orbis
+ * copied (see [SensitiveClip.clearIfDue]); [clipReadable] is false when no clip could be read at all (empty, or
+ * Android withheld it because Orbis is not focused), which is never taken as "replaced".
  */
 internal fun clipVerdict(
-    pendingToken: String?,
+    pending: Boolean,
     copiedAt: Long,
     now: Long,
     clipReadable: Boolean,
-    clipToken: String?,
+    clipIsOurs: Boolean,
     foreground: Boolean,
 ): ClipVerdict =
     when {
-        pendingToken == null -> ClipVerdict.NONE
+        !pending -> ClipVerdict.NONE
         !clipReadable -> ClipVerdict.WAIT
-        clipToken != pendingToken -> ClipVerdict.FORGET
+        !clipIsOurs -> ClipVerdict.FORGET
         !foreground -> ClipVerdict.WAIT
         now - copiedAt < SENSITIVE_CLIP_LIFETIME_MS -> ClipVerdict.WAIT
         else -> ClipVerdict.CLEAR
@@ -63,6 +65,11 @@ internal fun clipVerdict(
  * MainActivity comes to the front, the clip is cleared if Orbis is in front and the clip still carries that token.
  * Android lets only the focused app read the clipboard, so the check cannot run in the background; a clip the user
  * has since replaced is never touched.
+ *
+ * The clip on the clipboard is not always the one Orbis set: the system may put back a copy with the same text but
+ * its own label and extras, without the token (the emulator's host clipboard sync does this within milliseconds,
+ * which also drops the "sensitive" mark). So a clip without the token still counts as ours when its plain text is the
+ * secret; only a SHA-256 of the secret is kept for that comparison, never the secret itself.
  */
 class SensitiveClip(
     private val now: () -> Long = SystemClock::elapsedRealtime,
@@ -71,7 +78,7 @@ class SensitiveClip(
         Handler(Looper.getMainLooper()).postDelayed(task, delayMs)
     },
 ) {
-    private class Pending(val token: String, val copiedAt: Long)
+    private class Pending(val token: String, val digest: ByteArray, val copiedAt: Long)
 
     private var pending: Pending? = null
 
@@ -88,7 +95,7 @@ class SensitiveClip(
                 putString(SENSITIVE_CLIP_TOKEN_KEY, token)
             }
         clipboard.setPrimaryClip(clip)
-        synchronized(this) { pending = Pending(token, now()) }
+        synchronized(this) { pending = Pending(token, sha256(text), now()) }
         // A little after the lifetime, so the check never runs a moment too early.
         schedule(SENSITIVE_CLIP_LIFETIME_MS + 500L) { clearIfDue(clipboard) }
     }
@@ -97,13 +104,16 @@ class SensitiveClip(
     fun clearIfDue(clipboard: ClipboardManager) {
         val current = synchronized(this) { pending } ?: return
         val description = runCatching { if (clipboard.hasPrimaryClip()) clipboard.primaryClipDescription else null }.getOrNull()
+        val ours =
+            description != null &&
+                (description.extras?.getString(SENSITIVE_CLIP_TOKEN_KEY) == current.token || holdsText(clipboard, description, current.digest))
         val verdict =
             clipVerdict(
-                pendingToken = current.token,
+                pending = true,
                 copiedAt = current.copiedAt,
                 now = now(),
                 clipReadable = description != null,
-                clipToken = description?.extras?.getString(SENSITIVE_CLIP_TOKEN_KEY),
+                clipIsOurs = ours,
                 foreground = foreground,
             )
         when (verdict) {
@@ -117,4 +127,16 @@ class SensitiveClip(
             }
         }
     }
+
+    /** Whether the primary clip is a single plain-text item whose text is the secret with [digest]. */
+    private fun holdsText(clipboard: ClipboardManager, description: ClipDescription, digest: ByteArray): Boolean {
+        if (!description.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN)) return false
+        val clip = runCatching { clipboard.primaryClip }.getOrNull() ?: return false
+        if (clip.itemCount != 1) return false
+        // Item text only: coerceToText could open a content URI from another app.
+        val text = clip.getItemAt(0).text?.toString() ?: return false
+        return MessageDigest.isEqual(sha256(text), digest)
+    }
 }
+
+private fun sha256(text: String): ByteArray = MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))

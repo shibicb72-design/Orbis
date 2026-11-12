@@ -185,6 +185,15 @@ class Libtorrent4jEngine(
         }
     }
 
+    override fun forgetSessionState() {
+        post {
+            // On this thread, after any stop() already posted: the state it writes is deleted too.
+            if (session != null) return@post
+            File(sessionFile.parentFile, sessionFile.name + ".tmp").delete()
+            sessionFile.delete()
+        }
+    }
+
     override fun add(source: TorrentSource, saveDir: File, resumeData: ByteArray?, isPrivate: Boolean): EngineId {
         val id = EngineId(nextId.incrementAndGet())
         post { doAdd(id, source, saveDir, resumeData, isPrivate) }

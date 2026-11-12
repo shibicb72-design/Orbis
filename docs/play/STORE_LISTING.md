@@ -31,5 +31,7 @@ Made for big screens too: a tab strip, split screen and drag and drop on foldabl
 
 Source code: https://github.com/shibicb72-design/Orbis
 
+Requires Android 12 or newer (minSdk 31).
+
 **Category**: Communication (browsers). **Tags**: browser, privacy, web browser.
 **Contact email**: Owner to fill in (shown publicly).

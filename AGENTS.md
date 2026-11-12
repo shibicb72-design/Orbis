@@ -12,7 +12,7 @@ Open-source Android browser (Path B: GeckoView + Mozilla Android Components). Pr
 - Torrent natives: a diff touching `app/src/main/jniLibs/**` or `native/libtorrent4j/CHECKSUMS.sha256` is approved only after the run-provenance check in `native/libtorrent4j/README.md` ("Review rule"). Natives ship only from a green `workflow_dispatch` run of Torrent natives on `main`; never from a `pull_request` run.
 
 ## Project map
-- Single module `:app`, package / applicationId `com.shibi.orbis` (minSdk 29, targetSdk 36, compileSdk **37** required by GeckoView/AC 160, JDK 17).
+- Single module `:app`, package / applicationId `com.shibi.orbis` (minSdk 31, targetSdk 36, compileSdk **37** required by GeckoView/AC 160, JDK 17).
 - Kotlin, Compose Material 3. Engine: thin `BrowserEngine` interface; `GeckoEngineImpl` only may touch GeckoView.
 - Dependencies only through `gradle/libs.versions.toml`. Mozilla Maven repo in `settings.gradle.kts`.
 - GeckoView + AC versions are pinned as a matching pair — bump them together.

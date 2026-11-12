@@ -160,7 +160,7 @@ fun ClearBrowsingDataScreen(
                 selection = selection.copy(cookiesAndSiteData = it)
             }
             CheckRow(R.string.clear_cache, null, selection.cache, enabled) { selection = selection.copy(cache = it) }
-            CheckRow(R.string.clear_downloads, R.string.clear_downloads_summary, selection.downloadsList, enabled) {
+            CheckRow(R.string.clear_downloads, R.string.clear_downloads_summary_torrents, selection.downloadsList, enabled) {
                 selection = selection.copy(downloadsList = it)
             }
             CheckRow(R.string.clear_tabs, R.string.clear_tabs_summary, selection.openTabs, enabled) {

@@ -1,13 +1,26 @@
 package com.shibi.orbis.clear
 
+import com.shibi.orbis.downloads.DownloadManager
+import com.shibi.orbis.downloads.DownloadStore
+import com.shibi.orbis.torrent.TorrentSource
+import com.shibi.orbis.torrent.TorrentStatus
+import com.shibi.orbis.torrent.TorrentTestSetup
+import java.io.File
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 
 /** Records every call, in order. Throwing and slow behaviour is switched on per test. */
 private class RecordingTargets : ClearTargets {
@@ -374,5 +387,65 @@ class BrowsingDataClearerTest {
         }
         assertTrue(logs.any { it == "clear failed: HISTORY: IllegalStateException" })
         assertTrue(logs.any { it == "clear blocked: private tabs open" })
+    }
+
+    // ---- the downloads category covers torrents (security PR 10, F-07) ----
+
+    @get:Rule val tmp = TemporaryFolder()
+
+    /** A clear of [selection] whose downloads category runs the app's [clearDownloadLists]; returns what each list lost. */
+    private suspend fun TestScope.clearDownloads(selection: ClearSelection, torrents: TorrentTestSetup): ClearedDownloadLists? {
+        val io = StandardTestDispatcher(testScheduler)
+        val downloads = DownloadManager({ File(tmp.root, "dl") }, DownloadStore(File(tmp.root, "dl.json")), torrents.scope, io, {}, { 0L })
+        var cleared: ClearedDownloadLists? = null
+        val targets =
+            object : ClearTargets by RecordingTargets() {
+                override fun clearDownloadsList() {
+                    cleared = clearDownloadLists(downloads, torrents.manager)
+                }
+            }
+        assertEquals(ClearOutcome.Done, clearer(targets).run(selection))
+        advanceUntilIdle()
+        return cleared
+    }
+
+    private val downloadsOnly = ClearSelection(history = false, cookiesAndSiteData = false, cache = false, downloadsList = true)
+
+    @Test
+    fun theDownloadsCategoryClearsTheTorrentListToo() = runTest {
+        val t = TorrentTestSetup(tmp.root, testScheduler)
+        try {
+            t.manager.restore()
+            // Resume data alone is never a new torrent: the row is FAILED at once.
+            val id = t.manager.add(TorrentSource.FromResumeData, isPrivate = false)!!
+            advanceUntilIdle()
+            assertEquals(TorrentStatus.FAILED, t.only().status)
+
+            val cleared = clearDownloads(downloadsOnly, t)
+
+            assertEquals(listOf(id), cleared!!.torrents)
+            assertTrue(cleared.downloads.isEmpty())
+            assertTrue(t.manager.entries.value.isEmpty())
+            assertTrue(t.store.load().entries.isEmpty())
+        } finally {
+            t.scope.cancel()
+        }
+    }
+
+    @Test
+    fun withoutTheDownloadsCategoryTheTorrentListStays() = runTest {
+        val t = TorrentTestSetup(tmp.root, testScheduler)
+        try {
+            t.manager.restore()
+            t.manager.add(TorrentSource.FromResumeData, isPrivate = false)
+            advanceUntilIdle()
+
+            val cleared = clearDownloads(downloadsOnly.copy(downloadsList = false, bookmarks = true), t)
+
+            assertNull(cleared)
+            assertEquals(1, t.manager.entries.value.size)
+        } finally {
+            t.scope.cancel()
+        }
     }
 }

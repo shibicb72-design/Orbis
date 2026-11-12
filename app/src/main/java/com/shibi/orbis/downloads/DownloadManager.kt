@@ -273,21 +273,26 @@ class DownloadManager(
     /**
      * Empties the list but for downloads still running, which stay listed and carry on. No file is deleted and nothing
      * is cancelled: only the index forgets the finished, failed and cancelled entries. Returns the ids removed.
-     * A clear made before [restore] has read the stored index also drops what it then reads.
+     * A clear made before [restore] has read the stored index also drops what it then reads. The files of private
+     * rows taken off the list are still deleted when private browsing ends ([forgetPrivate], OD-3).
      */
     fun clearIndex(): List<Long> {
         // Private downloads still waiting to settle keep their pending drop: their files are deleted when they do.
         indexCleared.set(true)
-        var removed = emptyList<Long>()
+        var settledNow = emptyList<DownloadEntry>()
         _entries.update { list ->
             val (running, settled) = list.partition { it.status == DownloadStatus.IN_PROGRESS || active.containsKey(it.id) }
-            removed = settled.map { it.id }
+            settledNow = settled
             running
         }
+        clearedPrivate += settledNow.filter { it.isPrivate }
         scope.launch(io) { saveNow() }
         log("download list cleared")
-        return removed
+        return settledNow.map { it.id }
     }
+
+    /** Private rows [clearIndex] took off the list: their files still go when private browsing ends (OD-3). */
+    private val clearedPrivate: MutableSet<DownloadEntry> = ConcurrentHashMap.newKeySet()
 
     /** Private ids still running when private browsing ended: they leave the list as soon as they settle. */
     private val dropOnFinish: MutableSet<Long> = ConcurrentHashMap.newKeySet()
@@ -295,7 +300,8 @@ class DownloadManager(
     /**
      * Private browsing ended: every private entry leaves the list (so no private file name stays visible) and its
      * file is deleted (OD-3): finished, paused or still running. A private download still running settles first, then
-     * leaves and its file goes. Returns the ids removed now.
+     * leaves and its file goes. Private rows [clearIndex] already took off the list lose their files here too.
+     * Returns the ids removed now.
      */
     fun forgetPrivate(): List<Long> {
         var gone = emptyList<DownloadEntry>()
@@ -305,17 +311,19 @@ class DownloadManager(
             gone = leave
             keep
         }
-        if (gone.isEmpty()) return emptyList()
+        val orphans = clearedPrivate.toList()
+        clearedPrivate.removeAll(orphans.toSet())
+        if (gone.isEmpty() && orphans.isEmpty()) return emptyList()
         // A paused one holds only its part file and reserved name.
-        val paused = gone.mapNotNull { e -> pausedDownloads.remove(e.id) }
+        val paused = (gone + orphans).mapNotNull { e -> pausedDownloads.remove(e.id) }
         scope.launch(io) {
             for (p in paused) {
                 deleteOwned(p.reservation.partFile)
                 release(p.reservation)
             }
-            gone.filter { it.status == DownloadStatus.COMPLETED }.forEach { e -> e.filePath?.let { deleteOwned(File(it)) } }
+            (gone + orphans).filter { it.status == DownloadStatus.COMPLETED }.forEach { e -> e.filePath?.let { deleteOwned(File(it)) } }
         }
-        log("private downloads left the list")
+        if (gone.isNotEmpty()) log("private downloads left the list")
         return gone.map { it.id }
     }
 

@@ -18,6 +18,13 @@ interface TorrentEngine {
     fun stop()
 
     /**
+     * Deletes the saved session state (session.dat: the DHT table and settings). Applied after every call made before
+     * it, so it also removes what an earlier [stop] wrote. Does nothing while a session runs: its [stop] writes the
+     * state again.
+     */
+    fun forgetSessionState()
+
+    /**
      * Adds a torrent saving into [saveDir]. Every file starts at "don't download", so libtorrent creates no file, folder
      * or symlink for it. A torrent with metadata (a .torrent, or resume data that carries it) is added paused and
      * announced with [TorrentEvent.MetadataReceived]; a magnet without metadata runs to fetch it and is paused when it
