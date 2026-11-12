@@ -94,9 +94,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        app.container.tabs.setForeground(true)
-        app.downloadForeground?.onAppForeground()
-        app.torrentForeground?.onAppForeground()
+        app.startedActivities.onStart()
         // No-op once loaded; retries a load that failed (e.g. Keystore briefly unavailable).
         app.container.logins.load()
     }
@@ -143,10 +141,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        // Invisible: the selected page must not keep running at foreground priority.
-        app.container.tabs.setForeground(false)
-        app.downloadForeground?.onAppBackground()
-        app.torrentForeground?.onAppBackground()
+        // Invisible: the selected page must not keep running at foreground priority, unless another instance is
+        // started (a link opened right after Back starts one before this one stops; see StartedActivities).
+        app.startedActivities.onStop()
         // The process can be killed any time after this; make sure the tab list is on its way to disk.
         app.container.tabs.flush()
         app.container.bookmarks.flush()
