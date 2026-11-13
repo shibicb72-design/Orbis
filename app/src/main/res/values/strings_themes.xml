@@ -3,7 +3,7 @@
     <!-- English only (owner rule): translatable="false" keeps lint from asking for es, fr and de. -->
     <string name="themes_title" translatable="false">Themes</string>
     <string name="dark_mode_title" translatable="false">Dark mode</string>
-    <string name="dark_mode_option_description" translatable="false">Dark mode: %1$s</string>
+    <string name="dark_mode_option_description" translatable="false">Appearance: %1$s</string>
     <string name="themes_section_title" translatable="false">Color theme</string>
     <string name="theme_summary" translatable="false">%1$s, %2$s</string>
     <string name="theme_card_description" translatable="false">%1$s. %2$s</string>

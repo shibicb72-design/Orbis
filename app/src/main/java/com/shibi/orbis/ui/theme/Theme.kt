@@ -107,6 +107,9 @@ class AppTheme(
     val animated: Boolean = false,
 ) {
     fun mode(dark: Boolean): ThemeMode = if (dark) this.dark else light
+
+    /** Whether this theme's animated scene may run: it has one and the user has not switched it Off. */
+    fun animatesWith(staticThemeIds: Set<String>): Boolean = animated && id !in staticThemeIds
 }
 
 object AppThemes {

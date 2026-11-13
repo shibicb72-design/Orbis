@@ -22,6 +22,28 @@ internal object PrivateColors {
     val OnTertiaryDark = Color(0xFF432535)
 }
 
+/** Light surfaces keep at least this OKLab distance from the private plum chip (Orbis Teal measures 0.044). */
+private const val MIN_PRIVATE_TO_CONTAINER = 0.046
+private const val MIN_PRIVATE_TO_LOW = 0.055
+
+/**
+ * Moves a light surface away from the private plum, in steps along the line from plum through it, until it is [min]
+ * apart in OKLab. A plum chip must stay visible against the surfaces a tab sits on (Orbis Teal gets this from its
+ * cyan tint). Light themes only.
+ */
+private fun awayFromPlum(c: Color, min: Double): Color {
+    val plum = PrivateColors.Light.second
+    for (k in 0..40) {
+        val x = Color(
+            red = (c.red + (c.red - plum.red) * k * 0.1f).coerceIn(0f, 1f),
+            green = (c.green + (c.green - plum.green) * k * 0.1f).coerceIn(0f, 1f),
+            blue = (c.blue + (c.blue - plum.blue) * k * 0.1f).coerceIn(0f, 1f),
+        )
+        if (okLabDistance(plum, x) >= min) return x
+    }
+    return c
+}
+
 /** Builds a whole Material colour scheme from a [Palette]; the surface ladder is a lerp from background toward ink. */
 internal fun paletteMode(p: Palette, dark: Boolean, inversePrimary: Color): ThemeMode {
     val bg = p.background
@@ -52,8 +74,8 @@ internal fun paletteMode(p: Palette, dark: Boolean, inversePrimary: Color): Them
     } else {
         lowest = Color.White
         surface = Color.White
-        low = toInk(0.02f)
-        container = toInk(0.05f)
+        low = awayFromPlum(toInk(0.02f), MIN_PRIVATE_TO_LOW)
+        container = awayFromPlum(toInk(0.05f), MIN_PRIVATE_TO_CONTAINER)
         high = toInk(0.08f)
         highest = toInk(0.11f)
         variant = high
@@ -61,18 +83,30 @@ internal fun paletteMode(p: Palette, dark: Boolean, inversePrimary: Color): Them
         dim = toInk(0.14f)
     }
     val surfaces = listOf(bg, surface, low, container, high, highest, variant)
-    val onSurfaceVariant = readableOn(lerp(ink, bg, 0.25f), surfaces, ink)
     val primary = readableOn(p.primary, surfaces, ink)
+    // The accent must read on its own tinted containers (dashboard buttons, selected tabs): thin the tint until it does.
+    fun tinted(start: Float): Color {
+        var t = start
+        while (t > 0.02f) {
+            val c = lerp(bg, primary, t)
+            if (contrastOf(primary, c) >= 4.55) return c
+            t -= 0.02f
+        }
+        return lerp(bg, primary, 0.02f)
+    }
     val onPrimary = bestOn(primary, listOf(Color.White, bg, ink))
-    val primaryContainer = lerp(bg, primary, if (dark) 0.30f else 0.22f)
+    val primaryContainer = tinted(if (dark) 0.30f else 0.22f)
+    val onSurfaceVariant = readableOn(lerp(ink, bg, 0.25f), surfaces + primaryContainer, ink)
     val onPrimaryContainer = bestOn(primaryContainer, listOf(ink, Color.White))
     val secondary = readableOn(lerp(primary, ink, if (dark) 0.15f else 0.45f), surfaces, ink)
     val onSecondary = bestOn(secondary, listOf(Color.White, bg, ink))
-    val secondaryContainer = lerp(bg, primary, if (dark) 0.24f else 0.18f)
+    val secondaryContainer = tinted(if (dark) 0.24f else 0.18f)
     val onSecondaryContainer = bestOn(secondaryContainer, listOf(ink, Color.White))
     val outline = readableOn(toInk(0.55f), listOf(surface, bg, container), ink, min = 3.2)
     val outlineVariant = toInk(if (dark) 0.22f else 0.18f)
     val inverseSurface = lerp(ink, bg, 0.1f)
+    // Snackbar action labels: the other mode's accent, moved toward the page colour until it reads on the snackbar.
+    val inversePrimaryReadable = readableOn(inversePrimary, listOf(inverseSurface), bg)
     val errors = if (dark) TealDark else TealLight
 
     val scheme =
@@ -105,7 +139,7 @@ internal fun paletteMode(p: Palette, dark: Boolean, inversePrimary: Color): Them
                 surfaceDim = dim,
                 inverseSurface = inverseSurface,
                 inverseOnSurface = bg,
-                inversePrimary = inversePrimary,
+                inversePrimary = inversePrimaryReadable,
                 surfaceTint = primary,
                 outline = outline,
                 outlineVariant = outlineVariant,
@@ -143,7 +177,7 @@ internal fun paletteMode(p: Palette, dark: Boolean, inversePrimary: Color): Them
                 surfaceDim = dim,
                 inverseSurface = inverseSurface,
                 inverseOnSurface = bg,
-                inversePrimary = inversePrimary,
+                inversePrimary = inversePrimaryReadable,
                 surfaceTint = primary,
                 outline = outline,
                 outlineVariant = outlineVariant,

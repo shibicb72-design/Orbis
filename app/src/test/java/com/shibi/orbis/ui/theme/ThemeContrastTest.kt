@@ -40,6 +40,14 @@ class ThemeContrastTest {
                     f.need(w, "primary/$n", c.primary, s, aa)
                 }
                 f.need(w, "onPrimaryContainer/primaryContainer", c.onPrimaryContainer, c.primaryContainer, aa)
+                f.need(w, "primary/primaryContainer (dashboard button)", c.primary, c.primaryContainer, aa)
+                for ((n, s) in listOf("primaryContainer" to c.primaryContainer, "containerLow" to c.surfaceContainerLow, "containerHighest" to c.surfaceContainerHighest)) {
+                    f.need(w, "onSurfaceVariant/$n", c.onSurfaceVariant, s, aa)
+                }
+                for ((n, s) in listOf("container" to c.surfaceContainer, "containerLow" to c.surfaceContainerLow, "secondaryContainer" to c.secondaryContainer)) {
+                    f.need(w, "primary/$n", c.primary, s, aa)
+                }
+                f.need(w, "inversePrimary/inverseSurface (snackbar action)", c.inversePrimary, c.inverseSurface, aa)
                 f.need(w, "onSecondary/secondary", c.onSecondary, c.secondary, aa)
                 f.need(w, "onSecondaryContainer/secondaryContainer", c.onSecondaryContainer, c.secondaryContainer, aa)
                 f.need(w, "onTertiary/tertiary", c.onTertiary, c.tertiary, aa)
@@ -89,28 +97,39 @@ class ThemeContrastTest {
         }
     }
 
-    /** A private tab chip must stand out from the surfaces a tab can sit on, and no accent may be plum. */
+    /**
+     * A private tab chip must stand out from what a tab sits on: each theme keeps at least the OKLab distance Orbis
+     * Teal itself has (and Teal cannot change), per neighbour and per mode. No accent may be plum either.
+     */
     @Test
     fun privateLookIsDistinctInEveryTheme() {
-        val failures =
-            forEveryMode { w, c, f ->
-                val floor = FLOOR
-                val others = listOf("surface" to c.surface, "surfaceContainer" to c.surfaceContainer, "secondaryContainer" to c.secondaryContainer, "primaryContainer" to c.primaryContainer, "background" to c.background)
-                for ((n, other) in others) {
+        val teal = AppThemes.byId("orbis_teal")
+        fun neighbours(c: ColorScheme) = listOf("surfaceContainer" to c.surfaceContainer, "surface" to c.surface, "surfaceContainerLow" to c.surfaceContainerLow, "background" to c.background)
+        fun floors(c: ColorScheme) = neighbours(c).associate { (n, other) -> n to okLabDistance(c.tertiaryContainer, other) }
+        val lightFloors = floors(teal.light.scheme)
+        val darkFloors = floors(teal.dark.scheme)
+        val failures = mutableListOf<String>()
+        var minLight = 1.0
+        for (theme in AppThemes.all) {
+            for (dark in listOf(false, true)) {
+                val c = theme.mode(dark).scheme
+                val floors = if (dark) darkFloors else lightFloors
+                for ((n, other) in neighbours(c)) {
                     val d = okLabDistance(c.tertiaryContainer, other)
-                    if (d < floor) f.add("$w tertiaryContainer vs $n ${"%.3f".format(d)} < $floor")
+                    if (!dark && n == "surfaceContainer") minLight = minOf(minLight, d)
+                    if (d < floors.getValue(n)) failures.add("${theme.id}/${if (dark) "dark" else "light"} tertiaryContainer vs $n ${"%.3f".format(d)} < ${floors.getValue(n)}")
                 }
                 val plum = okLab(c.tertiary)
-                for ((n, accent) in listOf("primary" to c.primary, "secondary" to c.secondary, "secondaryContainer" to c.secondaryContainer)) {
+                for ((n, accent) in listOf("primary" to c.primary, "secondary" to c.secondary)) {
                     val lab = okLab(accent)
                     // Hue only means something with some chroma; near-grey accents (Graphite) cannot be mistaken for plum.
                     if (lab.chroma > 0.03 && hueDistance(lab.hue, plum.hue) < 40.0) {
-                        f.add("$w $n hue ${"%.0f".format(lab.hue)} is close to plum ${"%.0f".format(plum.hue)}")
+                        failures.add("${theme.id} $n hue ${"%.0f".format(lab.hue)} is close to plum ${"%.0f".format(plum.hue)}")
                     }
                 }
             }
-        assertTrue("Private look not distinct:\n" + failures.joinToString("\n"), failures.isEmpty())
-    }
+        }
+        assertTrue("Private look not distinct:\n" + failures.joinToString("\n"), failures.isEmpty())    }
 
     @Test
     fun idsAreUniqueAndTheCountIsDeliberate() {
@@ -120,8 +139,4 @@ class ThemeContrastTest {
         assertTrue("no animated themes yet", AppThemes.all.none { it.animated })
     }
 
-    private companion object {
-        /** Orbis Teal cannot change and its light plum chip sits close to its background, so the floor is low (measured minimum 0.030, Graphite light). */
-        const val FLOOR = 0.025
-    }
 }

@@ -112,23 +112,23 @@ internal fun ThemePickerContent(
             )
         },
     ) { padding ->
+        // The dark mode choice is outside the cards' selectable group: it is a separate setting.
+        Column(Modifier.padding(padding).fillMaxSize()) {
+            Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = stringResource(R.string.dark_mode_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.semantics { heading() },
+                )
+                DarkModeChoice(darkMode, onDarkMode)
+            }
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 280.dp),
-            modifier = Modifier.padding(padding).fillMaxSize().selectableGroup(),
+            modifier = Modifier.fillMaxSize().selectableGroup(),
             contentPadding = PaddingValues(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = stringResource(R.string.dark_mode_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.semantics { heading() },
-                    )
-                    DarkModeChoice(darkMode, onDarkMode)
-                }
-            }
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Text(
                     text = stringResource(R.string.themes_section_title),
@@ -142,6 +142,7 @@ internal fun ThemePickerContent(
                     AnimatedChoiceSlot(theme)
                 }
             }
+        }
         }
     }
 }

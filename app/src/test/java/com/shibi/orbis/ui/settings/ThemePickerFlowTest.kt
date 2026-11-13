@@ -1,6 +1,7 @@
 package com.shibi.orbis.ui.settings
 
 import android.content.Context
+import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.Role
@@ -13,7 +14,6 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasTestTag
-import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -131,26 +131,29 @@ class ThemePickerFlowTest {
     @Config(sdk = [35], application = android.app.Application::class, qualifiers = "w412dp-h915dp")
     fun previewsAreDrawnInEachThemesOwnColoursAndFollowDarkMode() {
         show()
-        for (t in AppThemes.all) assertPreview(t.id, t.light.scheme.background)
-        scrollToTop()
-        rule.onNodeWithContentDescription("Dark mode: Dark").performClick()
+        for (t in AppThemes.all) assertPreview(t.id, t.light.scheme)
+        rule.onNodeWithContentDescription("Appearance: Dark").performClick()
         rule.waitForIdle()
         assertEquals(DarkMode.DARK, settings.darkMode.value)
-        for (t in AppThemes.all) assertPreview(t.id, t.dark.scheme.background)
-        scrollToTop()
-        rule.onNodeWithContentDescription("Dark mode: Light").performClick()
+        for (t in AppThemes.all) assertPreview(t.id, t.dark.scheme)
+        rule.onNodeWithContentDescription("Appearance: Light").performClick()
         rule.waitForIdle()
-        for (t in AppThemes.all) assertPreview(t.id, t.light.scheme.background)
+        for (t in AppThemes.all) assertPreview(t.id, t.light.scheme)
     }
 
-    private fun scrollToTop() = rule.onNode(hasScrollAction()).performScrollToIndex(0)
-
-    private fun assertPreview(id: String, expected: Color) {
+    private fun assertPreview(id: String, scheme: ColorScheme) {
         rule.onNode(hasScrollAction()).performScrollToNode(hasTestTag("theme_card_$id"))
         val map = rule.onNodeWithTag("theme_preview_$id", useUnmergedTree = true).captureToImage().toPixelMap()
+        val d = rule.density.density
         // Inside the preview's padding, below the content, clear of the rounded top corners.
-        val actual = map[4, map.height - 4]
-        assertTrue("$id preview background $actual, expected $expected", close(actual, expected))
+        val background = map[4, map.height - 4]
+        assertTrue("$id preview background $background, expected ${scheme.background}", close(background, scheme.background))
+        // The tab row: scan across the chips' vertical centre. The private chip's plum and the normal chip's own colour must both be there.
+        val y = (54 * d).toInt()
+        val row = (0 until map.width).map { map[it, y] }
+        assertTrue("$id private chip colour ${scheme.tertiaryContainer} missing from the tab row", row.any { close(it, scheme.tertiaryContainer) })
+        assertTrue("$id normal chip colour ${scheme.surfaceContainer} missing from the tab row", row.any { close(it, scheme.surfaceContainer) })
+        assertTrue("$id private and normal chip colours must differ", !close(scheme.tertiaryContainer, scheme.surfaceContainer))
     }
 
     private fun close(a: Color, b: Color): Boolean {
@@ -203,16 +206,16 @@ class ThemePickerFlowTest {
     @Test
     fun darkModeChoiceIsAtTheTopWithSelectedStatesAndDescriptions() {
         show()
-        rule.onNodeWithContentDescription("Dark mode: System default").assertIsSelected()
-        rule.onNodeWithContentDescription("Dark mode: Light").performClick()
+        rule.onNodeWithContentDescription("Appearance: System default").assertIsSelected()
+        rule.onNodeWithContentDescription("Appearance: Light").performClick()
         rule.waitForIdle()
         assertEquals(DarkMode.LIGHT, settings.darkMode.value)
-        rule.onNodeWithContentDescription("Dark mode: Light").assertIsSelected()
-        rule.onNodeWithContentDescription("Dark mode: Dark").performClick()
+        rule.onNodeWithContentDescription("Appearance: Light").assertIsSelected()
+        rule.onNodeWithContentDescription("Appearance: Dark").performClick()
         rule.waitForIdle()
         assertEquals(DarkMode.DARK, settings.darkMode.value)
         assertEquals("DARK", prefs.getString("app_theme", null))
-        rule.onNodeWithContentDescription("Dark mode: Dark").assertIsSelected()
+        rule.onNodeWithContentDescription("Appearance: Dark").assertIsSelected()
     }
 
     @Test

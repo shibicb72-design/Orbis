@@ -91,7 +91,7 @@ class MainActivity : ComponentActivity() {
             val themeId by settings.themeId.collectAsStateWithLifecycle()
             val staticIds by settings.staticThemeIds.collectAsStateWithLifecycle()
             val theme = AppThemes.byId(themeId)
-            OrbisTheme(darkMode, theme, animate = theme.animated && theme.id !in staticIds) {
+            OrbisTheme(darkMode, theme, animate = theme.animatesWith(staticIds)) {
                 OrbisRoot(container = app.container)
             }
         }
