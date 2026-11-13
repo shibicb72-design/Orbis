@@ -129,7 +129,23 @@ class ThemeContrastTest {
                 }
             }
         }
-        assertTrue("Private look not distinct:\n" + failures.joinToString("\n"), failures.isEmpty())    }
+        assertTrue("Private look not distinct:\n" + failures.joinToString("\n"), failures.isEmpty())
+    }
+
+    /**
+     * The two accent containers must not coincide (a selected chip on a primaryContainer card would vanish), and
+     * both still carry the accent at 4.5:1.
+     */
+    @Test
+    fun primaryAndSecondaryContainersStayApart() {
+        val failures = forEveryMode { w, c, f ->
+            val d = okLabDistance(c.primaryContainer, c.secondaryContainer)
+            if (d < MIN_CONTAINER_GAP) f.add("$w primaryContainer vs secondaryContainer ${"%.3f".format(d)} < $MIN_CONTAINER_GAP")
+            f.need(w, "primary/primaryContainer", c.primary, c.primaryContainer, 4.5)
+            f.need(w, "primary/secondaryContainer", c.primary, c.secondaryContainer, 4.5)
+        }
+        assertTrue("Containers too close:\n" + failures.joinToString("\n"), failures.isEmpty())
+    }
 
     @Test
     fun idsAreUniqueAndTheCountIsDeliberate() {
@@ -139,4 +155,9 @@ class ThemeContrastTest {
         assertTrue("no animated themes yet", AppThemes.all.none { it.animated })
     }
 
+
+    private companion object {
+        /** Orbis Teal's light pair (#CCE8E6, #DCE9EE) is about 0.04 apart; nothing may be closer than half that. */
+        const val MIN_CONTAINER_GAP = 0.02
+    }
 }

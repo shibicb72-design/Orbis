@@ -12,9 +12,8 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
-import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasTestTag
-import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -132,17 +131,17 @@ class ThemePickerFlowTest {
     fun previewsAreDrawnInEachThemesOwnColoursAndFollowDarkMode() {
         show()
         for (t in AppThemes.all) assertPreview(t.id, t.light.scheme)
-        rule.onNodeWithContentDescription("Appearance: Dark").performClick()
+        rule.onNodeWithContentDescription("Appearance: Dark").performScrollTo().performClick()
         rule.waitForIdle()
         assertEquals(DarkMode.DARK, settings.darkMode.value)
         for (t in AppThemes.all) assertPreview(t.id, t.dark.scheme)
-        rule.onNodeWithContentDescription("Appearance: Light").performClick()
+        rule.onNodeWithContentDescription("Appearance: Light").performScrollTo().performClick()
         rule.waitForIdle()
         for (t in AppThemes.all) assertPreview(t.id, t.light.scheme)
     }
 
     private fun assertPreview(id: String, scheme: ColorScheme) {
-        rule.onNode(hasScrollAction()).performScrollToNode(hasTestTag("theme_card_$id"))
+        rule.onNodeWithTag("theme_card_$id").performScrollTo()
         val map = rule.onNodeWithTag("theme_preview_$id", useUnmergedTree = true).captureToImage().toPixelMap()
         val d = rule.density.density
         // Inside the preview's padding, below the content, clear of the rounded top corners.
@@ -166,7 +165,7 @@ class ThemePickerFlowTest {
     @Config(sdk = [35], application = android.app.Application::class, qualifiers = "w412dp-h915dp")
     fun pickingAThemeRepaintsThePickerItself() {
         show()
-        rule.onNode(hasScrollAction()).performScrollToNode(hasTestTag("theme_card_ember"))
+        rule.onNodeWithTag("theme_card_ember").performScrollTo()
         val before = rule.onNodeWithTag("theme_card_ember").captureToImage().toPixelMap()
         rule.onNodeWithTag("theme_card_ember").performClick()
         rule.waitForIdle()
@@ -207,11 +206,11 @@ class ThemePickerFlowTest {
     fun darkModeChoiceIsAtTheTopWithSelectedStatesAndDescriptions() {
         show()
         rule.onNodeWithContentDescription("Appearance: System default").assertIsSelected()
-        rule.onNodeWithContentDescription("Appearance: Light").performClick()
+        rule.onNodeWithContentDescription("Appearance: Light").performScrollTo().performClick()
         rule.waitForIdle()
         assertEquals(DarkMode.LIGHT, settings.darkMode.value)
         rule.onNodeWithContentDescription("Appearance: Light").assertIsSelected()
-        rule.onNodeWithContentDescription("Appearance: Dark").performClick()
+        rule.onNodeWithContentDescription("Appearance: Dark").performScrollTo().performClick()
         rule.waitForIdle()
         assertEquals(DarkMode.DARK, settings.darkMode.value)
         assertEquals("DARK", prefs.getString("app_theme", null))

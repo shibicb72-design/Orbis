@@ -33,7 +33,7 @@ internal val GraphiteTheme =
         id = "graphite",
         nameRes = R.string.theme_name_graphite,
         descriptionRes = R.string.theme_desc_graphite,
-        light = Palette(Color(0xFF3D4A56), Color(0xFFF5F7F7), Color(0xFF14191E)),
+        light = Palette(Color(0xFF3D4A56), Color(0xFFF6F7F8), Color(0xFF14191E)),
         dark = Palette(Color(0xFFB9C6D2), Color(0xFF0D0F11), Color(0xFFF1F4F6)),
     )
 
@@ -60,7 +60,7 @@ internal val EmberTheme =
         id = "ember",
         nameRes = R.string.theme_name_ember,
         descriptionRes = R.string.theme_desc_ember,
-        light = Palette(Color(0xFF9A4518), Color(0xFFFBF6F0), Color(0xFF2A1A10)),
+        light = Palette(Color(0xFF9A4518), Color(0xFFFBF6F1), Color(0xFF2A1A10)),
         dark = Palette(Color(0xFFFFB68E), Color(0xFF1A110C), Color(0xFFF8EDE6)),
     )
 
@@ -69,6 +69,6 @@ internal val PaperTheme =
         id = "paper",
         nameRes = R.string.theme_name_paper,
         descriptionRes = R.string.theme_desc_paper,
-        light = Palette(Color(0xFF6E5426), Color(0xFFF7F4E1), Color(0xFF221B10)),
+        light = Palette(Color(0xFF6E5426), Color(0xFFFAF4E3), Color(0xFF221B10)),
         dark = Palette(Color(0xFFE0C38C), Color(0xFF17130D), Color(0xFFF4ECDD)),
     )

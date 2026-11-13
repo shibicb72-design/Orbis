@@ -5,9 +5,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,10 +16,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -112,8 +110,8 @@ internal fun ThemePickerContent(
             )
         },
     ) { padding ->
-        // The dark mode choice is outside the cards' selectable group: it is a separate setting.
-        Column(Modifier.padding(padding).fillMaxSize()) {
+        // Everything scrolls together. Only the cards are a selectable group: the dark mode choice is a separate setting.
+        Column(Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState())) {
             Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = stringResource(R.string.dark_mode_title),
@@ -122,27 +120,28 @@ internal fun ThemePickerContent(
                 )
                 DarkModeChoice(darkMode, onDarkMode)
             }
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 280.dp),
-            modifier = Modifier.fillMaxSize().selectableGroup(),
-            contentPadding = PaddingValues(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                Text(
-                    text = stringResource(R.string.themes_section_title),
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(top = 8.dp).semantics { heading() },
-                )
-            }
-            items(AppThemes.all, key = { it.id }) { theme ->
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ThemeCard(theme, selected = theme.id == selected.id, previewDark = previewDark, onSelect = { onSelect(theme) })
-                    AnimatedChoiceSlot(theme)
+            Text(
+                text = stringResource(R.string.themes_section_title),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 24.dp).semantics { heading() },
+            )
+            BoxWithConstraints(Modifier.fillMaxWidth().padding(16.dp)) {
+                // As many columns as fit at least 280.dp each: one on a phone, three or four on a wide screen.
+                val columns = ((maxWidth + 12.dp) / (280.dp + 12.dp)).toInt().coerceAtLeast(1)
+                Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    AppThemes.all.chunked(columns).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            row.forEach { theme ->
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    ThemeCard(theme, selected = theme.id == selected.id, previewDark = previewDark, onSelect = { onSelect(theme) })
+                                    AnimatedChoiceSlot(theme)
+                                }
+                            }
+                            repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
                 }
             }
-        }
         }
     }
 }

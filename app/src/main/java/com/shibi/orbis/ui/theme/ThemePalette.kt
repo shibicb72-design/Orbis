@@ -27,21 +27,18 @@ private const val MIN_PRIVATE_TO_CONTAINER = 0.046
 private const val MIN_PRIVATE_TO_LOW = 0.055
 
 /**
- * Moves a light surface away from the private plum, in steps along the line from plum through it, until it is [min]
- * apart in OKLab. A plum chip must stay visible against the surfaces a tab sits on (Orbis Teal gets this from its
- * cyan tint). Light themes only.
+ * The tint step for a light surface: [start], lowered until the surface is [min] apart from the private plum in OKLab,
+ * but never below [floor]. It moves only along the theme's own bg-to-tone line, so a theme keeps its hue (a push
+ * away from the plum would add green to every theme). Fails loudly if the plum can never be cleared.
  */
-private fun awayFromPlum(c: Color, min: Double): Color {
+private fun clearOfPlum(bg: Color, tone: Color, start: Float, min: Double, floor: Float): Float {
     val plum = PrivateColors.Light.second
-    for (k in 0..40) {
-        val x = Color(
-            red = (c.red + (c.red - plum.red) * k * 0.1f).coerceIn(0f, 1f),
-            green = (c.green + (c.green - plum.green) * k * 0.1f).coerceIn(0f, 1f),
-            blue = (c.blue + (c.blue - plum.blue) * k * 0.1f).coerceIn(0f, 1f),
-        )
-        if (okLabDistance(plum, x) >= min) return x
+    var t = start
+    while (t >= floor) {
+        if (okLabDistance(plum, lerp(bg, tone, t)) >= min) return t
+        t -= 0.0025f
     }
-    return c
+    error("No tint step from $start down to $floor puts a light surface $min away from the private plum")
 }
 
 /** Builds a whole Material colour scheme from a [Palette]; the surface ladder is a lerp from background toward ink. */
@@ -74,8 +71,9 @@ internal fun paletteMode(p: Palette, dark: Boolean, inversePrimary: Color): Them
     } else {
         lowest = Color.White
         surface = Color.White
-        low = awayFromPlum(toInk(0.02f), MIN_PRIVATE_TO_LOW)
-        container = awayFromPlum(toInk(0.05f), MIN_PRIVATE_TO_CONTAINER)
+        val lowStep = clearOfPlum(bg, tone, 0.02f, MIN_PRIVATE_TO_LOW, 0f)
+        low = toInk(lowStep)
+        container = toInk(clearOfPlum(bg, tone, 0.05f, MIN_PRIVATE_TO_CONTAINER, lowStep + 0.005f))
         high = toInk(0.08f)
         highest = toInk(0.11f)
         variant = high
@@ -85,22 +83,23 @@ internal fun paletteMode(p: Palette, dark: Boolean, inversePrimary: Color): Them
     val surfaces = listOf(bg, surface, low, container, high, highest, variant)
     val primary = readableOn(p.primary, surfaces, ink)
     // The accent must read on its own tinted containers (dashboard buttons, selected tabs): thin the tint until it does.
-    fun tinted(start: Float): Color {
+    fun tintStep(start: Float): Float {
         var t = start
         while (t > 0.02f) {
-            val c = lerp(bg, primary, t)
-            if (contrastOf(primary, c) >= 4.55) return c
+            if (contrastOf(primary, lerp(bg, primary, t)) >= 4.55) return t
             t -= 0.02f
         }
-        return lerp(bg, primary, 0.02f)
+        return 0.02f
     }
     val onPrimary = bestOn(primary, listOf(Color.White, bg, ink))
-    val primaryContainer = tinted(if (dark) 0.30f else 0.22f)
+    val primaryStep = tintStep(if (dark) 0.30f else 0.22f)
+    val primaryContainer = lerp(bg, primary, primaryStep)
     val onSurfaceVariant = readableOn(lerp(ink, bg, 0.25f), surfaces + primaryContainer, ink)
     val onPrimaryContainer = bestOn(primaryContainer, listOf(ink, Color.White))
     val secondary = readableOn(lerp(primary, ink, if (dark) 0.15f else 0.45f), surfaces, ink)
     val onSecondary = bestOn(secondary, listOf(Color.White, bg, ink))
-    val secondaryContainer = tinted(if (dark) 0.24f else 0.18f)
+    // Always a fixed step less tinted than primaryContainer (lighter in light mode), as in Orbis Teal, so the two never coincide.
+    val secondaryContainer = lerp(bg, primary, primaryStep * 0.65f)
     val onSecondaryContainer = bestOn(secondaryContainer, listOf(ink, Color.White))
     val outline = readableOn(toInk(0.55f), listOf(surface, bg, container), ink, min = 3.2)
     val outlineVariant = toInk(if (dark) 0.22f else 0.18f)
