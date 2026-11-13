@@ -17,7 +17,6 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -62,9 +61,6 @@ import kotlinx.coroutines.flow.first
 import com.shibi.orbis.R
 import com.shibi.orbis.engine.hostOfUrl
 import com.shibi.orbis.tabs.TabUi
-import com.shibi.orbis.ui.theme.SceneLayer
-import com.shibi.orbis.ui.theme.SceneRegion
-import com.shibi.orbis.ui.theme.SceneSurface
 import com.shibi.orbis.ui.theme.TAB_ENTER_MS
 import com.shibi.orbis.ui.theme.TAB_EXIT_MS
 import com.shibi.orbis.ui.theme.TAB_PLACEMENT_MS
@@ -129,8 +125,6 @@ internal fun TabSwitcher(
     onRecentlyClosed: (() -> Unit)? = null,
     /** The "Tab closed / Undo" bar, shown inside the sheet (the screen's own one is behind it). */
     snackbars: SnackbarHostState? = null,
-    /** The browser screen's scene, behind the sheet's content; null draws none. */
-    scene: SceneSurface? = null,
 ) {
     val motionEnabled = rememberMotionEnabled()
     val gate = remember { TabSheetGate() }
@@ -148,150 +142,144 @@ internal fun TabSwitcher(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
-        // The browser's scene behind the whole sheet, under the opaque cards; none for a private tab.
-        Box {
-            SceneLayer(scene, SceneRegion.Sheet, Modifier.matchParentSize())
-            Column {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        stringResource(R.string.tabs_title),
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.semantics { heading() },
-                    )
-                    TextButton(onClick = { end(TabSheetOutcome.NEW_TAB, onNewTab) }) {
-                        Icon(Icons.Filled.Add, contentDescription = null)
-                        Text(stringResource(R.string.tabs_new), modifier = Modifier.padding(start = 4.dp))
-                    }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                stringResource(R.string.tabs_title),
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.semantics { heading() },
+            )
+            TextButton(onClick = { end(TabSheetOutcome.NEW_TAB, onNewTab) }) {
+                Icon(Icons.Filled.Add, contentDescription = null)
+                Text(stringResource(R.string.tabs_new), modifier = Modifier.padding(start = 4.dp))
+            }
+        }
+        FlowRow(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            TextButton(onClick = { end(TabSheetOutcome.NEW_TAB, onNewPrivateTab) }) {
+                Icon(Icons.Filled.VisibilityOff, contentDescription = null)
+                Text(stringResource(R.string.tabs_new_private), modifier = Modifier.padding(start = 4.dp))
+            }
+            if (onRecentlyClosed != null) {
+                TextButton(onClick = { end(TabSheetOutcome.DISMISSED, onRecentlyClosed) }) {
+                    Icon(Icons.Filled.History, contentDescription = null)
+                    Text(stringResource(R.string.tabs_recently_closed), modifier = Modifier.padding(start = 4.dp))
                 }
-                FlowRow(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    TextButton(onClick = { end(TabSheetOutcome.NEW_TAB, onNewPrivateTab) }) {
-                        Icon(Icons.Filled.VisibilityOff, contentDescription = null)
-                        Text(stringResource(R.string.tabs_new_private), modifier = Modifier.padding(start = 4.dp))
-                    }
-                    if (onRecentlyClosed != null) {
-                        TextButton(onClick = { end(TabSheetOutcome.DISMISSED, onRecentlyClosed) }) {
-                            Icon(Icons.Filled.History, contentDescription = null)
-                            Text(stringResource(R.string.tabs_recently_closed), modifier = Modifier.padding(start = 4.dp))
-                        }
-                    }
-                    if (tabs.any { it.isPrivate }) {
-                        TextButton(onClick = { end(TabSheetOutcome.CLOSED_PRIVATE, onClosePrivateTabs) }) {
-                            Text(stringResource(R.string.private_close_all))
-                        }
-                    }
+            }
+            if (tabs.any { it.isPrivate }) {
+                TextButton(onClick = { end(TabSheetOutcome.CLOSED_PRIVATE, onClosePrivateTabs) }) {
+                    Text(stringResource(R.string.private_close_all))
                 }
-                // Opens scrolled to the current tab: with many tabs it would otherwise sit below the fold.
-                val selectedIndex = tabs.indexOfFirst { it.selected }.coerceAtLeast(0)
-                val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = selectedIndex)
-                // The first placement happens before the sheet has its final height; once it is open, bring the current tab fully
-                // into view if it is not (never moves a grid the user can already see the current tab in).
-                LaunchedEffect(sheetState) {
-                    snapshotFlow { sheetState.currentValue }.first { it == SheetValue.Expanded }
-                    val info = gridState.layoutInfo
-                    val item = info.visibleItemsInfo.firstOrNull { it.index == selectedIndex }
-                    val fullyVisible =
-                        item != null && item.offset.y >= 0 && item.offset.y + item.size.height <= info.viewportEndOffset - info.afterContentPadding
-                    if (!fullyVisible) gridState.scrollToItem(selectedIndex)
-                }
-                // Above the grid: below it, the grid's remaining height would push it off the sheet.
-                snackbars?.let { SnackbarHost(it, Modifier.fillMaxWidth()) }
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 150.dp),
-                    modifier = Modifier.weight(1f, fill = false).selectableGroup(),
-                    state = gridState,
-                    // The last row (often the current tab, scrolled to) must clear the gesture/navigation bar.
-                    contentPadding = PaddingValues(
-                        start = 12.dp,
-                        end = 12.dp,
-                        top = 8.dp,
-                        bottom = 8.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+            }
+        }
+        // Opens scrolled to the current tab: with many tabs it would otherwise sit below the fold.
+        val selectedIndex = tabs.indexOfFirst { it.selected }.coerceAtLeast(0)
+        val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = selectedIndex)
+        // The first placement happens before the sheet has its final height; once it is open, bring the current tab fully
+        // into view if it is not (never moves a grid the user can already see the current tab in).
+        LaunchedEffect(sheetState) {
+            snapshotFlow { sheetState.currentValue }.first { it == SheetValue.Expanded }
+            val info = gridState.layoutInfo
+            val item = info.visibleItemsInfo.firstOrNull { it.index == selectedIndex }
+            val fullyVisible =
+                item != null && item.offset.y >= 0 && item.offset.y + item.size.height <= info.viewportEndOffset - info.afterContentPadding
+            if (!fullyVisible) gridState.scrollToItem(selectedIndex)
+        }
+        // Above the grid: below it, the grid's remaining height would push it off the sheet.
+        snackbars?.let { SnackbarHost(it, Modifier.fillMaxWidth()) }
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 150.dp),
+            modifier = Modifier.weight(1f, fill = false).selectableGroup(),
+            state = gridState,
+            // The last row (often the current tab, scrolled to) must clear the gesture/navigation bar.
+            contentPadding = PaddingValues(
+                start = 12.dp,
+                end = 12.dp,
+                top = 8.dp,
+                bottom = 8.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+            ),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(tabs, key = { it.id }) { tab ->
+                val container =
+                    when {
+                        tab.selected -> MaterialTheme.colorScheme.secondaryContainer
+                        tab.isPrivate -> MaterialTheme.colorScheme.tertiaryContainer
+                        else -> MaterialTheme.colorScheme.surface
+                    }
+                val content =
+                    when {
+                        tab.selected -> MaterialTheme.colorScheme.onSecondaryContainer
+                        tab.isPrivate -> MaterialTheme.colorScheme.onTertiaryContainer
+                        else -> MaterialTheme.colorScheme.onSurface
+                    }
+                val privateDescription = stringResource(R.string.tabs_private_mark)
+                val host = hostOfUrl(tab.url)
+                val title = tab.title.ifBlank { host ?: stringResource(R.string.tabs_blank_title) }
+                Surface(
+                    color = container,
+                    contentColor = content,
+                    shape = MaterialTheme.shapes.medium,
+                    // The current tab has a visible frame as well as its label (not color alone).
+                    border = if (tab.selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+                    modifier = Modifier
+                        .animateItem(
+                            fadeInSpec = motionTweenOrNull(motionEnabled, TAB_ENTER_MS),
+                            placementSpec = motionTweenOrNull(motionEnabled, TAB_PLACEMENT_MS),
+                            fadeOutSpec = motionTweenOrNull(motionEnabled, TAB_EXIT_MS),
+                        )
+                        .fillMaxWidth()
+                        .testTag(tabRowTag(tab.id))
+                        .selectable(selected = tab.selected, role = Role.Tab) {
+                            end(TabSheetOutcome.SELECTED) { onSelect(tab.id) }
+                        },
                 ) {
-                    items(tabs, key = { it.id }) { tab ->
-                        val container =
-                            when {
-                                tab.selected -> MaterialTheme.colorScheme.secondaryContainer
-                                tab.isPrivate -> MaterialTheme.colorScheme.tertiaryContainer
-                                else -> MaterialTheme.colorScheme.surface
-                            }
-                        val content =
-                            when {
-                                tab.selected -> MaterialTheme.colorScheme.onSecondaryContainer
-                                tab.isPrivate -> MaterialTheme.colorScheme.onTertiaryContainer
-                                else -> MaterialTheme.colorScheme.onSurface
-                            }
-                        val privateDescription = stringResource(R.string.tabs_private_mark)
-                        val host = hostOfUrl(tab.url)
-                        val title = tab.title.ifBlank { host ?: stringResource(R.string.tabs_blank_title) }
-                        Surface(
-                            color = container,
-                            contentColor = content,
-                            shape = MaterialTheme.shapes.medium,
-                            // The current tab has a visible frame as well as its label (not color alone).
-                            border = if (tab.selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
-                            modifier = Modifier
-                                .animateItem(
-                                    fadeInSpec = motionTweenOrNull(motionEnabled, TAB_ENTER_MS),
-                                    placementSpec = motionTweenOrNull(motionEnabled, TAB_PLACEMENT_MS),
-                                    fadeOutSpec = motionTweenOrNull(motionEnabled, TAB_EXIT_MS),
-                                )
-                                .fillMaxWidth()
-                                .testTag(tabRowTag(tab.id))
-                                .selectable(selected = tab.selected, role = Role.Tab) {
-                                    end(TabSheetOutcome.SELECTED) { onSelect(tab.id) }
-                                },
+                    Column {
+                        Row(
+                            Modifier.padding(start = 10.dp, end = 0.dp, top = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Column {
-                                Row(
-                                    Modifier.padding(start = 10.dp, end = 0.dp, top = 2.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    if (tab.isPrivate) {
-                                        Icon(
-                                            Icons.Filled.VisibilityOff,
-                                            contentDescription = privateDescription,
-                                            modifier = Modifier.padding(end = 6.dp).size(18.dp),
-                                        )
-                                    }
-                                    if (tab.selected) {
-                                        Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.padding(end = 6.dp).size(18.dp))
-                                    }
-                                    Column(Modifier.weight(1f)) {
-                                        if (tab.selected) {
-                                            Text(
-                                                stringResource(R.string.tabs_selected_label),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                // The card already announces itself as the selected tab. The words stay
-                                                // visible. Clearing semantics keeps TalkBack from reading them again.
-                                                modifier = Modifier.clearAndSetSemantics { this[SemanticsProperties.TestTag] = CURRENT_TAB_LABEL_TAG },
-                                            )
-                                        }
-                                        Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    }
-                                    val closeDescription =
-                                        stringResource(if (tab.isPrivate) R.string.tabs_close_private_named else R.string.tabs_close_named, title)
-                                    IconButton(onClick = { onClose(tab.id) }, modifier = Modifier.testTag(tabCloseTag(tab.id))) {
-                                        Icon(Icons.Filled.Close, contentDescription = closeDescription)
-                                    }
-                                }
-                                TabPreview(
-                                    image = thumbnails[tab.id]?.takeIf { host != null },
-                                    letter = (host?.removePrefix("www.")?.firstOrNull()?.uppercaseChar() ?: '+').toString(),
-                                    host = host,
+                            if (tab.isPrivate) {
+                                Icon(
+                                    Icons.Filled.VisibilityOff,
+                                    contentDescription = privateDescription,
+                                    modifier = Modifier.padding(end = 6.dp).size(18.dp),
                                 )
                             }
+                            if (tab.selected) {
+                                Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.padding(end = 6.dp).size(18.dp))
+                            }
+                            Column(Modifier.weight(1f)) {
+                                if (tab.selected) {
+                                    Text(
+                                        stringResource(R.string.tabs_selected_label),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        // The card already announces itself as the selected tab. The words stay
+                                        // visible. Clearing semantics keeps TalkBack from reading them again.
+                                        modifier = Modifier.clearAndSetSemantics { this[SemanticsProperties.TestTag] = CURRENT_TAB_LABEL_TAG },
+                                    )
+                                }
+                                Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            val closeDescription =
+                                stringResource(if (tab.isPrivate) R.string.tabs_close_private_named else R.string.tabs_close_named, title)
+                            IconButton(onClick = { onClose(tab.id) }, modifier = Modifier.testTag(tabCloseTag(tab.id))) {
+                                Icon(Icons.Filled.Close, contentDescription = closeDescription)
+                            }
                         }
+                        TabPreview(
+                            image = thumbnails[tab.id]?.takeIf { host != null },
+                            letter = (host?.removePrefix("www.")?.firstOrNull()?.uppercaseChar() ?: '+').toString(),
+                            host = host,
+                        )
                     }
                 }
             }

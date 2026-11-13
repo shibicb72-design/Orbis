@@ -1,7 +1,6 @@
 package com.shibi.orbis.ui.settings
 
 import android.widget.Toast
-import androidx.compose.ui.graphics.Color
 import com.shibi.orbis.settings.DarkMode
 import com.shibi.orbis.settings.BrowserSettings
 import com.shibi.orbis.settings.HttpsOnlyMode
@@ -225,8 +224,6 @@ fun SettingsScreen(
     }
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = Color.Transparent,
-        contentColor = MaterialTheme.colorScheme.onBackground,
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.settings_title)) },

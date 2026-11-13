@@ -151,9 +151,7 @@ class ThemeContrastTest {
     fun idsAreUniqueAndTheCountIsDeliberate() {
         val ids = AppThemes.all.map { it.id }
         assertEquals(ids.distinct(), ids)
-        assertEquals(listOf("orbis_teal", "graphite", "harbor", "fern", "ember", "paper", "night_sky", "aurora", "fair_weather"), ids)
-        assertEquals(listOf("night_sky", "aurora", "fair_weather"), AppThemes.all.filter { it.scene != null }.map { it.id })
-        assertTrue(AppThemes.all.all { it.animated == (it.scene != null) })
+        assertEquals(listOf("orbis_teal", "graphite", "harbor", "fern", "ember", "paper"), ids)
     }
 
     /**

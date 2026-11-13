@@ -72,6 +72,11 @@ class MotionStructureTest {
     }
 
     @Test
+    fun noFrameLoopAnywhere() {
+        assertEquals(emptySet<String>(), filesUsing(literal("withFrameNanos")))
+    }
+
+    @Test
     fun theEngineHostsContainNoAnimationApiAndNoGraphicsLayer() {
         val all = sources()
         val banned = stateAnimations + listOf("tween(", "spring(", "animateItem(", "graphicsLayer")

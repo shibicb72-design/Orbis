@@ -9,11 +9,6 @@
     <string name="theme_card_description" translatable="false">%1$s. %2$s</string>
     <string name="theme_state_selected" translatable="false">Selected</string>
     <string name="theme_state_not_selected" translatable="false">Not selected</string>
-    <string name="theme_animation_animated" translatable="false">Animated</string>
-    <string name="theme_animation_off" translatable="false">Off</string>
-    <string name="theme_animation_animated_description" translatable="false">Animated background for %1$s</string>
-    <string name="theme_animation_off_description" translatable="false">No animation for %1$s</string>
-    <string name="theme_animation_system_off" translatable="false">System animations are off, so this theme stays still.</string>
 
     <string name="theme_name_orbis_teal" translatable="false">Orbis Teal</string>
     <string name="theme_desc_orbis_teal" translatable="false">The classic Orbis look: deep teal on cool white.</string>
@@ -27,10 +22,4 @@
     <string name="theme_desc_ember" translatable="false">Warm terracotta on off-white or charcoal.</string>
     <string name="theme_name_paper" translatable="false">Paper</string>
     <string name="theme_desc_paper" translatable="false">Sepia ink on parchment, like a printed page.</string>
-    <string name="theme_name_night_sky" translatable="false">Night Sky</string>
-    <string name="theme_desc_night_sky" translatable="false">Deep navy with slow, twinkling stars.</string>
-    <string name="theme_name_aurora" translatable="false">Aurora</string>
-    <string name="theme_desc_aurora" translatable="false">Green and teal light drifting over a dark sky.</string>
-    <string name="theme_name_fair_weather" translatable="false">Fair Weather</string>
-    <string name="theme_desc_fair_weather" translatable="false">Sky blue with soft clouds drifting by.</string>
 </resources>

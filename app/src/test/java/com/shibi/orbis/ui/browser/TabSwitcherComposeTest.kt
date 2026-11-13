@@ -1,14 +1,11 @@
 package com.shibi.orbis.ui.browser
 
 import android.provider.Settings
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
@@ -26,20 +23,11 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import com.shibi.orbis.tabs.TabUi
-import com.shibi.orbis.ui.theme.NightSkyTheme
-import com.shibi.orbis.ui.theme.SCENE_LAYER_TAG
-import com.shibi.orbis.ui.theme.SceneHost
-import com.shibi.orbis.ui.theme.SceneTestHost
 import com.shibi.orbis.ui.theme.TAB_ENTER_MS
-import com.shibi.orbis.ui.theme.argb
 import com.shibi.orbis.ui.theme.frames
-import com.shibi.orbis.ui.theme.rememberSceneSurface
-import com.shibi.orbis.ui.theme.sceneSurfaceRoot
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -182,53 +170,6 @@ class TabSwitcherComposeTest {
         rule.waitForIdle()
         assertEquals(listOf("closePrivate"), events)
         assertEquals(listOf(TabSheetOutcome.CLOSED_PRIVATE), ended)
-    }
-
-    private fun sceneLayers() = rule.onAllNodesWithTag(SCENE_LAYER_TAG, useUnmergedTree = true).fetchSemanticsNodes()
-
-    @Test
-    fun withoutASceneTheSheetHasNoLayer() {
-        start()
-        rule.onNodeWithTag(tabRowTag(1)).assertExists()
-        assertEquals(0, sceneLayers().size)
-    }
-
-    @Test
-    @GraphicsMode(GraphicsMode.Mode.NATIVE)
-    fun aSceneSitsBehindTheGridAndCardsKeepTheirColours() {
-        rule.mainClock.autoAdvance = false
-        val host = SceneHost()
-        rule.setContent {
-            SceneTestHost(host, NightSkyTheme, dark = true) {
-                val surface = rememberSceneSurface()
-                Box(Modifier.fillMaxSize().sceneSurfaceRoot(surface))
-                TabSwitcher(
-                    tabs = tabs,
-                    onSelect = {},
-                    onClose = {},
-                    onNewTab = {},
-                    onNewPrivateTab = {},
-                    onClosePrivateTabs = {},
-                    onDismiss = {},
-                    scene = surface,
-                )
-            }
-        }
-        rule.frames(60) // the sheet slides up
-        val layers = sceneLayers()
-        assertEquals(1, layers.size)
-        val layer = layers.single().boundsInRoot
-        val scheme = NightSkyTheme.mode(true).scheme
-        val inset = with(rule.density) { 4.dp.toPx() }.toInt()
-        for ((id, container) in listOf(1L to scheme.secondaryContainer, 2L to scheme.surface, 3L to scheme.tertiaryContainer)) {
-            val card = rule.onNodeWithTag(tabRowTag(id)).fetchSemanticsNode().boundsInRoot
-            assertTrue("card $id $card lies on the layer $layer", card.left >= layer.left && card.top >= layer.top && card.right <= layer.right && card.bottom <= layer.bottom)
-            val pixel = rule.onNodeWithTag(tabRowTag(id)).captureToImage().toPixelMap().let { it[inset, it.height / 2] }
-            assertEquals("card $id", Integer.toHexString(container.toArgb()), Integer.toHexString(pixel.toArgb()))
-        }
-        val before = rule.onNodeWithTag(SCENE_LAYER_TAG, useUnmergedTree = true).captureToImage().argb()
-        rule.frames(30)
-        assertFalse("the scene moves behind the cards", before.contentEquals(rule.onNodeWithTag(SCENE_LAYER_TAG, useUnmergedTree = true).captureToImage().argb()))
     }
 
     // Tab open and close motion. The exit fade has no pixel assertion: Robolectric does not draw a leaving lazy item's

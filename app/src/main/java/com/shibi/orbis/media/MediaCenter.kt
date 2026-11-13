@@ -30,9 +30,6 @@ fun pickMediaTab(candidates: List<MediaTab>, selectedTabId: Long?): MediaTab? =
         ?: candidates.firstOrNull { it.tabId == selectedTabId }
         ?: candidates.firstOrNull()
 
-/** Whether media plays in any tab, audio included: animated theme scenes pause while it does. */
-fun anyMediaPlaying(candidates: List<MediaTab>): Boolean = candidates.any { it.media.playing }
-
 /** Text the notification shows: a private tab's page title or site never reaches the notification or lock screen. */
 fun mediaNotificationText(tab: MediaTab, privateLabel: String, fallbackTitle: String): Pair<String, String> =
     if (tab.isPrivate) privateLabel to "" else tab.media.title.ifBlank { fallbackTitle } to tab.media.artist
@@ -45,10 +42,6 @@ fun mediaNotificationText(tab: MediaTab, privateLabel: String, fallbackTitle: St
 class MediaCenter(private val tabs: TabManager, scope: CoroutineScope) {
     private val _current = MutableStateFlow<MediaTab?>(null)
     val current: StateFlow<MediaTab?> = _current.asStateFlow()
-    private val _mediaPlaying = MutableStateFlow(false)
-
-    /** True while any tab plays media, audio included (not only [current]: a video in tab B plays on behind tab A's audio). */
-    val mediaPlaying: StateFlow<Boolean> = _mediaPlaying.asStateFlow()
 
     init {
         tabs.tabs
@@ -60,10 +53,7 @@ class MediaCenter(private val tabs: TabManager, scope: CoroutineScope) {
                     combine(pairs.map { (id, private, s) -> s.state.toMediaTab(id, private, s) }) { arr -> arr.filterNotNull() }
                 }
             }
-            .onEach { candidates ->
-                _current.value = pickMediaTab(candidates, tabs.selected.value.id)
-                _mediaPlaying.value = anyMediaPlaying(candidates)
-            }
+            .onEach { candidates -> _current.value = pickMediaTab(candidates, tabs.selected.value.id) }
             .launchIn(scope)
     }
 
