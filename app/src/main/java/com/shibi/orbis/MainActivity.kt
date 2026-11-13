@@ -161,9 +161,9 @@ class MainActivity : ComponentActivity() {
      * some devices stop and restart the activity when the window is expanded, and an expand must never pause the media.
      */
     private val pipCloseHandler = Handler(Looper.getMainLooper())
-    private val confirmPipClose = Runnable { pipExit.confirmClose() }
+    private val confirmPipClose: Runnable = Runnable { pipExit.confirmClose() }
 
-    private val pipExit =
+    private val pipExit: PipWindowExit =
         PipWindowExit(
             onClosePending = {
                 pipLog("close pending")
