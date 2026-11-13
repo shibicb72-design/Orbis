@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -35,10 +36,15 @@ fun Modifier.secondaryReadingWidth(): Modifier = this.fillMaxWidth().wrapContent
 
 /** A quiet, shared layout. The icon is decorative; the existing message supplies all meaning. */
 @Composable
-fun OrbisEmptyState(text: String, icon: ImageVector, modifier: Modifier = Modifier) {
+fun OrbisEmptyState(
+    text: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    containerColor: Color = MaterialTheme.colorScheme.background,
+) {
     Surface(
         modifier = modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background,
+        color = containerColor,
         contentColor = MaterialTheme.colorScheme.onBackground,
     ) {
         Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {

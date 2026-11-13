@@ -3,6 +3,7 @@ package com.shibi.orbis.ui.bookmarks
 import android.content.Context
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.graphics.Color
 import com.shibi.orbis.bookmarks.folderNames
 import androidx.compose.runtime.LaunchedEffect
 import androidx.activity.compose.BackHandler
@@ -37,6 +38,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -147,6 +149,8 @@ fun BookmarksScreen(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        containerColor = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onBackground,
         topBar = {
             TopAppBar(
                 title = { Text(openFolder ?: stringResource(R.string.bookmarks_title)) },
@@ -281,7 +285,7 @@ private fun save(manager: BookmarkManager, target: Bookmark, title: String, addr
 
 @Composable
 private fun EmptyState(text: String) {
-    OrbisEmptyState(text, Icons.Filled.Bookmarks)
+    OrbisEmptyState(text, Icons.Filled.Bookmarks, containerColor = Color.Transparent)
 }
 
 @Composable

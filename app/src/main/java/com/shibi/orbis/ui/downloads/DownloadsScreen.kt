@@ -41,6 +41,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -131,7 +132,7 @@ fun DownloadsScreen(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color.Transparent,
         contentColor = MaterialTheme.colorScheme.onBackground,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
@@ -155,7 +156,7 @@ fun DownloadsScreen(
         },
     ) { padding ->
         if (rows.isEmpty()) {
-            OrbisEmptyState(stringResource(R.string.downloads_empty), Icons.Filled.Download, Modifier.padding(padding))
+            OrbisEmptyState(stringResource(R.string.downloads_empty), Icons.Filled.Download, Modifier.padding(padding), containerColor = Color.Transparent)
         } else {
             LazyColumn(
                 Modifier.padding(padding).fillMaxSize().secondaryReadingWidth(),
