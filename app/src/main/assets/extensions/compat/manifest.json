@@ -1,0 +1,16 @@
+{
+  "manifest_version": 2,
+  "name": "Orbis Compatibility",
+  "version": "1.0",
+  "description": "Tells Orbis when a page says this browser is unsupported, so Orbis can retry it as a desktop site. Sends nothing except to the Orbis app.",
+  "browser_specific_settings": { "gecko": { "id": "compat@orbis.shibi.com" } },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "permissions": ["nativeMessaging", "nativeMessagingFromContent", "geckoViewAddons"]
+}

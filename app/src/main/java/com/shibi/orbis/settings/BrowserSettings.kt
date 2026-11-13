@@ -61,6 +61,9 @@ interface BrowserPrefs {
     var alwaysDesktop: Boolean
     var desktopOn: Set<String>
     var desktopOff: Set<String>
+    /** Sites switched to desktop by the auto-desktop retry, and sites where the user turned that off for good. */
+    var desktopAuto: Set<String>
+    var desktopAutoDeclined: Set<String>
 
     /** Ask to open web links in the installed app that handles them. */
     var openLinksInApps: Boolean
@@ -230,6 +233,18 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
             prefs.edit { putStringSet(KEY_DESKTOP_OFF, value.toSet()) }
         }
 
+    override var desktopAuto: Set<String>
+        get() = prefs.getStringSet(KEY_DESKTOP_AUTO, emptySet())?.toSet() ?: emptySet()
+        set(value) {
+            prefs.edit { putStringSet(KEY_DESKTOP_AUTO, value.toSet()) }
+        }
+
+    override var desktopAutoDeclined: Set<String>
+        get() = prefs.getStringSet(KEY_DESKTOP_AUTO_DECLINED, emptySet())?.toSet() ?: emptySet()
+        set(value) {
+            prefs.edit { putStringSet(KEY_DESKTOP_AUTO_DECLINED, value.toSet()) }
+        }
+
     override var forceDark: Boolean
         get() = prefs.getBoolean(KEY_FORCE_DARK, false)
         set(value) {
@@ -330,6 +345,8 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         private const val KEY_ALWAYS_DESKTOP = "always_desktop"
         private const val KEY_DESKTOP_ON = "desktop_on_sites"
         private const val KEY_DESKTOP_OFF = "desktop_off_sites"
+        private const val KEY_DESKTOP_AUTO = "desktop_auto_sites"
+        private const val KEY_DESKTOP_AUTO_DECLINED = "desktop_auto_declined_sites"
         private const val KEY_PINNED = "pinned_sites"
         private const val KEY_HIDDEN = "hidden_sites"
         private const val KEY_FORCE_ZOOM = "force_zoom"
@@ -410,6 +427,65 @@ class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
 
     override fun desktopFor(url: String, isPrivate: Boolean): Boolean = desktopChoice.valueFor(url, isPrivate)
 
+    override fun alwaysDesktopOn(): Boolean = _alwaysDesktop.value
+
+    // Auto desktop (see compat/AutoDesktopRetry). Normal tabs persist; private tabs keep their own sets in memory, read
+    // the normal ones underneath (like SiteChoice), and lose theirs in forgetPrivate().
+    private var desktopAuto = prefs.desktopAuto
+    private var desktopAutoDeclined = prefs.desktopAutoDeclined
+    private val privateDesktopAuto = HashSet<String>()
+    private val privateDesktopAutoDeclined = HashSet<String>()
+
+    private fun siteKey(url: String): String? = hostOfUrl(url)?.lowercase()
+
+    /** The retry worked: Desktop site on for the site, and remembered as an automatic choice. */
+    override fun rememberAutoDesktop(url: String, isPrivate: Boolean) {
+        val host = siteKey(url) ?: return
+        desktopChoice.set(url, true, isPrivate)
+        if (isPrivate) {
+            privateDesktopAuto += host
+            privateDesktopAutoDeclined -= host
+        } else {
+            desktopAuto = desktopAuto + host
+            desktopAutoDeclined = desktopAutoDeclined - host
+            prefs.desktopAuto = desktopAuto
+            prefs.desktopAutoDeclined = desktopAutoDeclined
+        }
+    }
+
+    /** The user (or a failed retry) turned automatic desktop off for the site: desktop off, and never retried again. */
+    override fun declineAutoDesktop(url: String, isPrivate: Boolean) {
+        val host = siteKey(url) ?: return
+        desktopChoice.set(url, false, isPrivate)
+        if (isPrivate) {
+            privateDesktopAuto -= host
+            privateDesktopAutoDeclined += host
+        } else {
+            desktopAuto = desktopAuto - host
+            desktopAutoDeclined = desktopAutoDeclined + host
+            prefs.desktopAuto = desktopAuto
+            prefs.desktopAutoDeclined = desktopAutoDeclined
+        }
+    }
+
+    fun isAutoDesktop(url: String, isPrivate: Boolean): Boolean {
+        val host = siteKey(url) ?: return false
+        if (isPrivate) {
+            if (host in privateDesktopAuto) return true
+            if (host in privateDesktopAutoDeclined) return false
+        }
+        return host in desktopAuto
+    }
+
+    override fun isAutoDesktopDeclined(url: String, isPrivate: Boolean): Boolean {
+        val host = siteKey(url) ?: return false
+        if (isPrivate) {
+            if (host in privateDesktopAutoDeclined) return true
+            if (host in privateDesktopAuto) return false
+        }
+        return host in desktopAutoDeclined
+    }
+
     private val _openLinksInApps = MutableStateFlow(prefs.openLinksInApps)
     val openLinksInApps: StateFlow<Boolean> = _openLinksInApps.asStateFlow()
 
@@ -473,7 +549,26 @@ class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
     override fun javaScriptFor(url: String, isPrivate: Boolean): Boolean = jsChoice.valueFor(url, isPrivate)
 
     /** Remembers the page menu's Desktop site choice for the page's site. */
-    fun rememberDesktop(url: String, on: Boolean, isPrivate: Boolean) = desktopChoice.set(url, on, isPrivate)
+    /**
+     * Turning it off on a site that auto desktop switched on also stops future retries there ([declineAutoDesktop]);
+     * turning it on clears that.
+     */
+    fun rememberDesktop(url: String, on: Boolean, isPrivate: Boolean) {
+        val host = siteKey(url) ?: return
+        if (!on && isAutoDesktop(url, isPrivate)) {
+            declineAutoDesktop(url, isPrivate)
+            return
+        }
+        if (on) {
+            if (isPrivate) {
+                privateDesktopAutoDeclined -= host
+            } else if (host in desktopAutoDeclined) {
+                desktopAutoDeclined = desktopAutoDeclined - host
+                prefs.desktopAutoDeclined = desktopAutoDeclined
+            }
+        }
+        desktopChoice.set(url, on, isPrivate)
+    }
 
     /** Remembers the page menu's JavaScript choice for the page's site. */
     fun rememberJavaScript(url: String, on: Boolean, isPrivate: Boolean) = jsChoice.set(url, on, isPrivate)
@@ -482,6 +577,8 @@ class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
     fun forgetPrivate() {
         jsChoice.forgetPrivate()
         desktopChoice.forgetPrivate()
+        privateDesktopAuto.clear()
+        privateDesktopAutoDeclined.clear()
     }
 
     private val _homepage = MutableStateFlow(prefs.homepage)

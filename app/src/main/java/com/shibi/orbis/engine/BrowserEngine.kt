@@ -2,7 +2,9 @@ package com.shibi.orbis.engine
 
 import android.content.Context
 import android.view.View
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
 
 /**
  * Thin browser-engine surface. UI and feature modules must not import GeckoView types;
@@ -286,6 +288,11 @@ interface BrowserSession {
     val state: StateFlow<SessionState>
     /** Head of this session's prompt queue; null when nothing is pending. */
     val prompts: StateFlow<SitePrompt?>
+    /**
+     * One event each time the auto-desktop retry worked and Desktop site was kept for the page's site; the UI shows the
+     * notice. Not replayed: only a collector that is listening sees it. Test doubles never emit.
+     */
+    val autoDesktopKept: Flow<Unit> get() = emptyFlow()
     /** Callbacks that need the tab layer. Set by whoever owns the session (the tab manager). */
     var host: SessionHost?
     /** Puts this session in [contentView], releasing whatever the view held first. No-op if it already holds it. */
@@ -391,6 +398,14 @@ interface SitePolicy {
     fun offerAppsForLinks(): Boolean = true
     /** Tapped magnet: links go to Orbis's torrent downloader instead of another app (Settings > Magnet links). */
     fun magnetsToOrbis(): Boolean = false
+    /** Settings > Always request desktop site. */
+    fun alwaysDesktopOn(): Boolean = false
+    /** Auto desktop (see compat/AutoDesktopRetry): the user turned it off for this site, so it is never retried. */
+    fun isAutoDesktopDeclined(url: String, isPrivate: Boolean): Boolean = false
+    /** The retry worked: keep Desktop site on for the site. */
+    fun rememberAutoDesktop(url: String, isPrivate: Boolean) {}
+    /** The retry did not help: Desktop site off for the site, and no retry there again. */
+    fun declineAutoDesktop(url: String, isPrivate: Boolean) {}
 }
 
 /** The translator's view of a page. Language tags are BCP 47 ("en", "fr", "zh-Hans"); empty when unknown. */
