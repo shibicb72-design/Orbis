@@ -9,6 +9,11 @@
     <string name="theme_card_description" translatable="false">%1$s. %2$s</string>
     <string name="theme_state_selected" translatable="false">Selected</string>
     <string name="theme_state_not_selected" translatable="false">Not selected</string>
+    <string name="theme_animation_animated" translatable="false">Animated</string>
+    <string name="theme_animation_off" translatable="false">Off</string>
+    <string name="theme_animation_animated_description" translatable="false">Animated background for %1$s</string>
+    <string name="theme_animation_off_description" translatable="false">No animation for %1$s</string>
+    <string name="theme_animation_system_off" translatable="false">System animations are off, so this theme stays still.</string>
 
     <string name="theme_name_orbis_teal" translatable="false">Orbis Teal</string>
     <string name="theme_desc_orbis_teal" translatable="false">The classic Orbis look: deep teal on cool white.</string>
