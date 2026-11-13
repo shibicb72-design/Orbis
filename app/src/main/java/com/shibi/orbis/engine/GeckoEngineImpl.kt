@@ -10,6 +10,10 @@ import android.view.View
 import android.webkit.MimeTypeMap
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import com.shibi.orbis.compat.AUTO_DESKTOP_RETRY
+import com.shibi.orbis.compat.Action
+import com.shibi.orbis.compat.AutoDesktopRetry
+import com.shibi.orbis.compat.isUnsupportedBrowserPage
 import com.shibi.orbis.debug.DebugLog
 import com.shibi.orbis.downloads.DownloadIntents
 import com.shibi.orbis.history.VisitTracker
@@ -31,7 +35,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -80,6 +88,9 @@ class GeckoEngineImpl(
 
     /** Page probe for Cast (see CastExtensionHolder). Allowed in private tabs; it stores nothing. */
     private val castExtension = CastExtensionHolder { debugLog.log("GeckoEngine", it) }
+
+    /** "Unsupported browser" probe for the auto-desktop retry (see CompatExtensionHolder). Only with AUTO_DESKTOP_RETRY. */
+    private val compatExtension = CompatExtensionHolder { debugLog.log("GeckoEngine", it) }
 
     /** Notices blocked YouTube ad requests for the on-device time-saved estimate. Not installed in private tabs. */
     private val youtubeAdObserver = YoutubeAdExtensionHolder(onEvent = { onYoutubeAdEvent }, log = { debugLog.log("GeckoEngine", it) })
@@ -298,6 +309,7 @@ class GeckoEngineImpl(
             created.autocompleteStorageDelegate = loginStorageDelegate()
             reader.install(created)
             castExtension.install(created)
+            if (AUTO_DESKTOP_RETRY) compatExtension.install(created)
             youtubeAdObserver.install(created)
             YoutubePipExtension.install(created) { debugLog.log("GeckoEngine", it) }
             // Without a prompt delegate, WebExtensionController.install() hangs forever.
@@ -483,11 +495,18 @@ class GeckoEngineImpl(
             onBlocked = { onContentBlocked },
             reader = reader,
             castExtension = castExtension,
+            compatExtension = compatExtension,
             sitePolicy = { sitePolicy },
             onYoutubeAd = { onYoutubeAdEvent },
-            // A popup child inherits the opener's desktop/mobile choice and its privacy, and is never opened by us.
-            newPopupChild = { opener ->
-                buildSession(SessionInit(desktopMode = opener.state.value.desktopMode, isPrivate = opener.isPrivate))
+            // A popup child takes the desktop/mobile choice of its own site (never the opener's page: that would carry
+            // one site's desktop mode to another) and the opener's privacy. It is never opened by us.
+            newPopupChild = { opener, uri ->
+                buildSession(
+                    SessionInit(
+                        desktopMode = opener.desktopWantedFor(uri) ?: opener.state.value.desktopMode,
+                        isPrivate = opener.isPrivate,
+                    ),
+                )
             },
             onClosed = { if (init.isPrivate) privateSessions.decrementAndGet() },
         ).also { if (init.isPrivate) privateSessions.incrementAndGet() }
@@ -552,9 +571,10 @@ private class GeckoBrowserSession(
     private val onBlocked: () -> ((com.shibi.orbis.stats.BlockKind, String?, Boolean) -> Unit)?,
     private val reader: ReaderExtensionHolder,
     private val castExtension: CastExtensionHolder,
+    private val compatExtension: CompatExtensionHolder,
     private val sitePolicy: () -> SitePolicy?,
     private val onYoutubeAd: () -> ((YoutubeAdEvent) -> Unit)?,
-    private val newPopupChild: (GeckoBrowserSession) -> GeckoBrowserSession,
+    private val newPopupChild: (opener: GeckoBrowserSession, uri: String) -> GeckoBrowserSession,
     /** Runs once, when this session closes. */
     private val onClosed: () -> Unit,
 ) : BrowserSession {
@@ -573,6 +593,25 @@ private class GeckoBrowserSession(
      * before any reload, so that reload does not apply it again.
      */
     private var scriptForcedByImport = false
+
+    /**
+     * Host (lowercase) of a pending auto-desktop retry: desktop for this tab only until the retry is kept or reverted.
+     * Every other desktop choice comes from the site policy, which both menus store.
+     */
+    private var retryDesktopHost: String? = null
+
+    /** A top-level page started since the last commit; a commit without one is same-document (hash, pushState). */
+    private var pageStartedSinceCommit = false
+
+    /** The last commit reloaded because its desktop mode was wrong (see [desktopAfterCommit]). */
+    private var desktopReloadPending = false
+
+    /** Host of the last committed web page, lowercase; null for a non-web page. */
+    private var committedHost: String? = null
+
+    private val autoDesktop = AutoDesktopRetry()
+    private val _autoDesktopKept = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val autoDesktopKept: SharedFlow<Unit> = _autoDesktopKept.asSharedFlow()
 
     private val queue = PromptQueue()
     override val prompts: StateFlow<SitePrompt?> = queue.head
@@ -625,6 +664,12 @@ private class GeckoBrowserSession(
         session.permissionDelegate = permissionDelegate()
         session.mediaSessionDelegate = mediaSessionDelegate()
         session.translationsSessionDelegate = translationDelegate()
+        session.historyDelegate =
+            object : GeckoSession.HistoryDelegate {
+                override fun onHistoryStateChange(session: GeckoSession, historyList: GeckoSession.HistoryDelegate.HistoryList) {
+                    history = historyList
+                }
+            }
         session.contentBlockingDelegate =
             object : ContentBlocking.Delegate {
                 override fun onContentBlocked(session: GeckoSession, event: ContentBlocking.BlockEvent) {
@@ -657,6 +702,7 @@ private class GeckoBrowserSession(
         session.open(runtime)
         attachReader()
         attachCast()
+        attachCompat()
         // A restored page reloads without passing onLoadRequest: its site's choices are applied first.
         init.fallbackUrl?.takeIf { isWebUrl(it) }?.let { url ->
             applyTrackingProtection(!trackingExceptions.isExcepted(url, isPrivate))
@@ -699,6 +745,7 @@ private class GeckoBrowserSession(
                     // Back/Forward commits without onLoadRequest. An import forces JavaScript (HTML off, PDF on).
                     // Forward back to a website has to restore that site's setting, or it stays off.
                     applyImportedScript(url, reloadIfChanged = true)
+                    onCommitForDesktop(url)
                 }
                 // Gecko hands every web page its tracking permission record; ALLOW means a stored (normal) exception.
                 trackingPermission = perms.firstOrNull { it.permission == GeckoSession.PermissionDelegate.PERMISSION_TRACKING }
@@ -788,6 +835,10 @@ private class GeckoBrowserSession(
                 }
                 // Decide tracking protection for the site BEFORE its page loads (see TrackingExceptions).
                 applyTrackingProtection(!trackingExceptions.isExcepted(request.uri, isPrivate))
+                // Measured on GeckoView 160: a 302 from a desktop page to a mobile site keeps the desktop User-Agent
+                // (header and navigator.userAgent) for that one document, although the session is switched to mobile
+                // here. It is not reloaded: redirect targets can be one-time URLs (sign-in callbacks, magic links).
+                // The next navigation is mobile.
                 applySitePolicy(request.uri)
                 return null
             }
@@ -816,9 +867,10 @@ private class GeckoBrowserSession(
                 }
                 // The child is deliberately NOT opened: Gecko opens the session it is handed, and opening it
                 // here too throws. The tab layer keeps the strong reference and attaches it to the view.
-                val child = newPopupChild(this@GeckoBrowserSession)
+                val child = newPopupChild(this@GeckoBrowserSession, uri)
                 runCatching { child.attachReader() }
                 runCatching { child.attachCast() }
+                runCatching { child.attachCompat() }
                 owner.onPopupSession(child, this@GeckoBrowserSession)
                 debugLog.log("GeckoSession", "popup session created")
                 return GeckoResult.fromValue(child.geckoSession)
@@ -849,6 +901,9 @@ private class GeckoBrowserSession(
                 applyImportedScript(url, reloadIfChanged = true)
                 // A new top-level page ends any dialog-spam lockout and invalidates the find highlight.
                 abuseGuard.onPageStart()
+                // A message from the page being replaced must not be read as one about the next page.
+                compatPort = null
+                pageStartedSinceCommit = true
                 // A permission dialog must not outlive the page that asked; dismissing denies without recording.
                 queue.dismissWhere { it is SitePrompt.SitePermission }
                 reconciler.onPageStart()
@@ -1250,6 +1305,144 @@ private class GeckoBrowserSession(
             CastExtensionHolder.NATIVE_APP,
         )
     }
+
+    // ---- auto desktop --------------------------------------------------------------------------------------
+
+    private var compatPort: WebExtension.Port? = null
+
+    /** The committed URL when [compatPort] connected; a message counts only while that page is still the one shown. */
+    private var compatPortUrl: String? = null
+
+    fun attachCompat() {
+        if (!AUTO_DESKTOP_RETRY) return
+        compatExtension.whenReady { ext ->
+            if (closed) return@whenReady
+            runCatching { attachCompatTo(ext) }.onFailure { debugLog.log("GeckoSession", "compat attach failed") }
+        }
+    }
+
+    private fun attachCompatTo(ext: WebExtension) {
+        session.webExtensionController.setMessageDelegate(
+            ext,
+            object : WebExtension.MessageDelegate {
+                override fun onConnect(port: WebExtension.Port) {
+                    // Port callbacks may arrive off the main thread; everything below runs on main, in order.
+                    scope.launch {
+                        compatPort = port
+                        compatPortUrl = _state.value.url
+                    }
+                    port.setDelegate(
+                        object : WebExtension.PortDelegate {
+                            override fun onPortMessage(message: Any, port: WebExtension.Port) {
+                                val obj = message as? JSONObject ?: return
+                                scope.launch { onCompatMessage(port, obj) }
+                            }
+
+                            override fun onDisconnect(port: WebExtension.Port) {
+                                scope.launch { if (compatPort === port) compatPort = null }
+                            }
+                        },
+                    )
+                }
+            },
+            CompatExtensionHolder.NATIVE_APP,
+        )
+    }
+
+    /** The page's sample is classified and dropped here: never stored, never logged. */
+    private fun onCompatMessage(port: WebExtension.Port, obj: JSONObject) {
+        if (closed || !session.isOpen || port !== compatPort) return
+        val url = _state.value.url
+        if (!isWebUrl(url) || url != compatPortUrl) return
+        val host = hostOfUrl(url)?.lowercase() ?: return
+        val policy = sitePolicy() ?: return
+        val message = parseCompatMessage(obj) ?: return
+        val retrying = retryDesktopHost == host
+        val action =
+            when (message) {
+                CompatMessage.Clean -> autoDesktop.onCleanPage(host)
+                is CompatMessage.Sample -> {
+                    // Desktop already on and not by our retry (Always desktop, the user's choice): nothing to detect.
+                    if (_state.value.desktopMode && !retrying) return
+                    if (isUnsupportedBrowserPage(message.sample)) {
+                        autoDesktop.onBlockedPage(
+                            host = host,
+                            desktopMode = _state.value.desktopMode,
+                            alwaysDesktop = policy.alwaysDesktopOn(),
+                            declined = policy.isAutoDesktopDeclined(url, isPrivate),
+                            userChoseDesktop = policy.desktopFor(url, isPrivate),
+                        )
+                    } else {
+                        autoDesktop.onCleanPage(host)
+                    }
+                }
+            }
+        // No URL or host in the log: it would record browsing history.
+        when (action) {
+            Action.Retry -> {
+                retryDesktopHost = host
+                applyDesktop(true)
+                debugLog.log("GeckoSession", "auto desktop: retry")
+                session.reload()
+            }
+            Action.Keep -> {
+                policy.rememberAutoDesktop(url, isPrivate)
+                retryDesktopHost = null
+                debugLog.log("GeckoSession", "auto desktop: kept")
+                _autoDesktopKept.tryEmit(Unit)
+            }
+            Action.Revert -> {
+                retryDesktopHost = null
+                policy.declineAutoDesktop(url, isPrivate)
+                applyDesktop(false)
+                debugLog.log("GeckoSession", "auto desktop: reverted")
+                session.reload()
+            }
+            Action.None -> Unit
+        }
+    }
+
+    /**
+     * The tab's desktop choice for [url]: desktop while a retry for its site is pending, else the site policy. Null for
+     * a non-web URL or without a policy.
+     */
+    fun desktopWantedFor(url: String): Boolean? {
+        if (!isWebUrl(url)) return null
+        val host = hostOfUrl(url)?.lowercase()
+        if (host != null && host == retryDesktopHost) return true
+        return sitePolicy()?.desktopFor(url, isPrivate)
+    }
+
+    /**
+     * Every commit, including Back and Forward, which skip onLoadRequest: a site never keeps the desktop mode of the
+     * site shown before it. Reloads once when the mode had to change (loop-guarded, see [desktopAfterCommit]).
+     */
+    private fun onCommitForDesktop(url: String) {
+        if (closed) return
+        val host = if (isWebUrl(url)) hostOfUrl(url)?.lowercase() else null
+        if (host != committedHost) {
+            committedHost?.let { autoDesktop.onLeft(it) }
+            committedHost = host
+            if (retryDesktopHost != null && retryDesktopHost != host) retryDesktopHost = null
+        }
+        val reloaded = desktopReloadPending
+        desktopReloadPending = false
+        val pageStarted = pageStartedSinceCommit
+        pageStartedSinceCommit = false
+        when (val d = desktopAfterCommit(desktopWantedFor(url), _state.value.desktopMode, reloaded, pageStarted)) {
+            DesktopCommit.Leave -> Unit
+            is DesktopCommit.Apply -> {
+                applyDesktop(d.desktop)
+                if (d.reload && session.isOpen) {
+                    desktopReloadPending = true
+                    // No URL or host: it would record browsing history.
+                    debugLog.log("GeckoSession", "desktop mode corrected on commit; reloading")
+                    session.reload()
+                }
+            }
+        }
+    }
+
 
     private fun contentDelegate() =
         object : GeckoSession.ContentDelegate {
@@ -2196,6 +2389,13 @@ private class GeckoBrowserSession(
 
     override fun setDesktopMode(enabled: Boolean) {
         if (closed || _state.value.desktopMode == enabled) return
+        // The user decided: a pending retry for this page's site ends here (both menus store the choice first).
+        hostOfUrl(_state.value.url)?.lowercase()?.let { host ->
+            if (host == retryDesktopHost) {
+                retryDesktopHost = null
+                autoDesktop.onLeft(host)
+            }
+        }
         applyDesktop(enabled)
         // Settings only take effect for the next load.
         if (session.isOpen && _state.value.url.isNotEmpty()) reload()
@@ -2214,7 +2414,7 @@ private class GeckoBrowserSession(
     private fun applySitePolicy(url: String) {
         if (closed || !isWebUrl(url)) return
         val policy = sitePolicy() ?: return
-        applyDesktop(policy.desktopFor(url, isPrivate))
+        applyDesktop(desktopWantedFor(url) ?: policy.desktopFor(url, isPrivate))
         val js = policy.javaScriptFor(url, isPrivate)
         if (session.settings.allowJavascript != js) session.settings.allowJavascript = js
         _state.update { it.copy(javaScriptOn = js) }
@@ -2234,14 +2434,35 @@ private class GeckoBrowserSession(
         if (session.isOpen && _state.value.url.isNotEmpty()) reload()
     }
 
+    /** The session's back/forward list as Gecko last reported it (main thread). */
+    private var history: GeckoSession.HistoryDelegate.HistoryList? = null
+
+    /**
+     * Back and Forward skip onLoadRequest, so the entry's site gets its desktop mode here, before its request is sent.
+     * Only when Gecko's back/forward list is current: it is reported several seconds after a navigation (measured on
+     * GeckoView 160), and until then the commit fallback ([onCommitForDesktop]) corrects the mode with one reload.
+     */
+    private fun prepareHistoryStep(offset: Int) {
+        val list = history ?: return
+        val uri = historyStepTarget(list.map { it.uri }, list.currentIndex, offset, _state.value.url)
+        if (uri == null) {
+            // Gecko reports the list late; a stale one would name the wrong entry. No URL in the log.
+            debugLog.log("GeckoSession", "history step: list not current; desktop mode left to the commit")
+            return
+        }
+        desktopWantedFor(uri)?.let { applyDesktop(it) }
+    }
+
     override fun goBack(): Boolean {
         if (closed || !_state.value.canGoBack) return false
+        prepareHistoryStep(-1)
         session.goBack()
         return true
     }
 
     override fun goForward(): Boolean {
         if (closed || !_state.value.canGoForward) return false
+        prepareHistoryStep(1)
         session.goForward()
         return true
     }

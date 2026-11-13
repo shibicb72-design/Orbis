@@ -251,6 +251,8 @@ private fun CustomTabScreen(
                         })
                         DropdownMenuItem(text = { Text(stringResource(R.string.menu_desktop_site)) }, onClick = {
                             menuOpen = false
+                            // Remembered for the site like the browser's menu, so unticking also stops auto-desktop retries.
+                            if (isWebUrl(state.url)) app.container.browserSettings.rememberDesktop(state.url, !state.desktopMode, session.isPrivate)
                             session.setDesktopMode(!state.desktopMode)
                         })
                     }

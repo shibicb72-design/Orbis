@@ -1,0 +1,103 @@
+// Tells Orbis when the top page says this browser is unsupported (see compat/UnsupportedBrowserClassifier.kt).
+// Top frame only. Reads the page a few times right after it loads and sends exactly one message, to the Orbis app
+// only: a sample, or "clean" at 3 s or at the first interaction, so a retry is always resolved. No network, no
+// storage, no changes to the page, nothing on the page's window.
+(() => {
+  const MAX_TEXT_CONTENT = 20000;
+  const MAX_VISIBLE_TEXT = 800;
+  const MAX_HEADLINES = 5;
+  const MAX_HEADLINE = 200;
+  // Same list as BLOCK_SEGMENTS in UnsupportedBrowserClassifier.kt. Only the yes/no answer leaves this script.
+  const BLOCK_SEGMENTS = [
+    "unsupported",
+    "unsupported-browser",
+    "browser-not-supported",
+    "browser-unsupported",
+    "outdated-browser",
+    "upgrade-browser",
+    "browser-update",
+    "incompatible-browser",
+  ];
+
+  let done = false;
+  const timers = [];
+
+  function stop() {
+    done = true;
+    for (const t of timers) clearTimeout(t);
+    document.removeEventListener("pointerdown", interacted, true);
+    document.removeEventListener("keydown", interacted, true);
+    document.removeEventListener("scroll", interacted, true);
+  }
+
+  // The user started using the page: look one last time, then stop for good.
+  function interacted() {
+    if (done) return;
+    if (!check()) send({ type: "clean" });
+  }
+
+  function send(message) {
+    stop();
+    try {
+      const port = browser.runtime.connectNative("orbisCompat");
+      port.postMessage(message);
+    } catch (e) {}
+  }
+
+  function isBlockPath(path) {
+    const segments = String(path || "").toLowerCase().split("/");
+    for (const seg of segments) {
+      const dot = seg.lastIndexOf(".");
+      const name = dot >= 0 ? seg.substring(0, dot) : seg;
+      if (BLOCK_SEGMENTS.indexOf(name) >= 0) return true;
+    }
+    return false;
+  }
+
+  function visible(el) {
+    return el.getClientRects().length > 0;
+  }
+
+  function headlines() {
+    const out = [];
+    const nodes = document.querySelectorAll("h1, h2");
+    for (let i = 0; i < nodes.length && out.length < MAX_HEADLINES; i++) {
+      if (!visible(nodes[i])) continue;
+      const t = (nodes[i].innerText || "").trim();
+      if (t) out.push(t.substring(0, MAX_HEADLINE));
+    }
+    return out;
+  }
+
+  // Returns true when it sent.
+  function check() {
+    if (done) return true;
+    const body = document.body;
+    if (!body) return false;
+    if ((body.textContent || "").length > MAX_TEXT_CONTENT) return false;
+    const text = body.innerText || "";
+    if (text.length > MAX_VISIBLE_TEXT) return false;
+    const title = document.title || "";
+    if (!/browser/i.test(title + "\n" + text)) return false;
+    send({
+      type: "sample",
+      title: title,
+      headlines: headlines(),
+      text: text,
+      blockPath: isBlockPath(location.pathname),
+    });
+    return true;
+  }
+
+  document.addEventListener("pointerdown", interacted, true);
+  document.addEventListener("keydown", interacted, true);
+  document.addEventListener("scroll", interacted, true);
+
+  if (check()) return;
+  timers.push(setTimeout(check, 1500));
+  timers.push(
+    setTimeout(() => {
+      if (!check()) send({ type: "clean" });
+    }, 3000),
+  );
+})();
