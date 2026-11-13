@@ -1,6 +1,5 @@
 package com.shibi.orbis.ui.browser
 
-import androidx.compose.animation.core.tween
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material.icons.filled.History
@@ -66,7 +65,10 @@ import com.shibi.orbis.tabs.TabUi
 import com.shibi.orbis.ui.theme.SceneLayer
 import com.shibi.orbis.ui.theme.SceneRegion
 import com.shibi.orbis.ui.theme.SceneSurface
+import com.shibi.orbis.ui.theme.TAB_ENTER_MS
+import com.shibi.orbis.ui.theme.TAB_EXIT_MS
 import com.shibi.orbis.ui.theme.TAB_PLACEMENT_MS
+import com.shibi.orbis.ui.theme.motionTweenOrNull
 import com.shibi.orbis.ui.theme.rememberMotionEnabled
 
 /** How a tab sheet ended; decides where focus goes next (see [tabSheetReturnFocus]). */
@@ -238,9 +240,9 @@ internal fun TabSwitcher(
                             border = if (tab.selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                             modifier = Modifier
                                 .animateItem(
-                                    fadeInSpec = null,
-                                    placementSpec = if (motionEnabled) tween(TAB_PLACEMENT_MS) else null,
-                                    fadeOutSpec = null,
+                                    fadeInSpec = motionTweenOrNull(motionEnabled, TAB_ENTER_MS),
+                                    placementSpec = motionTweenOrNull(motionEnabled, TAB_PLACEMENT_MS),
+                                    fadeOutSpec = motionTweenOrNull(motionEnabled, TAB_EXIT_MS),
                                 )
                                 .fillMaxWidth()
                                 .testTag(tabRowTag(tab.id))

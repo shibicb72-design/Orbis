@@ -1,12 +1,15 @@
 package com.shibi.orbis.ui.browser
 
+import android.provider.Settings
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.assertIsDisplayed
@@ -21,17 +24,21 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
+import androidx.test.core.app.ApplicationProvider
 import com.shibi.orbis.tabs.TabUi
 import com.shibi.orbis.ui.theme.NightSkyTheme
 import com.shibi.orbis.ui.theme.SCENE_LAYER_TAG
 import com.shibi.orbis.ui.theme.SceneHost
 import com.shibi.orbis.ui.theme.SceneTestHost
+import com.shibi.orbis.ui.theme.TAB_ENTER_MS
 import com.shibi.orbis.ui.theme.argb
 import com.shibi.orbis.ui.theme.frames
 import com.shibi.orbis.ui.theme.rememberSceneSurface
 import com.shibi.orbis.ui.theme.sceneSurfaceRoot
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -222,5 +229,85 @@ class TabSwitcherComposeTest {
         val before = rule.onNodeWithTag(SCENE_LAYER_TAG, useUnmergedTree = true).captureToImage().argb()
         rule.frames(30)
         assertFalse("the scene moves behind the cards", before.contentEquals(rule.onNodeWithTag(SCENE_LAYER_TAG, useUnmergedTree = true).captureToImage().argb()))
+    }
+
+    // Tab open and close motion. The exit fade has no pixel assertion: Robolectric does not draw a leaving lazy item's
+    // layer (see TabStripMotionComposeTest). It was checked on an API 36 emulator at animator scale 10 instead.
+
+    private val resolver get() = ApplicationProvider.getApplicationContext<android.app.Application>().contentResolver
+
+    @After
+    fun resetAnimatorScale() {
+        Settings.Global.putFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+    }
+
+    private var unselectedCard = Color.Unspecified
+
+    /** The sheet with the clock held, slid fully up, at the system animator [scale]. */
+    private fun startHeld(scale: Float = 1f) {
+        Settings.Global.putFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, scale)
+        rule.mainClock.autoAdvance = false
+        rule.setContent {
+            MaterialTheme(colorScheme = lightColorScheme()) {
+                unselectedCard = MaterialTheme.colorScheme.surface
+                TabSwitcher(
+                    tabs = tabs,
+                    onSelect = { events += "select:$it" },
+                    onClose = { id ->
+                        events += "close:$id"
+                        tabs = tabs.filterNot { it.id == id }
+                    },
+                    onNewTab = {},
+                    onNewPrivateTab = {},
+                    onClosePrivateTabs = {},
+                    onDismiss = {},
+                    onEnded = { ended += it },
+                )
+            }
+        }
+        rule.frames(60) // the sheet slides up
+    }
+
+    private fun framesFor(ms: Int) = (ms + 15) / 16
+
+    /** A pixel of a card's container, clear of its corners and its text. */
+    private fun cardPixel(id: Long): Int {
+        val map = rule.onNodeWithTag(tabRowTag(id)).captureToImage().toPixelMap()
+        val inset = with(rule.density) { 4.dp.roundToPx() }
+        return map[inset, map.height / 2].toArgb()
+    }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun anOpenedCardFadesInToItsContainerColour() {
+        startHeld()
+        tabs = tabs + TabUi(5, "Fifth page", "https://fifth.example/", selected = false)
+        rule.frames(1)
+        assertNotEquals("not yet its container on the first frame", unselectedCard.toArgb(), cardPixel(5))
+        rule.frames(framesFor(TAB_ENTER_MS + 32) - 1)
+        assertEquals(Integer.toHexString(unselectedCard.toArgb()), Integer.toHexString(cardPixel(5)))
+    }
+
+    @Test
+    fun aTapOnAnotherCardDuringTheExitSelectsIt() {
+        startHeld()
+        rule.onNodeWithTag(tabCloseTag(2)).performClick()
+        rule.frames(3) // 48 ms: inside the exit, and the cards after it are still moving up
+        assertEquals(listOf("close:2"), events)
+        rule.onNodeWithTag(tabRowTag(1)).performClick()
+        assertEquals(listOf("close:2", "select:1"), events)
+        assertEquals(listOf(TabSheetOutcome.SELECTED), ended)
+    }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun atAnimatorScaleZeroACloseAndAnOpenShowOnTheNextFrame() {
+        startHeld(scale = 0f)
+        rule.onNodeWithTag(tabCloseTag(2)).performClick()
+        rule.frames(1)
+        rule.onNodeWithTag(tabRowTag(2)).assertDoesNotExist()
+        tabs = tabs + TabUi(5, "Fifth page", "https://fifth.example/", selected = false)
+        rule.frames(1)
+        assertEquals(Integer.toHexString(unselectedCard.toArgb()), Integer.toHexString(cardPixel(5)))
     }
 }

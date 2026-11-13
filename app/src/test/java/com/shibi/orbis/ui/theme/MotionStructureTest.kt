@@ -44,8 +44,7 @@ class MotionStructureTest {
 
     @Test
     fun tweenAndSpringLiteralsLiveInMotionAndTheFourRouteFades() {
-        // TabSwitcher.kt still holds its placement tween until the tab package replaces it with motionTweenOrNull.
-        val allowed = setOf(motion, orbisRoot, tabSwitcher)
+        val allowed = setOf(motion, orbisRoot)
         for (api in listOf("tween(", "spring(")) {
             assertEquals("$api outside the allowed files", emptySet<String>(), filesUsing(literal(api)) - allowed)
         }
