@@ -548,10 +548,9 @@ class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
 
     override fun javaScriptFor(url: String, isPrivate: Boolean): Boolean = jsChoice.valueFor(url, isPrivate)
 
-    /** Remembers the page menu's Desktop site choice for the page's site. */
     /**
-     * Turning it off on a site that auto desktop switched on also stops future retries there ([declineAutoDesktop]);
-     * turning it on clears that.
+     * Remembers the page menu's Desktop site choice for the page's site. Turning it off on a site that auto desktop
+     * switched on also stops future retries there ([declineAutoDesktop]); turning it on clears that.
      */
     fun rememberDesktop(url: String, on: Boolean, isPrivate: Boolean) {
         val host = siteKey(url) ?: return

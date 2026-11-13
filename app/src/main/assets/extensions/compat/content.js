@@ -1,6 +1,7 @@
 // Tells Orbis when the top page says this browser is unsupported (see compat/UnsupportedBrowserClassifier.kt).
-// Top frame only. Reads the page a few times right after it loads and sends at most one message, to the Orbis app
-// only. No network, no storage, no changes to the page, nothing on the page's window.
+// Top frame only. Reads the page a few times right after it loads and sends exactly one message, to the Orbis app
+// only: a sample, or "clean" at 3 s or at the first interaction, so a retry is always resolved. No network, no
+// storage, no changes to the page, nothing on the page's window.
 (() => {
   const MAX_TEXT_CONTENT = 20000;
   const MAX_VISIBLE_TEXT = 800;
@@ -24,9 +25,15 @@
   function stop() {
     done = true;
     for (const t of timers) clearTimeout(t);
-    document.removeEventListener("pointerdown", stop, true);
-    document.removeEventListener("keydown", stop, true);
-    document.removeEventListener("scroll", stop, true);
+    document.removeEventListener("pointerdown", interacted, true);
+    document.removeEventListener("keydown", interacted, true);
+    document.removeEventListener("scroll", interacted, true);
+  }
+
+  // The user started using the page: look one last time, then stop for good.
+  function interacted() {
+    if (done) return;
+    if (!check()) send({ type: "clean" });
   }
 
   function send(message) {
@@ -82,9 +89,9 @@
     return true;
   }
 
-  document.addEventListener("pointerdown", stop, true);
-  document.addEventListener("keydown", stop, true);
-  document.addEventListener("scroll", stop, true);
+  document.addEventListener("pointerdown", interacted, true);
+  document.addEventListener("keydown", interacted, true);
+  document.addEventListener("scroll", interacted, true);
 
   if (check()) return;
   timers.push(setTimeout(check, 1500));

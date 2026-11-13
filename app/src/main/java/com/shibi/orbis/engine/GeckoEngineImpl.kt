@@ -595,18 +595,19 @@ private class GeckoBrowserSession(
     private var scriptForcedByImport = false
 
     /**
-     * Desktop mode chosen in this tab for one site, over the site policy: the tab's Desktop site toggle (in case the
-     * caller did not store it) or a pending auto-desktop retry. Without it the commit fallback would undo the choice.
+     * Host (lowercase) of a pending auto-desktop retry: desktop for this tab only until the retry is kept or reverted.
+     * Every other desktop choice comes from the site policy, which both menus store.
      */
-    private data class DesktopOverride(val host: String, val desktop: Boolean, val fromRetry: Boolean)
+    private var retryDesktopHost: String? = null
 
-    private var desktopOverride: DesktopOverride? = null
+    /** A top-level page started since the last commit; a commit without one is same-document (hash, pushState). */
+    private var pageStartedSinceCommit = false
 
     /** The last commit reloaded because its desktop mode was wrong (see [desktopAfterCommit]). */
     private var desktopReloadPending = false
 
-    /** Redirects restarted by [redirectNeedsFreshLoad] since the last commit (a loop guard). */
-    private var desktopRestarts = 0
+    /** One-shot: the navigation being committed was redirected from desktop to mobile (see [redirectKeepsDesktop]). */
+    private var reloadAfterRedirect = false
 
     /** Host of the last committed web page, lowercase; null for a non-web page. */
     private var committedHost: String? = null
@@ -837,17 +838,13 @@ private class GeckoBrowserSession(
                 }
                 // Decide tracking protection for the site BEFORE its page loads (see TrackingExceptions).
                 applyTrackingProtection(!trackingExceptions.isExcepted(request.uri, isPrivate))
+                // A new navigation drops a flag left by a redirect that never committed.
+                if (!request.isRedirect) reloadAfterRedirect = false
                 val desktopBefore = _state.value.desktopMode
                 applySitePolicy(request.uri)
-                if (redirectNeedsFreshLoad(request.isRedirect, desktopBefore, _state.value.desktopMode, desktopRestarts)) {
-                    // A redirect followed from a desktop page keeps the desktop User-Agent (header and
-                    // navigator.userAgent) even after the switch to mobile, so the mobile site is loaded afresh.
-                    desktopRestarts++
-                    val uri = request.uri
-                    debugLog.log("GeckoSession", "redirect reloaded for desktop mode")
-                    scope.launch { if (!closed && session.isOpen) session.load(GeckoSession.Loader().uri(uri)) }
-                    return GeckoResult.fromValue(AllowOrDeny.DENY)
-                }
+                // A redirect followed from a desktop page keeps the desktop User-Agent (header and navigator.userAgent)
+                // even after the switch to mobile: the page is reloaded once after it commits (onCommitForDesktop).
+                if (redirectKeepsDesktop(request.isRedirect, desktopBefore, _state.value.desktopMode)) reloadAfterRedirect = true
                 return null
             }
 
@@ -911,6 +908,7 @@ private class GeckoBrowserSession(
                 abuseGuard.onPageStart()
                 // A message from the page being replaced must not be read as one about the next page.
                 compatPort = null
+                pageStartedSinceCommit = true
                 // A permission dialog must not outlive the page that asked; dismissing denies without recording.
                 queue.dismissWhere { it is SitePrompt.SitePermission }
                 reconciler.onPageStart()
@@ -1364,7 +1362,7 @@ private class GeckoBrowserSession(
         val host = hostOfUrl(url)?.lowercase() ?: return
         val policy = sitePolicy() ?: return
         val message = parseCompatMessage(obj) ?: return
-        val retrying = desktopOverride?.let { it.fromRetry && it.host == host } == true
+        val retrying = retryDesktopHost == host
         val action =
             when (message) {
                 CompatMessage.Clean -> autoDesktop.onCleanPage(host)
@@ -1387,19 +1385,19 @@ private class GeckoBrowserSession(
         // No URL or host in the log: it would record browsing history.
         when (action) {
             Action.Retry -> {
-                desktopOverride = DesktopOverride(host, desktop = true, fromRetry = true)
+                retryDesktopHost = host
                 applyDesktop(true)
                 debugLog.log("GeckoSession", "auto desktop: retry")
                 session.reload()
             }
             Action.Keep -> {
                 policy.rememberAutoDesktop(url, isPrivate)
-                desktopOverride = null
+                retryDesktopHost = null
                 debugLog.log("GeckoSession", "auto desktop: kept")
                 _autoDesktopKept.tryEmit(Unit)
             }
             Action.Revert -> {
-                desktopOverride = null
+                retryDesktopHost = null
                 policy.declineAutoDesktop(url, isPrivate)
                 applyDesktop(false)
                 debugLog.log("GeckoSession", "auto desktop: reverted")
@@ -1410,13 +1408,13 @@ private class GeckoBrowserSession(
     }
 
     /**
-     * The tab's desktop choice for [url]: this tab's own choice for the site, else the site policy. Null for a
-     * non-web URL or without a policy.
+     * The tab's desktop choice for [url]: desktop while a retry for its site is pending, else the site policy. Null for
+     * a non-web URL or without a policy.
      */
     fun desktopWantedFor(url: String): Boolean? {
         if (!isWebUrl(url)) return null
         val host = hostOfUrl(url)?.lowercase()
-        desktopOverride?.takeIf { it.host == host }?.let { return it.desktop }
+        if (host != null && host == retryDesktopHost) return true
         return sitePolicy()?.desktopFor(url, isPrivate)
     }
 
@@ -1426,21 +1424,32 @@ private class GeckoBrowserSession(
      */
     private fun onCommitForDesktop(url: String) {
         if (closed) return
-        desktopRestarts = 0
+        val afterRedirect = reloadAfterRedirect
+        reloadAfterRedirect = false
         val host = if (isWebUrl(url)) hostOfUrl(url)?.lowercase() else null
         if (host != committedHost) {
             committedHost?.let { autoDesktop.onLeft(it) }
             committedHost = host
-            if (desktopOverride?.let { it.fromRetry && it.host != host } == true) desktopOverride = null
+            if (retryDesktopHost != null && retryDesktopHost != host) retryDesktopHost = null
         }
         val reloaded = desktopReloadPending
         desktopReloadPending = false
-        when (val d = desktopAfterCommit(desktopWantedFor(url), _state.value.desktopMode, reloaded)) {
+        val pageStarted = pageStartedSinceCommit
+        pageStartedSinceCommit = false
+        if (afterRedirect && pageStarted && !reloaded && session.isOpen && !_state.value.desktopMode) {
+            desktopReloadPending = true
+            debugLog.log("GeckoSession", "desktop mode corrected after redirect; reloading")
+            session.reload()
+            return
+        }
+        when (val d = desktopAfterCommit(desktopWantedFor(url), _state.value.desktopMode, reloaded, pageStarted)) {
             DesktopCommit.Leave -> Unit
             is DesktopCommit.Apply -> {
                 applyDesktop(d.desktop)
                 if (d.reload && session.isOpen) {
                     desktopReloadPending = true
+                    // No URL or host: it would record browsing history.
+                    debugLog.log("GeckoSession", "desktop mode corrected on commit; reloading")
                     session.reload()
                 }
             }
@@ -2393,8 +2402,13 @@ private class GeckoBrowserSession(
 
     override fun setDesktopMode(enabled: Boolean) {
         if (closed || _state.value.desktopMode == enabled) return
-        val url = _state.value.url
-        desktopOverride = if (isWebUrl(url)) hostOfUrl(url)?.lowercase()?.let { DesktopOverride(it, enabled, fromRetry = false) } else null
+        // The user decided: a pending retry for this page's site ends here (both menus store the choice first).
+        hostOfUrl(_state.value.url)?.lowercase()?.let { host ->
+            if (host == retryDesktopHost) {
+                retryDesktopHost = null
+                autoDesktop.onLeft(host)
+            }
+        }
         applyDesktop(enabled)
         // Settings only take effect for the next load.
         if (session.isOpen && _state.value.url.isNotEmpty()) reload()

@@ -12,22 +12,25 @@ internal sealed interface DesktopCommit {
  * Desktop mode for a commit that may have skipped onLoadRequest (Back, Forward). [wanted] is the site's choice (null
  * when there is none to apply: no policy, not a web page), [current] the session's mode. [reloadedForLastCommit] is
  * true when the previous commit already reloaded for this: the reload's own commit never reloads again, so a site whose
- * choice keeps changing cannot loop. It still gets the right mode for its next load.
+ * choice keeps changing cannot loop. It still gets the right mode for its next load. [pageStarted] is false for a
+ * same-document commit (a hash link, history.pushState): nothing was requested, so the mode is left alone until the
+ * next real load, which applies the site policy itself.
  */
-internal fun desktopAfterCommit(wanted: Boolean?, current: Boolean, reloadedForLastCommit: Boolean): DesktopCommit =
+internal fun desktopAfterCommit(
+    wanted: Boolean?,
+    current: Boolean,
+    reloadedForLastCommit: Boolean,
+    pageStarted: Boolean,
+): DesktopCommit =
     when {
-        wanted == null || wanted == current -> DesktopCommit.Leave
+        wanted == null || wanted == current || !pageStarted -> DesktopCommit.Leave
         else -> DesktopCommit.Apply(wanted, reload = !reloadedForLastCommit)
     }
 
-/** Fresh loads one navigation may start through [redirectNeedsFreshLoad] before redirects are left alone. */
-internal const val MAX_DESKTOP_REDIRECT_RESTARTS = 3
-
 /**
- * True when a redirect must be cancelled and its target loaded afresh. Measured on GeckoView 160: switching the session
- * from desktop to mobile in onLoadRequest does not reach the redirected request, which keeps the desktop User-Agent
- * header and navigator.userAgent. Mobile to desktop, and link taps either way, do take effect, so only that case is
- * restarted. [restartsSoFar] bounds it, so a redirect loop between desktop and mobile sites cannot run forever.
+ * True when a redirect leaves a desktop page for a mobile site. Measured on GeckoView 160: switching the session from
+ * desktop to mobile in onLoadRequest does not reach the redirected request, which keeps the desktop User-Agent header
+ * and navigator.userAgent. Mobile to desktop, and link taps either way, do take effect.
  */
-internal fun redirectNeedsFreshLoad(isRedirect: Boolean, desktopBefore: Boolean, desktopAfter: Boolean, restartsSoFar: Int): Boolean =
-    isRedirect && desktopBefore && !desktopAfter && restartsSoFar < MAX_DESKTOP_REDIRECT_RESTARTS
+internal fun redirectKeepsDesktop(isRedirect: Boolean, desktopBefore: Boolean, desktopAfter: Boolean): Boolean =
+    isRedirect && desktopBefore && !desktopAfter
