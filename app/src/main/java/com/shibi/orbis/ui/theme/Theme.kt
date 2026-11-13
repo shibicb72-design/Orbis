@@ -95,7 +95,7 @@ class ThemeMode(val scheme: ColorScheme)
 
 /**
  * A colour theme: a light and a dark palette for Orbis's own screens. Themes never touch web pages, layout or
- * behaviour. An animated theme has a [scene], drawn only in Orbis's chrome; [animated] follows from it.
+ * behaviour.
  */
 @Immutable
 class AppTheme(
@@ -104,14 +104,8 @@ class AppTheme(
     @StringRes val descriptionRes: Int,
     val light: ThemeMode,
     val dark: ThemeMode,
-    val scene: ChromeScene? = null,
 ) {
-    val animated: Boolean get() = scene != null
-
     fun mode(dark: Boolean): ThemeMode = if (dark) this.dark else light
-
-    /** Whether this theme's animated scene may run: it has one and the user has not switched it Off. */
-    fun animatesWith(staticThemeIds: Set<String>): Boolean = animated && id !in staticThemeIds
 }
 
 object AppThemes {
@@ -120,21 +114,13 @@ object AppThemes {
     val Default: AppTheme get() = TealTheme
 
     /** In picker order. Ids are stored, so never change one. */
-    val all: List<AppTheme> by lazy {
-        listOf(TealTheme, GraphiteTheme, HarborTheme, FernTheme, EmberTheme, PaperTheme, NightSkyTheme, AuroraTheme, FairWeatherTheme)
-    }
+    val all: List<AppTheme> by lazy { listOf(TealTheme, GraphiteTheme, HarborTheme, FernTheme, EmberTheme, PaperTheme) }
 
     /** An unknown or missing id (a downgrade, a removed theme) reads as Orbis Teal; the stored id is left alone. */
     fun byId(id: String?): AppTheme = all.firstOrNull { it.id == id } ?: Default
 }
 
 val LocalAppTheme = staticCompositionLocalOf { AppThemes.Default }
-
-/** Whether the current theme's animated scene may move: it has one and the user has not set it to Off. */
-val LocalThemeAnimate = staticCompositionLocalOf { false }
-
-/** Whether Orbis's own screens are dark right now (the resolved [DarkMode]). */
-val LocalThemeDark = staticCompositionLocalOf { false }
 
 /** Whether [mode] is dark right now. [systemDark] is the system setting. */
 fun DarkMode.isDark(systemDark: Boolean): Boolean =
@@ -148,7 +134,6 @@ fun DarkMode.isDark(systemDark: Boolean): Boolean =
 fun OrbisTheme(
     darkMode: DarkMode = DarkMode.SYSTEM,
     theme: AppTheme = AppThemes.Default,
-    animate: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val dark = darkMode.isDark(isSystemInDarkTheme())
@@ -162,7 +147,7 @@ fun OrbisTheme(
             bars.isAppearanceLightNavigationBars = !dark
         }
     }
-    CompositionLocalProvider(LocalAppTheme provides theme, LocalThemeAnimate provides animate, LocalThemeDark provides dark) {
+    CompositionLocalProvider(LocalAppTheme provides theme) {
         MaterialTheme(
             colorScheme = theme.mode(dark).scheme,
             content = content,

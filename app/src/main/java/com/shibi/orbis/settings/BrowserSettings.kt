@@ -51,8 +51,6 @@ interface BrowserPrefs {
     /** The stored theme id, or null when none was ever chosen (reads as Orbis Teal). Unknown ids are kept as stored. */
     var themeId: String?
 
-    /** Ids of animated themes the user switched Off. Absent means Animated. */
-    var staticThemeIds: Set<String>
     /** Ask pages for their dark design whatever the app theme. */
     var darkWebsites: Boolean
     /** JavaScript default for every site, and the sites the user switched the other way. */
@@ -190,12 +188,6 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
             prefs.edit { if (value == null) remove(KEY_THEME_ID) else putString(KEY_THEME_ID, value) }
         }
 
-    override var staticThemeIds: Set<String>
-        get() = prefs.getStringSet(KEY_THEME_STATIC_IDS, emptySet())?.toSet() ?: emptySet()
-        set(value) {
-            prefs.edit { putStringSet(KEY_THEME_STATIC_IDS, value.toSet()) }
-        }
-
     override var darkWebsites: Boolean
         get() = prefs.getBoolean(KEY_DARK_WEBSITES, false)
         set(value) {
@@ -331,7 +323,6 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         // Legacy name from before themes existed: it holds the DarkMode. Never change the key or its values.
         private const val KEY_APP_THEME = "app_theme"
         private const val KEY_THEME_ID = "theme_id"
-        private const val KEY_THEME_STATIC_IDS = "theme_static_ids"
         private const val KEY_DARK_WEBSITES = "dark_websites"
         private const val KEY_JS = "javascript"
         private const val KEY_JS_ON = "javascript_on_sites"
@@ -379,17 +370,6 @@ class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
     fun setThemeId(id: String) {
         prefs.themeId = id
         _themeId.value = id
-    }
-
-    private val _staticThemeIds = MutableStateFlow(prefs.staticThemeIds)
-
-    /** Animated themes the user switched Off. */
-    val staticThemeIds: StateFlow<Set<String>> = _staticThemeIds.asStateFlow()
-
-    fun setThemeAnimated(id: String, animated: Boolean) {
-        val next = if (animated) _staticThemeIds.value - id else _staticThemeIds.value + id
-        prefs.staticThemeIds = next
-        _staticThemeIds.value = next
     }
 
     private val _darkWebsites = MutableStateFlow(prefs.darkWebsites)

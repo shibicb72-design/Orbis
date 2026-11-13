@@ -98,9 +98,8 @@ class MainActivity : ComponentActivity() {
             val settings = app.container.browserSettings
             val darkMode by settings.darkMode.collectAsStateWithLifecycle()
             val themeId by settings.themeId.collectAsStateWithLifecycle()
-            val staticIds by settings.staticThemeIds.collectAsStateWithLifecycle()
             val theme = AppThemes.byId(themeId)
-            OrbisTheme(darkMode, theme, animate = theme.animatesWith(staticIds)) {
+            OrbisTheme(darkMode, theme) {
                 OrbisRoot(container = app.container)
             }
         }

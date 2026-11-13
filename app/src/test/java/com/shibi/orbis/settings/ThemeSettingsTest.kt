@@ -41,7 +41,6 @@ class ThemeSettingsTest {
         assertEquals(DarkMode.DARK, s.darkMode.value)
         assertEquals("orbis_teal", s.themeId.value)
         assertEquals("orbis_teal", AppThemes.byId(s.themeId.value).id)
-        assertTrue(s.staticThemeIds.value.isEmpty())
         assertEquals("upgrading must not write anything", before, prefs.all.toMap())
     }
 
@@ -79,16 +78,22 @@ class ThemeSettingsTest {
     }
 
     @Test
-    fun themeIdAndAnimatedChoiceSurviveReopening() {
+    fun themeIdSurvivesReopening() {
         val s = open()
         s.setThemeId("harbor")
-        s.setThemeAnimated("night_sky", false)
-        s.setThemeAnimated("aurora", false)
-        s.setThemeAnimated("aurora", true)
         val again = open()
         assertEquals("harbor", again.themeId.value)
-        assertEquals(setOf("night_sky"), again.staticThemeIds.value)
         assertEquals("harbor", prefs.getString("theme_id", null))
+    }
+
+    @Test
+    fun aRemovedAnimatedThemeIdReadsBackAsStoredAndShowsTeal() {
+        prefs.edit().putString("theme_id", "aurora").commit()
+        val before = prefs.all.toMap()
+        val s = open()
+        assertEquals("aurora", s.themeId.value)
+        assertEquals("orbis_teal", AppThemes.byId(s.themeId.value).id)
+        assertEquals("reading must not write anything", before, prefs.all.toMap())
     }
 
     @Test
@@ -104,7 +109,6 @@ class ThemeSettingsTest {
         val job = CoroutineScope(Dispatchers.Unconfined).launch { s.websiteColorScheme().collect { seen += it } }
         assertEquals(listOf<Boolean?>(null), seen)
         for (id in AppThemes.all.map { it.id }) s.setThemeId(id)
-        s.setThemeAnimated("night_sky", false)
         assertEquals("theme changes must not reach the engine", listOf<Boolean?>(null), seen)
         s.setDarkMode(DarkMode.DARK)
         assertEquals(listOf<Boolean?>(null, true), seen)

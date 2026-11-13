@@ -194,10 +194,10 @@ class ThemeFadeTest {
             frame()
             assertEquals("frame $it", plum.toArgb(), pixel(PLUM))
         }
-        theme = NightSkyTheme // an animated theme too
+        theme = PaperTheme
         repeat((THEME_CROSSFADE_MS + 32) / 16 + 1) {
             frame()
-            assertEquals("to Night Sky, frame $it", plum.toArgb(), pixel(PLUM))
+            assertEquals("to Paper, frame $it", plum.toArgb(), pixel(PLUM))
         }
         assertTrue("the fades composed frames: ${composedPlums.size}", composedPlums.size > 10)
         assertTrue("every composed scheme", composedPlums.all { it == plum })

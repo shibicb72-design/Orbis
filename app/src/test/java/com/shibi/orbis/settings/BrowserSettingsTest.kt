@@ -21,7 +21,6 @@ class BrowserSettingsTest {
         override var httpsOnly: HttpsOnlyMode = HttpsOnlyMode.ALL
         override var darkMode: DarkMode = DarkMode.SYSTEM
         override var themeId: String? = null
-        override var staticThemeIds: Set<String> = emptySet()
         override var darkWebsites: Boolean = false
         override var javaScript: Boolean = true
         override var javaScriptOn: Set<String> = emptySet()

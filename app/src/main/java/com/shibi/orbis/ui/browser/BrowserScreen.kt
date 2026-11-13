@@ -155,13 +155,7 @@ import com.shibi.orbis.engine.isWebUrl
 import com.shibi.orbis.engine.pickerMimeTypes
 import com.shibi.orbis.tabs.TabEvent
 import com.shibi.orbis.ui.OrbisEmptyState
-import com.shibi.orbis.ui.theme.LocalSceneHost
-import com.shibi.orbis.ui.theme.SceneBand
-import com.shibi.orbis.ui.theme.SceneRegion
-import com.shibi.orbis.ui.theme.SceneSurface
 import com.shibi.orbis.ui.theme.rememberMotionEnabled
-import com.shibi.orbis.ui.theme.rememberSceneSurface
-import com.shibi.orbis.ui.theme.sceneSurfaceRoot
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -307,13 +301,12 @@ fun BrowserScreen(
 }
 
 /**
- * The browser screen's skeleton: the tab strip, the toolbar above or below the page, and the page area. The theme's
- * scene shows only behind the strip and the toolbar here, each in its own band; nothing is added to [page], so the
- * engine view is never drawn on. [modifier] goes after the system bar and keyboard insets (the focus sink).
+ * The browser screen's skeleton: the tab strip, the toolbar above or below the page, and the page area between them.
+ * [chrome] is hidden with [showChrome] false (page fullscreen, picture-in-picture) and the page then fills the frame.
+ * [modifier] goes after the system bar and keyboard insets (the focus sink).
  */
 @Composable
 internal fun BrowserFrame(
-    scene: SceneSurface?,
     showChrome: Boolean,
     showStrip: Boolean,
     toolbarBottom: Boolean,
@@ -329,16 +322,15 @@ internal fun BrowserFrame(
             .imePadding()
             .then(modifier),
     ) {
-        if (showStrip) SceneBand(scene, SceneRegion.Bar, Modifier.fillMaxWidth()) { tabStrip() }
-        // chrome() emits several rows; in a band they stack in a Column, as they did in this one.
-        if (showChrome && !toolbarBottom) SceneBand(scene, SceneRegion.Bar, Modifier.fillMaxWidth()) { Column { chrome() } }
+        if (showStrip) tabStrip()
+        if (showChrome && !toolbarBottom) chrome()
         Box(
             Modifier
                 .weight(1f)
                 .fillMaxWidth(),
             content = page,
         )
-        if (showChrome && toolbarBottom) SceneBand(scene, SceneRegion.Bar, Modifier.fillMaxWidth()) { Column { chrome() } }
+        if (showChrome && toolbarBottom) chrome()
     }
 }
 
@@ -460,20 +452,8 @@ private fun BrowserContent(
     // The selected tab's own page fullscreen; system bars hide and the screen stays on while it lasts.
     val fullScreen = state.fullScreen && session != null
     FullScreenWindowEffect(fullScreen, landscape = fullScreen && state.fullScreenVideoLandscape)
-    // Page fullscreen pauses the scene; leaving this screen ends it.
-    val sceneHost = LocalSceneHost.current
-    DisposableEffect(sceneHost, fullScreen) {
-        sceneHost?.browserFullScreen = fullScreen
-        onDispose { sceneHost?.browserFullScreen = false }
-    }
 
     val blankTab = isBlankAddress(selectedTab.url) && isBlankAddress(state.url)
-    // A web page (the start page does not cover the engine view) or the tab sheet: the bars keep a still frame.
-    val sceneResting = !(blankTab && !state.isLoading) || showTabs
-    DisposableEffect(sceneHost, sceneResting) {
-        sceneHost?.browserPageShowing = sceneResting
-        onDispose { sceneHost?.browserPageShowing = false }
-    }
     val hasLiveOpener = selectedTab.openerTabId?.let { id -> tabList.any { it.id == id } } == true
 
     // Back order: close find bar, then history, then a tab opened from another tab, then the system default.
@@ -593,18 +573,15 @@ private fun BrowserContent(
     val pullThresholdPx = with(LocalDensity.current) { PULL_TO_REFRESH_THRESHOLD.toPx() }
     val currentSession by rememberUpdatedState(session)
     val currentFullScreen by rememberUpdatedState(fullScreen)
-    // The theme's scene behind the tab strip, toolbar, start page and tab sheet; null for a private tab.
-    val scene = rememberSceneSurface(privateTab = selectedTab.isPrivate)
 
     Surface(
-        modifier = modifier.fillMaxSize().sceneSurfaceRoot(scene),
+        modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
         contentColor = MaterialTheme.colorScheme.onBackground,
     ) {
         val stripWidthDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
         val showChrome = !fullScreen && !inPip
         BrowserFrame(
-            scene = scene,
             showChrome = showChrome,
             showStrip = showChrome && showsTabStrip(stripWidthDp),
             toolbarBottom = toolbarBottom,
@@ -1162,7 +1139,6 @@ private fun BrowserContent(
                             onPin = { container.browserSettings.pinSite(it.url, it.title) },
                             onUnpin = { container.browserSettings.unpinSite(it.url) },
                             onRemove = { container.browserSettings.removeSite(it.url) },
-                            scene = scene,
                         )
                     }
                 }
@@ -1295,7 +1271,6 @@ private fun BrowserContent(
             },
             thumbnails = thumbnailImages,
             snackbars = snackbars,
-            scene = null,
             onRecentlyClosed = if (recentlyClosed.isEmpty()) null else ({
                 showTabs = false
                 showRecentlyClosed = true

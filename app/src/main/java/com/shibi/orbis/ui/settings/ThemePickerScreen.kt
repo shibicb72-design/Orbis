@@ -38,8 +38,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,30 +58,11 @@ import com.shibi.orbis.settings.BrowserSettings
 import com.shibi.orbis.settings.DarkMode
 import com.shibi.orbis.ui.theme.AppTheme
 import com.shibi.orbis.ui.theme.AppThemes
-import com.shibi.orbis.ui.theme.MAX_PARTICLES
-import com.shibi.orbis.ui.theme.SceneLayer
-import com.shibi.orbis.ui.theme.SceneSurface
-import com.shibi.orbis.ui.theme.SceneRegion
 import com.shibi.orbis.ui.theme.isDark
-import com.shibi.orbis.ui.theme.rememberMotionEnabled
-import com.shibi.orbis.ui.theme.rememberSceneSurface
-import com.shibi.orbis.ui.theme.sceneSurfaceRoot
 
 internal fun themeCardTag(id: String) = "theme_card_$id"
 
 internal fun themePreviewTag(id: String) = "theme_preview_$id"
-
-/** Tests only: told when a card or a preview's scene surface is composed. Null in the app. */
-internal interface PickerProbe {
-    fun cardComposed(id: String)
-
-    fun previewSurface(id: String, surface: SceneSurface?)
-}
-
-internal val LocalPickerProbe = staticCompositionLocalOf<PickerProbe?> { null }
-
-/** Each animated theme's preview draws at most this many scene elements, so all of them together stay under the cap. */
-internal val PREVIEW_BUDGET = MAX_PARTICLES / AppThemes.all.count { it.animated }.coerceAtLeast(1)
 
 /** Settings > Theme: the light/dark choice, then one card per colour theme with a live preview. */
 @Composable
@@ -94,14 +73,11 @@ fun ThemePickerScreen(
 ) {
     val darkMode by settings.darkMode.collectAsStateWithLifecycle()
     val themeId by settings.themeId.collectAsStateWithLifecycle()
-    val staticIds by settings.staticThemeIds.collectAsStateWithLifecycle()
     ThemePickerContent(
         darkMode = darkMode,
         onDarkMode = settings::setDarkMode,
         selected = AppThemes.byId(themeId),
         onSelect = { settings.setThemeId(it.id) },
-        staticIds = staticIds,
-        onAnimated = { theme, on -> settings.setThemeAnimated(theme.id, on) },
         onBack = onBack,
         modifier = modifier,
     )
@@ -114,8 +90,6 @@ internal fun ThemePickerContent(
     onDarkMode: (DarkMode) -> Unit,
     selected: AppTheme,
     onSelect: (AppTheme) -> Unit,
-    staticIds: Set<String>,
-    onAnimated: (AppTheme, Boolean) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -158,15 +132,8 @@ internal fun ThemePickerContent(
                     AppThemes.all.chunked(columns).forEach { row ->
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             row.forEach { theme ->
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    ThemeCard(
-                                        theme,
-                                        selected = theme.id == selected.id,
-                                        previewDark = previewDark,
-                                        animated = theme.id !in staticIds,
-                                        onSelect = { onSelect(theme) },
-                                    )
-                                    AnimatedChoiceSlot(theme, animated = theme.id !in staticIds, onAnimated = { onAnimated(theme, it) })
+                                Box(Modifier.weight(1f)) {
+                                    ThemeCard(theme, selected = theme.id == selected.id, previewDark = previewDark, onSelect = { onSelect(theme) })
                                 }
                             }
                             repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
@@ -196,46 +163,11 @@ private fun DarkModeChoice(current: DarkMode, onSelect: (DarkMode) -> Unit) {
     }
 }
 
-/**
- * An animated theme's Animated/Off toggle. It is a sibling of the card, not a child, so the card's own accessibility
- * text stays clean, and changing it does not select the theme. Static themes have none.
- */
 @Composable
-private fun AnimatedChoiceSlot(theme: AppTheme, animated: Boolean, onAnimated: (Boolean) -> Unit) {
-    if (!theme.animated) return
-    val name = stringResource(theme.nameRes)
-    val options =
-        listOf(
-            Triple(true, stringResource(R.string.theme_animation_animated), stringResource(R.string.theme_animation_animated_description, name)),
-            Triple(false, stringResource(R.string.theme_animation_off), stringResource(R.string.theme_animation_off_description, name)),
-        )
-    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-        options.forEachIndexed { index, (on, label, description) ->
-            SegmentedButton(
-                selected = animated == on,
-                onClick = { onAnimated(on) },
-                shape = SegmentedButtonDefaults.itemShape(index, options.size),
-                modifier = Modifier.semantics { contentDescription = description },
-            ) {
-                Text(label, maxLines = 1)
-            }
-        }
-    }
-    if (!rememberMotionEnabled()) {
-        Text(
-            text = stringResource(R.string.theme_animation_system_off),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun ThemeCard(theme: AppTheme, selected: Boolean, previewDark: Boolean, animated: Boolean, onSelect: () -> Unit) {
+private fun ThemeCard(theme: AppTheme, selected: Boolean, previewDark: Boolean, onSelect: () -> Unit) {
     val name = stringResource(theme.nameRes)
     val description = stringResource(theme.descriptionRes)
     val summary = stringResource(R.string.theme_card_description, name, description)
-    LocalPickerProbe.current?.let { probe -> SideEffect { probe.cardComposed(theme.id) } }
     val state = stringResource(if (selected) R.string.theme_state_selected else R.string.theme_state_not_selected)
     Surface(
         shape = MaterialTheme.shapes.medium,
@@ -257,7 +189,7 @@ private fun ThemeCard(theme: AppTheme, selected: Boolean, previewDark: Boolean, 
                 },
     ) {
         Column {
-            ThemePreview(theme, previewDark, animated)
+            ThemePreview(theme, previewDark)
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -287,64 +219,56 @@ private fun ThemeCard(theme: AppTheme, selected: Boolean, previewDark: Boolean, 
  * private look is visible on every card), a normal tab and a start page area. Decorative: the card text is read.
  */
 @Composable
-private fun ThemePreview(theme: AppTheme, dark: Boolean, animated: Boolean) {
+private fun ThemePreview(theme: AppTheme, dark: Boolean) {
     val c = theme.mode(dark).scheme
-    // Null for a static theme, or with no scene host. The preview follows its own theme's toggle, not the selected theme.
-    val surface = rememberSceneSurface(theme = theme, userAnimated = animated, dark = dark, budget = PREVIEW_BUDGET)
-    LocalPickerProbe.current?.let { probe -> SideEffect { probe.previewSurface(theme.id, surface) } }
-    Box(
+    Column(
         Modifier
             .fillMaxWidth()
             .height(104.dp)
             .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
             .background(c.background)
-            .sceneSurfaceRoot(surface)
+            .padding(8.dp)
             .clearAndSetSemantics { testTag = themePreviewTag(theme.id) },
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        SceneLayer(surface, SceneRegion.Preview, Modifier.matchParentSize())
-        Column(
-            Modifier.fillMaxSize().padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+        Row(
+            Modifier.fillMaxWidth().height(26.dp).clip(RoundedCornerShape(13.dp)).background(c.surfaceContainer).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            Box(Modifier.weight(1f).height(14.dp).clip(RoundedCornerShape(7.dp)).background(c.surfaceContainerHigh))
+            Spacer(Modifier.width(8.dp))
+            Box(Modifier.size(14.dp).border(1.5.dp, c.onSurface, RoundedCornerShape(3.dp)))
+        }
+        Row(Modifier.fillMaxWidth().height(24.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            val chip = RoundedCornerShape(8.dp)
+            Box(
+                Modifier.weight(1f).fillMaxSize().clip(chip).background(c.secondaryContainer).border(1.dp, c.primary, chip).padding(horizontal = 8.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Box(Modifier.fillMaxWidth(0.6f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.onSecondaryContainer))
+            }
             Row(
-                Modifier.fillMaxWidth().height(26.dp).clip(RoundedCornerShape(13.dp)).background(c.surfaceContainer).padding(horizontal = 8.dp),
+                Modifier.weight(1f).fillMaxSize().clip(chip).background(c.tertiaryContainer).padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(Modifier.weight(1f).height(14.dp).clip(RoundedCornerShape(7.dp)).background(c.surfaceContainerHigh))
-                Spacer(Modifier.width(8.dp))
-                Box(Modifier.size(14.dp).border(1.5.dp, c.onSurface, RoundedCornerShape(3.dp)))
+                Icon(Icons.Filled.VisibilityOff, contentDescription = null, tint = c.onTertiaryContainer, modifier = Modifier.size(12.dp))
+                Spacer(Modifier.width(4.dp))
+                Box(Modifier.fillMaxWidth(0.6f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.onTertiaryContainer))
             }
-            Row(Modifier.fillMaxWidth().height(24.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                val chip = RoundedCornerShape(8.dp)
-                Box(
-                    Modifier.weight(1f).fillMaxSize().clip(chip).background(c.secondaryContainer).border(1.dp, c.primary, chip).padding(horizontal = 8.dp),
-                    contentAlignment = Alignment.CenterStart,
-                ) {
-                    Box(Modifier.fillMaxWidth(0.6f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.onSecondaryContainer))
-                }
-                Row(
-                    Modifier.weight(1f).fillMaxSize().clip(chip).background(c.tertiaryContainer).padding(horizontal = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Filled.VisibilityOff, contentDescription = null, tint = c.onTertiaryContainer, modifier = Modifier.size(12.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Box(Modifier.fillMaxWidth(0.6f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.onTertiaryContainer))
-                }
-                Box(
-                    Modifier.weight(1f).fillMaxSize().clip(chip).background(c.surfaceContainer).padding(horizontal = 8.dp),
-                    contentAlignment = Alignment.CenterStart,
-                ) {
-                    Box(Modifier.fillMaxWidth(0.6f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.onSurface))
-                }
+            Box(
+                Modifier.weight(1f).fillMaxSize().clip(chip).background(c.surfaceContainer).padding(horizontal = 8.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Box(Modifier.fillMaxWidth(0.6f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.onSurface))
             }
-            Row(Modifier.fillMaxWidth().weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(Modifier.width(48.dp).height(16.dp).clip(RoundedCornerShape(8.dp)).background(c.primary), contentAlignment = Alignment.Center) {
-                    Box(Modifier.width(24.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.onPrimary))
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Box(Modifier.width(88.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.onBackground))
-                    Box(Modifier.width(56.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.onSurfaceVariant))
-                }
+        }
+        Row(Modifier.fillMaxWidth().weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(Modifier.width(48.dp).height(16.dp).clip(RoundedCornerShape(8.dp)).background(c.primary), contentAlignment = Alignment.Center) {
+                Box(Modifier.width(24.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.onPrimary))
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Box(Modifier.width(88.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.onBackground))
+                Box(Modifier.width(56.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.onSurfaceVariant))
             }
         }
     }
