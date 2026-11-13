@@ -5,6 +5,7 @@ import com.shibi.orbis.engine.ExtensionInstallException
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,6 +26,7 @@ class UboOnboardingController(
     private val log: (String) -> Unit,
     private val now: () -> Long,
     private val installTimeoutMillis: Long = DEFAULT_INSTALL_TIMEOUT_MILLIS,
+    private val updateDelayMillis: Long = DEFAULT_UPDATE_DELAY_MILLIS,
 ) {
     private val _state = MutableStateFlow<UboState>(UboState.Checking)
     val state: StateFlow<UboState> = _state.asStateFlow()
@@ -125,7 +127,7 @@ class UboOnboardingController(
                 _showOnboarding.value = false
                 _state.value = existing.toUboState()
                 allowInPrivateBrowsing()
-                checkForUpdateIfDue()
+                scheduleUpdateCheck()
             }
             // Accepted earlier but not installed (e.g. the first attempt failed offline): try once more.
             prefs.decision == UboDecision.ACCEPTED -> runInstall()
@@ -170,7 +172,21 @@ class UboOnboardingController(
         }
     }
 
+    /**
+     * The daily update check runs well after launch, never during the first page load: an update restarts uBO and
+     * reloads every filter list, and uBO holds network requests until its lists are loaded.
+     */
+    private fun scheduleUpdateCheck() {
+        if (now() - prefs.lastUpdateCheckMillis < UPDATE_INTERVAL_MILLIS) return
+        scope.launch {
+            delay(updateDelayMillis)
+            opLock.withLock { checkForUpdateIfDue() }
+        }
+    }
+
     private suspend fun checkForUpdateIfDue() {
+        // The user may have removed or declined uBO during the delay.
+        if (_state.value !is UboState.Installed) return
         if (now() - prefs.lastUpdateCheckMillis < UPDATE_INTERVAL_MILLIS) return
         try {
             val updated = host.checkForUpdate(UBO_ID)
@@ -200,6 +216,7 @@ class UboOnboardingController(
 
     companion object {
         const val DEFAULT_INSTALL_TIMEOUT_MILLIS = 180_000L
+        const val DEFAULT_UPDATE_DELAY_MILLIS = 120_000L
         const val UPDATE_INTERVAL_MILLIS = 24L * 60 * 60 * 1000
     }
 }

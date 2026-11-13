@@ -379,4 +379,60 @@ class UboOnboardingControllerTest {
         assertEquals(1, host.updateCalls)
         assertEquals(UboState.Installed("1.0", true, false), c.state.value)
     }
+
+    @Test
+    fun updateCheckWaitsForTheStartupDelayAndStateIsInstalledFirst() = runTest {
+        val host = FakeHost().apply {
+            installed = ext("1.0")
+            updateResult = ext("1.1")
+        }
+        val prefs = MemoryPrefs(lastUpdateCheckMillis = now - 25 * HOUR)
+        val c = started(host, prefs)
+        assertEquals(UboState.Installed("1.0", true, false), c.state.value)
+        assertEquals(0, host.updateCalls)
+        testScheduler.advanceTimeBy(UboOnboardingController.DEFAULT_UPDATE_DELAY_MILLIS - 1)
+        runCurrent()
+        assertEquals(0, host.updateCalls)
+        assertEquals(UboState.Installed("1.0", true, false), c.state.value)
+        testScheduler.advanceTimeBy(1)
+        runCurrent()
+        assertEquals(1, host.updateCalls)
+        assertEquals(UboState.Installed("1.1", true, false), c.state.value)
+        assertEquals(now, prefs.lastUpdateCheckMillis)
+        advanceUntilIdle()
+        assertEquals(1, host.updateCalls)
+    }
+
+    @Test
+    fun updateCheckIsNotScheduledWithin24HoursOfTheLastOne() = runTest {
+        val host = FakeHost().apply { installed = ext() }
+        val prefs = MemoryPrefs(lastUpdateCheckMillis = now - HOUR)
+        started(host, prefs)
+        testScheduler.advanceTimeBy(UboOnboardingController.DEFAULT_UPDATE_DELAY_MILLIS * 10)
+        runCurrent()
+        assertEquals(0, host.updateCalls)
+        assertEquals(now - HOUR, prefs.lastUpdateCheckMillis)
+    }
+
+    @Test
+    fun aSecondStartAfterADueCheckDoesNotCheckAgainWithin24Hours() = runTest {
+        val host = FakeHost().apply { installed = ext() }
+        val prefs = MemoryPrefs(lastUpdateCheckMillis = now - 25 * HOUR)
+        started(host, prefs)
+        advanceUntilIdle()
+        assertEquals(1, host.updateCalls)
+        started(host, prefs)
+        advanceUntilIdle()
+        assertEquals(1, host.updateCalls)
+    }
+
+    @Test
+    fun removingUboDuringTheDelaySkipsTheUpdateCheck() = runTest {
+        val host = FakeHost().apply { installed = ext() }
+        val c = started(host, MemoryPrefs(lastUpdateCheckMillis = now - 25 * HOUR))
+        c.remove()
+        advanceUntilIdle()
+        assertEquals(UboState.NotInstalled, c.state.value)
+        assertEquals(0, host.updateCalls)
+    }
 }
