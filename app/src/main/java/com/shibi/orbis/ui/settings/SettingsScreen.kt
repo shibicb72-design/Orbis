@@ -1,7 +1,7 @@
 package com.shibi.orbis.ui.settings
 
 import android.widget.Toast
-import com.shibi.orbis.settings.AppTheme
+import com.shibi.orbis.settings.DarkMode
 import com.shibi.orbis.settings.BrowserSettings
 import com.shibi.orbis.settings.HttpsOnlyMode
 import com.shibi.orbis.settings.MagnetHandler
@@ -60,6 +60,7 @@ import com.shibi.orbis.engine.SearchEngine
 import com.shibi.orbis.role.BrowserRoleStatus
 import com.shibi.orbis.role.DefaultBrowserRole
 import com.shibi.orbis.ubo.UboState
+import com.shibi.orbis.ui.theme.AppThemes
 import kotlinx.coroutines.flow.StateFlow
 
 @StringRes
@@ -151,24 +152,12 @@ fun SettingsScreen(
     onOpenLicences: () -> Unit = {},
     /** Browsing > Torrents (Wi-Fi only, speed limits, seeding, peers, magnet links). */
     onOpenTorrents: () -> Unit = {},
+    /** Browsing > Theme: the theme picker (dark mode and colour theme). */
+    onOpenThemes: () -> Unit = {},
 ) {
-    var themeDialogOpen by remember { mutableStateOf(false) }
     var httpsDialogOpen by remember { mutableStateOf(false) }
     if (site != null) {
-        val theme by site.appTheme.collectAsStateWithLifecycle()
         val https by site.httpsOnly.collectAsStateWithLifecycle()
-        if (themeDialogOpen) {
-            ChoiceDialog(
-                title = R.string.theme_title,
-                options = AppTheme.entries.map { it to themeLabel(it) },
-                selected = theme,
-                onSelect = {
-                    site.setAppTheme(it)
-                    themeDialogOpen = false
-                },
-                onDismiss = { themeDialogOpen = false },
-            )
-        }
         if (httpsDialogOpen) {
             ChoiceDialog(
                 title = R.string.https_only_title,
@@ -295,7 +284,8 @@ fun SettingsScreen(
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 if (site != null) {
-                    val theme by site.appTheme.collectAsStateWithLifecycle()
+                    val darkMode by site.darkMode.collectAsStateWithLifecycle()
+                    val themeId by site.themeId.collectAsStateWithLifecycle()
                     val darkSites by site.darkWebsites.collectAsStateWithLifecycle()
                     val alwaysDesktop by site.alwaysDesktop.collectAsStateWithLifecycle()
                     val forceDark by site.forceDark.collectAsStateWithLifecycle()
@@ -318,8 +308,16 @@ fun SettingsScreen(
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     SettingsItem(
                         headlineContent = { Text(stringResource(R.string.theme_title)) },
-                        supportingContent = { Text(stringResource(themeLabel(theme))) },
-                        modifier = Modifier.fillMaxWidth().clickable { themeDialogOpen = true },
+                        supportingContent = {
+                            Text(
+                                stringResource(
+                                    R.string.theme_summary,
+                                    stringResource(AppThemes.byId(themeId).nameRes),
+                                    stringResource(darkModeLabel(darkMode)),
+                                ),
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenThemes),
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     SettingsItem(
@@ -472,11 +470,11 @@ fun SettingsScreen(
 }
 
 @StringRes
-private fun themeLabel(t: AppTheme): Int =
-    when (t) {
-        AppTheme.SYSTEM -> R.string.theme_system
-        AppTheme.LIGHT -> R.string.theme_light
-        AppTheme.DARK -> R.string.theme_dark
+internal fun darkModeLabel(m: DarkMode): Int =
+    when (m) {
+        DarkMode.SYSTEM -> R.string.theme_system
+        DarkMode.LIGHT -> R.string.theme_light
+        DarkMode.DARK -> R.string.theme_dark
     }
 
 @StringRes

@@ -11,7 +11,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import com.shibi.orbis.engine.isWebUrl
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.asStateFlow
 
 /** Where browsing preferences are kept. */
@@ -43,7 +45,14 @@ interface BrowserPrefs {
     var readerTheme: ReaderTheme
 
     var httpsOnly: HttpsOnlyMode
-    var appTheme: AppTheme
+    /** Light/dark choice. Stored under the legacy key "app_theme" (see KEY_APP_THEME). */
+    var darkMode: DarkMode
+
+    /** The stored theme id, or null when none was ever chosen (reads as Orbis Teal). Unknown ids are kept as stored. */
+    var themeId: String?
+
+    /** Ids of animated themes the user switched Off. Absent means Animated. */
+    var staticThemeIds: Set<String>
     /** Ask pages for their dark design whatever the app theme. */
     var darkWebsites: Boolean
     /** JavaScript default for every site, and the sites the user switched the other way. */
@@ -81,7 +90,11 @@ enum class ReaderTheme { LIGHT, SEPIA, DARK }
 
 enum class HttpsOnlyMode { OFF, PRIVATE, ALL }
 
-enum class AppTheme { SYSTEM, LIGHT, DARK }
+/** Light/dark choice. Entry names are the stored values of "app_theme": never rename them. */
+enum class DarkMode { SYSTEM, LIGHT, DARK }
+
+/** The id of the default theme (Orbis Teal). */
+const val DEFAULT_THEME_ID = "orbis_teal"
 
 /**
  * A per-site on/off choice over a default: [on] and [off] hold only the sites that differ from it. Private choices
@@ -165,10 +178,22 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
             prefs.edit { putString(KEY_HTTPS_ONLY, value.name) }
         }
 
-    override var appTheme: AppTheme
-        get() = AppTheme.entries.firstOrNull { it.name == prefs.getString(KEY_APP_THEME, null) } ?: AppTheme.SYSTEM
+    override var darkMode: DarkMode
+        get() = DarkMode.entries.firstOrNull { it.name == prefs.getString(KEY_APP_THEME, null) } ?: DarkMode.SYSTEM
         set(value) {
             prefs.edit { putString(KEY_APP_THEME, value.name) }
+        }
+
+    override var themeId: String?
+        get() = prefs.getString(KEY_THEME_ID, null)
+        set(value) {
+            prefs.edit { if (value == null) remove(KEY_THEME_ID) else putString(KEY_THEME_ID, value) }
+        }
+
+    override var staticThemeIds: Set<String>
+        get() = prefs.getStringSet(KEY_THEME_STATIC_IDS, emptySet())?.toSet() ?: emptySet()
+        set(value) {
+            prefs.edit { putStringSet(KEY_THEME_STATIC_IDS, value.toSet()) }
         }
 
     override var darkWebsites: Boolean
@@ -303,7 +328,10 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         private const val KEY_FORCE_DARK = "force_dark"
         private const val KEY_MAGNET_HANDLER = "magnet_handler"
         private const val KEY_TORRENT_IP_NOTE = "torrent_ip_note_seen"
+        // Legacy name from before themes existed: it holds the DarkMode. Never change the key or its values.
         private const val KEY_APP_THEME = "app_theme"
+        private const val KEY_THEME_ID = "theme_id"
+        private const val KEY_THEME_STATIC_IDS = "theme_static_ids"
         private const val KEY_DARK_WEBSITES = "dark_websites"
         private const val KEY_JS = "javascript"
         private const val KEY_JS_ON = "javascript_on_sites"
@@ -335,12 +363,33 @@ class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
         _httpsOnly.value = mode
     }
 
-    private val _appTheme = MutableStateFlow(prefs.appTheme)
-    val appTheme: StateFlow<AppTheme> = _appTheme.asStateFlow()
+    private val _darkMode = MutableStateFlow(prefs.darkMode)
+    val darkMode: StateFlow<DarkMode> = _darkMode.asStateFlow()
 
-    fun setAppTheme(theme: AppTheme) {
-        prefs.appTheme = theme
-        _appTheme.value = theme
+    fun setDarkMode(mode: DarkMode) {
+        prefs.darkMode = mode
+        _darkMode.value = mode
+    }
+
+    private val _themeId = MutableStateFlow(prefs.themeId ?: DEFAULT_THEME_ID)
+
+    /** The stored theme id (Orbis Teal when none). It may name a theme this build does not have: resolve it with AppThemes.byId. */
+    val themeId: StateFlow<String> = _themeId.asStateFlow()
+
+    fun setThemeId(id: String) {
+        prefs.themeId = id
+        _themeId.value = id
+    }
+
+    private val _staticThemeIds = MutableStateFlow(prefs.staticThemeIds)
+
+    /** Animated themes the user switched Off. */
+    val staticThemeIds: StateFlow<Set<String>> = _staticThemeIds.asStateFlow()
+
+    fun setThemeAnimated(id: String, animated: Boolean) {
+        val next = if (animated) _staticThemeIds.value - id else _staticThemeIds.value + id
+        prefs.staticThemeIds = next
+        _staticThemeIds.value = next
     }
 
     private val _darkWebsites = MutableStateFlow(prefs.darkWebsites)
@@ -568,3 +617,17 @@ fun parseHomepageInput(raw: String): String? {
     if (com.shibi.orbis.home.isSearchResultPage(url) && !raw.trim().lowercase().startsWith("http")) return null
     return url.takeIf { isWebUrl(it) }
 }
+
+/**
+ * What pages are told about the colour scheme: dark, light, or null to follow the system. It follows only the
+ * light/dark choice and "dark websites", never the theme, so a theme can never restyle a web page.
+ */
+fun BrowserSettings.websiteColorScheme(): Flow<Boolean?> =
+    combine(darkMode, darkWebsites) { mode, darkSites ->
+        when {
+            darkSites -> true
+            mode == DarkMode.LIGHT -> false
+            mode == DarkMode.DARK -> true
+            else -> null
+        }
+    }

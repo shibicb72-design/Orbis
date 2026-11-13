@@ -19,7 +19,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import com.shibi.orbis.cast.CastTrustPrompt
 import com.shibi.orbis.cast.CastTrustReason
-import com.shibi.orbis.settings.AppTheme
+import com.shibi.orbis.settings.DarkMode
 import com.shibi.orbis.ui.passTapGuard
 import com.shibi.orbis.ui.theme.OrbisTheme
 import java.io.File
@@ -52,7 +52,7 @@ class CastTrustSheetTest {
     private var confirms = 0
     private var cancels = 0
 
-    private fun show(theme: AppTheme, reason: CastTrustReason) {
+    private fun show(theme: DarkMode, reason: CastTrustReason) {
         rule.setContent {
             OrbisTheme(theme) {
                 error = MaterialTheme.colorScheme.error.toArgb() and RGB
@@ -72,7 +72,7 @@ class CastTrustSheetTest {
         rule.waitForIdle()
     }
 
-    private fun check(theme: AppTheme, reason: CastTrustReason, expectedText: String) {
+    private fun check(theme: DarkMode, reason: CastTrustReason, expectedText: String) {
         show(theme, reason)
         rule.onNodeWithTag(CAST_TRUST_TEXT_TAG).assertIsDisplayed().assertTextEquals(expectedText)
         rule.onNodeWithTag(CAST_TRUST_CONFIRM_TAG).assertIsDisplayed()
@@ -100,43 +100,43 @@ class CastTrustSheetTest {
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     fun firstUseIsNeutralInLight() {
         val text = "First time casting to “Living Room”. Orbis will remember this device and warn you if a different one uses its name."
-        check(AppTheme.LIGHT, CastTrustReason.FIRST_USE, text)
+        check(DarkMode.LIGHT, CastTrustReason.FIRST_USE, text)
     }
 
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     fun firstUseIsNeutralInDark() {
         val text = "First time casting to “Living Room”. Orbis will remember this device and warn you if a different one uses its name."
-        check(AppTheme.DARK, CastTrustReason.FIRST_USE, text)
+        check(DarkMode.DARK, CastTrustReason.FIRST_USE, text)
     }
 
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     fun aChangedKeyIsAWarningInLight() {
-        check(AppTheme.LIGHT, CastTrustReason.KEY_CHANGED, CHANGED)
+        check(DarkMode.LIGHT, CastTrustReason.KEY_CHANGED, CHANGED)
     }
 
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     fun aChangedKeyIsAWarningInDark() {
-        check(AppTheme.DARK, CastTrustReason.KEY_CHANGED, CHANGED)
+        check(DarkMode.DARK, CastTrustReason.KEY_CHANGED, CHANGED)
     }
 
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     fun aRenameIsNeutralInLight() {
-        check(AppTheme.LIGHT, CastTrustReason.RENAMED, RENAMED)
+        check(DarkMode.LIGHT, CastTrustReason.RENAMED, RENAMED)
     }
 
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     fun aRenameIsNeutralInDark() {
-        check(AppTheme.DARK, CastTrustReason.RENAMED, RENAMED)
+        check(DarkMode.DARK, CastTrustReason.RENAMED, RENAMED)
     }
 
     @Test
     fun theButtonsAnswerTheQuestion() {
-        show(AppTheme.LIGHT, CastTrustReason.KEY_CHANGED)
+        show(DarkMode.LIGHT, CastTrustReason.KEY_CHANGED)
         rule.onNodeWithTag(CAST_TRUST_CANCEL_TAG).performClick()
         rule.waitForIdle()
         assertEquals(0, confirms)

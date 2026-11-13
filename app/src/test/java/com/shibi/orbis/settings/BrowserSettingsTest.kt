@@ -19,7 +19,9 @@ class BrowserSettingsTest {
         override var readerSerif: Boolean = true
         override var readerTheme: ReaderTheme = ReaderTheme.LIGHT
         override var httpsOnly: HttpsOnlyMode = HttpsOnlyMode.ALL
-        override var appTheme: AppTheme = AppTheme.SYSTEM
+        override var darkMode: DarkMode = DarkMode.SYSTEM
+        override var themeId: String? = null
+        override var staticThemeIds: Set<String> = emptySet()
         override var darkWebsites: Boolean = false
         override var javaScript: Boolean = true
         override var javaScriptOn: Set<String> = emptySet()
@@ -84,11 +86,11 @@ class BrowserSettingsTest {
     fun httpsOnlyDefaultsToAllTabsAndThemeToSystem() {
         val s = BrowserSettings(MemPrefs())
         assertEquals(HttpsOnlyMode.ALL, s.httpsOnly.value)
-        assertEquals(AppTheme.SYSTEM, s.appTheme.value)
+        assertEquals(DarkMode.SYSTEM, s.darkMode.value)
         s.setHttpsOnly(HttpsOnlyMode.PRIVATE)
-        s.setAppTheme(AppTheme.DARK)
+        s.setDarkMode(DarkMode.DARK)
         assertEquals(HttpsOnlyMode.PRIVATE, s.httpsOnly.value)
-        assertEquals(AppTheme.DARK, s.appTheme.value)
+        assertEquals(DarkMode.DARK, s.darkMode.value)
     }
 
     @Test
