@@ -1,6 +1,7 @@
 package com.shibi.orbis.ui.browser
 
 import android.app.Activity
+import android.content.pm.PackageManager
 import com.shibi.orbis.engine.hostOfUrl
 import com.shibi.orbis.engine.SitePermissionKey
 import com.shibi.orbis.engine.SitePermissionKind
@@ -1087,10 +1088,14 @@ private fun BrowserContent(
                 }
                 SnackbarHost(snackbars, Modifier.align(Alignment.BottomCenter))
                 if (fullScreen && !inPip) {
-                    CastFullscreenButton(
+                    val pipContext = LocalContext.current
+                    val pipSupported = remember { pipContext.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE) }
+                    FullscreenCornerButtons(
                         casting = casting != null,
-                        onClick = { castOpen = true },
-                        modifier = Modifier.align(Alignment.TopEnd).padding(12.dp).windowInsetsPadding(WindowInsets.systemBars),
+                        showPip = state.media != null && pipSupported,
+                        onCast = { castOpen = true },
+                        onPip = { container.pipRequests.tryEmit(Unit) },
+                        modifier = Modifier.align(Alignment.TopEnd).windowInsetsPadding(WindowInsets.systemBars),
                     )
                 }
                 if (pullPx > 0f) {

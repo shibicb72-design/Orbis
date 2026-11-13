@@ -3,4 +3,5 @@
     <string name="settings_section_browsing">Browsing</string>
     <string name="settings_section_privacy">Privacy and site controls</string>
     <string name="settings_section_support">Diagnostics</string>
+    <string name="fullscreen_pip" translatable="false">Picture-in-picture</string>
 </resources>
