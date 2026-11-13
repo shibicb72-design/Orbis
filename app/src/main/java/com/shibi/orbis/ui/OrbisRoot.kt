@@ -250,14 +250,12 @@ fun OrbisRoot(container: AppContainer) {
                 }
             }
             composable(Routes.ClearData) {
-                SceneScreen {
-                    ClearBrowsingDataScreen(
-                        tabs = container.tabs,
-                        bookmarks = container.bookmarks,
-                        controller = container.clear,
-                        onBack = { nav.popBackStack() },
-                    )
-                }
+                ClearBrowsingDataScreen(
+                    tabs = container.tabs,
+                    bookmarks = container.bookmarks,
+                    controller = container.clear,
+                    onBack = { nav.popBackStack() },
+                )
             }
             composable(Routes.SitePermissions) {
                 SceneScreen {
@@ -278,17 +276,15 @@ fun OrbisRoot(container: AppContainer) {
                 }
             }
             composable(Routes.Ubo) {
-                SceneScreen {
-                    UboSettingsScreen(
-                        controller = container.ubo,
-                        onBack = { nav.popBackStack() },
-                        onOpenExtensionPage = { url ->
-                            // A new normal tab; the browser screen then shows it.
-                            container.tabs.newTab()?.let { container.tabs.sessionOf(it)?.loadExtensionPage(url) }
-                            nav.popBackStack(Routes.Browser, inclusive = false)
-                        },
-                    )
-                }
+                UboSettingsScreen(
+                    controller = container.ubo,
+                    onBack = { nav.popBackStack() },
+                    onOpenExtensionPage = { url ->
+                        // A new normal tab; the browser screen then shows it.
+                        container.tabs.newTab()?.let { container.tabs.sessionOf(it)?.loadExtensionPage(url) }
+                        nav.popBackStack(Routes.Browser, inclusive = false)
+                    },
+                )
             }
         }
     }

@@ -1,7 +1,6 @@
 package com.shibi.orbis.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.ui.graphics.Color
 import com.shibi.orbis.ubo.uboFilterListsUrl
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,8 +46,6 @@ fun UboSettingsScreen(
     val state by controller.state.collectAsStateWithLifecycle()
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = Color.Transparent,
-        contentColor = MaterialTheme.colorScheme.onBackground,
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.ubo_name)) },

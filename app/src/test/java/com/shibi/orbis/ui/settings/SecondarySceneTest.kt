@@ -284,6 +284,83 @@ class SecondarySceneTest {
         assertTrue("onBackground is light on this theme's dark background", contrastOf(scheme.onBackground, scheme.background) >= 4.5)
     }
 
+    // ---- source-scan guard: what is wrapped, how each wrapped screen is built ----
+
+    private val srcRoot = File("src/main/java/com/shibi/orbis")
+
+    private fun source(path: String): String {
+        assertTrue("run from the app module: ${srcRoot.absolutePath}", srcRoot.isDirectory)
+        return File(srcRoot, path).readText().replace("\r\n", "\n")
+    }
+
+    /** Route name to the file of the screen it shows. */
+    private val wrappedRoutes =
+        mapOf(
+            "Settings" to "ui/settings/SettingsScreen.kt",
+            "Downloads" to "ui/downloads/DownloadsScreen.kt",
+            "Bookmarks" to "ui/bookmarks/BookmarksScreen.kt",
+            "History" to "ui/history/HistoryScreen.kt",
+            "Licences" to "ui/settings/LicencesScreen.kt",
+            "Torrents" to "ui/settings/TorrentSettingsScreen.kt",
+            "SitePermissions" to "ui/settings/SitePermissionsScreen.kt",
+            "ErrorLog" to "ui/settings/DebugLogScreen.kt",
+        )
+
+    /** The source of each `composable(Routes.X) { ... }` block in OrbisRoot, by route name. */
+    private fun routeBlocks(): Map<String, String> {
+        val text = source("ui/OrbisRoot.kt")
+        val starts = Regex("""composable\(Routes\.(\w+)\) \{""").findAll(text).toList()
+        return starts.mapIndexed { i, m -> m.groupValues[1] to text.substring(m.range.first, starts.getOrNull(i + 1)?.range?.first ?: text.length) }.toMap()
+    }
+
+    @Test
+    fun orbisRootWrapsExactlyTheIntendedRoutes() {
+        val blocks = routeBlocks()
+        val wrapped = blocks.filterValues { "SceneScreen {" in it }.keys
+        assertEquals(wrappedRoutes.keys, wrapped)
+        // Not wrapped on purpose: secrets, the camera preview, the theme picker (its previews are its scenes), the browser,
+        // and the two screens whose error-coloured text would sit on scene ink.
+        for (route in listOf("Passwords", "QrScan", "Themes", "Browser", "ClearData", "Ubo")) {
+            assertTrue("$route is a route", route in blocks)
+            assertFalse("$route must not be wrapped", "SceneScreen" in blocks.getValue(route))
+        }
+    }
+
+    @Test
+    fun everyWrappedScreenHasATransparentScaffoldWithAnExplicitContentColour() {
+        for ((route, file) in wrappedRoutes) {
+            val text = source(file)
+            assertTrue("$route ($file): containerColor = Color.Transparent", "containerColor = Color.Transparent," in text)
+            assertTrue("$route ($file): contentColor = MaterialTheme.colorScheme.onBackground", "contentColor = MaterialTheme.colorScheme.onBackground," in text)
+        }
+    }
+
+    /**
+     * Error and tertiary colours are not in the ink contrast check, so a wrapped screen may use them only inside an
+     * opaque container. Allowed by content: the two Downloads row texts, which sit in `Surface(color = colors.surface)`
+     * (DownloadsScreen.kt, the Surface just above each); the Licences "unavailable" text, inside its card's
+     * `Surface(color = colors.surface)`; and error/tertiary used as a button or chip container.
+     */
+    private val allowedErrorUses =
+        listOf(
+            "color = if (failed) colors.error else secondary,",
+            "color = if (entry.status == DownloadStatus.FAILED) colors.error else secondary,",
+            "Text(stringResource(R.string.licences_unavailable), style = MaterialTheme.typography.bodySmall, color = colors.error)",
+        )
+
+    @Test
+    fun noWrappedScreenPutsErrorOrTertiaryTextOutsideAnOpaqueContainer() {
+        val use = Regex("""\.(error|tertiary|onError|onTertiary)""")
+        for ((route, file) in wrappedRoutes) {
+            for ((n, line) in source(file).lines().withIndex()) {
+                if (!use.containsMatchIn(line)) continue
+                val trimmed = line.trim()
+                if (allowedErrorUses.any { trimmed == it || trimmed.endsWith(it) }) continue
+                assertTrue("$route ($file:${n + 1}) uses an error or tertiary colour on the scene: $trimmed", false)
+            }
+        }
+    }
+
     private companion object {
         const val ROOT = "secondary_root"
     }

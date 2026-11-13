@@ -83,7 +83,7 @@ internal interface PickerProbe {
 internal val LocalPickerProbe = staticCompositionLocalOf<PickerProbe?> { null }
 
 /** Each animated theme's preview draws at most this many scene elements, so all of them together stay under the cap. */
-internal val PREVIEW_BUDGET = MAX_PARTICLES / AppThemes.all.count { it.animated }
+internal val PREVIEW_BUDGET = MAX_PARTICLES / AppThemes.all.count { it.animated }.coerceAtLeast(1)
 
 /** Settings > Theme: the light/dark choice, then one card per colour theme with a live preview. */
 @Composable
