@@ -1169,6 +1169,15 @@ private fun BrowserContent(
         )
     }
 
+    val autoNotices by tabs.autoDesktopNotices.collectAsStateWithLifecycle()
+    AutoDesktopNotice(
+        tabId = selectedTab.id,
+        marked = session != null && selectedTab.id in autoNotices,
+        snackbars = snackbars,
+        onShown = { tabs.clearAutoDesktopNotice(selectedTab.id) },
+        onUndo = { session?.let { undoAutoDesktop(container.browserSettings, it, state.url) } },
+    )
+
     if (showSiteSettings && session != null && isWebUrl(state.url)) {
         val s0 = session
         val origin = siteOriginOf(state.url)
@@ -1184,6 +1193,7 @@ private fun BrowserContent(
             trackingOn = state.trackingProtectionOff != true,
             javaScriptOn = state.javaScriptOn,
             desktop = state.desktopMode,
+            desktopAutoNote = showsAutoDesktopNote(container.browserSettings.isAutoDesktop(state.url, s0.isPrivate), state.desktopMode),
             permissions = perms,
             onTracking = { on -> s0.setTrackingProtectionOff(!on) },
             onJavaScript = { on ->
