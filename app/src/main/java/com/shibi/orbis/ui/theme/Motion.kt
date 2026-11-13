@@ -59,6 +59,13 @@ internal const val TAB_PLACEMENT_MS = 180
 internal fun routeFades(motionEnabled: Boolean, fromRoute: String?, toRoute: String?, browserRoute: String): Boolean =
     motionEnabled && fromRoute != browserRoute && toRoute != browserRoute
 
+/**
+ * Whether a theme change may cross-fade on [route]. Never with motion off, before the first route is known, or on the
+ * browser route: there the change is immediate, so the chrome around the engine view never shows a mixed colour.
+ */
+internal fun themeFades(motionEnabled: Boolean, route: String?, browserRoute: String): Boolean =
+    motionEnabled && route != null && route != browserRoute
+
 internal const val TAB_ENTER_MS = 140
 internal const val TAB_EXIT_MS = 100
 internal const val ADDRESS_FOCUS_MS = 120

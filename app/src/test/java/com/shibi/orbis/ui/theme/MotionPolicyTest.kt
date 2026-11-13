@@ -32,6 +32,16 @@ class MotionPolicyTest {
     }
 
     @Test
+    fun theThemeFadesOnSecondaryRoutesOnly() {
+        assertTrue("the theme picker", themeFades(motionEnabled = true, route = "settings/themes", browserRoute = browser))
+        assertTrue(themeFades(true, "downloads", browser))
+        assertFalse("the browser route", themeFades(true, browser, browser))
+        assertFalse("no route yet", themeFades(true, null, browser))
+        assertFalse("motion off (animator scale 0)", themeFades(false, "settings/themes", browser))
+        assertFalse(themeFades(false, browser, browser))
+    }
+
+    @Test
     fun recordedBaselinesAreUnchanged() {
         assertEquals(160, ROUTE_ENTER_MS)
         assertEquals(100, ROUTE_EXIT_MS)
