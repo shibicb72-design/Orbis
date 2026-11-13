@@ -62,6 +62,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -154,6 +155,12 @@ import com.shibi.orbis.engine.isWebUrl
 import com.shibi.orbis.engine.pickerMimeTypes
 import com.shibi.orbis.tabs.TabEvent
 import com.shibi.orbis.ui.OrbisEmptyState
+import com.shibi.orbis.ui.theme.LocalSceneHost
+import com.shibi.orbis.ui.theme.SceneBand
+import com.shibi.orbis.ui.theme.SceneRegion
+import com.shibi.orbis.ui.theme.SceneSurface
+import com.shibi.orbis.ui.theme.rememberSceneSurface
+import com.shibi.orbis.ui.theme.sceneSurfaceRoot
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -298,6 +305,42 @@ fun BrowserScreen(
     BrowserContent(container, onOpenSettings, onOpenDownloads, onOpenBookmarks, onOpenHistory, onOpenQrScanner, modifier)
 }
 
+/**
+ * The browser screen's skeleton: the tab strip, the toolbar above or below the page, and the page area. The theme's
+ * scene shows only behind the strip and the toolbar here, each in its own band; nothing is added to [page], so the
+ * engine view is never drawn on. [modifier] goes after the system bar and keyboard insets (the focus sink).
+ */
+@Composable
+internal fun BrowserFrame(
+    scene: SceneSurface?,
+    showChrome: Boolean,
+    showStrip: Boolean,
+    toolbarBottom: Boolean,
+    modifier: Modifier,
+    tabStrip: @Composable () -> Unit,
+    chrome: @Composable () -> Unit,
+    page: @Composable BoxScope.() -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.systemBars)
+            .imePadding()
+            .then(modifier),
+    ) {
+        if (showStrip) SceneBand(scene, SceneRegion.Bar, Modifier.fillMaxWidth()) { tabStrip() }
+        // chrome() emits several rows; in a band they stack in a Column, as they did in this one.
+        if (showChrome && !toolbarBottom) SceneBand(scene, SceneRegion.Bar, Modifier.fillMaxWidth()) { Column { chrome() } }
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            content = page,
+        )
+        if (showChrome && toolbarBottom) SceneBand(scene, SceneRegion.Bar, Modifier.fillMaxWidth()) { Column { chrome() } }
+    }
+}
+
 @Composable
 private fun BrowserContent(
     container: AppContainer,
@@ -416,6 +459,12 @@ private fun BrowserContent(
     // The selected tab's own page fullscreen; system bars hide and the screen stays on while it lasts.
     val fullScreen = state.fullScreen && session != null
     FullScreenWindowEffect(fullScreen, landscape = fullScreen && state.fullScreenVideoLandscape)
+    // Page fullscreen pauses the scene; leaving this screen ends it.
+    val sceneHost = LocalSceneHost.current
+    DisposableEffect(sceneHost, fullScreen) {
+        sceneHost?.browserFullScreen = fullScreen
+        onDispose { sceneHost?.browserFullScreen = false }
+    }
 
     val blankTab = isBlankAddress(selectedTab.url) && isBlankAddress(state.url)
     val hasLiveOpener = selectedTab.openerTabId?.let { id -> tabList.any { it.id == id } } == true
@@ -537,23 +586,27 @@ private fun BrowserContent(
     val pullThresholdPx = with(LocalDensity.current) { PULL_TO_REFRESH_THRESHOLD.toPx() }
     val currentSession by rememberUpdatedState(session)
     val currentFullScreen by rememberUpdatedState(fullScreen)
+    // The theme's scene behind the tab strip, toolbar, start page and tab sheet; null for a private tab.
+    val scene = rememberSceneSurface(privateTab = selectedTab.isPrivate)
 
     Surface(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize().sceneSurfaceRoot(scene),
         color = MaterialTheme.colorScheme.background,
         contentColor = MaterialTheme.colorScheme.onBackground,
     ) {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.systemBars)
-                .imePadding()
+        val stripWidthDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
+        val showChrome = !fullScreen && !inPip
+        BrowserFrame(
+            scene = scene,
+            showChrome = showChrome,
+            showStrip = showChrome && showsTabStrip(stripWidthDp),
+            toolbarBottom = toolbarBottom,
+            modifier = Modifier
                 .focusRequester(focusSink)
                 .focusable(),
-        ) {
             // The toolbar block (address bar, buttons, banners, progress): above the page, or below it when the user
             // chose a bottom toolbar. Page fullscreen (a video) hides it; it comes back when that ends.
-            val chrome: @Composable () -> Unit = {
+            chrome = {
                 // Very large text on a narrow window: the address gets a row of its own and Back, Tabs and the menu move
                 // to a second row (toolbarWraps). The address bar keeps its place in composition either way, so a layout
                 // change never drops what the user is typing.
@@ -962,9 +1015,8 @@ private fun BrowserContent(
                         }
                     }
                 }
-            }
-            val stripWidthDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
-            if (!fullScreen && !inPip && showsTabStrip(stripWidthDp)) {
+            },
+            tabStrip = {
                 TabStrip(
                     tabs = tabList,
                     onSelect = tabs::select,
@@ -974,13 +1026,8 @@ private fun BrowserContent(
                         normalizeAddressInput(text, container.searchEngine.selected.value)?.let { tabs.newTab(it) }
                     },
                 )
-            }
-            if (!fullScreen && !inPip && !toolbarBottom) chrome()
-            Box(
-                Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-            ) {
+            },
+            page = {
                 // ONE content view for all tabs; the tab shown is swapped in update(), which may run any number of
                 // times and so only acts when the selected session differs from the attached one.
                 AndroidView(
@@ -1110,6 +1157,7 @@ private fun BrowserContent(
                             onPin = { container.browserSettings.pinSite(it.url, it.title) },
                             onUnpin = { container.browserSettings.unpinSite(it.url) },
                             onRemove = { container.browserSettings.removeSite(it.url) },
+                            scene = scene,
                         )
                     }
                 }
@@ -1136,9 +1184,8 @@ private fun BrowserContent(
                         modifier = Modifier.align(if (toolbarBottom) Alignment.BottomStart else Alignment.TopStart),
                     )
                 }
-            }
-            if (!fullScreen && !inPip && toolbarBottom) chrome()
-        }
+            },
+        )
     }
 
     if (showSiteSettings && session != null && isWebUrl(state.url)) {
@@ -1243,6 +1290,7 @@ private fun BrowserContent(
             },
             thumbnails = thumbnailImages,
             snackbars = snackbars,
+            scene = scene,
             onRecentlyClosed = if (recentlyClosed.isEmpty()) null else ({
                 showTabs = false
                 showRecentlyClosed = true

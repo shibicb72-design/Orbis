@@ -4,12 +4,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -18,6 +21,7 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -286,6 +290,38 @@ class SceneHostTest {
         h.browserFullScreen = false
         frames(1)
         assertEquals(OpenAmbient, h.gates)
+    }
+
+    @Test
+    fun layersStayWindowsOntoOneFieldWhenTheyMove() {
+        var x by mutableIntStateOf(0)
+        var generation by mutableIntStateOf(0)
+        rule.setContent {
+            SceneTestHost(host, AuroraTheme, dark = true) {
+                val surface = rememberSceneSurface()
+                Box(Modifier.size(300.dp, 200.dp).background(MaterialTheme.colorScheme.background).sceneSurfaceRoot(surface)) {
+                    key(generation) {
+                        // Moved by placement only: nothing recomposes or re-measures, so only the layer's own
+                        // position tells it to draw again.
+                        Box(Modifier.offset { IntOffset(x, 0) }.size(120.dp).testTag("window")) {
+                            SceneLayer(surface, SceneRegion.Page, Modifier.matchParentSize())
+                        }
+                    }
+                }
+            }
+        }
+        frames(3)
+        host.showStill(AuroraScene, 9.1f) // Paused: the clock does not invalidate anything
+        frames(2)
+        val atStart = rule.onNodeWithTag("window").captureToImage().argb()
+        x = with(rule.density) { 150.dp.roundToPx() }
+        frames(2)
+        val moved = rule.onNodeWithTag("window").captureToImage().argb()
+        generation++
+        frames(2)
+        val placedThere = rule.onNodeWithTag("window").captureToImage().argb()
+        assertFalse("the two places show different parts of the field", atStart.contentEquals(placedThere))
+        assertArrayEquals("a layer that moved shows what a layer placed there shows", placedThere, moved)
     }
 
     @Test
