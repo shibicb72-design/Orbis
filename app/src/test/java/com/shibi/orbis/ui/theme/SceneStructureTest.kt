@@ -45,10 +45,11 @@ class SceneStructureTest {
     fun sceneCallSitesAreTheKnownOnes() {
         val expected = // file to (SceneLayer calls, SceneBand calls)
             mapOf(
-                "ui/theme/SceneHost.kt" to (1 to 0),
+                "ui/theme/SceneHost.kt" to (2 to 0),
                 "ui/browser/BrowserScreen.kt" to (0 to 3),
                 "ui/home/StartPage.kt" to (1 to 0),
                 "ui/browser/TabSwitcher.kt" to (1 to 0),
+                "ui/settings/ThemePickerScreen.kt" to (1 to 0),
             )
         val layer = Regex("""(?<!fun )\bSceneLayer\(""")
         val band = Regex("""(?<!fun )\bSceneBand\(""")

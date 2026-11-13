@@ -1,8 +1,12 @@
 package com.shibi.orbis.ui.theme
 
 import androidx.annotation.VisibleForTesting
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -402,5 +406,20 @@ private class SceneLayerNode(var surface: SceneSurface) : Modifier.Node(), DrawM
         val frame = s.frameFor(fieldSize, this)
         val t = s.timeSec()
         translate(dx, dy) { with(frame) { draw(t) } }
+    }
+}
+
+/**
+ * A secondary screen over its theme's scene: the page background, the scene behind [content], and the content colour
+ * set from that background. With a theme that has no scene (or no host) it is only the background, so pixels match the
+ * screen without it. The screen's own Scaffold must have a transparent container and set `contentColor` itself.
+ */
+@Composable
+fun SceneScreen(content: @Composable () -> Unit) {
+    val surface = rememberSceneSurface()
+    val colors = MaterialTheme.colorScheme
+    Box(Modifier.fillMaxSize().background(colors.background).sceneSurfaceRoot(surface)) {
+        SceneLayer(surface, SceneRegion.Page, Modifier.matchParentSize())
+        CompositionLocalProvider(LocalContentColor provides colors.onBackground) { content() }
     }
 }

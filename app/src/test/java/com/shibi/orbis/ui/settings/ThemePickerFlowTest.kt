@@ -10,7 +10,24 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.runtime.CompositionLocalProvider
+import android.provider.Settings
+import com.shibi.orbis.ui.theme.MAX_PARTICLES
+import com.shibi.orbis.ui.theme.OpenAmbient
+import com.shibi.orbis.ui.theme.ProvideSceneHost
+import com.shibi.orbis.ui.theme.SceneHost
+import com.shibi.orbis.ui.theme.SceneSurface
+import com.shibi.orbis.ui.theme.argb
+import com.shibi.orbis.ui.theme.frames
+import org.junit.After
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.robolectric.Shadows.shadowOf
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.performScrollTo
@@ -229,11 +246,229 @@ class ThemePickerFlowTest {
     @Test
     fun staticThemesHaveNoAnimatedControl() {
         show()
-        rule.onAllNodesWithText("Animated").assertCountEquals(0)
-        rule.onAllNodesWithText("Off").assertCountEquals(0)
-        rule.onAllNodes(SemanticsMatcher("an animated control") {
-            it.config.getOrNull(SemanticsProperties.ContentDescription)?.any { d -> d.contains("nimat") } == true
-        }).assertCountEquals(0)
+        for (t in AppThemes.all.filter { !it.animated }) {
+            val name = context.getString(t.nameRes)
+            rule.onAllNodesWithContentDescription("Animated background for $name").assertCountEquals(0)
+            rule.onAllNodesWithContentDescription("No animation for $name").assertCountEquals(0)
+        }
+    }
+
+    // ---- Animated/Off toggle and live previews (a scene host, like the app) ----
+
+    private val host = SceneHost()
+    private val animatedThemes get() = AppThemes.all.filter { it.animated }
+    private val resolver get() = context.contentResolver
+    private val surfaces = mutableMapOf<String, SceneSurface?>()
+    private val cardCompositions = mutableMapOf<String, Int>()
+
+    @After
+    fun resetAnimatorScale() {
+        Settings.Global.putFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+    }
+
+    private fun showWithHost(initial: BrowserSettings = settings, holdClock: Boolean = false) {
+        // With the clock running, the app is never idle: toggle tests pause the scene so waitForIdle can return.
+        if (holdClock) rule.mainClock.autoAdvance = false else host.ambient = OpenAmbient.copy(resumed = false)
+        val probe =
+            object : PickerProbe {
+                override fun cardComposed(id: String) {
+                    cardCompositions[id] = (cardCompositions[id] ?: 0) + 1
+                }
+
+                override fun previewSurface(id: String, surface: SceneSurface?) {
+                    surfaces[id] = surface
+                }
+            }
+        rule.setContent {
+            val darkMode by initial.darkMode.collectAsStateWithLifecycle()
+            val themeId by initial.themeId.collectAsStateWithLifecycle()
+            OrbisTheme(darkMode, AppThemes.byId(themeId)) {
+                ProvideSceneHost(host) {
+                    CompositionLocalProvider(LocalPickerProbe provides probe) {
+                        ThemePickerScreen(settings = initial, onBack = {})
+                    }
+                }
+            }
+        }
+        if (holdClock) rule.frames(3) else rule.waitForIdle()
+    }
+
+    private fun animated(t: AppTheme) = "Animated background for ${context.getString(t.nameRes)}"
+
+    private fun off(t: AppTheme) = "No animation for ${context.getString(t.nameRes)}"
+
+    @Test
+    @Config(sdk = [35], application = android.app.Application::class, qualifiers = "w412dp-h4000dp")
+    fun exactlyThreeAnimatedControlsEachUnderItsOwnCard() {
+        showWithHost()
+        val controls =
+            rule.onAllNodes(
+                SemanticsMatcher("an animation control") {
+                    it.config.getOrNull(SemanticsProperties.ContentDescription)
+                        ?.any { d -> d.startsWith("Animated background for ") || d.startsWith("No animation for ") } == true
+                },
+            )
+        controls.assertCountEquals(6)
+        rule.onAllNodesWithText("Animated").assertCountEquals(3)
+        rule.onAllNodesWithText("Off").assertCountEquals(3)
+        for (t in animatedThemes) {
+            val card = rule.onNodeWithTag(themeCardTag(t.id)).fetchSemanticsNode().boundsInRoot
+            for (d in listOf(animated(t), off(t))) {
+                val b = rule.onNodeWithContentDescription(d).fetchSemanticsNode().boundsInRoot
+                assertTrue("$d sits under its card", b.top >= card.bottom - 1f && b.top < card.bottom + 64f)
+                assertTrue("$d sits inside its card's column", b.left >= card.left - 1f && b.right <= card.right + 1f)
+            }
+        }
+        for (t in AppThemes.all.filter { !it.animated }) {
+            rule.onAllNodesWithContentDescription(animated(t)).assertCountEquals(0)
+            rule.onAllNodesWithContentDescription(off(t)).assertCountEquals(0)
+        }
+    }
+
+    @Test
+    @Config(sdk = [35], application = android.app.Application::class, qualifiers = "w412dp-h4000dp")
+    fun byDefaultAnimatedIsSelectedAndNothingIsStored() {
+        showWithHost()
+        for (t in animatedThemes) {
+            rule.onNodeWithContentDescription(animated(t)).assertIsSelected()
+            rule.onNodeWithContentDescription(off(t)).assertIsNotSelected()
+        }
+        assertFalse(prefs.contains("theme_static_ids"))
+    }
+
+    @Test
+    @Config(sdk = [35], application = android.app.Application::class, qualifiers = "w412dp-h4000dp")
+    fun turningAuroraOffStoresOnlyAuroraAndTurningItOnRemovesIt() {
+        settings.setThemeId("harbor")
+        showWithHost()
+        val aurora = theme("aurora")
+        rule.onNodeWithContentDescription(off(aurora)).performClick()
+        rule.waitForIdle()
+        assertEquals(setOf("aurora"), settings.staticThemeIds.value)
+        assertEquals(setOf("aurora"), BrowserSettings(SharedPreferencesBrowserPrefs(prefs)).staticThemeIds.value)
+        assertEquals("harbor", settings.themeId.value)
+        assertEquals("harbor", prefs.getString("theme_id", null))
+        rule.onNodeWithContentDescription(off(aurora)).assertIsSelected()
+        rule.onNodeWithContentDescription(animated(aurora)).assertIsNotSelected()
+        for (other in animatedThemes.filter { it.id != "aurora" }) rule.onNodeWithContentDescription(animated(other)).assertIsSelected()
+        assertEquals(listOf("harbor"), selectedCardIds())
+
+        rule.onNodeWithContentDescription(animated(aurora)).performClick()
+        rule.waitForIdle()
+        assertEquals(emptySet<String>(), settings.staticThemeIds.value)
+        assertEquals(emptySet<String>(), BrowserSettings(SharedPreferencesBrowserPrefs(prefs)).staticThemeIds.value)
+        rule.onNodeWithContentDescription(animated(aurora)).assertIsSelected()
+        assertEquals("harbor", settings.themeId.value)
+    }
+
+    @Test
+    @Config(sdk = [35], application = android.app.Application::class, qualifiers = "w412dp-h4000dp")
+    fun theControlsDescribeThemselvesAndTheCardKeepsItsOwnDescription() {
+        showWithHost()
+        for (t in animatedThemes) {
+            val name = context.getString(t.nameRes)
+            rule.onNodeWithContentDescription("Animated background for $name")
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true))
+            rule.onNodeWithContentDescription("No animation for $name")
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, false))
+            val card = rule.onNodeWithTag(themeCardTag(t.id))
+            card.assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("$name. ${context.getString(t.descriptionRes)}")))
+            card.assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))
+        }
+    }
+
+    @Test
+    @Config(sdk = [35], application = android.app.Application::class, qualifiers = "w412dp-h4000dp")
+    fun theSystemAnimationsNoteShowsAtScaleZeroAndNotAtOne() {
+        val note = "System animations are off, so this theme stays still."
+        Settings.Global.putFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+        showWithHost()
+        rule.onAllNodesWithText(note).assertCountEquals(0)
+        Settings.Global.putFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 0f)
+        shadowOf(android.os.Looper.getMainLooper()).idle()
+        rule.waitForIdle()
+        rule.onAllNodesWithText(note).assertCountEquals(3)
+        // The row stays usable.
+        rule.onNodeWithContentDescription(off(theme("aurora"))).performClick()
+        rule.waitForIdle()
+        assertEquals(setOf("aurora"), settings.staticThemeIds.value)
+        Settings.Global.putFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+        shadowOf(android.os.Looper.getMainLooper()).idle()
+        rule.waitForIdle()
+        rule.onAllNodesWithText(note).assertCountEquals(0)
+    }
+
+    private fun preview(id: String): IntArray =
+        rule.onNodeWithTag(themePreviewTag(id), useUnmergedTree = true).captureToImage().argb()
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    @Config(sdk = [35], application = android.app.Application::class, qualifiers = "w412dp-h4000dp")
+    fun animatedPreviewsMoveAndStaticOnesDoNot() {
+        showWithHost(holdClock = true)
+        assertEquals(1, host.activeLoops)
+        val before = AppThemes.all.associate { it.id to preview(it.id) }
+        rule.frames(70)
+        assertEquals(1, host.activeLoops)
+        val after = AppThemes.all.associate { it.id to preview(it.id) }
+        for (t in AppThemes.all) {
+            if (t.animated) {
+                assertFalse("${t.id} preview moves", before.getValue(t.id).contentEquals(after.getValue(t.id)))
+            } else {
+                assertArrayEquals("${t.id} preview is still", before.getValue(t.id), after.getValue(t.id))
+            }
+        }
+    }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    @Config(sdk = [35], application = android.app.Application::class, qualifiers = "w412dp-h4000dp")
+    fun aPreviewSwitchedOffIsFrozenWhileTheOthersMove() {
+        settings.setThemeAnimated("aurora", false)
+        showWithHost(holdClock = true)
+        assertEquals(1, host.activeLoops)
+        val before = animatedThemes.associate { it.id to preview(it.id) }
+        repeat(3) {
+            rule.frames(25)
+            assertEquals(1, host.activeLoops)
+        }
+        val after = animatedThemes.associate { it.id to preview(it.id) }
+        assertArrayEquals("aurora is at its still frame", before.getValue("aurora"), after.getValue("aurora"))
+        for (id in listOf("night_sky", "fair_weather")) {
+            assertFalse("$id moves", before.getValue(id).contentEquals(after.getValue(id)))
+        }
+    }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    @Config(sdk = [35], application = android.app.Application::class, qualifiers = "w412dp-h4000dp")
+    fun eachPreviewDrawsAtMostItsShareOfTheParticleCap() {
+        showWithHost(holdClock = true)
+        rule.frames(5)
+        assertEquals(13, PREVIEW_BUDGET)
+        for (t in animatedThemes) {
+            preview(t.id) // a capture forces the draw
+            val surface = surfaces[t.id]
+            assertNotNull("${t.id} has a surface", surface)
+            val frame = surface!!.builtFrame
+            assertNotNull("${t.id} built a frame", frame)
+            assertTrue("${t.id} draws ${frame!!.elements}", frame.elements in 1..PREVIEW_BUDGET)
+        }
+        for (t in AppThemes.all.filter { !it.animated }) assertNull("${t.id} has no surface", surfaces[t.id])
+        assertTrue(animatedThemes.sumOf { surfaces.getValue(it.id)!!.builtFrame!!.elements } <= MAX_PARTICLES)
+    }
+
+    @Test
+    @Config(sdk = [35], application = android.app.Application::class, qualifiers = "w412dp-h4000dp")
+    fun previewFramesDoNotRecomposeCards() {
+        showWithHost(holdClock = true)
+        rule.frames(5)
+        val cardsBefore = cardCompositions.toMap()
+        assertEquals(AppThemes.all.map { it.id }.toSet(), cardsBefore.keys)
+        val writesBefore = host.frameWrites
+        rule.frames(120)
+        assertTrue("frames were written", host.frameWrites > writesBefore + 30)
+        assertEquals(cardsBefore, cardCompositions.toMap())
     }
 
     private fun androidx.compose.ui.test.SemanticsNodeInteractionCollection.filterToHeadings() {

@@ -34,6 +34,7 @@ import com.shibi.orbis.ui.passwords.PasswordsScreen
 import com.shibi.orbis.ui.theme.ProvideSceneHost
 import com.shibi.orbis.ui.theme.ROUTE_ENTER_MS
 import com.shibi.orbis.ui.theme.ROUTE_EXIT_MS
+import com.shibi.orbis.ui.theme.SceneScreen
 import com.shibi.orbis.ui.theme.rememberMotionEnabled
 import com.shibi.orbis.ui.theme.routeFades
 
@@ -151,36 +152,42 @@ fun OrbisRoot(container: AppContainer) {
                 )
             }
             composable(Routes.Bookmarks) {
-                BookmarksScreen(
-                    manager = container.bookmarks,
-                    onOpen = { url ->
-                        container.tabs.loadInSelected(url)
-                        nav.popBackStack(Routes.Browser, inclusive = false)
-                    },
-                    onOpenInNewTab = { url ->
-                        container.tabs.newTab(url)
-                        nav.popBackStack(Routes.Browser, inclusive = false)
-                    },
-                    onBack = { nav.popBackStack() },
-                )
+                SceneScreen {
+                    BookmarksScreen(
+                        manager = container.bookmarks,
+                        onOpen = { url ->
+                            container.tabs.loadInSelected(url)
+                            nav.popBackStack(Routes.Browser, inclusive = false)
+                        },
+                        onOpenInNewTab = { url ->
+                            container.tabs.newTab(url)
+                            nav.popBackStack(Routes.Browser, inclusive = false)
+                        },
+                        onBack = { nav.popBackStack() },
+                    )
+                }
             }
             composable(Routes.History) {
-                HistoryScreen(
-                    manager = container.history,
-                    onOpen = { url ->
-                        container.tabs.loadInSelected(url)
-                        nav.popBackStack(Routes.Browser, inclusive = false)
-                    },
-                    onBack = { nav.popBackStack() },
-                )
+                SceneScreen {
+                    HistoryScreen(
+                        manager = container.history,
+                        onOpen = { url ->
+                            container.tabs.loadInSelected(url)
+                            nav.popBackStack(Routes.Browser, inclusive = false)
+                        },
+                        onBack = { nav.popBackStack() },
+                    )
+                }
             }
             composable(Routes.Downloads) {
-                DownloadsScreen(
-                    manager = container.downloads,
-                    torrents = container.torrents,
-                    onBack = { nav.popBackStack() },
-                    log = TorrentLog.sink(container.debugLog),
-                )
+                SceneScreen {
+                    DownloadsScreen(
+                        manager = container.downloads,
+                        torrents = container.torrents,
+                        onBack = { nav.popBackStack() },
+                        log = TorrentLog.sink(container.debugLog),
+                    )
+                }
             }
             composable(Routes.Passwords) {
                 // Shows secrets: the window is protected (FLAG_SECURE, no Recents snapshot) while this screen is up.
@@ -197,44 +204,50 @@ fun OrbisRoot(container: AppContainer) {
                 )
             }
             composable(Routes.Settings) {
-                SettingsScreen(
-                    uboStateFlow = container.ubo.state,
-                    searchEngineFlow = container.searchEngine.selected,
-                    onSelectSearchEngine = container.searchEngine::select,
-                    homepageFlow = container.browserSettings.homepage,
-                    onSetHomepage = { container.browserSettings.setHomepage(it) },
-                    searchSuggestionsFlow = container.browserSettings.searchSuggestions,
-                    onSetSearchSuggestions = container.browserSettings::setSearchSuggestions,
-                    textZoomFlow = container.browserSettings.textZoomPercent,
-                    onSetTextZoom = container.browserSettings::setTextZoomPercent,
-                    forceZoomFlow = container.browserSettings.forceZoom,
-                    onSetForceZoom = container.browserSettings::setForceZoom,
-                    onBack = { nav.popBackStack() },
-                    onOpenErrorLog = { nav.navigate(Routes.ErrorLog) },
-                    onOpenUbo = { nav.navigate(Routes.Ubo) },
-                    onOpenSitePermissions = { nav.navigate(Routes.SitePermissions) },
-                    onOpenClearData = { nav.navigate(Routes.ClearData) },
-                    onOpenPasswords = { nav.navigate(Routes.Passwords) },
-                    site = container.browserSettings,
-                    onOpenLicences = { nav.navigate(Routes.Licences) },
-                    onOpenTorrents = { nav.navigate(Routes.Torrents) },
-                    onOpenThemes = { nav.navigate(Routes.Themes) },
-                )
+                SceneScreen {
+                    SettingsScreen(
+                        uboStateFlow = container.ubo.state,
+                        searchEngineFlow = container.searchEngine.selected,
+                        onSelectSearchEngine = container.searchEngine::select,
+                        homepageFlow = container.browserSettings.homepage,
+                        onSetHomepage = { container.browserSettings.setHomepage(it) },
+                        searchSuggestionsFlow = container.browserSettings.searchSuggestions,
+                        onSetSearchSuggestions = container.browserSettings::setSearchSuggestions,
+                        textZoomFlow = container.browserSettings.textZoomPercent,
+                        onSetTextZoom = container.browserSettings::setTextZoomPercent,
+                        forceZoomFlow = container.browserSettings.forceZoom,
+                        onSetForceZoom = container.browserSettings::setForceZoom,
+                        onBack = { nav.popBackStack() },
+                        onOpenErrorLog = { nav.navigate(Routes.ErrorLog) },
+                        onOpenUbo = { nav.navigate(Routes.Ubo) },
+                        onOpenSitePermissions = { nav.navigate(Routes.SitePermissions) },
+                        onOpenClearData = { nav.navigate(Routes.ClearData) },
+                        onOpenPasswords = { nav.navigate(Routes.Passwords) },
+                        site = container.browserSettings,
+                        onOpenLicences = { nav.navigate(Routes.Licences) },
+                        onOpenTorrents = { nav.navigate(Routes.Torrents) },
+                        onOpenThemes = { nav.navigate(Routes.Themes) },
+                    )
+                }
             }
             composable(Routes.Themes) {
                 ThemePickerScreen(settings = container.browserSettings, onBack = { nav.popBackStack() })
             }
             composable(Routes.Torrents) {
-                val store = container.torrentSettings
-                if (store == null) {
-                    // No torrent support in this process: nothing to show.
-                    LaunchedEffect(Unit) { nav.popBackStack() }
-                } else {
-                    TorrentSettingsScreen(store = store, browser = container.browserSettings, onBack = { nav.popBackStack() })
+                SceneScreen {
+                    val store = container.torrentSettings
+                    if (store == null) {
+                        // No torrent support in this process: nothing to show.
+                        LaunchedEffect(Unit) { nav.popBackStack() }
+                    } else {
+                        TorrentSettingsScreen(store = store, browser = container.browserSettings, onBack = { nav.popBackStack() })
+                    }
                 }
             }
             composable(Routes.Licences) {
-                LicencesScreen(onBack = { nav.popBackStack() })
+                SceneScreen {
+                    LicencesScreen(onBack = { nav.popBackStack() })
+                }
             }
             composable(Routes.ClearData) {
                 ClearBrowsingDataScreen(
@@ -245,18 +258,22 @@ fun OrbisRoot(container: AppContainer) {
                 )
             }
             composable(Routes.SitePermissions) {
-                SitePermissionsScreen(
-                    decisions = container.sitePermissions,
-                    // The engine's own copy of a location answer is reset so a removed site is asked again.
-                    onRemoved = { container.engine.reconcileSitePermissions() },
-                    onBack = { nav.popBackStack() },
-                )
+                SceneScreen {
+                    SitePermissionsScreen(
+                        decisions = container.sitePermissions,
+                        // The engine's own copy of a location answer is reset so a removed site is asked again.
+                        onRemoved = { container.engine.reconcileSitePermissions() },
+                        onBack = { nav.popBackStack() },
+                    )
+                }
             }
             composable(Routes.ErrorLog) {
-                DebugLogScreen(
-                    container = container,
-                    onBack = { nav.popBackStack() },
-                )
+                SceneScreen {
+                    DebugLogScreen(
+                        container = container,
+                        onBack = { nav.popBackStack() },
+                    )
+                }
             }
             composable(Routes.Ubo) {
                 UboSettingsScreen(

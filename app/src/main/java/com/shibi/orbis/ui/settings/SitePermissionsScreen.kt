@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -50,6 +51,8 @@ fun SitePermissionsScreen(
     LaunchedEffect(Unit) { decisions.purgeExpired() }
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        containerColor = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onBackground,
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.perm_settings_title)) },
@@ -65,7 +68,7 @@ fun SitePermissionsScreen(
         },
     ) { padding ->
         if (entries.isEmpty()) {
-            OrbisEmptyState(stringResource(R.string.perm_settings_empty), Icons.Filled.Tune, Modifier.padding(padding))
+            OrbisEmptyState(stringResource(R.string.perm_settings_empty), Icons.Filled.Tune, Modifier.padding(padding), containerColor = Color.Transparent)
         } else {
             Column(Modifier.padding(padding).fillMaxSize()) {
                 Text(
