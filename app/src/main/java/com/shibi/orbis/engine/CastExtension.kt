@@ -18,7 +18,7 @@ class CastExtensionHolder(private val log: (String) -> Unit) {
         controller.ensureBuiltIn(ASSET_URL, ID).accept(
             { ext ->
                 if (ext == null) return@accept
-                controller.setAllowedInPrivateBrowsing(ext, true).accept(
+                controller.ensureAllowedInPrivateBrowsing(ext, true).accept(
                     { allowed -> ready(allowed ?: ext) },
                     { ready(ext) },
                 )

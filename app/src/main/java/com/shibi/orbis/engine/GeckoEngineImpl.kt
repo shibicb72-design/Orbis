@@ -159,7 +159,7 @@ class GeckoEngineImpl(
                 { installed ->
                     if (installed == null) return@accept
                     darkenExtension = installed
-                    controller.setAllowedInPrivateBrowsing(installed, true).accept({ applyForceDark(rt) }, { applyForceDark(rt) })
+                    controller.ensureAllowedInPrivateBrowsing(installed, true).accept({ applyForceDark(rt) }, { applyForceDark(rt) })
                 },
                 { debugLog.log("GeckoEngine", "darken extension install failed: ${it?.javaClass?.simpleName}") },
             )

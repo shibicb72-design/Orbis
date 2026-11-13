@@ -17,7 +17,7 @@ object YoutubePipExtension {
         controller.ensureBuiltIn(ASSET_URL, ID).accept(
             { ext ->
                 if (ext == null) return@accept
-                controller.setAllowedInPrivateBrowsing(ext, true).accept({ log("youtube pip fix ready") }, { log("youtube pip fix ready") })
+                controller.ensureAllowedInPrivateBrowsing(ext, true).accept({ log("youtube pip fix ready") }, { log("youtube pip fix ready") })
             },
             { log("youtube pip fix install failed: ${it?.javaClass?.simpleName}") },
         )
