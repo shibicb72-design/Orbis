@@ -140,6 +140,32 @@ class MediaCenterTest {
         assertEquals(listOf<Pair<Long, Long>?>(null), shapes)
     }
 
+    /** Pause then play again in a fullscreen page re-arms auto-enter (the tester's video, at about 8.5 s). */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun pictureInPictureReArmsAfterPauseAndPlayInFullscreen() = runTest {
+        val session = FullScreenSession().apply { fullScreen(true) }
+        val media = MutableStateFlow<MediaTab?>(tab(1, true, video = true, w = 1280, h = 720, session = session))
+        val shapes = mutableListOf<Pair<Long, Long>?>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            pipShapes(media, MutableStateFlow(session)).collect { shapes += it }
+        }
+        media.value = tab(1, false, video = true, w = 1280, h = 720, session = session)
+        media.value = tab(1, true, video = true, w = 1280, h = 720, session = session)
+        assertEquals(listOf(1280L to 720L, null, 1280L to 720L), shapes)
+    }
+
+    @Test
+    fun manualPictureInPictureTakesAFullscreenPagePausedOrPlaying() {
+        val pausedSized = MediaState(playing = false, hasVideo = true, videoWidth = 1280, videoHeight = 720)
+        assertNull("not fullscreen", manualPipShapeOf(pausedSized, fullScreen = false))
+        assertNull("no media", manualPipShapeOf(null, fullScreen = true))
+        assertEquals("paused, size known", 1280L to 720L, manualPipShapeOf(pausedSized, fullScreen = true))
+        assertEquals("paused, size unknown", 16L to 9L, manualPipShapeOf(MediaState(playing = false), fullScreen = true))
+        assertEquals("playing, size known", 1280L to 720L, manualPipShapeOf(pausedSized.copy(playing = true), fullScreen = true))
+        assertEquals("playing, size unknown", 16L to 9L, manualPipShapeOf(MediaState(playing = true), fullScreen = true))
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun pictureInPictureFollowsTheSelectedTab() = runTest {

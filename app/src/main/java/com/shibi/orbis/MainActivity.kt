@@ -10,6 +10,8 @@ import android.app.PictureInPictureParams
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -38,6 +40,7 @@ import com.shibi.orbis.privacy.PrivacyWindowOps
 import com.shibi.orbis.ui.OrbisRoot
 import com.shibi.orbis.engine.BrowserSession
 import com.shibi.orbis.media.PipWindowExit
+import com.shibi.orbis.media.manualPipShapeOf
 import com.shibi.orbis.media.onPipWindowClosed
 import com.shibi.orbis.media.pipAspectRatio
 import com.shibi.orbis.media.pipShapes
@@ -47,6 +50,9 @@ import com.shibi.orbis.ui.theme.OrbisTheme
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+
+/** How long a picture-in-picture close waits for a start or resume that would make it an expand. */
+private const val PIP_CLOSE_CONFIRM_MS = 500L
 
 class MainActivity : ComponentActivity() {
     private val app get() = application as OrbisApp
@@ -71,10 +77,13 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             pipShapes(app.container.media.current, app.container.tabs.selected.map { it.session }.distinctUntilChanged())
                 .collect { shape ->
+                    pipLog("shape=${shapeText(shape)}")
                     pipShape = shape
                     applyPipParams()
                 }
         }
+        // The user asked for picture-in-picture: enters it for the selected fullscreen page, paused or playing.
+        lifecycleScope.launch { app.container.pipRequests.collect { enterPipOnRequest() } }
         // Fullscreen can rotate and resize the window after the shape was set; the source hint follows the new size.
         window.decorView.addOnLayoutChangeListener { _, l, t, r, b, oldL, oldT, oldR, oldB ->
             val resized = r - l != oldR - oldL || b - t != oldB - oldT
@@ -104,6 +113,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        if (pipExit.onStart()) pipLog("close cancelled by start")
+        pipCloseHandler.removeCallbacks(confirmPipClose)
         // Also set here, so a missed mode callback cannot leave the toolbar hidden.
         app.container.pictureInPicture.value = isInPictureInPictureMode
         app.startedActivities.onStart()
@@ -113,7 +124,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        pipExit.onResume()
+        if (pipExit.onResume()) pipLog("close cancelled by resume")
+        pipCloseHandler.removeCallbacks(confirmPipClose)
+        // Leaving from here must find the params current, even on a device that dropped them when PiP ended.
+        if (!isInPictureInPictureMode) applyPipParams()
         app.container.pictureInPicture.value = isInPictureInPictureMode
         app.container.sensitiveClip.foreground = hasWindowFocus()
         clearSensitiveClipIfDue()
@@ -139,8 +153,26 @@ class MainActivity : ComponentActivity() {
     /** The tab whose media played in the picture-in-picture window; set when the window opens. */
     private var pipSession: BrowserSession? = null
 
-    private val pipExit =
-        PipWindowExit {
+    /** The session of a page the user put in picture-in-picture by request; it may be paused, so not media.current. */
+    private var requestedPipSession: BrowserSession? = null
+
+    /**
+     * A close is confirmed [PIP_CLOSE_CONFIRM_MS] after it looks like one, unless the activity starts or resumes first:
+     * some devices stop and restart the activity when the window is expanded, and an expand must never pause the media.
+     */
+    private val pipCloseHandler = Handler(Looper.getMainLooper())
+    private val confirmPipClose: Runnable = Runnable { pipExit.confirmClose() }
+
+    private val pipExit: PipWindowExit =
+        PipWindowExit(
+            onClosePending = {
+                pipLog("close pending")
+                pipCloseHandler.removeCallbacks(confirmPipClose)
+                pipCloseHandler.postDelayed(confirmPipClose, PIP_CLOSE_CONFIRM_MS)
+            },
+        ) {
+            pipLog("close confirmed")
+            // Read now, at the confirm: another instance may have started while the close was pending.
             onPipWindowClosed(
                 noneStarted = app.startedActivities.noneStarted,
                 pausePipMedia = { pipSession?.mediaPause() },
@@ -152,7 +184,10 @@ class MainActivity : ComponentActivity() {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         app.container.pictureInPicture.value = isInPictureInPictureMode
-        if (isInPictureInPictureMode) pipSession = app.container.media.current.value?.session
+        if (isInPictureInPictureMode) {
+            pipSession = requestedPipSession ?: app.container.media.current.value?.session
+        }
+        requestedPipSession = null
         val state = lifecycle.currentState
         val activity =
             when {
@@ -160,27 +195,65 @@ class MainActivity : ComponentActivity() {
                 state.isAtLeast(Lifecycle.State.STARTED) -> PipWindowExit.Activity.STARTED
                 else -> PipWindowExit.Activity.STOPPED
             }
+        pipLog("mode inPip=$isInPictureInPictureMode at=${activity.name}")
         pipExit.onPipModeChanged(isInPictureInPictureMode, activity)
+        // Out of the window: send the params again, in case the device dropped them when PiP ended.
+        if (!isInPictureInPictureMode && !this.isInPictureInPictureMode) applyPipParams()
+    }
+
+    override fun onDestroy() {
+        // A destroyed activity must not leave a closed window's media playing.
+        pipCloseHandler.removeCallbacks(confirmPipClose)
+        pipExit.confirmClose()
+        super.onDestroy()
     }
 
     /** Width:height of the video that may go picture-in-picture now, or null. */
     private var pipShape: Pair<Long, Long>? = null
 
-    private fun pipParams(): PictureInPictureParams? {
-        val (w, h) = pipShape ?: return null
+    private fun pipParams(): PictureInPictureParams? = pipShape?.let { pipParamsFor(it, autoEnter = true) }
+
+    private fun pipParamsFor(shape: Pair<Long, Long>, autoEnter: Boolean): PictureInPictureParams {
+        val (w, h) = shape
         // The page fills the window in fullscreen, so the whole window is where the video comes from.
         val source = window.decorView.let { Rect(0, 0, it.width, it.height) }
         return PictureInPictureParams.Builder().setAspectRatio(pipAspectRatio(w, h)).setSourceRectHint(source)
-            .setAutoEnterEnabled(true)
+            .setAutoEnterEnabled(autoEnter)
             .build()
     }
 
     private fun applyPipParams() {
         // Entering is automatic while a shape is set; clearing it turns auto-enter off.
+        pipLog("params autoEnter=${pipShape != null}")
         runCatching {
             setPictureInPictureParams(pipParams() ?: PictureInPictureParams.Builder().setAutoEnterEnabled(false).build())
         }
     }
+
+    /**
+     * The fullscreen PiP button: the selected tab's own page state decides, so a paused video goes too. The stored
+     * auto-enter flag stays what [pipShape] says, so Home after an expand still enters only for playing media.
+     */
+    private fun enterPipOnRequest() {
+        val session = app.container.tabs.selected.value.session
+        val state = session?.state?.value
+        val shape = manualPipShapeOf(state?.media, fullScreen = state?.fullScreen == true)
+        val result =
+            if (shape == null || isInPictureInPictureMode) {
+                "false"
+            } else {
+                requestedPipSession = session
+                runCatching { enterPictureInPictureMode(pipParamsFor(shape, autoEnter = pipShape != null)) }
+                    .fold(onSuccess = { it.toString() }, onFailure = { "error" })
+                    .also { if (it != "true") requestedPipSession = null }
+            }
+        pipLog("manual enter shape=${shapeText(shape)} result=$result")
+    }
+
+    /** Booleans, sizes and state names only: a private tab may be playing, so never a URL, title, host or tab id. */
+    private fun pipLog(msg: String) = app.container.debugLog.log("Pip", msg)
+
+    private fun shapeText(shape: Pair<Long, Long>?) = shape?.let { (w, h) -> "${w}x$h" } ?: "none"
 
     override fun onStop() {
         // Invisible: the selected page must not keep running at foreground priority, unless another instance is

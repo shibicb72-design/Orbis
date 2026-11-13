@@ -934,14 +934,17 @@ private class GeckoBrowserSession(
 
             override fun onPlay(session: GeckoSession, mediaSession: MediaSession) {
                 activeMedia = mediaSession
+                debugLog.log("Media", "media play")
                 _state.update { it.copy(media = (it.media ?: MediaState(playing = true)).copy(playing = true)) }
             }
 
             override fun onPause(session: GeckoSession, mediaSession: MediaSession) {
+                debugLog.log("Media", "media pause")
                 _state.update { it.copy(media = it.media?.copy(playing = false)) }
             }
 
             override fun onStop(session: GeckoSession, mediaSession: MediaSession) {
+                debugLog.log("Media", "media stop")
                 _state.update { it.copy(media = it.media?.copy(playing = false)) }
             }
         }
