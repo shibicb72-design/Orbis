@@ -199,6 +199,7 @@ class BrowserFrameSceneTest {
         userAnimated = true
         privateTab = false
         host.browserFullScreen = false
+        host.browserPageShowing = false
         host.ambient = OpenAmbient
     }
 
@@ -301,6 +302,7 @@ class BrowserFrameSceneTest {
                 "not resumed" to { closed -> host.ambient = OpenAmbient.copy(resumed = !closed) },
                 "picture-in-picture" to { closed -> host.ambient = OpenAmbient.copy(inPip = closed) },
                 "page fullscreen" to { closed -> host.browserFullScreen = closed },
+                "web page showing" to { closed -> host.browserPageShowing = closed },
                 "media playing" to { closed -> host.ambient = OpenAmbient.copy(mediaPlaying = closed) },
                 "private tab" to { closed -> privateTab = closed },
             )
@@ -320,6 +322,32 @@ class BrowserFrameSceneTest {
                 close(false)
                 frames(5)
             }
+        }
+    }
+
+    /** What BrowserContent reports while a web page shows: the bars keep a still frame and no frame loop runs. */
+    @Test
+    fun aPageShowingFreezesTheBars() {
+        show()
+        val bars = listOf(TAB_STRIP_TAG, TOOLBAR_TAG)
+        for (t in AnimatedThemes) {
+            theme = t
+            openEveryGate()
+            frames(5)
+            assertEquals("${t.id}: the scene runs", 1, host.activeLoops)
+            host.browserPageShowing = true
+            frames(2)
+            val before = bars.map { capture(it) }
+            frames(ONE_SECOND)
+            for ((i, tag) in bars.withIndex()) assertArrayEquals("${t.id}: $tag identical 1 s apart", before[i], capture(tag))
+            assertEquals("${t.id}: the still frame is drawn, not hidden", 2, layers())
+            assertEquals("${t.id}: no loop", 0, host.activeLoops)
+            host.browserPageShowing = false
+            frames(5)
+            assertEquals("${t.id}: the loop runs again", 1, host.activeLoops)
+            val moving = bars.map { capture(it) }
+            frames(ONE_SECOND)
+            assertFalse("${t.id}: the bars move again", bars.indices.all { moving[it].contentEquals(capture(bars[it])) })
         }
     }
 
