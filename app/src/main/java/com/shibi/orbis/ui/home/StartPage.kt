@@ -55,6 +55,9 @@ import com.shibi.orbis.engine.hostOfUrl
 import com.shibi.orbis.home.TopSite
 import com.shibi.orbis.home.tileLetter
 import com.shibi.orbis.ui.secondaryReadingWidth
+import com.shibi.orbis.ui.theme.SceneLayer
+import com.shibi.orbis.ui.theme.SceneRegion
+import com.shibi.orbis.ui.theme.SceneSurface
 
 internal const val START_SEARCH_TAG = "start_search"
 
@@ -81,8 +84,11 @@ fun StartPage(
     onVoice: (() -> Unit)? = null,
     /** The privacy dashboard under the search box; null hides it. */
     dashboard: (@Composable () -> Unit)? = null,
+    /** The browser screen's scene, behind everything on the page; null draws none (a static theme, a private tab). */
+    scene: SceneSurface? = null,
 ) {
     Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background, contentColor = MaterialTheme.colorScheme.onBackground) {
+        SceneLayer(scene, SceneRegion.Page, Modifier.fillMaxSize())
         Column(
             Modifier
                 .fillMaxSize()
