@@ -11,7 +11,7 @@ import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.engine.afterLocationChange
 import com.shibi.orbis.engine.afterPageStart
 import com.shibi.orbis.engine.afterSecurityChange
-import com.shibi.orbis.settings.AppTheme
+import com.shibi.orbis.settings.DarkMode
 import com.shibi.orbis.ui.theme.OrbisTheme
 import org.junit.Rule
 import org.junit.Test
@@ -31,7 +31,7 @@ class CustomTabLockComposeTest {
 
     private val loaded = SessionState().afterPageStart().afterLocationChange("https://www.a.example/page")
 
-    private fun show(theme: AppTheme, state: SessionState) {
+    private fun show(theme: DarkMode, state: SessionState) {
         rule.setContent {
             OrbisTheme(theme) {
                 Surface(color = MaterialTheme.colorScheme.surfaceContainer, contentColor = MaterialTheme.colorScheme.onSurface) {
@@ -42,7 +42,7 @@ class CustomTabLockComposeTest {
         rule.waitForIdle()
     }
 
-    private fun check(theme: AppTheme, state: SessionState, lock: Boolean) {
+    private fun check(theme: DarkMode, state: SessionState, lock: Boolean) {
         show(theme, state)
         rule.onNodeWithText("a.example").assertIsDisplayed()
         val node = rule.onNodeWithContentDescription("Secure connection")
@@ -52,15 +52,15 @@ class CustomTabLockComposeTest {
     private fun secure(mixedActive: Boolean = false) =
         loaded.afterSecurityChange(connectionSecure = true, certificateException = false, mixedActiveLoaded = mixedActive)
 
-    @Test fun reportedSecureShowsLockLight() = check(AppTheme.LIGHT, secure(), lock = true)
+    @Test fun reportedSecureShowsLockLight() = check(DarkMode.LIGHT, secure(), lock = true)
 
-    @Test fun reportedSecureShowsLockDark() = check(AppTheme.DARK, secure(), lock = true)
+    @Test fun reportedSecureShowsLockDark() = check(DarkMode.DARK, secure(), lock = true)
 
-    @Test fun httpsBeforeReportShowsNoLockLight() = check(AppTheme.LIGHT, loaded, lock = false)
+    @Test fun httpsBeforeReportShowsNoLockLight() = check(DarkMode.LIGHT, loaded, lock = false)
 
-    @Test fun httpsBeforeReportShowsNoLockDark() = check(AppTheme.DARK, loaded, lock = false)
+    @Test fun httpsBeforeReportShowsNoLockDark() = check(DarkMode.DARK, loaded, lock = false)
 
-    @Test fun mixedActiveShowsNoLockLight() = check(AppTheme.LIGHT, secure(mixedActive = true), lock = false)
+    @Test fun mixedActiveShowsNoLockLight() = check(DarkMode.LIGHT, secure(mixedActive = true), lock = false)
 
-    @Test fun mixedActiveShowsNoLockDark() = check(AppTheme.DARK, secure(mixedActive = true), lock = false)
+    @Test fun mixedActiveShowsNoLockDark() = check(DarkMode.DARK, secure(mixedActive = true), lock = false)
 }

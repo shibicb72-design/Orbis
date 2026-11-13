@@ -26,6 +26,7 @@ import com.shibi.orbis.ui.settings.DebugLogScreen
 import com.shibi.orbis.ui.settings.LicencesScreen
 import com.shibi.orbis.ui.settings.SettingsScreen
 import com.shibi.orbis.ui.settings.SitePermissionsScreen
+import com.shibi.orbis.ui.settings.ThemePickerScreen
 import com.shibi.orbis.ui.settings.TorrentSettingsScreen
 import com.shibi.orbis.ui.settings.UboOnboardingScreen
 import com.shibi.orbis.ui.settings.UboSettingsScreen
@@ -48,6 +49,7 @@ private object Routes {
     const val Passwords = "settings/passwords"
     const val Licences = "settings/licences"
     const val Torrents = "settings/torrents"
+    const val Themes = "settings/themes"
     const val QrScan = "qr_scan"
 }
 
@@ -211,7 +213,11 @@ fun OrbisRoot(container: AppContainer) {
                 site = container.browserSettings,
                 onOpenLicences = { nav.navigate(Routes.Licences) },
                 onOpenTorrents = { nav.navigate(Routes.Torrents) },
+                onOpenThemes = { nav.navigate(Routes.Themes) },
             )
+        }
+        composable(Routes.Themes) {
+            ThemePickerScreen(settings = container.browserSettings, onBack = { nav.popBackStack() })
         }
         composable(Routes.Torrents) {
             val store = container.torrentSettings

@@ -1,9 +1,8 @@
 package com.shibi.orbis
 
 import android.app.Application
-import kotlinx.coroutines.flow.combine
 import com.shibi.orbis.settings.HttpsOnlyMode
-import com.shibi.orbis.settings.AppTheme
+import com.shibi.orbis.settings.websiteColorScheme
 import android.content.Context
 import androidx.core.net.toUri
 import android.os.Environment
@@ -162,14 +161,7 @@ class OrbisApp : Application() {
             }
         }
         appScope.launch {
-            combine(browserSettings.appTheme, browserSettings.darkWebsites) { theme, darkSites ->
-                when {
-                    darkSites -> true
-                    theme == AppTheme.LIGHT -> false
-                    theme == AppTheme.DARK -> true
-                    else -> null
-                }
-            }.collect { engine.setWebsiteColorScheme(it) }
+            browserSettings.websiteColorScheme().collect { engine.setWebsiteColorScheme(it) }
         }
         val ubo =
             UboOnboardingController(

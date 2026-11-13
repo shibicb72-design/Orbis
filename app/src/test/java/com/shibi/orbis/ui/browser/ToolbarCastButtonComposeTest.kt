@@ -18,7 +18,7 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
-import com.shibi.orbis.settings.AppTheme
+import com.shibi.orbis.settings.DarkMode
 import com.shibi.orbis.ui.theme.OrbisTheme
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -45,7 +45,7 @@ class ToolbarCastButtonComposeTest {
 
     /** The button on a toolbar-like surface that sets the content colour from its container. */
     private fun show(
-        theme: AppTheme,
+        theme: DarkMode,
         connected: () -> Boolean,
         enabled: () -> Boolean = { true },
         onClick: () -> Unit = {},
@@ -70,7 +70,7 @@ class ToolbarCastButtonComposeTest {
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     fun idleStateShowsCastIconEnabled() {
-        show(AppTheme.LIGHT, connected = { false })
+        show(DarkMode.LIGHT, connected = { false })
         val node = rule.onNodeWithTag(CAST_BUTTON_TAG)
         node.assertIsDisplayed()
         node.assertIsEnabled()
@@ -83,7 +83,7 @@ class ToolbarCastButtonComposeTest {
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     fun connectedStateIsTintedPrimaryAndNamesDevice() {
-        show(AppTheme.LIGHT, connected = { true })
+        show(DarkMode.LIGHT, connected = { true })
         val node = rule.onNodeWithTag(CAST_BUTTON_TAG)
         node.assertIsEnabled()
         node.assertContentDescriptionEquals("Casting to Living room TV")
@@ -96,7 +96,7 @@ class ToolbarCastButtonComposeTest {
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     fun connectedStateOnDarkThemeUsesTheReadableTonalPrimary() {
-        show(AppTheme.DARK, connected = { true })
+        show(DarkMode.DARK, connected = { true })
         val image = rule.onNodeWithTag(CAST_BUTTON_TAG).captureToImage()
         save(image, "cast-connected-dark.png")
         val icon = iconRgb(image)
@@ -107,7 +107,7 @@ class ToolbarCastButtonComposeTest {
     @Test
     fun tapCallsOnClick() {
         var clicks = 0
-        show(AppTheme.LIGHT, connected = { false }, onClick = { clicks++ })
+        show(DarkMode.LIGHT, connected = { false }, onClick = { clicks++ })
         rule.onNodeWithTag(CAST_BUTTON_TAG).performClick()
         rule.waitForIdle()
         assertEquals(1, clicks)
@@ -118,7 +118,7 @@ class ToolbarCastButtonComposeTest {
     fun noSessionIsDisabledAndIgnoresTaps() {
         var clicks = 0
         var connected by mutableStateOf(false)
-        show(AppTheme.LIGHT, connected = { connected }, enabled = { false }, onClick = { clicks++ })
+        show(DarkMode.LIGHT, connected = { connected }, enabled = { false }, onClick = { clicks++ })
         val node = rule.onNodeWithTag(CAST_BUTTON_TAG)
         node.assertIsDisplayed()
         node.assertIsNotEnabled()

@@ -20,7 +20,7 @@ import com.shibi.orbis.passwords.LoginManager
 import com.shibi.orbis.passwords.LoginStore
 import com.shibi.orbis.passwords.NeverSavePrefs
 import com.shibi.orbis.passwords.SavedLogin
-import com.shibi.orbis.settings.AppTheme
+import com.shibi.orbis.settings.DarkMode
 import com.shibi.orbis.ui.browser.ComposeActivityRegistration
 import com.shibi.orbis.ui.theme.OrbisTheme
 import kotlinx.coroutines.CoroutineScope
@@ -98,7 +98,7 @@ class PasswordsUnlockGateTest {
             }
         rule.setContent {
             CompositionLocalProvider(LocalLifecycleOwner provides owner) {
-                OrbisTheme(AppTheme.LIGHT) {
+                OrbisTheme(DarkMode.LIGHT) {
                     PasswordsScreen(manager = manager, offerSaveFlow = MutableStateFlow(true), onSetOfferSave = {}, onBack = {}, startUnlocked = unlocked)
                 }
             }

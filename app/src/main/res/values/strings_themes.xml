@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- English only (owner rule): translatable="false" keeps lint from asking for es, fr and de. -->
+    <string name="themes_title" translatable="false">Themes</string>
+    <string name="dark_mode_title" translatable="false">Dark mode</string>
+    <string name="dark_mode_option_description" translatable="false">Appearance: %1$s</string>
+    <string name="themes_section_title" translatable="false">Color theme</string>
+    <string name="theme_summary" translatable="false">%1$s, %2$s</string>
+    <string name="theme_card_description" translatable="false">%1$s. %2$s</string>
+    <string name="theme_state_selected" translatable="false">Selected</string>
+    <string name="theme_state_not_selected" translatable="false">Not selected</string>
+
+    <string name="theme_name_orbis_teal" translatable="false">Orbis Teal</string>
+    <string name="theme_desc_orbis_teal" translatable="false">The classic Orbis look: deep teal on cool white.</string>
+    <string name="theme_name_graphite" translatable="false">Graphite</string>
+    <string name="theme_desc_graphite" translatable="false">Quiet slate grey that steps back from the page.</string>
+    <string name="theme_name_harbor" translatable="false">Harbor</string>
+    <string name="theme_desc_harbor" translatable="false">Familiar link blue on cool white or deep navy.</string>
+    <string name="theme_name_fern" translatable="false">Fern</string>
+    <string name="theme_desc_fern" translatable="false">Soft moss green, calm for long reading.</string>
+    <string name="theme_name_ember" translatable="false">Ember</string>
+    <string name="theme_desc_ember" translatable="false">Warm terracotta on off-white or charcoal.</string>
+    <string name="theme_name_paper" translatable="false">Paper</string>
+    <string name="theme_desc_paper" translatable="false">Sepia ink on parchment, like a printed page.</string>
+</resources>

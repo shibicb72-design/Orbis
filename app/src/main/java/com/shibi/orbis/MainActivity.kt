@@ -42,6 +42,7 @@ import com.shibi.orbis.media.onPipWindowClosed
 import com.shibi.orbis.media.pipAspectRatio
 import com.shibi.orbis.media.pipShapes
 import com.shibi.orbis.ui.BackKeyWindowCallback
+import com.shibi.orbis.ui.theme.AppThemes
 import com.shibi.orbis.ui.theme.OrbisTheme
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -85,8 +86,12 @@ class MainActivity : ComponentActivity() {
             takeViewIntent(intent)
         }
         setContent {
-            val theme by app.container.browserSettings.appTheme.collectAsStateWithLifecycle()
-            OrbisTheme(theme) {
+            val settings = app.container.browserSettings
+            val darkMode by settings.darkMode.collectAsStateWithLifecycle()
+            val themeId by settings.themeId.collectAsStateWithLifecycle()
+            val staticIds by settings.staticThemeIds.collectAsStateWithLifecycle()
+            val theme = AppThemes.byId(themeId)
+            OrbisTheme(darkMode, theme, animate = theme.animatesWith(staticIds)) {
                 OrbisRoot(container = app.container)
             }
         }

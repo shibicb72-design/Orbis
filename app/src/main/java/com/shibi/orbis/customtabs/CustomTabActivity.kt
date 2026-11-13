@@ -64,6 +64,7 @@ import com.shibi.orbis.ui.browser.SitePromptDialog
 import com.shibi.orbis.ui.browser.PageShareDialogs
 import com.shibi.orbis.ui.browser.rememberPageShare
 import com.shibi.orbis.ui.browser.showsLock
+import com.shibi.orbis.ui.theme.AppThemes
 import com.shibi.orbis.ui.theme.OrbisTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -96,8 +97,12 @@ class CustomTabActivity : ComponentActivity() {
         s.host = host
         session = s
         setContent {
-            val theme by app.container.browserSettings.appTheme.collectAsStateWithLifecycle()
-            OrbisTheme(theme) {
+            val settings = app.container.browserSettings
+            val darkMode by settings.darkMode.collectAsStateWithLifecycle()
+            val themeId by settings.themeId.collectAsStateWithLifecycle()
+            val staticIds by settings.staticThemeIds.collectAsStateWithLifecycle()
+            val theme = AppThemes.byId(themeId)
+            OrbisTheme(darkMode, theme, animate = theme.animatesWith(staticIds)) {
                 CustomTabScreen(
                     session = s,
                     startUrl = url,
