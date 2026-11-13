@@ -20,6 +20,8 @@ private val BLOCK_PATTERNS: List<Regex> = listOf(
         "\\b(?:(?:this|your|the|current) )?browser(?: version)? (?:is|isn't|is not) " +
             "(?:unsupported|not supported|no longer supported|out of date|outdated|incompatible|not compatible)\\b",
     ),
+    // "this browser isn't supported/compatible" (curly apostrophes are normalized to straight first).
+    Regex("\\b(?:(?:this|your|the|current) )?browser(?: version)? isn't (?:supported|compatible)\\b"),
     // Short headline form: "Unsupported browser".
     Regex("\\bunsupported browser\\b"),
     // Short headline form: "Browser not supported".

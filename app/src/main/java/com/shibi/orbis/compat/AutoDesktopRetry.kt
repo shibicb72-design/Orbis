@@ -23,7 +23,7 @@ class AutoDesktopRetry {
         desktopMode: Boolean,
         alwaysDesktop: Boolean,
         declined: Boolean,
-        userChoseDesktop: Boolean,
+        userChoseDesktop: Boolean, // intentionally unused: blocked with Desktop on already returns None
     ): Action {
         if (retrying == host) {
             retrying = null

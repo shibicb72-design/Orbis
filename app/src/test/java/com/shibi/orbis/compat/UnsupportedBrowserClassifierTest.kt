@@ -61,7 +61,24 @@ class UnsupportedBrowserClassifierTest {
         assertEquals(true, isUnsupportedBrowserPage(sample(text)))
     }
 
+    @Test
+    fun isntSupportedWithRemedy_bothApostrophes() {
+        assertEquals(true, isUnsupportedBrowserPage(sample("Your browser isn't supported. Please use Chrome or Firefox.")))
+        assertEquals(true, isUnsupportedBrowserPage(sample("Your browser isn’t supported. Please use Chrome or Firefox.")))
+    }
+
+    @Test
+    fun isntCompatibleInTitle_bothApostrophes() {
+        assertEquals(true, isUnsupportedBrowserPage(sample("Sorry.", title = "This browser isn't compatible")))
+        assertEquals(true, isUnsupportedBrowserPage(sample("Sorry.", title = "This browser isn’t compatible")))
+    }
+
     // ---- negatives ----
+
+    @Test
+    fun supportedBrowserIsNotABlock() {
+        assertEquals(false, isUnsupportedBrowserPage(sample("Your browser is supported.", title = "Supported browser")))
+    }
 
     @Test
     fun longArticleContainingEveryPositiveSentence() {
