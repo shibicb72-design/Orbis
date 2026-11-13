@@ -302,10 +302,11 @@ private fun CustomTabScreen(
     }
     AutoDesktopNotice(
         tabId = 0L,
-        marked = autoMarked,
+        marked = autoMarked && !state.fullScreen,
+        currentUrl = state.url,
         snackbars = snackbars,
         onShown = { autoMarked = false },
-        onUndo = { undoAutoDesktop(app.container.browserSettings, session, state.url) },
+        onUndo = { noticeUrl -> undoAutoDesktop(app.container.browserSettings, session, noticeUrl, state.url) },
     )
     prompt?.let { SitePromptDialog(it) }
     PageShareDialogs(pageShare)

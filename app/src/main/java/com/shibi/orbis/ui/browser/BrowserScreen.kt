@@ -1172,10 +1172,11 @@ private fun BrowserContent(
     val autoNotices by tabs.autoDesktopNotices.collectAsStateWithLifecycle()
     AutoDesktopNotice(
         tabId = selectedTab.id,
-        marked = session != null && selectedTab.id in autoNotices,
+        marked = session != null && !fullScreen && !inPip && selectedTab.id in autoNotices,
+        currentUrl = state.url,
         snackbars = snackbars,
         onShown = { tabs.clearAutoDesktopNotice(selectedTab.id) },
-        onUndo = { session?.let { undoAutoDesktop(container.browserSettings, it, state.url) } },
+        onUndo = { noticeUrl -> session?.let { undoAutoDesktop(container.browserSettings, it, noticeUrl, state.url) } },
     )
 
     if (showSiteSettings && session != null && isWebUrl(state.url)) {

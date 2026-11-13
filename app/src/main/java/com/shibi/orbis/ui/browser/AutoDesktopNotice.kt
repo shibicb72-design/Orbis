@@ -12,8 +12,10 @@ import androidx.compose.ui.res.stringResource
 import com.shibi.orbis.R
 import com.shibi.orbis.engine.BrowserSession
 import com.shibi.orbis.engine.SitePolicy
+import com.shibi.orbis.engine.hostOfUrl
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** How long the "showing desktop site" notice stays. */
@@ -28,32 +30,46 @@ internal const val AUTO_DESKTOP_NOTICE_MILLIS = 8_000L
 internal fun AutoDesktopNotice(
     tabId: Long,
     marked: Boolean,
+    currentUrl: String,
     snackbars: SnackbarHostState,
     onShown: () -> Unit,
-    onUndo: () -> Unit,
+    onUndo: (noticeUrl: String) -> Unit,
 ) {
     val message = stringResource(R.string.auto_desktop_notice)
     val undoLabel = stringResource(R.string.auto_desktop_undo)
     val isMarked by rememberUpdatedState(marked)
+    val url by rememberUpdatedState(currentUrl)
     val shown by rememberUpdatedState(onShown)
     val undo by rememberUpdatedState(onUndo)
     LaunchedEffect(tabId, snackbars) {
-        snapshotFlow { isMarked }.filter { it }.collectLatest {
+        val effect = this
+        snapshotFlow { isMarked }.collectLatest { on ->
+            if (!on) return@collectLatest
+            // Another snackbar is never dismissed: wait for the host to be free. The mark stays set until then, and
+            // if this wait is cancelled (tab change, fullscreen) the notice shows later.
+            snapshotFlow { snackbars.currentSnackbarData }.first { it == null }
             shown()
-            snackbars.currentSnackbarData?.dismiss()
-            val result =
-                withTimeoutOrNull(AUTO_DESKTOP_NOTICE_MILLIS) {
-                    snackbars.showSnackbar(message, actionLabel = undoLabel, duration = SnackbarDuration.Indefinite)
-                }
-            if (result == SnackbarResult.ActionPerformed) undo()
+            val noticeUrl = url
+            // Not a child of this collector: clearing the mark must not cancel the notice it just started.
+            effect.launch {
+                val result =
+                    withTimeoutOrNull(AUTO_DESKTOP_NOTICE_MILLIS) {
+                        snackbars.showSnackbar(message, actionLabel = undoLabel, duration = SnackbarDuration.Indefinite)
+                    }
+                if (result == SnackbarResult.ActionPerformed) undo(noticeUrl)
+            }
         }
     }
 }
 
-/** Undo of an automatic Desktop site: the site is never retried, and this page goes back to the mobile site. */
-internal fun undoAutoDesktop(settings: SitePolicy, session: BrowserSession, url: String) {
-    settings.declineAutoDesktop(url, session.isPrivate)
-    session.setDesktopMode(false)
+/**
+ * Undo of an automatic Desktop site: the site the notice was shown for is never retried. The page goes back to the
+ * mobile site only while it is still on that site ([currentUrl]); on another site it is left alone.
+ */
+internal fun undoAutoDesktop(settings: SitePolicy, session: BrowserSession, noticeUrl: String, currentUrl: String) {
+    settings.declineAutoDesktop(noticeUrl, session.isPrivate)
+    val noticeHost = hostOfUrl(noticeUrl)?.lowercase()
+    if (noticeHost != null && noticeHost == hostOfUrl(currentUrl)?.lowercase()) session.setDesktopMode(false)
 }
 
 /** The sheet's note under the Desktop site switch: only for a site Orbis switched on by itself, while it is on. */
