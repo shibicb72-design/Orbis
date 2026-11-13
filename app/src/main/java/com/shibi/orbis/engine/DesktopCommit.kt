@@ -28,9 +28,11 @@ internal fun desktopAfterCommit(
     }
 
 /**
- * True when a redirect leaves a desktop page for a mobile site. Measured on GeckoView 160: switching the session from
- * desktop to mobile in onLoadRequest does not reach the redirected request, which keeps the desktop User-Agent header
- * and navigator.userAgent. Mobile to desktop, and link taps either way, do take effect.
+ * The entry a Back ([offset] -1) or Forward (+1) step will load, or null when the back/forward list Gecko last reported
+ * is not current: its current entry is not [committedUrl]. GeckoView reports the list some time after a navigation, and
+ * a stale list names the wrong entry (and so the wrong desktop mode); the commit fallback then decides instead.
  */
-internal fun redirectKeepsDesktop(isRedirect: Boolean, desktopBefore: Boolean, desktopAfter: Boolean): Boolean =
-    isRedirect && desktopBefore && !desktopAfter
+internal fun historyStepTarget(uris: List<String>, currentIndex: Int, offset: Int, committedUrl: String): String? {
+    if (uris.getOrNull(currentIndex) != committedUrl) return null
+    return uris.getOrNull(currentIndex + offset)
+}

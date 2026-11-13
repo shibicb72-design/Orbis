@@ -606,9 +606,6 @@ private class GeckoBrowserSession(
     /** The last commit reloaded because its desktop mode was wrong (see [desktopAfterCommit]). */
     private var desktopReloadPending = false
 
-    /** One-shot: the navigation being committed was redirected from desktop to mobile (see [redirectKeepsDesktop]). */
-    private var reloadAfterRedirect = false
-
     /** Host of the last committed web page, lowercase; null for a non-web page. */
     private var committedHost: String? = null
 
@@ -838,13 +835,11 @@ private class GeckoBrowserSession(
                 }
                 // Decide tracking protection for the site BEFORE its page loads (see TrackingExceptions).
                 applyTrackingProtection(!trackingExceptions.isExcepted(request.uri, isPrivate))
-                // A new navigation drops a flag left by a redirect that never committed.
-                if (!request.isRedirect) reloadAfterRedirect = false
-                val desktopBefore = _state.value.desktopMode
+                // Measured on GeckoView 160: a 302 from a desktop page to a mobile site keeps the desktop User-Agent
+                // (header and navigator.userAgent) for that one document, although the session is switched to mobile
+                // here. It is not reloaded: redirect targets can be one-time URLs (sign-in callbacks, magic links).
+                // The next navigation is mobile.
                 applySitePolicy(request.uri)
-                // A redirect followed from a desktop page keeps the desktop User-Agent (header and navigator.userAgent)
-                // even after the switch to mobile: the page is reloaded once after it commits (onCommitForDesktop).
-                if (redirectKeepsDesktop(request.isRedirect, desktopBefore, _state.value.desktopMode)) reloadAfterRedirect = true
                 return null
             }
 
@@ -1424,8 +1419,6 @@ private class GeckoBrowserSession(
      */
     private fun onCommitForDesktop(url: String) {
         if (closed) return
-        val afterRedirect = reloadAfterRedirect
-        reloadAfterRedirect = false
         val host = if (isWebUrl(url)) hostOfUrl(url)?.lowercase() else null
         if (host != committedHost) {
             committedHost?.let { autoDesktop.onLeft(it) }
@@ -1436,12 +1429,6 @@ private class GeckoBrowserSession(
         desktopReloadPending = false
         val pageStarted = pageStartedSinceCommit
         pageStartedSinceCommit = false
-        if (afterRedirect && pageStarted && !reloaded && session.isOpen && !_state.value.desktopMode) {
-            desktopReloadPending = true
-            debugLog.log("GeckoSession", "desktop mode corrected after redirect; reloading")
-            session.reload()
-            return
-        }
         when (val d = desktopAfterCommit(desktopWantedFor(url), _state.value.desktopMode, reloaded, pageStarted)) {
             DesktopCommit.Leave -> Unit
             is DesktopCommit.Apply -> {
@@ -2452,11 +2439,17 @@ private class GeckoBrowserSession(
 
     /**
      * Back and Forward skip onLoadRequest, so the entry's site gets its desktop mode here, before its request is sent.
-     * The commit fallback ([onCommitForDesktop]) still corrects anything this misses.
+     * Only when Gecko's back/forward list is current: it is reported several seconds after a navigation (measured on
+     * GeckoView 160), and until then the commit fallback ([onCommitForDesktop]) corrects the mode with one reload.
      */
     private fun prepareHistoryStep(offset: Int) {
         val list = history ?: return
-        val uri = list.getOrNull(list.currentIndex + offset)?.uri ?: return
+        val uri = historyStepTarget(list.map { it.uri }, list.currentIndex, offset, _state.value.url)
+        if (uri == null) {
+            // Gecko reports the list late; a stale one would name the wrong entry. No URL in the log.
+            debugLog.log("GeckoSession", "history step: list not current; desktop mode left to the commit")
+            return
+        }
         desktopWantedFor(uri)?.let { applyDesktop(it) }
     }
 

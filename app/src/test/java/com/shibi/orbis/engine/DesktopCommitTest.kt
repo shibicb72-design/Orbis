@@ -52,11 +52,14 @@ class DesktopCommitTest {
     }
 
     @Test
-    fun onlyARedirectFromDesktopToMobileKeepsTheDesktopUserAgent() {
-        assertEquals(true, redirectKeepsDesktop(isRedirect = true, desktopBefore = true, desktopAfter = false))
-        assertEquals(false, redirectKeepsDesktop(isRedirect = true, desktopBefore = false, desktopAfter = true))
-        assertEquals(false, redirectKeepsDesktop(isRedirect = true, desktopBefore = true, desktopAfter = true))
-        assertEquals(false, redirectKeepsDesktop(isRedirect = true, desktopBefore = false, desktopAfter = false))
-        assertEquals(false, redirectKeepsDesktop(isRedirect = false, desktopBefore = true, desktopAfter = false))
+    fun aHistoryStepUsesTheListOnlyWhenItIsCurrent() {
+        val uris = listOf("https://a.example/", "https://b.example/", "https://c.example/")
+        assertEquals("https://a.example/", historyStepTarget(uris, currentIndex = 1, offset = -1, committedUrl = "https://b.example/"))
+        assertEquals("https://c.example/", historyStepTarget(uris, currentIndex = 1, offset = 1, committedUrl = "https://b.example/"))
+        // Stale: the page shown is not the list's current entry.
+        assertEquals(null, historyStepTarget(uris, currentIndex = 1, offset = -1, committedUrl = "https://d.example/"))
+        // Out of range.
+        assertEquals(null, historyStepTarget(uris, currentIndex = 0, offset = -1, committedUrl = "https://a.example/"))
+        assertEquals(null, historyStepTarget(emptyList(), currentIndex = 0, offset = 1, committedUrl = ""))
     }
 }
