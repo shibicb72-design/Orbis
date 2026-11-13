@@ -1,5 +1,6 @@
 package com.shibi.orbis.ui.browser
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
@@ -53,6 +54,9 @@ import com.shibi.orbis.R
 import com.shibi.orbis.engine.SearchEngine
 import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.tabs.PendingDownload
+import com.shibi.orbis.ui.theme.ADDRESS_FOCUS_MS
+import com.shibi.orbis.ui.theme.motionTween
+import com.shibi.orbis.ui.theme.rememberMotionEnabled
 import kotlinx.coroutines.flow.StateFlow
 
 internal const val ADDRESS_FIELD_TAG = "address_field"
@@ -182,6 +186,15 @@ internal fun BrowserAddressBar(
         val loadingDescription = stringResource(R.string.address_bar_loading)
         val showsPending = addressBarShowsPendingTarget(addressFocused, pending.text, pending.failed)
         val textColor = MaterialTheme.colorScheme.onSurface
+        val motionEnabled = rememberMotionEnabled()
+        // Focus gain fades the full address in; only its colour moves (text, semantics and IME are there at once).
+        // Focus loss never waits: the field then draws unfocusedTextColor, and this snaps back to transparent so the
+        // next focus fades in again. The resting line is an anti-spoofing display and shows on the next frame.
+        val focusFadeColor by animateColorAsState(
+            targetValue = if (addressFocused) textColor else Color.Transparent,
+            animationSpec = motionTween(motionEnabled && addressFocused, ADDRESS_FOCUS_MS),
+            label = "addressFocusText",
+        )
         PrivateImeScope(isPrivate) {
             Box(modifier.addressBarSwipe(enabled = onSwipe != null && !addressFocused) { onSwipe?.invoke(it) }) {
                 OutlinedTextField(
@@ -212,7 +225,8 @@ internal fun BrowserAddressBar(
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = MaterialTheme.colorScheme.surface,
                         unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                        focusedTextColor = textColor,
+                        // The first typed character shows at full strength; with motion off the address is there at once.
+                        focusedTextColor = if (editedSinceFocus || !motionEnabled) textColor else focusFadeColor,
                         // At rest the resting line draws the text; the field's own copy (scrolled wherever the caret
                         // left it) must not show through underneath.
                         unfocusedTextColor = if (resting != null) Color.Transparent else textColor,

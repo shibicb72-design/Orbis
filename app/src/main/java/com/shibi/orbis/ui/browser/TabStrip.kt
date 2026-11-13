@@ -54,6 +54,11 @@ import com.shibi.orbis.customtabs.CustomTabActivity
 import com.shibi.orbis.engine.hostOfUrl
 import com.shibi.orbis.engine.isWebUrl
 import com.shibi.orbis.tabs.TabUi
+import com.shibi.orbis.ui.theme.TAB_ENTER_MS
+import com.shibi.orbis.ui.theme.TAB_EXIT_MS
+import com.shibi.orbis.ui.theme.TAB_PLACEMENT_MS
+import com.shibi.orbis.ui.theme.motionTweenOrNull
+import com.shibi.orbis.ui.theme.rememberMotionEnabled
 
 /** Windows at least this wide (the unfolded Fold, tablets, a wide split) show a tab strip above the toolbar. */
 internal const val TAB_STRIP_MIN_WIDTH_DP = 600
@@ -78,6 +83,7 @@ internal fun TabStrip(
     onDropOpen: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val motionEnabled = rememberMotionEnabled()
     val listState = rememberLazyListState()
     val selectedIndex = tabs.indexOfFirst { it.selected }
     LaunchedEffect(selectedIndex) { if (selectedIndex >= 0) listState.animateScrollToItem(selectedIndex) }
@@ -97,7 +103,17 @@ internal fun TabStrip(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             items(tabs, key = { it.id }) { tab ->
-                TabChip(tab, onSelect = { onSelect(tab.id) }, onClose = { onClose(tab.id) })
+                TabChip(
+                    tab,
+                    onSelect = { onSelect(tab.id) },
+                    onClose = { onClose(tab.id) },
+                    // Opacity and position only: the chip keeps its 180 x 36 dp size on every frame.
+                    modifier = Modifier.animateItem(
+                        fadeInSpec = motionTweenOrNull(motionEnabled, TAB_ENTER_MS),
+                        placementSpec = motionTweenOrNull(motionEnabled, TAB_PLACEMENT_MS),
+                        fadeOutSpec = motionTweenOrNull(motionEnabled, TAB_EXIT_MS),
+                    ),
+                )
             }
         }
         IconButton(onClick = onNewTab) { Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.tabs_new)) }
@@ -106,7 +122,7 @@ internal fun TabStrip(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TabChip(tab: TabUi, onSelect: () -> Unit, onClose: () -> Unit) {
+private fun TabChip(tab: TabUi, onSelect: () -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier) {
     val host = hostOfUrl(tab.url)
     val title = tab.title.ifBlank { host ?: stringResource(R.string.tabs_blank_title) }
     val container =
@@ -129,7 +145,7 @@ private fun TabChip(tab: TabUi, onSelect: () -> Unit, onClose: () -> Unit) {
         contentColor = content,
         shape = MaterialTheme.shapes.small,
         border = if (tab.selected) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
-        modifier = Modifier
+        modifier = modifier
             .width(180.dp)
             .height(36.dp)
             .testTag(tabChipTag(tab.id))
