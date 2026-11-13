@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cast
@@ -61,25 +60,6 @@ import com.shibi.orbis.cast.CastTrustReason
 import com.shibi.orbis.engine.BrowserSession
 import com.shibi.orbis.ui.ObscuredTouchFilter
 import com.shibi.orbis.ui.rememberTapGuard
-
-/** Cast icon kept on top of a fullscreen video. Its surface carries its own content colour. */
-@Composable
-internal fun CastFullscreenButton(casting: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = CircleShape,
-        modifier = modifier,
-    ) {
-        IconButton(onClick = onClick) {
-            Icon(
-                if (casting) Icons.Filled.CastConnected else Icons.Filled.Cast,
-                contentDescription = stringResource(R.string.menu_cast),
-                tint = castTint(casting),
-            )
-        }
-    }
-}
 
 internal const val CAST_BUTTON_TAG = "toolbar_cast"
 
