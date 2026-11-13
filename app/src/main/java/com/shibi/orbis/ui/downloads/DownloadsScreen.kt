@@ -61,6 +61,8 @@ import com.shibi.orbis.torrent.TorrentStatus
 import com.shibi.orbis.ui.GuardedTextButton
 import com.shibi.orbis.ui.ObscuredTouchFilter
 import com.shibi.orbis.ui.OrbisEmptyState
+import com.shibi.orbis.ui.theme.rememberMotionEnabled
+import com.shibi.orbis.ui.theme.rememberSmoothProgress
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
@@ -107,6 +109,7 @@ fun DownloadsScreen(
             (files + tors).sortedByDescending { it.time }
         }
     val context = LocalContext.current
+    val motionEnabled = rememberMotionEnabled()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var pendingDelete by remember { mutableStateOf<DownloadEntry?>(null) }
@@ -170,6 +173,7 @@ fun DownloadsScreen(
                         val savedIn = if (entry.isPrivate) msgSavedPrivate else stringResource(R.string.torrents_state_saved, entry.displayName)
                         TorrentRow(
                             model = row.model,
+                            motionEnabled = motionEnabled,
                             onPause = { t.pause(entry.id) },
                             onResume = { t.resume(entry.id) },
                             onRetry = { t.retry(entry.id) },
@@ -191,6 +195,7 @@ fun DownloadsScreen(
                     val entry = (row as ListRow.File).entry
                     DownloadRow(
                         entry = entry,
+                        motionEnabled = motionEnabled,
                         onCancel = { manager.cancel(entry.id) },
                         onPause = if (manager.canPause) ({ manager.pause(entry.id) }) else null,
                         onResume = { manager.resume(entry.id) },
@@ -328,8 +333,9 @@ private fun RemoveTorrentDialog(entry: TorrentEntry, onRemove: (deleteFiles: Boo
 }
 
 @Composable
-private fun TorrentRow(
+internal fun TorrentRow(
     model: TorrentRowModel,
+    motionEnabled: Boolean,
     onPause: () -> Unit,
     onResume: () -> Unit,
     onRetry: () -> Unit,
@@ -369,8 +375,9 @@ private fun TorrentRow(
             val percent = model.percent
             if (model.state != RowState.Completed && model.state != RowState.Kept && !failed) {
                 if (percent != null) {
+                    val smooth = rememberSmoothProgress(percent / 100f, motionEnabled, resetKey = model.id)
                     LinearProgressIndicator(
-                        progress = { percent / 100f },
+                        progress = { smooth.value },
                         modifier = Modifier.fillMaxWidth(),
                         color = colors.primary,
                         trackColor = colors.onSurface.copy(alpha = 0.2f),
@@ -471,8 +478,9 @@ private fun statsText(context: android.content.Context, model: TorrentRowModel):
 }
 
 @Composable
-private fun DownloadRow(
+internal fun DownloadRow(
     entry: DownloadEntry,
+    motionEnabled: Boolean,
     onCancel: () -> Unit,
     onPause: (() -> Unit)?,
     onResume: () -> Unit,
@@ -512,8 +520,14 @@ private fun DownloadRow(
             when (entry.status) {
                 DownloadStatus.IN_PROGRESS -> {
                     if (entry.totalBytes > 0) {
+                        val smooth =
+                            rememberSmoothProgress(
+                                (entry.receivedBytes.toFloat() / entry.totalBytes).coerceIn(0f, 1f),
+                                motionEnabled,
+                                resetKey = entry.id,
+                            )
                         LinearProgressIndicator(
-                            progress = { (entry.receivedBytes.toFloat() / entry.totalBytes).coerceIn(0f, 1f) },
+                            progress = { smooth.value },
                             modifier = Modifier.fillMaxWidth(),
                             color = colors.primary,
                             trackColor = colors.onSurface.copy(alpha = 0.2f),

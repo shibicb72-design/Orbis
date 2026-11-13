@@ -96,7 +96,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -159,6 +158,7 @@ import com.shibi.orbis.ui.theme.LocalSceneHost
 import com.shibi.orbis.ui.theme.SceneBand
 import com.shibi.orbis.ui.theme.SceneRegion
 import com.shibi.orbis.ui.theme.SceneSurface
+import com.shibi.orbis.ui.theme.rememberMotionEnabled
 import com.shibi.orbis.ui.theme.rememberSceneSurface
 import com.shibi.orbis.ui.theme.sceneSurfaceRoot
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -607,6 +607,7 @@ private fun BrowserContent(
             // The toolbar block (address bar, buttons, banners, progress): above the page, or below it when the user
             // chose a bottom toolbar. Page fullscreen (a video) hides it; it comes back when that ends.
             chrome = {
+                val motionEnabled = rememberMotionEnabled()
                 // Very large text on a narrow window: the address gets a row of its own and Back, Tabs and the menu move
                 // to a second row (toolbarWraps). The address bar keeps its place in composition either way, so a layout
                 // change never drops what the user is typing.
@@ -975,14 +976,7 @@ private fun BrowserContent(
                         )
                     }
                 }
-                Box(Modifier.fillMaxWidth().height(4.dp)) {
-                    if (state.isLoading) {
-                        LinearProgressIndicator(
-                            progress = { state.progress / 100f },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
+                LoadingBar(state.isLoading, state.progress / 100f, motionEnabled, Modifier.fillMaxWidth().height(4.dp))
                 if (state.crashed || state.loadFailed) {
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,

@@ -4,11 +4,22 @@ import android.database.ContentObserver
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 
@@ -47,3 +58,43 @@ internal const val TAB_PLACEMENT_MS = 180
  */
 internal fun routeFades(motionEnabled: Boolean, fromRoute: String?, toRoute: String?, browserRoute: String): Boolean =
     motionEnabled && fromRoute != browserRoute && toRoute != browserRoute
+
+internal const val TAB_ENTER_MS = 140
+internal const val TAB_EXIT_MS = 100
+internal const val ADDRESS_FOCUS_MS = 120
+internal const val THEME_CROSSFADE_MS = 220
+internal const val PROGRESS_FADE_MS = 150
+
+/** For animate*AsState and Animatable: a tween, or a snap when motion is off. */
+internal fun <T> motionTween(enabled: Boolean, ms: Int): FiniteAnimationSpec<T> =
+    if (enabled) tween(ms, easing = FastOutSlowInEasing) else snap()
+
+/** For Modifier.animateItem, where null means "no animation". */
+internal fun <T> motionTweenOrNull(enabled: Boolean, ms: Int): FiniteAnimationSpec<T>? =
+    if (enabled) tween(ms, easing = FastOutSlowInEasing) else null
+
+/** For values that are retargeted while moving (progress): no bounce. */
+internal fun <T> motionSpring(enabled: Boolean): FiniteAnimationSpec<T> =
+    if (enabled) spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow) else snap()
+
+/**
+ * A progress fraction that glides to [target]. It starts at [target] (never animates up from zero on first show),
+ * never moves backwards (a lower target snaps), and snaps when [resetKey] changes or motion is off.
+ * Read the result inside the indicator's `progress = { }` lambda only, so a frame redraws and never recomposes.
+ */
+@Composable
+internal fun rememberSmoothProgress(target: Float, motionEnabled: Boolean, resetKey: Any? = null): State<Float> {
+    val glide = remember(resetKey) { Animatable(target) }
+    val latestTarget = rememberUpdatedState(target)
+    val latestMotion = rememberUpdatedState(motionEnabled)
+    LaunchedEffect(glide, target, motionEnabled) {
+        if (!motionEnabled || target < glide.value) glide.snapTo(target) else glide.animateTo(target, motionSpring(true))
+    }
+    // The snap cases are decided here, not in the effect, so they show on the very next frame.
+    return remember(glide) {
+        derivedStateOf {
+            val t = latestTarget.value
+            if (!latestMotion.value || t < glide.value) t else glide.value
+        }
+    }
+}

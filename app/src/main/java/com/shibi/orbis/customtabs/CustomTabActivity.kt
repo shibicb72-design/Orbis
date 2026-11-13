@@ -12,7 +12,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,7 +28,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -64,8 +62,10 @@ import com.shibi.orbis.ui.browser.SitePromptDialog
 import com.shibi.orbis.ui.browser.PageShareDialogs
 import com.shibi.orbis.ui.browser.rememberPageShare
 import com.shibi.orbis.ui.browser.showsLock
+import com.shibi.orbis.ui.browser.LoadingBar
 import com.shibi.orbis.ui.theme.AppThemes
 import com.shibi.orbis.ui.theme.OrbisTheme
+import com.shibi.orbis.ui.theme.rememberMotionEnabled
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -256,11 +256,7 @@ private fun CustomTabScreen(
                         })
                     }
                 }
-                if (state.isLoading) {
-                    LinearProgressIndicator(progress = { state.progress / 100f }, modifier = Modifier.fillMaxWidth(), color = onBar)
-                } else {
-                    Spacer(Modifier.height(4.dp))
-                }
+                LoadingBar(state.isLoading, state.progress / 100f, rememberMotionEnabled(), Modifier.fillMaxWidth().height(4.dp), color = onBar)
             }
         }
         AndroidView(
