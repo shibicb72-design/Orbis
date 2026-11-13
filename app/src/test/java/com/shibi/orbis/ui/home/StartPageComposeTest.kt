@@ -1,7 +1,13 @@
 package com.shibi.orbis.ui.home
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.onAllNodesWithText
@@ -13,12 +19,23 @@ import androidx.compose.ui.test.performScrollTo
 import com.shibi.orbis.bookmarks.Bookmark
 import com.shibi.orbis.home.TopSite
 import com.shibi.orbis.ui.browser.ComposeActivityRegistration
+import com.shibi.orbis.ui.theme.AuroraTheme
+import com.shibi.orbis.ui.theme.SCENE_LAYER_TAG
+import com.shibi.orbis.ui.theme.SceneHost
+import com.shibi.orbis.ui.theme.SceneTestHost
+import com.shibi.orbis.ui.theme.argb
+import com.shibi.orbis.ui.theme.frames
+import com.shibi.orbis.ui.theme.rememberSceneSurface
+import com.shibi.orbis.ui.theme.sceneSurfaceRoot
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = android.app.Application::class)
@@ -113,8 +130,51 @@ class StartPageComposeTest {
         assertEquals(0, rule.onAllNodesWithText("B9").fetchSemanticsNodes().size)
     }
 
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun withASceneTheStartPageHasOneMovingLayerInsideIt() {
+        rule.mainClock.autoAdvance = false
+        val host = SceneHost()
+        rule.setContent {
+            SceneTestHost(host, AuroraTheme, dark = true) {
+                val surface = rememberSceneSurface()
+                Box(Modifier.fillMaxSize().sceneSurfaceRoot(surface)) {
+                    StartPage(SITES, emptyList(), onSearch = {}, onOpen = {}, onAllBookmarks = {}, modifier = Modifier.testTag(PAGE), scene = surface)
+                }
+            }
+        }
+        rule.frames(5)
+        val layers = rule.onAllNodesWithTag(SCENE_LAYER_TAG, useUnmergedTree = true).fetchSemanticsNodes()
+        assertEquals(1, layers.size)
+        val page = rule.onNodeWithTag(PAGE).fetchSemanticsNode().boundsInRoot
+        val layer = layers.single().boundsInRoot
+        assertTrue("layer $layer inside the start page $page", layer.left >= page.left && layer.top >= page.top && layer.right <= page.right && layer.bottom <= page.bottom)
+        assertTrue("the layer is not empty: $layer", layer.width > 0f && layer.height > 0f)
+        val before = rule.onNodeWithTag(PAGE).captureToImage().argb()
+        rule.frames(30)
+        assertFalse("the scene moves", before.contentEquals(rule.onNodeWithTag(PAGE).captureToImage().argb()))
+    }
+
+    @Test
+    fun withoutASceneTheStartPageHasNoLayer() {
+        rule.mainClock.autoAdvance = false
+        rule.setContent {
+            SceneTestHost(SceneHost(), AuroraTheme, dark = true) {
+                StartPage(SITES, emptyList(), onSearch = {}, onOpen = {}, onAllBookmarks = {})
+            }
+        }
+        rule.frames(5)
+        rule.onNodeWithTag(START_SEARCH_TAG).assertExists()
+        assertEquals(0, rule.onAllNodesWithTag(SCENE_LAYER_TAG, useUnmergedTree = true).fetchSemanticsNodes().size)
+    }
+
     private fun SemanticsNodeInteraction.customAction(label: String) {
         val action = fetchSemanticsNode().config[SemanticsActions.CustomActions].first { it.label == label }
         rule.runOnIdle { action.action() }
+    }
+
+    private companion object {
+        const val PAGE = "start_page"
+        val SITES = listOf(TopSite("https://news.test/b", "News", "news.test"))
     }
 }

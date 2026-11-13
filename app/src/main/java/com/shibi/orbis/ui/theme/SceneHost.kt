@@ -32,6 +32,7 @@ import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.node.GlobalPositionAwareModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.node.requireLayoutCoordinates
 import androidx.compose.ui.platform.InspectorInfo
 import androidx.compose.ui.platform.testTag
@@ -369,8 +370,21 @@ private class SceneLayerElement(val surface: SceneSurface) : ModifierNodeElement
     override fun hashCode() = System.identityHashCode(surface)
 }
 
-private class SceneLayerNode(var surface: SceneSurface) : Modifier.Node(), DrawModifierNode {
+private class SceneLayerNode(var surface: SceneSurface) : Modifier.Node(), DrawModifierNode, GlobalPositionAwareModifierNode {
+    /** Where the layer was on screen when it last drew its slice of the field. */
+    private var drawnAt = Offset.Unspecified
+
+    /**
+     * A layer that moves (a sheet sliding in, a bar after a resize) is placed again but not redrawn, so it would keep
+     * the slice from where it was. Draw again whenever the position on screen differs from the one last drawn at.
+     */
+    override fun onGloballyPositioned(coordinates: LayoutCoordinates) {
+        if (coordinates.positionOnScreen() != drawnAt) invalidateDraw()
+    }
+
     override fun ContentDrawScope.draw() {
+        val me = requireLayoutCoordinates().positionOnScreen()
+        drawnAt = me
         val s = surface
         val rootSize = s.rootSize
         val rootOnScreen = s.rootOnScreen
@@ -378,7 +392,6 @@ private class SceneLayerNode(var surface: SceneSurface) : Modifier.Node(), DrawM
         var dx = 0f
         var dy = 0f
         if (rootSize.isSpecified && rootOnScreen.isSpecified && rootSize.width > 0f && rootSize.height > 0f) {
-            val me = requireLayoutCoordinates().positionOnScreen()
             fieldSize = rootSize
             dx = rootOnScreen.x - me.x
             dy = rootOnScreen.y - me.y

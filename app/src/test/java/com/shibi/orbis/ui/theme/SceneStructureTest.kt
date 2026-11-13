@@ -43,7 +43,13 @@ class SceneStructureTest {
     /** A new place that draws a scene must be added here on purpose. Package B and C add theirs. */
     @Test
     fun sceneCallSitesAreTheKnownOnes() {
-        val expected = mapOf("ui/theme/SceneHost.kt" to (1 to 0)) // file to (SceneLayer calls, SceneBand calls)
+        val expected = // file to (SceneLayer calls, SceneBand calls)
+            mapOf(
+                "ui/theme/SceneHost.kt" to (1 to 0),
+                "ui/browser/BrowserScreen.kt" to (0 to 3),
+                "ui/home/StartPage.kt" to (1 to 0),
+                "ui/browser/TabSwitcher.kt" to (1 to 0),
+            )
         val layer = Regex("""(?<!fun )\bSceneLayer\(""")
         val band = Regex("""(?<!fun )\bSceneBand\(""")
         val actual =
