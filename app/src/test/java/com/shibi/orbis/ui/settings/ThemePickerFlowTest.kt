@@ -229,7 +229,6 @@ class ThemePickerFlowTest {
     @Test
     fun staticThemesHaveNoAnimatedControl() {
         show()
-        assertTrue(AppThemes.all.none { it.animated })
         rule.onAllNodesWithText("Animated").assertCountEquals(0)
         rule.onAllNodesWithText("Off").assertCountEquals(0)
         rule.onAllNodes(SemanticsMatcher("an animated control") {

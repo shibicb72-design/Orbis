@@ -31,6 +31,7 @@ import com.shibi.orbis.ui.settings.TorrentSettingsScreen
 import com.shibi.orbis.ui.settings.UboOnboardingScreen
 import com.shibi.orbis.ui.settings.UboSettingsScreen
 import com.shibi.orbis.ui.passwords.PasswordsScreen
+import com.shibi.orbis.ui.theme.ProvideSceneHost
 import com.shibi.orbis.ui.theme.ROUTE_ENTER_MS
 import com.shibi.orbis.ui.theme.ROUTE_EXIT_MS
 import com.shibi.orbis.ui.theme.rememberMotionEnabled
@@ -63,206 +64,211 @@ fun OrbisRoot(container: AppContainer) {
         UboOnboardingScreen(controller = container.ubo)
         return
     }
-    // A link from another app: leave Settings/Downloads/etc. so the browser screen is shown and can take it.
-    // Both of these wait while Clear browsing data is running: leaving that screen early could let a private tab be
-    // opened while the engine is still clearing.
-    val clearState by container.clear.state.collectAsStateWithLifecycle()
-    val clearRunning = clearState is ClearState.Running
-    val pendingExternalUrl by container.pendingExternalUrl.collectAsStateWithLifecycle()
-    val pendingImported by container.pendingImports.head.collectAsStateWithLifecycle()
-    val pendingTorrent by container.pendingTorrentIntake.collectAsStateWithLifecycle()
-    LaunchedEffect(pendingExternalUrl, pendingImported, pendingTorrent, clearRunning) {
-        if ((pendingExternalUrl != null || pendingImported != null || pendingTorrent != null) && !clearRunning) {
-            nav.popBackStack(Routes.Browser, inclusive = false)
-        }
-    }
-    // A download notification was tapped: open the Downloads screen once. Reached only after onboarding, so an
-    // earlier tap simply waits.
-    val pendingShowDownloads by container.pendingShowDownloads.collectAsStateWithLifecycle()
-    LaunchedEffect(pendingShowDownloads, clearRunning) {
-        if (pendingShowDownloads && !clearRunning) {
-            container.pendingShowDownloads.value = false
-            nav.popBackStack(Routes.Browser, inclusive = false)
-            nav.navigate(Routes.Downloads) { launchSingleTop = true }
-        }
-    }
-    NavHost(
-        navController = nav,
-        startDestination = Routes.Browser,
-        // Immediate across the browser boundary (the engine surface is never faded); the existing fades only between
-        // secondary screens, and none at all with motion off. See routeFades.
-        enterTransition = {
-            if (routeFades(motionEnabled, initialState.destination.route, targetState.destination.route, Routes.Browser)) {
-                fadeIn(tween(ROUTE_ENTER_MS))
-            } else {
-                EnterTransition.None
-            }
-        },
-        exitTransition = {
-            if (routeFades(motionEnabled, initialState.destination.route, targetState.destination.route, Routes.Browser)) {
-                fadeOut(tween(ROUTE_EXIT_MS))
-            } else {
-                ExitTransition.None
-            }
-        },
-        popEnterTransition = {
-            if (routeFades(motionEnabled, initialState.destination.route, targetState.destination.route, Routes.Browser)) {
-                fadeIn(tween(ROUTE_ENTER_MS))
-            } else {
-                EnterTransition.None
-            }
-        },
-        popExitTransition = {
-            if (routeFades(motionEnabled, initialState.destination.route, targetState.destination.route, Routes.Browser)) {
-                fadeOut(tween(ROUTE_EXIT_MS))
-            } else {
-                ExitTransition.None
-            }
-        },
-    ) {
-        composable(Routes.Browser) {
-            BrowserScreen(
-                container = container,
-                onOpenSettings = { nav.navigate(Routes.Settings) },
-                onOpenDownloads = { nav.navigate(Routes.Downloads) },
-                onOpenBookmarks = { nav.navigate(Routes.Bookmarks) },
-                onOpenHistory = { nav.navigate(Routes.History) },
-                onOpenQrScanner = { nav.navigate(Routes.QrScan) },
-            )
-        }
-        composable(Routes.QrScan) {
-            com.shibi.orbis.ui.qr.QrScanScreen(
-                onOpenUrl = { url ->
-                    container.tabs.loadInSelected(url)
-                    nav.popBackStack()
-                },
-                onSearch = { text ->
-                    com.shibi.orbis.engine.normalizeAddressInput(text, container.searchEngine.selected.value)?.let {
-                        container.tabs.loadInSelected(it)
-                    }
-                    nav.popBackStack()
-                },
-                onBack = { nav.popBackStack() },
-            )
-        }
-        composable(Routes.Bookmarks) {
-            BookmarksScreen(
-                manager = container.bookmarks,
-                onOpen = { url ->
-                    container.tabs.loadInSelected(url)
-                    nav.popBackStack(Routes.Browser, inclusive = false)
-                },
-                onOpenInNewTab = { url ->
-                    container.tabs.newTab(url)
-                    nav.popBackStack(Routes.Browser, inclusive = false)
-                },
-                onBack = { nav.popBackStack() },
-            )
-        }
-        composable(Routes.History) {
-            HistoryScreen(
-                manager = container.history,
-                onOpen = { url ->
-                    container.tabs.loadInSelected(url)
-                    nav.popBackStack(Routes.Browser, inclusive = false)
-                },
-                onBack = { nav.popBackStack() },
-            )
-        }
-        composable(Routes.Downloads) {
-            DownloadsScreen(
-                manager = container.downloads,
-                torrents = container.torrents,
-                onBack = { nav.popBackStack() },
-                log = TorrentLog.sink(container.debugLog),
-            )
-        }
-        composable(Routes.Passwords) {
-            // Shows secrets: the window is protected (FLAG_SECURE, no Recents snapshot) while this screen is up.
-            DisposableEffect(Unit) {
-                container.sensitiveScreens.update { it + 1 }
-                onDispose { container.sensitiveScreens.update { it - 1 } }
-            }
-            PasswordsScreen(
-                manager = container.logins,
-                offerSaveFlow = container.browserSettings.offerSavePasswords,
-                onSetOfferSave = container.browserSettings::setOfferSavePasswords,
-                onBack = { nav.popBackStack() },
-                sensitiveClip = container.sensitiveClip,
-            )
-        }
-        composable(Routes.Settings) {
-            SettingsScreen(
-                uboStateFlow = container.ubo.state,
-                searchEngineFlow = container.searchEngine.selected,
-                onSelectSearchEngine = container.searchEngine::select,
-                homepageFlow = container.browserSettings.homepage,
-                onSetHomepage = { container.browserSettings.setHomepage(it) },
-                searchSuggestionsFlow = container.browserSettings.searchSuggestions,
-                onSetSearchSuggestions = container.browserSettings::setSearchSuggestions,
-                textZoomFlow = container.browserSettings.textZoomPercent,
-                onSetTextZoom = container.browserSettings::setTextZoomPercent,
-                forceZoomFlow = container.browserSettings.forceZoom,
-                onSetForceZoom = container.browserSettings::setForceZoom,
-                onBack = { nav.popBackStack() },
-                onOpenErrorLog = { nav.navigate(Routes.ErrorLog) },
-                onOpenUbo = { nav.navigate(Routes.Ubo) },
-                onOpenSitePermissions = { nav.navigate(Routes.SitePermissions) },
-                onOpenClearData = { nav.navigate(Routes.ClearData) },
-                onOpenPasswords = { nav.navigate(Routes.Passwords) },
-                site = container.browserSettings,
-                onOpenLicences = { nav.navigate(Routes.Licences) },
-                onOpenTorrents = { nav.navigate(Routes.Torrents) },
-                onOpenThemes = { nav.navigate(Routes.Themes) },
-            )
-        }
-        composable(Routes.Themes) {
-            ThemePickerScreen(settings = container.browserSettings, onBack = { nav.popBackStack() })
-        }
-        composable(Routes.Torrents) {
-            val store = container.torrentSettings
-            if (store == null) {
-                // No torrent support in this process: nothing to show.
-                LaunchedEffect(Unit) { nav.popBackStack() }
-            } else {
-                TorrentSettingsScreen(store = store, browser = container.browserSettings, onBack = { nav.popBackStack() })
+    val inPip by container.pictureInPicture.collectAsStateWithLifecycle()
+    val mediaPlaying by container.media.mediaPlaying.collectAsStateWithLifecycle()
+    // One scene clock for the whole activity, outside the NavHost so every route and sheet shares it.
+    ProvideSceneHost(motionEnabled, inPip, mediaPlaying) {
+        // A link from another app: leave Settings/Downloads/etc. so the browser screen is shown and can take it.
+        // Both of these wait while Clear browsing data is running: leaving that screen early could let a private tab be
+        // opened while the engine is still clearing.
+        val clearState by container.clear.state.collectAsStateWithLifecycle()
+        val clearRunning = clearState is ClearState.Running
+        val pendingExternalUrl by container.pendingExternalUrl.collectAsStateWithLifecycle()
+        val pendingImported by container.pendingImports.head.collectAsStateWithLifecycle()
+        val pendingTorrent by container.pendingTorrentIntake.collectAsStateWithLifecycle()
+        LaunchedEffect(pendingExternalUrl, pendingImported, pendingTorrent, clearRunning) {
+            if ((pendingExternalUrl != null || pendingImported != null || pendingTorrent != null) && !clearRunning) {
+                nav.popBackStack(Routes.Browser, inclusive = false)
             }
         }
-        composable(Routes.Licences) {
-            LicencesScreen(onBack = { nav.popBackStack() })
+        // A download notification was tapped: open the Downloads screen once. Reached only after onboarding, so an
+        // earlier tap simply waits.
+        val pendingShowDownloads by container.pendingShowDownloads.collectAsStateWithLifecycle()
+        LaunchedEffect(pendingShowDownloads, clearRunning) {
+            if (pendingShowDownloads && !clearRunning) {
+                container.pendingShowDownloads.value = false
+                nav.popBackStack(Routes.Browser, inclusive = false)
+                nav.navigate(Routes.Downloads) { launchSingleTop = true }
+            }
         }
-        composable(Routes.ClearData) {
-            ClearBrowsingDataScreen(
-                tabs = container.tabs,
-                bookmarks = container.bookmarks,
-                controller = container.clear,
-                onBack = { nav.popBackStack() },
-            )
-        }
-        composable(Routes.SitePermissions) {
-            SitePermissionsScreen(
-                decisions = container.sitePermissions,
-                // The engine's own copy of a location answer is reset so a removed site is asked again.
-                onRemoved = { container.engine.reconcileSitePermissions() },
-                onBack = { nav.popBackStack() },
-            )
-        }
-        composable(Routes.ErrorLog) {
-            DebugLogScreen(
-                container = container,
-                onBack = { nav.popBackStack() },
-            )
-        }
-        composable(Routes.Ubo) {
-            UboSettingsScreen(
-                controller = container.ubo,
-                onBack = { nav.popBackStack() },
-                onOpenExtensionPage = { url ->
-                    // A new normal tab; the browser screen then shows it.
-                    container.tabs.newTab()?.let { container.tabs.sessionOf(it)?.loadExtensionPage(url) }
-                    nav.popBackStack(Routes.Browser, inclusive = false)
-                },
-            )
+        NavHost(
+            navController = nav,
+            startDestination = Routes.Browser,
+            // Immediate across the browser boundary (the engine surface is never faded); the existing fades only between
+            // secondary screens, and none at all with motion off. See routeFades.
+            enterTransition = {
+                if (routeFades(motionEnabled, initialState.destination.route, targetState.destination.route, Routes.Browser)) {
+                    fadeIn(tween(ROUTE_ENTER_MS))
+                } else {
+                    EnterTransition.None
+                }
+            },
+            exitTransition = {
+                if (routeFades(motionEnabled, initialState.destination.route, targetState.destination.route, Routes.Browser)) {
+                    fadeOut(tween(ROUTE_EXIT_MS))
+                } else {
+                    ExitTransition.None
+                }
+            },
+            popEnterTransition = {
+                if (routeFades(motionEnabled, initialState.destination.route, targetState.destination.route, Routes.Browser)) {
+                    fadeIn(tween(ROUTE_ENTER_MS))
+                } else {
+                    EnterTransition.None
+                }
+            },
+            popExitTransition = {
+                if (routeFades(motionEnabled, initialState.destination.route, targetState.destination.route, Routes.Browser)) {
+                    fadeOut(tween(ROUTE_EXIT_MS))
+                } else {
+                    ExitTransition.None
+                }
+            },
+        ) {
+            composable(Routes.Browser) {
+                BrowserScreen(
+                    container = container,
+                    onOpenSettings = { nav.navigate(Routes.Settings) },
+                    onOpenDownloads = { nav.navigate(Routes.Downloads) },
+                    onOpenBookmarks = { nav.navigate(Routes.Bookmarks) },
+                    onOpenHistory = { nav.navigate(Routes.History) },
+                    onOpenQrScanner = { nav.navigate(Routes.QrScan) },
+                )
+            }
+            composable(Routes.QrScan) {
+                com.shibi.orbis.ui.qr.QrScanScreen(
+                    onOpenUrl = { url ->
+                        container.tabs.loadInSelected(url)
+                        nav.popBackStack()
+                    },
+                    onSearch = { text ->
+                        com.shibi.orbis.engine.normalizeAddressInput(text, container.searchEngine.selected.value)?.let {
+                            container.tabs.loadInSelected(it)
+                        }
+                        nav.popBackStack()
+                    },
+                    onBack = { nav.popBackStack() },
+                )
+            }
+            composable(Routes.Bookmarks) {
+                BookmarksScreen(
+                    manager = container.bookmarks,
+                    onOpen = { url ->
+                        container.tabs.loadInSelected(url)
+                        nav.popBackStack(Routes.Browser, inclusive = false)
+                    },
+                    onOpenInNewTab = { url ->
+                        container.tabs.newTab(url)
+                        nav.popBackStack(Routes.Browser, inclusive = false)
+                    },
+                    onBack = { nav.popBackStack() },
+                )
+            }
+            composable(Routes.History) {
+                HistoryScreen(
+                    manager = container.history,
+                    onOpen = { url ->
+                        container.tabs.loadInSelected(url)
+                        nav.popBackStack(Routes.Browser, inclusive = false)
+                    },
+                    onBack = { nav.popBackStack() },
+                )
+            }
+            composable(Routes.Downloads) {
+                DownloadsScreen(
+                    manager = container.downloads,
+                    torrents = container.torrents,
+                    onBack = { nav.popBackStack() },
+                    log = TorrentLog.sink(container.debugLog),
+                )
+            }
+            composable(Routes.Passwords) {
+                // Shows secrets: the window is protected (FLAG_SECURE, no Recents snapshot) while this screen is up.
+                DisposableEffect(Unit) {
+                    container.sensitiveScreens.update { it + 1 }
+                    onDispose { container.sensitiveScreens.update { it - 1 } }
+                }
+                PasswordsScreen(
+                    manager = container.logins,
+                    offerSaveFlow = container.browserSettings.offerSavePasswords,
+                    onSetOfferSave = container.browserSettings::setOfferSavePasswords,
+                    onBack = { nav.popBackStack() },
+                    sensitiveClip = container.sensitiveClip,
+                )
+            }
+            composable(Routes.Settings) {
+                SettingsScreen(
+                    uboStateFlow = container.ubo.state,
+                    searchEngineFlow = container.searchEngine.selected,
+                    onSelectSearchEngine = container.searchEngine::select,
+                    homepageFlow = container.browserSettings.homepage,
+                    onSetHomepage = { container.browserSettings.setHomepage(it) },
+                    searchSuggestionsFlow = container.browserSettings.searchSuggestions,
+                    onSetSearchSuggestions = container.browserSettings::setSearchSuggestions,
+                    textZoomFlow = container.browserSettings.textZoomPercent,
+                    onSetTextZoom = container.browserSettings::setTextZoomPercent,
+                    forceZoomFlow = container.browserSettings.forceZoom,
+                    onSetForceZoom = container.browserSettings::setForceZoom,
+                    onBack = { nav.popBackStack() },
+                    onOpenErrorLog = { nav.navigate(Routes.ErrorLog) },
+                    onOpenUbo = { nav.navigate(Routes.Ubo) },
+                    onOpenSitePermissions = { nav.navigate(Routes.SitePermissions) },
+                    onOpenClearData = { nav.navigate(Routes.ClearData) },
+                    onOpenPasswords = { nav.navigate(Routes.Passwords) },
+                    site = container.browserSettings,
+                    onOpenLicences = { nav.navigate(Routes.Licences) },
+                    onOpenTorrents = { nav.navigate(Routes.Torrents) },
+                    onOpenThemes = { nav.navigate(Routes.Themes) },
+                )
+            }
+            composable(Routes.Themes) {
+                ThemePickerScreen(settings = container.browserSettings, onBack = { nav.popBackStack() })
+            }
+            composable(Routes.Torrents) {
+                val store = container.torrentSettings
+                if (store == null) {
+                    // No torrent support in this process: nothing to show.
+                    LaunchedEffect(Unit) { nav.popBackStack() }
+                } else {
+                    TorrentSettingsScreen(store = store, browser = container.browserSettings, onBack = { nav.popBackStack() })
+                }
+            }
+            composable(Routes.Licences) {
+                LicencesScreen(onBack = { nav.popBackStack() })
+            }
+            composable(Routes.ClearData) {
+                ClearBrowsingDataScreen(
+                    tabs = container.tabs,
+                    bookmarks = container.bookmarks,
+                    controller = container.clear,
+                    onBack = { nav.popBackStack() },
+                )
+            }
+            composable(Routes.SitePermissions) {
+                SitePermissionsScreen(
+                    decisions = container.sitePermissions,
+                    // The engine's own copy of a location answer is reset so a removed site is asked again.
+                    onRemoved = { container.engine.reconcileSitePermissions() },
+                    onBack = { nav.popBackStack() },
+                )
+            }
+            composable(Routes.ErrorLog) {
+                DebugLogScreen(
+                    container = container,
+                    onBack = { nav.popBackStack() },
+                )
+            }
+            composable(Routes.Ubo) {
+                UboSettingsScreen(
+                    controller = container.ubo,
+                    onBack = { nav.popBackStack() },
+                    onOpenExtensionPage = { url ->
+                        // A new normal tab; the browser screen then shows it.
+                        container.tabs.newTab()?.let { container.tabs.sessionOf(it)?.loadExtensionPage(url) }
+                        nav.popBackStack(Routes.Browser, inclusive = false)
+                    },
+                )
+            }
         }
     }
 }

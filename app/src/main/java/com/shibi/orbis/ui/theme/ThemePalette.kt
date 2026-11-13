@@ -23,13 +23,14 @@ internal object PrivateColors {
 }
 
 /** Light surfaces keep at least this OKLab distance from the private plum chip (Orbis Teal measures 0.044). */
-private const val MIN_PRIVATE_TO_CONTAINER = 0.046
-private const val MIN_PRIVATE_TO_LOW = 0.055
+internal const val MIN_PRIVATE_TO_CONTAINER = 0.046
+internal const val MIN_PRIVATE_TO_LOW = 0.055
 
 /**
  * The tint step for a light surface: [start], lowered until the surface is [min] apart from the private plum in OKLab,
  * but never below [floor]. It moves only along the theme's own bg-to-tone line, so a theme keeps its hue (a push
- * away from the plum would add green to every theme). Fails loudly if the plum can never be cleared.
+ * away from the plum would add green to every theme). If no step clears the plum it returns [floor]: a bad seed must
+ * not crash the app while the theme list is built. `ThemeContrastTest.lightSurfacesClearThePlum` catches it instead.
  */
 private fun clearOfPlum(bg: Color, tone: Color, start: Float, min: Double, floor: Float): Float {
     val plum = PrivateColors.Light.second
@@ -38,7 +39,7 @@ private fun clearOfPlum(bg: Color, tone: Color, start: Float, min: Double, floor
         if (okLabDistance(plum, lerp(bg, tone, t)) >= min) return t
         t -= 0.0025f
     }
-    error("No tint step from $start down to $floor puts a light surface $min away from the private plum")
+    return floor
 }
 
 /** Builds a whole Material colour scheme from a [Palette]; the surface ladder is a lerp from background toward ink. */

@@ -68,6 +68,18 @@ class MediaCenterTest {
         assertNull(pickMediaTab(emptyList(), selectedTabId = 1))
     }
 
+    /** Animated scenes pause while any tab plays, audio included: an inline video never reports hasVideo. */
+    @Test
+    fun anyTabPlayingAnythingCountsAsMediaPlaying() {
+        assertEquals("no media", false, anyMediaPlaying(emptyList()))
+        assertEquals("a paused tab", false, anyMediaPlaying(listOf(tab(1, false, video = true))))
+        assertEquals("audio only", true, anyMediaPlaying(listOf(tab(1, true, video = false))))
+        // The selected tab (1) is paused; a background tab (2) plays. MediaCenter.current would still pick tab 2 here,
+        // but a video in tab 2 behind audio in tab 1 would be hidden from current: the flag looks at every tab.
+        assertEquals("selected paused, another playing", true, anyMediaPlaying(listOf(tab(1, false), tab(2, true))))
+        assertEquals("selected playing audio, another playing video", true, anyMediaPlaying(listOf(tab(1, true), tab(2, true, video = true))))
+    }
+
     @Test
     fun aPrivateTabNeverShowsItsTitleInTheNotification() {
         assertEquals("Playing in a private tab" to "", mediaNotificationText(tab(1, true, private = true), "Playing in a private tab", "Playing in Orbis"))

@@ -151,8 +151,29 @@ class ThemeContrastTest {
     fun idsAreUniqueAndTheCountIsDeliberate() {
         val ids = AppThemes.all.map { it.id }
         assertEquals(ids.distinct(), ids)
-        assertEquals(listOf("orbis_teal", "graphite", "harbor", "fern", "ember", "paper"), ids)
-        assertTrue("no animated themes yet", AppThemes.all.none { it.animated })
+        assertEquals(listOf("orbis_teal", "graphite", "harbor", "fern", "ember", "paper", "night_sky", "aurora", "fair_weather"), ids)
+        assertEquals(listOf("night_sky", "aurora", "fair_weather"), AppThemes.all.filter { it.scene != null }.map { it.id })
+        assertTrue(AppThemes.all.all { it.animated == (it.scene != null) })
+    }
+
+    /**
+     * A seed whose light surfaces cannot be moved clear of the private plum no longer throws while the theme list is
+     * built (that crashed every test, and would crash the app); it fails here, by name. Orbis Teal is hand-written and
+     * sits closer (0.044), so it is the one exception.
+     */
+    @Test
+    fun lightSurfacesClearThePlum() {
+        val plum = PrivateColors.Light.second
+        val failures = mutableListOf<String>()
+        for (theme in AppThemes.all) {
+            if (theme.id == AppThemes.DEFAULT_ID) continue
+            val c = theme.light.scheme
+            val low = okLabDistance(plum, c.surfaceContainerLow)
+            val container = okLabDistance(plum, c.surfaceContainer)
+            if (low < MIN_PRIVATE_TO_LOW) failures.add("${theme.id} surfaceContainerLow ${"%.4f".format(low)} < $MIN_PRIVATE_TO_LOW")
+            if (container < MIN_PRIVATE_TO_CONTAINER) failures.add("${theme.id} surfaceContainer ${"%.4f".format(container)} < $MIN_PRIVATE_TO_CONTAINER")
+        }
+        assertTrue("Light surfaces too close to the private plum:\n" + failures.joinToString("\n"), failures.isEmpty())
     }
 
 
