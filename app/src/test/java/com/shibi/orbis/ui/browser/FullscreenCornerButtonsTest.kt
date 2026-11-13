@@ -68,7 +68,7 @@ class FullscreenCornerButtonsTest {
     private fun visual(tag: String) = rule.onNodeWithTag(tag, useUnmergedTree = true)
 
     @Test
-    fun visualsAre24dpAndTouchSquaresAre48dp() {
+    fun visualsAre24dpAndTouchSquaresAre32dp() {
         show()
         for (tag in listOf(FULLSCREEN_CAST_TAG, FULLSCREEN_PIP_TAG)) {
             visual(tag).assertWidthIsEqualTo(FULLSCREEN_CORNER_VISUAL).assertHeightIsEqualTo(FULLSCREEN_CORNER_VISUAL)
@@ -77,7 +77,7 @@ class FullscreenCornerButtonsTest {
             touch(d).assertWidthIsEqualTo(FULLSCREEN_CORNER_TOUCH).assertHeightIsEqualTo(FULLSCREEN_CORNER_TOUCH)
         }
         assertEquals(24.dp, FULLSCREEN_CORNER_VISUAL)
-        assertEquals(48.dp, FULLSCREEN_CORNER_TOUCH)
+        assertEquals(32.dp, FULLSCREEN_CORNER_TOUCH)
     }
 
     @Test

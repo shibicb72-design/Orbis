@@ -30,7 +30,7 @@ internal const val FULLSCREEN_CAST_TAG = "fullscreen_cast"
 internal const val FULLSCREEN_PIP_TAG = "fullscreen_pip"
 internal val FULLSCREEN_CORNER_VISUAL = 24.dp
 internal val FULLSCREEN_CORNER_ICON = 16.dp
-internal val FULLSCREEN_CORNER_TOUCH = 48.dp
+internal val FULLSCREEN_CORNER_TOUCH = 32.dp
 internal val FULLSCREEN_CORNER_MARGIN = 4.dp
 
 /** How far in from the top and end edges the visuals sit: the margin, or more on a rounded screen corner. */
@@ -52,14 +52,18 @@ internal fun FullscreenCornerButtons(
     val view = LocalView.current
     val radiusPx = view.rootWindowInsets?.getRoundedCorner(RoundedCorner.POSITION_TOP_RIGHT)?.radius ?: 0
     val inset = cornerInsetDp(with(density) { radiusPx.toDp().value }).dp
-    Column(modifier) {
+    // The visual sits inside its touch square by up to the slack; any further inset (a rounded corner) moves the square.
+    val slack = FULLSCREEN_CORNER_TOUCH - FULLSCREEN_CORNER_VISUAL
+    val inner = minOf(inset, slack)
+    val outer = inset - inner
+    Column(modifier.padding(top = outer, end = outer)) {
         CornerButton(
             icon = if (casting) Icons.Filled.CastConnected else Icons.Filled.Cast,
             description = stringResource(R.string.menu_cast),
             tag = FULLSCREEN_CAST_TAG,
             tinted = casting,
-            top = inset,
-            end = inset,
+            top = inner,
+            end = inner,
             onClick = onCast,
         )
         if (showPip) {
@@ -68,8 +72,8 @@ internal fun FullscreenCornerButtons(
                 description = stringResource(R.string.fullscreen_pip),
                 tag = FULLSCREEN_PIP_TAG,
                 tinted = false,
-                top = FULLSCREEN_CORNER_MARGIN,
-                end = inset,
+                top = minOf(FULLSCREEN_CORNER_MARGIN, slack),
+                end = inner,
                 onClick = onPip,
             )
         }
