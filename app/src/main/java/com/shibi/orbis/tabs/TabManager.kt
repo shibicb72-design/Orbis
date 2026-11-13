@@ -18,6 +18,7 @@ import com.shibi.orbis.torrent.IntakeRequest
 import com.shibi.orbis.torrent.TorrentIntake
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
@@ -145,6 +146,7 @@ class TabManager(
     private var foreground = true
 
     private val observers = HashMap<Long, Job>()
+    private val noticeObservers = HashMap<Long, Job>()
     private var persistJob: Job? = null
 
     /** Import URLs a tab has shown. Removed when the tab closes or history can no longer reach them. */
@@ -201,6 +203,16 @@ class TabManager(
 
     /** Normal tabs closed this session, newest first. Cleared with history or with the open tabs. */
     val recentlyClosed: StateFlow<List<ClosedTab>> = _recentlyClosed.asStateFlow()
+
+    private val _autoDesktopNotices = MutableStateFlow<Set<Long>>(emptySet())
+
+    /** Tabs where Desktop site was kept automatically and the user has not been told yet. Memory only, never persisted. */
+    val autoDesktopNotices: StateFlow<Set<Long>> = _autoDesktopNotices.asStateFlow()
+
+    /** The notice for [id] has been shown: forget the mark. */
+    fun clearAutoDesktopNotice(id: Long) {
+        _autoDesktopNotices.value = _autoDesktopNotices.value - id
+    }
 
     private val _linkMenu = MutableStateFlow<LinkMenuRequest?>(null)
     val linkMenu: StateFlow<LinkMenuRequest?> = _linkMenu.asStateFlow()
@@ -342,6 +354,14 @@ class TabManager(
     }
 
     private fun observe(id: Long, session: BrowserSession) {
+        // autoDesktopKept is not replayed, so every session is collected from the moment it joins the list (started
+        // undispatched: no event can fall between creation and the first collect). Background tabs get their mark too.
+        noticeObservers[id]?.cancel()
+        noticeObservers[id] = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            session.autoDesktopKept.collect {
+                if (indexOf(id) >= 0) _autoDesktopNotices.value = _autoDesktopNotices.value + id
+            }
+        }
         observers[id]?.cancel()
         observers[id] = scope.launch {
             session.state.collect { onSessionState(id, it) }
@@ -548,6 +568,8 @@ class TabManager(
     private fun dispose(tab: Tab) {
         val privateId = tab.id.takeIf { tab.isPrivate }
         observers.remove(tab.id)?.cancel()
+        noticeObservers.remove(tab.id)?.cancel()
+        _autoDesktopNotices.value = _autoDesktopNotices.value - tab.id
         tab.session?.let {
             it.host = null
             it.close()

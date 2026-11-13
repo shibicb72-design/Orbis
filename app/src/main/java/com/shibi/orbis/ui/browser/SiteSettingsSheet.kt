@@ -69,6 +69,7 @@ internal fun SiteSettingsSheet(
     trackingOn: Boolean,
     javaScriptOn: Boolean,
     desktop: Boolean,
+    desktopAutoNote: Boolean = false,
     permissions: Map<SitePermissionKind, PermissionChoice>,
     onTracking: (Boolean) -> Unit,
     onJavaScript: (Boolean) -> Unit,
@@ -101,6 +102,7 @@ internal fun SiteSettingsSheet(
             SwitchRow(R.string.menu_tracking_protection, R.string.site_tracking_summary, trackingOn, onTracking)
             SwitchRow(R.string.javascript_title, R.string.site_js_summary, javaScriptOn, onJavaScript)
             SwitchRow(R.string.menu_desktop_site, R.string.site_desktop_summary, desktop, onDesktop)
+            if (desktopAutoNote) Text(stringResource(R.string.auto_desktop_note), style = MaterialTheme.typography.bodySmall)
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             Text(stringResource(R.string.site_permissions_title), style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
             if (isPrivate) {

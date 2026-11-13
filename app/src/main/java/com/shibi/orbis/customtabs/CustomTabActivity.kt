@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -24,14 +25,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +45,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -57,7 +65,9 @@ import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.engine.hostOfUrl
 import com.shibi.orbis.engine.isWebUrl
 import com.shibi.orbis.tabs.PendingDownload
+import com.shibi.orbis.ui.browser.AutoDesktopNotice
 import com.shibi.orbis.ui.browser.DownloadConfirmDialog
+import com.shibi.orbis.ui.browser.undoAutoDesktop
 import com.shibi.orbis.ui.browser.SitePromptDialog
 import com.shibi.orbis.ui.browser.PageShareDialogs
 import com.shibi.orbis.ui.browser.rememberPageShare
@@ -215,6 +225,11 @@ private fun CustomTabScreen(
     val download by pendingDownload.collectAsStateWithLifecycle()
     var menuOpen by remember { mutableStateOf(false) }
     val pageShare = rememberPageShare()
+    // A Custom Tab has one session: collect "desktop site kept automatically" here (it is not replayed; the page only
+    // loads once the view is attached, after this effect has started).
+    val snackbars = remember { SnackbarHostState() }
+    var autoMarked by remember { mutableStateOf(false) }
+    LaunchedEffect(session) { session.autoDesktopKept.collect { autoMarked = true } }
     // The app's color when it gave one; its content color is chosen for contrast (never dark on dark).
     val bar = toolbarArgb?.let { Color(it) } ?: MaterialTheme.colorScheme.surfaceContainer
     val onBar = toolbarArgb?.let { Color(contentColorOn(it)) } ?: MaterialTheme.colorScheme.onSurface
@@ -249,17 +264,19 @@ private fun CustomTabScreen(
                             context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("URL", state.url))
                             Toast.makeText(context, R.string.qr_copied, Toast.LENGTH_SHORT).show()
                         })
-                        DropdownMenuItem(text = { Text(stringResource(R.string.menu_desktop_site)) }, onClick = {
+                        CustomTabDesktopItem(state.desktopMode) {
                             menuOpen = false
                             // Remembered for the site like the browser's menu, so unticking also stops auto-desktop retries.
                             if (isWebUrl(state.url)) app.container.browserSettings.rememberDesktop(state.url, !state.desktopMode, session.isPrivate)
                             session.setDesktopMode(!state.desktopMode)
-                        })
+                        }
                     }
                 }
                 LoadingBar(state.isLoading, state.progress / 100f, rememberMotionEnabled(), Modifier.fillMaxWidth().height(4.dp), color = onBar)
             }
         }
+        // The notice sits at the bottom of the page area: the address line is at the top and is never covered.
+        Box(Modifier.fillMaxSize()) {
         AndroidView(
             factory = { ctx ->
                 app.container.engine.createContentView(ctx).also { view ->
@@ -280,7 +297,17 @@ private fun CustomTabScreen(
             onRelease = { view -> session.detachFrom(view) },
             modifier = Modifier.fillMaxSize(),
         )
+        SnackbarHost(snackbars, Modifier.align(Alignment.BottomCenter))
+        }
     }
+    AutoDesktopNotice(
+        tabId = 0L,
+        marked = autoMarked && !state.fullScreen,
+        currentUrl = state.url,
+        snackbars = snackbars,
+        onShown = { autoMarked = false },
+        onUndo = { noticeUrl -> undoAutoDesktop(app.container.browserSettings, session, noticeUrl, state.url) },
+    )
     prompt?.let { SitePromptDialog(it) }
     PageShareDialogs(pageShare)
     download?.let { pending ->
@@ -296,4 +323,15 @@ private fun CustomTabScreen(
             },
         )
     }
+}
+
+/** The Custom Tab menu's Desktop site item: a trailing checkbox shows the current mode, like the browser menu. */
+@Composable
+internal fun CustomTabDesktopItem(desktopMode: Boolean, onClick: () -> Unit) {
+    DropdownMenuItem(
+        modifier = Modifier.semantics { toggleableState = ToggleableState(desktopMode) },
+        text = { Text(stringResource(R.string.menu_desktop_site)) },
+        trailingIcon = { Checkbox(checked = desktopMode, onCheckedChange = null) },
+        onClick = onClick,
+    )
 }
