@@ -51,7 +51,7 @@ class ReaderExtensionHolder(private val log: (String) -> Unit) {
         controller.ensureBuiltIn(ASSET_URL, ID).accept(
             { ext ->
                 if (ext == null) return@accept
-                controller.setAllowedInPrivateBrowsing(ext, true).accept({ allowed -> ready(allowed ?: ext) }, { ready(ext) })
+                controller.ensureAllowedInPrivateBrowsing(ext, true).accept({ allowed -> ready(allowed ?: ext) }, { ready(ext) })
             },
             { log("reader extension install failed: ${it?.javaClass?.simpleName}") },
         )

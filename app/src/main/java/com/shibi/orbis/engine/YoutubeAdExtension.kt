@@ -22,7 +22,7 @@ class YoutubeAdExtensionHolder(
             { ext ->
                 if (ext == null) return@accept
                 attach(ext)
-                controller.setAllowedInPrivateBrowsing(ext, false).accept(
+                controller.ensureAllowedInPrivateBrowsing(ext, false).accept(
                     { updated ->
                         attach(updated ?: ext)
                         log("youtube ad observer ready")
