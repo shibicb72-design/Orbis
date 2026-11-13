@@ -1,6 +1,8 @@
 package com.shibi.orbis.ui.browser
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
@@ -42,13 +44,17 @@ class FullscreenCornerButtonsTest {
 
     private var casts = 0
     private var pips = 0
+    private var pageTaps = 0
 
     private fun show(showPip: Boolean = true) {
         casts = 0
         pips = 0
+        pageTaps = 0
         rule.setContent {
             MaterialTheme(colorScheme = lightColorScheme()) {
                 Box(Modifier.size(300.dp).testTag(CONTAINER)) {
+                    // Stand-in for the page (YouTube's own controls), under the buttons as in the app.
+                    Box(Modifier.fillMaxSize().clickable { pageTaps++ })
                     FullscreenCornerButtons(
                         casting = false,
                         showPip = showPip,
@@ -150,13 +156,25 @@ class FullscreenCornerButtonsTest {
     }
 
     @Test
-    fun clickJustOutsideCallsNothing() {
+    fun tapsJustOutsideATouchSquareReachThePageNotTheButtons() {
         show()
-        for (d in listOf("Cast", "Picture-in-picture")) {
-            val node = touch(d)
-            val size = node.fetchSemanticsNode().size
-            node.performTouchInput { click(Offset(-2f, size.height / 2f)) }
+        val box = rule.onNodeWithTag(CONTAINER).getBoundsInRoot()
+        val cast = touch("Cast").getBoundsInRoot()
+        val pip = touch("Picture-in-picture").getBoundsInRoot()
+        // Container coordinates, in dp.
+        fun x(v: androidx.compose.ui.unit.Dp) = (v - box.left).value
+        fun y(v: androidx.compose.ui.unit.Dp) = (v - box.top).value
+        val taps = listOf(
+            x(cast.left) - 2f to y((cast.top + cast.bottom) / 2),
+            x(pip.left) - 2f to y((pip.top + pip.bottom) / 2),
+            x((pip.left + pip.right) / 2) to y(pip.bottom) + 2f,
+            x(cast.left) - 6f to y((cast.top + cast.bottom) / 2),
+            x(pip.left) - 6f to y((pip.top + pip.bottom) / 2),
+        )
+        for ((i, t) in taps.withIndex()) {
+            rule.onNodeWithTag(CONTAINER).performTouchInput { click(Offset(t.first.dp.toPx(), t.second.dp.toPx())) }
             rule.waitForIdle()
+            assertEquals("tap $i reached the page", i + 1, pageTaps)
         }
         assertEquals(0, casts)
         assertEquals(0, pips)
