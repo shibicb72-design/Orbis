@@ -89,13 +89,13 @@ class SceneHostTest {
         val still = capture()
         host.ambient = OpenAmbient
         frames(2)
-        for (n in 0 until 256) {
-            val hasScene = bit(n, 7)
-            val private = bit(n, 6)
-            val user = bit(n, 5)
-            val ambient = SceneAmbient(motionEnabled = bit(n, 4), resumed = bit(n, 3), inPip = bit(n, 2), fullScreen = bit(n, 1), mediaPlaying = bit(n, 0))
+        for (n in 0 until 512) {
+            val hasScene = bit(n, 8)
+            val private = bit(n, 7)
+            val user = bit(n, 6)
+            val ambient = SceneAmbient(motionEnabled = bit(n, 5), resumed = bit(n, 4), inPip = bit(n, 3), fullScreen = bit(n, 2), mediaPlaying = bit(n, 1), pageShowing = bit(n, 0))
             val expected = sceneMode(hasScene, user, private, ambient)
-            val where = "combination ${n.toString(2).padStart(8, '0')} ($expected)"
+            val where = "combination ${n.toString(2).padStart(9, '0')} ($expected)"
             var beforeClose: IntArray? = null
             if (expected == SceneMode.Paused) {
                 // Moving first, so "frozen" means frozen where it was, not at some old frame.
@@ -247,7 +247,7 @@ class SceneHostTest {
         assertTrue("$writes writes in 960 ms", writes in 29..31)
     }
 
-    /** The public host reads the real inputs: RESUMED from the lifecycle, PiP, media, and the browser's fullscreen. */
+    /** The public host reads the real inputs: RESUMED from the lifecycle, PiP, media, the browser's fullscreen and page. */
     @Test
     fun provideSceneHostFollowsTheLifecycleAndItsInputs() {
         val owner =
@@ -288,6 +288,16 @@ class SceneHostTest {
         frames(2)
         assertEquals(OpenAmbient.copy(fullScreen = true), h.gates)
         h.browserFullScreen = false
+        frames(1)
+        assertEquals(OpenAmbient, h.gates)
+        h.browserPageShowing = true
+        frames(2)
+        assertEquals(OpenAmbient.copy(pageShowing = true), h.gates)
+        h.browserFullScreen = true
+        frames(1)
+        assertEquals(OpenAmbient.copy(fullScreen = true, pageShowing = true), h.gates)
+        h.browserFullScreen = false
+        h.browserPageShowing = false
         frames(1)
         assertEquals(OpenAmbient, h.gates)
     }

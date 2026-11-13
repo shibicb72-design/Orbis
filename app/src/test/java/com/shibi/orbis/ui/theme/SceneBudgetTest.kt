@@ -56,6 +56,26 @@ class SceneBudgetTest {
         }
     }
 
+    /** On a low surface (a 104 dp bar) Fair Weather's clouds are at most 0.35 of their full-size width. */
+    @Test
+    fun fairWeatherCloudsShrinkOnALowSurface() {
+        val density = Density(2.625f)
+        val full = FairWeatherScene.cloudFields(Size(412 * density.density, 915 * density.density), density, SceneBudget())
+        val low = FairWeatherScene.cloudFields(Size(412 * density.density, 104 * density.density), density, SceneBudget())
+        assertEquals(full.size, low.size)
+        var clouds = 0
+        for (l in full.indices) {
+            assertEquals("layer $l", full[l].count, low[l].count)
+            for (i in 0 until low[l].count) {
+                val where = "layer $l cloud $i"
+                assertTrue("$where: drawn", low[l].sizeOf(i) > 0f)
+                assertTrue("$where: ${low[l].sizeOf(i)} px against ${full[l].sizeOf(i)} px", low[l].sizeOf(i) <= 0.35f * full[l].sizeOf(i) + 0.01f)
+                clouds++
+            }
+        }
+        assertEquals(9, clouds)
+    }
+
     @Test
     fun aSceneWithNoBudgetBuildsNothing() {
         for (theme in AnimatedThemes) {

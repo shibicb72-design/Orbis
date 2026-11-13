@@ -10,7 +10,7 @@ import androidx.compose.ui.graphics.toPixelMap
 import com.shibi.orbis.settings.DarkMode
 
 /** Every gate open: a scene with a host in this state moves. */
-internal val OpenAmbient = SceneAmbient(motionEnabled = true, resumed = true, inPip = false, fullScreen = false, mediaPlaying = false)
+internal val OpenAmbient = SceneAmbient(motionEnabled = true, resumed = true, inPip = false, fullScreen = false, mediaPlaying = false, pageShowing = false)
 
 /** The three animated themes, in picker order. */
 internal val AnimatedThemes: List<AppTheme> get() = AppThemes.all.filter { it.animated }

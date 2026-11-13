@@ -243,7 +243,6 @@ internal object AuroraScene : ChromeScene {
 /** Fair Weather: three layers of soft clouds drifting left to right, nearer ones bigger, faster and more opaque. */
 internal object FairWeatherScene : ChromeScene {
     private val LightBody = Color(0xFF8FB4D6)
-    private val LightHighlight = Color(0xFFFFFFFF)
     private val DarkBody = Color(0xFFC9DCEC)
     private val DarkUnderside = Color(0xFF9CCBF0)
 
@@ -271,9 +270,9 @@ internal object FairWeatherScene : ChromeScene {
 
     override val staticTimeSec = 7.5f
 
-    override fun inks(dark: Boolean) = if (dark) listOf(DarkBody, DarkUnderside) else listOf(LightBody, LightHighlight)
+    override fun inks(dark: Boolean) = if (dark) listOf(DarkBody, DarkUnderside) else listOf(LightBody)
 
-    override fun coverage(dark: Boolean) = if (dark) 0.20f else 0.60f
+    override fun coverage(dark: Boolean) = if (dark) 0.20f else 0.35f
 
     /** One cloud, 1 unit wide, with its left edge at x = 0 and its flat base at y = 0.18: three ovals on a base. */
     private fun cloudPath(crown: Float) =
@@ -284,19 +283,27 @@ internal object FairWeatherScene : ChromeScene {
             addRoundRect(androidx.compose.ui.geometry.RoundRect(0.08f, 0.02f, 0.94f, 0.18f, radiusX = 0.08f, radiusY = 0.08f))
         }
 
-    override fun build(size: Size, density: Density, dark: Boolean, budget: SceneBudget): SceneFrame {
+    /** How much of its full width a cloud keeps on a surface [heightDp] high: a low bar gets smaller clouds. */
+    internal fun cloudWidthScale(heightDp: Float): Float = (heightDp / 400f).coerceIn(0.35f, 1f)
+
+    /** The clouds of each layer on [size], widths scaled by [cloudWidthScale]. */
+    internal fun cloudFields(size: Size, density: Density, budget: SceneBudget): Array<ParticleField> {
         val wide = size.isWide(density)
-        val fields =
-            Layers.map { l ->
-                val want = if (wide) l.wideCount else l.count
-                val system =
-                    ParticleSystem(want, l.seed, Drift.Sideways, l.speedDp..l.speedDp, swayDp = BOB_DP, swayHz = BOB_HZ, sizeDp = l.widthDp, alpha = l.alpha, fadeInFrac = 0f, fadeOutFrac = 0f)
-                ParticleField(system, Size(size.width, size.height * (l.bandBottom - l.bandTop)), density, budget.take(want))
-            }.toTypedArray()
+        val k = cloudWidthScale(size.height / density.density)
+        return Layers.map { l ->
+            val want = if (wide) l.wideCount else l.count
+            val width = l.widthDp.start * k..l.widthDp.endInclusive * k
+            val system =
+                ParticleSystem(want, l.seed, Drift.Sideways, l.speedDp..l.speedDp, swayDp = BOB_DP, swayHz = BOB_HZ, sizeDp = width, alpha = l.alpha, fadeInFrac = 0f, fadeOutFrac = 0f)
+            ParticleField(system, Size(size.width, size.height * (l.bandBottom - l.bandTop)), density, budget.take(want))
+        }.toTypedArray()
+    }
+
+    override fun build(size: Size, density: Density, dark: Boolean, budget: SceneBudget): SceneFrame {
+        val fields = cloudFields(size, density, budget)
         val tops = FloatArray(Layers.size) { Layers[it].bandTop * size.height }
         val paths = Array(Layers.size) { cloudPath(Layers[it].crown) }
         val body = if (dark) DarkBody else LightBody
-        val accent = if (dark) DarkUnderside else LightHighlight
         return object : SceneFrame(budget.used) {
             override fun DrawScope.draw(timeSec: Float) {
                 for (l in fields.indices) {
@@ -306,13 +313,9 @@ internal object FairWeatherScene : ChromeScene {
                             scale(width, width, pivot = Offset.Zero) {
                                 if (dark) {
                                     // A deeper underside shows below the body.
-                                    translate(0f, 0.04f) { drawPath(path, accent, alpha = a) }
-                                    drawPath(path, body, alpha = a)
-                                } else {
-                                    // A white highlight sits on the upper body.
-                                    drawPath(path, body, alpha = a)
-                                    translate(0.09f, -0.05f) { scale(0.82f, 0.82f, pivot = Offset.Zero) { drawPath(path, accent, alpha = a) } }
+                                    translate(0f, 0.04f) { drawPath(path, DarkUnderside, alpha = a) }
                                 }
+                                drawPath(path, body, alpha = a)
                             }
                         }
                     }

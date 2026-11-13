@@ -467,6 +467,12 @@ private fun BrowserContent(
     }
 
     val blankTab = isBlankAddress(selectedTab.url) && isBlankAddress(state.url)
+    // A web page (the start page does not cover the engine view) or the tab sheet: the bars keep a still frame.
+    val sceneResting = !(blankTab && !state.isLoading) || showTabs
+    DisposableEffect(sceneHost, sceneResting) {
+        sceneHost?.browserPageShowing = sceneResting
+        onDispose { sceneHost?.browserPageShowing = false }
+    }
     val hasLiveOpener = selectedTab.openerTabId?.let { id -> tabList.any { it.id == id } } == true
 
     // Back order: close find bar, then history, then a tab opened from another tab, then the system default.
@@ -1284,7 +1290,7 @@ private fun BrowserContent(
             },
             thumbnails = thumbnailImages,
             snackbars = snackbars,
-            scene = scene,
+            scene = null,
             onRecentlyClosed = if (recentlyClosed.isEmpty()) null else ({
                 showTabs = false
                 showRecentlyClosed = true

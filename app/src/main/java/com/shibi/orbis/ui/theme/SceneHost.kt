@@ -57,18 +57,19 @@ data class SceneAmbient(
     val inPip: Boolean,
     val fullScreen: Boolean,
     val mediaPlaying: Boolean,
+    val pageShowing: Boolean,
 )
 
 /**
  * Every gate, in one place. No scene or a private tab: nothing at all. The user set the theme to Off or the system
- * animator scale is 0: the still frame. Not resumed, picture-in-picture, a fullscreen page, or media playing in any
- * tab (audio too): the last frame, frozen. Otherwise it moves.
+ * animator scale is 0: the still frame. Not resumed, picture-in-picture, a fullscreen page, media playing in any tab
+ * (audio too), or a web page showing in the browser: the last frame, frozen. Otherwise it moves.
  */
 internal fun sceneMode(hasScene: Boolean, userAnimated: Boolean, privateTab: Boolean, ambient: SceneAmbient): SceneMode =
     when {
         !hasScene || privateTab -> SceneMode.Hidden
         !userAnimated || !ambient.motionEnabled -> SceneMode.Static
-        !ambient.resumed || ambient.inPip || ambient.fullScreen || ambient.mediaPlaying -> SceneMode.Paused
+        !ambient.resumed || ambient.inPip || ambient.fullScreen || ambient.mediaPlaying || ambient.pageShowing -> SceneMode.Paused
         else -> SceneMode.Running
     }
 
@@ -90,15 +91,20 @@ class SceneHost internal constructor() {
     internal val elapsedSec: FloatState get() = elapsed
 
     /** Set by [ProvideSceneHost]. */
-    var ambient: SceneAmbient by mutableStateOf(SceneAmbient(motionEnabled = true, resumed = true, inPip = false, fullScreen = false, mediaPlaying = false))
+    var ambient: SceneAmbient by mutableStateOf(SceneAmbient(motionEnabled = true, resumed = true, inPip = false, fullScreen = false, mediaPlaying = false, pageShowing = false))
 
     /** Set by the browser screen while its page is fullscreen; false once it leaves. */
     var browserFullScreen: Boolean by mutableStateOf(false)
 
-    /** [ambient] with [browserFullScreen] folded in: what every surface's mode comes from. */
+    /** Set by the browser screen while a web page (not its start page) or its tab sheet shows; false once it leaves. */
+    var browserPageShowing: Boolean by mutableStateOf(false)
+
+    /** [ambient] with [browserFullScreen] and [browserPageShowing] folded in: what every surface's mode comes from. */
     internal val gates: SceneAmbient by derivedStateOf {
         val a = ambient
-        if (browserFullScreen && !a.fullScreen) a.copy(fullScreen = true) else a
+        val fullScreen = a.fullScreen || browserFullScreen
+        val pageShowing = a.pageShowing || browserPageShowing
+        if (fullScreen == a.fullScreen && pageShowing == a.pageShowing) a else a.copy(fullScreen = fullScreen, pageShowing = pageShowing)
     }
 
     private var holds by mutableIntStateOf(0)
@@ -194,6 +200,7 @@ private fun SceneAmbientInputs(host: SceneHost, motionEnabled: Boolean, inPip: B
             inPip = inPip,
             fullScreen = false, // the browser screen reports it through browserFullScreen
             mediaPlaying = mediaPlaying,
+            pageShowing = false, // the browser screen reports it through browserPageShowing
         )
 }
 
