@@ -69,6 +69,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
 
 class OrbisApp : Application() {
     lateinit var container: AppContainer
@@ -502,6 +503,9 @@ class AppContainer(
 
     /** The activity is shown as a picture-in-picture window; the browser hides its toolbar and buttons there. */
     val pictureInPicture = MutableStateFlow(false)
+
+    /** The user asked for picture-in-picture (the fullscreen button); MainActivity enters it, paused or playing. */
+    val pipRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
     /**
      * A torrent another app handed over (a `content:` .torrent or a magnet: link). Set by MainActivity or

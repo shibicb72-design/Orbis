@@ -91,6 +91,15 @@ fun pipShapeOf(tab: MediaTab?, selected: BrowserSession?, fullScreen: Boolean): 
 }
 
 /**
+ * The shape for a picture-in-picture window the user asked for: the selected tab's page is fullscreen and has media,
+ * playing or paused; the video's size when known, else 16:9. Home still auto-enters only for [pipShapeOf].
+ */
+fun manualPipShapeOf(media: MediaState?, fullScreen: Boolean): Pair<Long, Long>? {
+    if (!fullScreen || media == null) return null
+    return if (media.videoWidth > 0 && media.videoHeight > 0) media.videoWidth to media.videoHeight else 16L to 9L
+}
+
+/**
  * [pipShapeOf] kept current: recomputed when the media changes and when the selected tab enters or leaves fullscreen.
  * Fullscreen must be followed too, because entering or leaving it often leaves the media itself unchanged.
  */
