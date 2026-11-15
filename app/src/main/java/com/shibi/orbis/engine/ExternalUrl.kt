@@ -57,3 +57,14 @@ fun hostOfUrl(url: String): String? {
         }
     return host.lowercase(Locale.ROOT).takeIf { it.isNotEmpty() }
 }
+
+/**
+ * Whether the "desktop site kept" notice marked on [noticeUrl] still belongs to a page now reporting [currentUrl]. A
+ * blank url is a load in progress and does not count as leaving; a committed web URL on the same host keeps it, and a
+ * web URL on another host or a non-web page (about:blank, ...) drops it.
+ */
+fun noticeStillApplies(noticeUrl: String, currentUrl: String): Boolean {
+    if (currentUrl.isEmpty()) return true
+    if (!isWebUrl(currentUrl)) return false
+    return hostOfUrl(currentUrl) == hostOfUrl(noticeUrl)
+}

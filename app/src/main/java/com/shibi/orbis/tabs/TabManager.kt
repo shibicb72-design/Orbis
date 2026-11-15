@@ -11,6 +11,7 @@ import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.engine.isExternalScheme
 import com.shibi.orbis.engine.isImportLoadUrl
 import com.shibi.orbis.engine.isWebUrl
+import com.shibi.orbis.engine.noticeStillApplies
 import com.shibi.orbis.engine.pageContextMenu
 import com.shibi.orbis.engine.schemeOf
 import com.shibi.orbis.torrent.IntakeLog
@@ -204,10 +205,13 @@ class TabManager(
     /** Normal tabs closed this session, newest first. Cleared with history or with the open tabs. */
     val recentlyClosed: StateFlow<List<ClosedTab>> = _recentlyClosed.asStateFlow()
 
-    private val _autoDesktopNotices = MutableStateFlow<Set<Long>>(emptySet())
+    private val _autoDesktopNotices = MutableStateFlow<Map<Long, String>>(emptyMap())
 
-    /** Tabs where Desktop site was kept automatically and the user has not been told yet. Memory only, never persisted. */
-    val autoDesktopNotices: StateFlow<Set<Long>> = _autoDesktopNotices.asStateFlow()
+    /**
+     * Tabs where Desktop site was kept automatically and the user has not been told yet, each with the URL of the page
+     * at the moment it happened. A mark is dropped when the tab leaves that site. Memory only, never persisted.
+     */
+    val autoDesktopNotices: StateFlow<Map<Long, String>> = _autoDesktopNotices.asStateFlow()
 
     /** The notice for [id] has been shown: forget the mark. */
     fun clearAutoDesktopNotice(id: Long) {
@@ -359,7 +363,8 @@ class TabManager(
         noticeObservers[id]?.cancel()
         noticeObservers[id] = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             session.autoDesktopKept.collect {
-                if (indexOf(id) >= 0) _autoDesktopNotices.value = _autoDesktopNotices.value + id
+                val url = session.state.value.url
+                if (indexOf(id) >= 0 && isWebUrl(url)) _autoDesktopNotices.value = _autoDesktopNotices.value + (id to url)
             }
         }
         observers[id]?.cancel()
@@ -372,6 +377,8 @@ class TabManager(
         val i = indexOf(id)
         if (i < 0) return
         val tab = list[i]
+        val mark = _autoDesktopNotices.value[id]
+        if (mark != null && !noticeStillApplies(mark, st.url)) clearAutoDesktopNotice(id)
         // A fresh session reports an empty url/title until its first page: keep the stored ones (they are the
         // fallback if the app is killed before then).
         val url = st.url.ifEmpty { tab.url }

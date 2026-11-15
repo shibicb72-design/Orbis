@@ -97,8 +97,7 @@ class AutoDesktopNoticeComposeTest {
                     SnackbarHost(snackbars)
                     AutoDesktopNotice(
                         tabId = selected.id,
-                        marked = session != null && !fullScreen.value && !pip.value && selected.id in marks,
-                        currentUrl = session?.state?.collectAsState()?.value?.url.orEmpty(),
+                        noticeUrl = if (session != null && !fullScreen.value && !pip.value) marks[selected.id] else null,
                         snackbars = snackbars,
                         onShown = { m.clearAutoDesktopNotice(selected.id) },
                         onUndo = { noticeUrl -> session?.let { undoAutoDesktop(policy, it, noticeUrl, it.state.value.url) } },
@@ -126,7 +125,7 @@ class AutoDesktopNoticeComposeTest {
         rule.waitForIdle()
         rule.onNodeWithText(text).assertIsDisplayed()
         rule.onNodeWithText("Undo").assertIsDisplayed()
-        assertEquals(emptySet<Long>(), m.autoDesktopNotices.value)
+        assertEquals(emptySet<Long>(), m.autoDesktopNotices.value.keys)
     }
 
     @Test
@@ -151,12 +150,12 @@ class AutoDesktopNoticeComposeTest {
         created[0].kept.tryEmit(Unit)
         rule.waitForIdle()
         rule.onNodeWithText(text).assertDoesNotExist()
-        assertEquals(setOf(a), m.autoDesktopNotices.value)
+        assertEquals(setOf(a), m.autoDesktopNotices.value.keys)
 
         m.select(a)
         rule.waitForIdle()
         rule.onNodeWithText(text).assertIsDisplayed()
-        assertEquals(emptySet<Long>(), m.autoDesktopNotices.value)
+        assertEquals(emptySet<Long>(), m.autoDesktopNotices.value.keys)
 
         // Leaving and coming back does not show it again.
         rule.mainClock.advanceTimeBy(AUTO_DESKTOP_NOTICE_MILLIS + 1_000)
@@ -177,7 +176,7 @@ class AutoDesktopNoticeComposeTest {
         created[0].kept.tryEmit(Unit)
         m.close(a)
         rule.waitForIdle()
-        assertEquals(emptySet<Long>(), m.autoDesktopNotices.value)
+        assertEquals(emptySet<Long>(), m.autoDesktopNotices.value.keys)
         rule.onNodeWithText(text).assertDoesNotExist()
     }
 
@@ -221,6 +220,23 @@ class AutoDesktopNoticeComposeTest {
     }
 
     @Test
+    fun theMarkDroppedWhileAnotherSnackbarIsUpMeansNoNoticeWhenTheHostIsFree() {
+        val m = manager()
+        val s = markedSession(m)
+        scope.launch { host!!.showSnackbar("Tab closed", actionLabel = "Reopen", duration = androidx.compose.material3.SnackbarDuration.Indefinite) }
+        rule.waitForIdle()
+        s.kept.tryEmit(Unit)
+        rule.waitForIdle()
+        assertEquals(setOf(m.selected.value.id), m.autoDesktopNotices.value.keys)
+        s.stateFlow.value = s.stateFlow.value.copy(url = "https://b.test/")
+        rule.waitForIdle()
+        assertTrue(m.autoDesktopNotices.value.isEmpty())
+        host!!.currentSnackbarData?.dismiss()
+        rule.waitForIdle()
+        rule.onNodeWithText(text).assertDoesNotExist()
+    }
+
+    @Test
     fun undoOnTheSameSiteAnotherPathAlsoTurnsDesktopOff() {
         val m = manager()
         val s = markedSession(m)
@@ -243,11 +259,11 @@ class AutoDesktopNoticeComposeTest {
         s.kept.tryEmit(Unit)
         rule.waitForIdle()
         rule.onNodeWithText(text).assertDoesNotExist()
-        assertEquals(setOf(id), m.autoDesktopNotices.value)
+        assertEquals(setOf(id), m.autoDesktopNotices.value.keys)
         flag.value = false
         rule.waitForIdle()
         rule.onNodeWithText(text).assertIsDisplayed()
-        assertEquals(emptySet<Long>(), m.autoDesktopNotices.value)
+        assertEquals(emptySet<Long>(), m.autoDesktopNotices.value.keys)
         rule.mainClock.advanceTimeBy(AUTO_DESKTOP_NOTICE_MILLIS + 1_000)
         rule.waitForIdle()
         rule.onNodeWithText(text).assertDoesNotExist()
@@ -274,18 +290,18 @@ class AutoDesktopNoticeComposeTest {
         // The other snackbar is still there and the mark has not been cleared while the notice waits.
         rule.onNodeWithText("Tab closed").assertIsDisplayed()
         rule.onNodeWithText(text).assertDoesNotExist()
-        assertEquals(setOf(id), m.autoDesktopNotices.value)
+        assertEquals(setOf(id), m.autoDesktopNotices.value.keys)
         rule.mainClock.advanceTimeBy(AUTO_DESKTOP_NOTICE_MILLIS * 2)
         rule.waitForIdle()
         rule.onNodeWithText("Tab closed").assertIsDisplayed()
-        assertEquals(setOf(id), m.autoDesktopNotices.value)
+        assertEquals(setOf(id), m.autoDesktopNotices.value.keys)
 
         // Its action still works; then the notice appears and stays for the whole time.
         rule.onNodeWithText("Reopen").performClick()
         rule.waitForIdle()
         assertEquals(SnackbarResult.ActionPerformed, result)
         rule.onNodeWithText(text).assertIsDisplayed()
-        assertEquals(emptySet<Long>(), m.autoDesktopNotices.value)
+        assertEquals(emptySet<Long>(), m.autoDesktopNotices.value.keys)
         rule.mainClock.advanceTimeBy(AUTO_DESKTOP_NOTICE_MILLIS - 1_000)
         rule.waitForIdle()
         rule.onNodeWithText(text).assertIsDisplayed()
@@ -306,14 +322,14 @@ class AutoDesktopNoticeComposeTest {
         rule.waitForIdle()
         m.select(a)
         rule.waitForIdle()
-        assertEquals(setOf(b), m.autoDesktopNotices.value)
+        assertEquals(setOf(b), m.autoDesktopNotices.value.keys)
         host!!.currentSnackbarData?.dismiss()
         rule.waitForIdle()
         rule.onNodeWithText(text).assertDoesNotExist()
         m.select(b)
         rule.waitForIdle()
         rule.onNodeWithText(text).assertIsDisplayed()
-        assertEquals(emptySet<Long>(), m.autoDesktopNotices.value)
+        assertEquals(emptySet<Long>(), m.autoDesktopNotices.value.keys)
     }
 
     @Test
