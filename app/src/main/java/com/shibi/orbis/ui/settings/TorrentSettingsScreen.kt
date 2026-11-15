@@ -25,8 +25,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +42,7 @@ import com.shibi.orbis.settings.BrowserSettings
 import com.shibi.orbis.settings.MagnetHandler
 import com.shibi.orbis.torrent.TorrentSettings
 import com.shibi.orbis.torrent.TorrentSettingsStore
+import com.shibi.orbis.ui.OrbisTopAppBar
 
 private enum class TorrentDialog { DOWN_LIMIT, UP_LIMIT, RATIO, MAGNETS, IP_NOTE }
 
@@ -70,19 +69,15 @@ fun TorrentSettingsScreen(
         containerColor = colors.background,
         contentColor = colors.onBackground,
         topBar = {
-            TopAppBar(
+            OrbisTopAppBar(
                 title = { Text(stringResource(R.string.torrents_settings_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 },
-                colors =
-                    TopAppBarDefaults.topAppBarColors(
-                        containerColor = colors.background,
-                        titleContentColor = colors.onBackground,
-                        navigationIconContentColor = colors.onBackground,
-                    ),
+                containerColor = colors.background,
+                contentColor = colors.onBackground,
             )
         },
     ) { padding ->

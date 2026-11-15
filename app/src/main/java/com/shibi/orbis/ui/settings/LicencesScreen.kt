@@ -25,8 +25,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,6 +46,7 @@ import com.shibi.orbis.about.LicenceKind
 import com.shibi.orbis.about.LicenceNote
 import com.shibi.orbis.about.LicenceText
 import com.shibi.orbis.about.Licences
+import com.shibi.orbis.ui.OrbisTopAppBar
 import com.shibi.orbis.ui.secondaryReadingWidth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -66,19 +65,15 @@ fun LicencesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
         containerColor = colors.background,
         contentColor = colors.onBackground,
         topBar = {
-            TopAppBar(
+            OrbisTopAppBar(
                 title = { Text(stringResource(R.string.licences_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.licences_back))
                     }
                 },
-                colors =
-                    TopAppBarDefaults.topAppBarColors(
-                        containerColor = colors.background,
-                        titleContentColor = colors.onBackground,
-                        navigationIconContentColor = colors.onBackground,
-                    ),
+                containerColor = colors.background,
+                contentColor = colors.onBackground,
             )
         },
     ) { padding ->

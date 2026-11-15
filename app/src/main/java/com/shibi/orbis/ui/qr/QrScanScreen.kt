@@ -33,7 +33,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -54,6 +53,7 @@ import com.shibi.orbis.R
 import com.shibi.orbis.qr.QrContent
 import com.shibi.orbis.qr.classifyQr
 import com.shibi.orbis.qr.decodeQr
+import com.shibi.orbis.ui.OrbisTopAppBar
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -80,7 +80,7 @@ fun QrScanScreen(
     var result by remember { mutableStateOf<QrContent?>(null) }
     Scaffold(
         topBar = {
-            TopAppBar(
+            OrbisTopAppBar(
                 title = { Text(stringResource(R.string.qr_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {

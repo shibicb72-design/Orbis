@@ -21,7 +21,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -32,6 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shibi.orbis.R
 import com.shibi.orbis.ubo.UboOnboardingController
 import com.shibi.orbis.ubo.UboState
+import com.shibi.orbis.ui.OrbisTopAppBar
 
 /** Status and controls for the optional uBlock Origin install. Claims nothing beyond the actual state. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -47,7 +47,7 @@ fun UboSettingsScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
+            OrbisTopAppBar(
                 title = { Text(stringResource(R.string.ubo_name)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {

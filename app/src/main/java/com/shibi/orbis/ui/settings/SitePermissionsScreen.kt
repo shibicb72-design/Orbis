@@ -17,7 +17,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -32,6 +31,7 @@ import com.shibi.orbis.engine.SitePermissionDecisions
 import com.shibi.orbis.engine.SitePermissionEntry
 import com.shibi.orbis.engine.SitePermissionKind
 import com.shibi.orbis.ui.OrbisEmptyState
+import com.shibi.orbis.ui.OrbisTopAppBar
 
 /**
  * Every camera, microphone and location answer the browser is holding, so a remembered decision can be undone.
@@ -51,7 +51,7 @@ fun SitePermissionsScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
+            OrbisTopAppBar(
                 title = { Text(stringResource(R.string.perm_settings_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {

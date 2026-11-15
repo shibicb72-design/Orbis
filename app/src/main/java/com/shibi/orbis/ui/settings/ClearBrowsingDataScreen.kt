@@ -26,7 +26,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -55,6 +54,7 @@ import com.shibi.orbis.clear.ClearState
 import com.shibi.orbis.clear.blockedByPrivateTabs
 import com.shibi.orbis.clear.canSubmit
 import com.shibi.orbis.tabs.TabManager
+import com.shibi.orbis.ui.OrbisTopAppBar
 
 private val SelectionSaver =
     listSaver<ClearSelection, Boolean>(
@@ -122,7 +122,7 @@ fun ClearBrowsingDataScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
+            OrbisTopAppBar(
                 title = { Text(stringResource(R.string.clear_data_title)) },
                 navigationIcon = {
                     IconButton(onClick = { leave() }, enabled = !running) {
