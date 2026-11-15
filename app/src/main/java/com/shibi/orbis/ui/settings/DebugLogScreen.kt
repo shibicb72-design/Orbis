@@ -23,7 +23,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,6 +37,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shibi.orbis.AppContainer
 import com.shibi.orbis.R
+import com.shibi.orbis.ui.OrbisTopAppBar
 
 /** Settings-only monospace error/debug log. Never shown on main browser chrome. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,7 +57,7 @@ fun DebugLogScreen(container: AppContainer, onBack: () -> Unit, modifier: Modifi
         containerColor = MaterialTheme.colorScheme.background,
         contentColor = MaterialTheme.colorScheme.onBackground,
         topBar = {
-            TopAppBar(
+            OrbisTopAppBar(
                 title = { Text(stringResource(R.string.debug_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {

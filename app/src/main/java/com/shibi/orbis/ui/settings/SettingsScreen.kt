@@ -37,7 +37,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +59,7 @@ import com.shibi.orbis.engine.SearchEngine
 import com.shibi.orbis.role.BrowserRoleStatus
 import com.shibi.orbis.role.DefaultBrowserRole
 import com.shibi.orbis.ubo.UboState
+import com.shibi.orbis.ui.OrbisTopAppBar
 import com.shibi.orbis.ui.theme.AppThemes
 import kotlinx.coroutines.flow.StateFlow
 
@@ -225,7 +225,7 @@ fun SettingsScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
+            OrbisTopAppBar(
                 title = { Text(stringResource(R.string.settings_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {

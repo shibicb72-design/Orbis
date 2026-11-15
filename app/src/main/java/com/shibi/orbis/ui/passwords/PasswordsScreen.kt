@@ -42,7 +42,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -71,6 +70,7 @@ import com.shibi.orbis.passwords.SavedLogin
 import com.shibi.orbis.passwords.SensitiveClip
 import com.shibi.orbis.ui.GuardedTextButton
 import com.shibi.orbis.ui.ObscuredTouchFilter
+import com.shibi.orbis.ui.OrbisTopAppBar
 import com.shibi.orbis.ui.secondaryReadingWidth
 import java.util.Locale
 import kotlinx.coroutines.launch
@@ -169,7 +169,7 @@ fun PasswordsScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
+            OrbisTopAppBar(
                 title = { Text(stringResource(R.string.passwords_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back)) }

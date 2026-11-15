@@ -41,7 +41,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,6 +58,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.shibi.orbis.ui.OrbisTopAppBar
 import com.shibi.orbis.ui.secondaryReadingWidth
 import com.shibi.orbis.R
 import com.shibi.orbis.bookmarks.Bookmark
@@ -148,7 +148,7 @@ fun BookmarksScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
+            OrbisTopAppBar(
                 title = { Text(openFolder ?: stringResource(R.string.bookmarks_title)) },
                 navigationIcon = {
                     IconButton(onClick = { if (openFolder != null) openFolder = null else onBack() }) {

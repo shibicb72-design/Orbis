@@ -36,7 +36,6 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -56,6 +55,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shibi.orbis.R
 import com.shibi.orbis.settings.BrowserSettings
 import com.shibi.orbis.settings.DarkMode
+import com.shibi.orbis.ui.OrbisTopAppBar
 import com.shibi.orbis.ui.theme.AppTheme
 import com.shibi.orbis.ui.theme.AppThemes
 import com.shibi.orbis.ui.theme.isDark
@@ -97,7 +97,7 @@ internal fun ThemePickerContent(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
+            OrbisTopAppBar(
                 title = { Text(stringResource(R.string.themes_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
