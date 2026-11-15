@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -31,7 +32,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draganddrop.DragAndDropEvent
@@ -85,8 +88,18 @@ internal fun TabStrip(
 ) {
     val motionEnabled = rememberMotionEnabled()
     val listState = rememberLazyListState()
-    val selectedIndex = tabs.indexOfFirst { it.selected }
-    LaunchedEffect(selectedIndex) { if (selectedIndex >= 0) listState.animateScrollToItem(selectedIndex) }
+    val selectedId = tabs.firstOrNull { it.selected }?.id
+    val selectedIndex by rememberUpdatedState(tabs.indexOfFirst { it.selected })
+    // Keyed on the id: closing a tab before the current one shifts its index but is not a reason to scroll.
+    LaunchedEffect(selectedId) {
+        if (selectedId == null || listState.showsWhole(selectedId)) return@LaunchedEffect
+        listState.animateScrollToItem(selectedIndex)
+        // When the strip cannot put the chip first (it all fits, or the chip is near the end), animateScrollToItem
+        // ends by snapping to a position the list refuses. That clears the lazy row's record of where its chips are,
+        // so the next close or open would jump instead of animate. Measuring once more where the row now is
+        // records them again; it does not move anything.
+        listState.scrollToItem(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+    }
     val drop = rememberLinkDropTarget(onDropOpen)
     Row(
         modifier
@@ -118,6 +131,16 @@ internal fun TabStrip(
         }
         IconButton(onClick = onNewTab) { Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.tabs_new)) }
     }
+}
+
+/**
+ * Whether the chip of tab [id] is on screen in full. Scrolling to a chip that already is would only snap the row,
+ * which stops the slide of the chips in a close happening at the same time.
+ */
+private fun LazyListState.showsWhole(id: Long): Boolean {
+    val info = layoutInfo
+    val item = info.visibleItemsInfo.firstOrNull { it.key == id } ?: return false
+    return item.offset >= info.viewportStartOffset && item.offset + item.size <= info.viewportEndOffset
 }
 
 @OptIn(ExperimentalFoundationApi::class)
