@@ -46,11 +46,11 @@ class AutoDesktopNoticeMarksTest {
         val b = m.newTab("https://b.example/")!!
         // b is selected; a is in the background.
         created[0].kept.tryEmit(Unit)
-        assertEquals(setOf(a), m.autoDesktopNotices.value)
+        assertEquals(setOf(a), m.autoDesktopNotices.value.keys)
         created[1].kept.tryEmit(Unit)
-        assertEquals(setOf(a, b), m.autoDesktopNotices.value)
+        assertEquals(setOf(a, b), m.autoDesktopNotices.value.keys)
         m.clearAutoDesktopNotice(a)
-        assertEquals(setOf(b), m.autoDesktopNotices.value)
+        assertEquals(setOf(b), m.autoDesktopNotices.value.keys)
     }
 
     @Test
@@ -61,10 +61,10 @@ class AutoDesktopNoticeMarksTest {
         created[0].kept.tryEmit(Unit)
         created[1].kept.tryEmit(Unit)
         m.close(a)
-        assertEquals(setOf(b), m.autoDesktopNotices.value)
+        assertEquals(setOf(b), m.autoDesktopNotices.value.keys)
         // A closed session's late event is not collected any more.
         created[0].kept.tryEmit(Unit)
-        assertEquals(setOf(b), m.autoDesktopNotices.value)
+        assertEquals(setOf(b), m.autoDesktopNotices.value.keys)
     }
 
     @Test
@@ -89,6 +89,57 @@ class AutoDesktopNoticeMarksTest {
         assertTrue(m.autoDesktopNotices.value.isEmpty())
         m.openSelected()
         created.single().kept.tryEmit(Unit)
-        assertEquals(setOf(first), m.autoDesktopNotices.value)
+        assertEquals(setOf(first), m.autoDesktopNotices.value.keys)
+    }
+
+    private fun markedOn(url: String): Pair<TabManager, NoticeSession> {
+        val m = manager()
+        m.newTab(url)
+        val s = created[0]
+        s.stateFlow.value = s.stateFlow.value.copy(url = url)
+        s.kept.tryEmit(Unit)
+        return m to s
+    }
+
+    private fun NoticeSession.goTo(url: String) {
+        stateFlow.value = stateFlow.value.copy(url = url)
+    }
+
+    @Test
+    fun theMarkIsTheUrlOfThePageWhenTheEventArrived() {
+        val (m, _) = markedOn("https://a.test/x")
+        assertEquals(mapOf(m.selected.value.id to "https://a.test/x"), m.autoDesktopNotices.value)
+    }
+
+    @Test
+    fun committingAnotherHostDropsTheMark() {
+        val (m, s) = markedOn("https://a.test/x")
+        s.goTo("https://b.test/")
+        assertTrue(m.autoDesktopNotices.value.isEmpty())
+    }
+
+    @Test
+    fun anotherPathOnTheSameHostKeepsTheOriginalUrl() {
+        val (m, s) = markedOn("https://a.test/x")
+        s.goTo("https://a.test/other")
+        assertEquals(mapOf(m.selected.value.id to "https://a.test/x"), m.autoDesktopNotices.value)
+    }
+
+    @Test
+    fun aBlankUrlKeepsTheMarkAndAboutBlankDropsIt() {
+        val (m, s) = markedOn("https://a.test/x")
+        s.goTo("")
+        assertEquals(1, m.autoDesktopNotices.value.size)
+        s.goTo("about:blank")
+        assertTrue(m.autoDesktopNotices.value.isEmpty())
+    }
+
+    @Test
+    fun anEventOnANonWebPageSetsNoMark() {
+        val m = manager()
+        m.newTab("https://a.test/x")
+        created[0].goTo("about:blank")
+        created[0].kept.tryEmit(Unit)
+        assertTrue(m.autoDesktopNotices.value.isEmpty())
     }
 }

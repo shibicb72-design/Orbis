@@ -64,6 +64,7 @@ import com.shibi.orbis.engine.SessionInit
 import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.engine.hostOfUrl
 import com.shibi.orbis.engine.isWebUrl
+import com.shibi.orbis.engine.noticeStillApplies
 import com.shibi.orbis.tabs.PendingDownload
 import com.shibi.orbis.ui.browser.AutoDesktopNotice
 import com.shibi.orbis.ui.browser.DownloadConfirmDialog
@@ -228,8 +229,13 @@ private fun CustomTabScreen(
     // A Custom Tab has one session: collect "desktop site kept automatically" here (it is not replayed; the page only
     // loads once the view is attached, after this effect has started).
     val snackbars = remember { SnackbarHostState() }
-    var autoMarked by remember { mutableStateOf(false) }
-    LaunchedEffect(session) { session.autoDesktopKept.collect { autoMarked = true } }
+    var autoMarkUrl by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(session) {
+        session.autoDesktopKept.collect { autoMarkUrl = session.state.value.url.takeIf { isWebUrl(it) } }
+    }
+    LaunchedEffect(state.url) {
+        autoMarkUrl?.let { if (!noticeStillApplies(it, state.url)) autoMarkUrl = null }
+    }
     // The app's color when it gave one; its content color is chosen for contrast (never dark on dark).
     val bar = toolbarArgb?.let { Color(it) } ?: MaterialTheme.colorScheme.surfaceContainer
     val onBar = toolbarArgb?.let { Color(contentColorOn(it)) } ?: MaterialTheme.colorScheme.onSurface
@@ -302,10 +308,9 @@ private fun CustomTabScreen(
     }
     AutoDesktopNotice(
         tabId = 0L,
-        marked = autoMarked && !state.fullScreen,
-        currentUrl = state.url,
+        noticeUrl = if (state.fullScreen) null else autoMarkUrl,
         snackbars = snackbars,
-        onShown = { autoMarked = false },
+        onShown = { autoMarkUrl = null },
         onUndo = { noticeUrl -> undoAutoDesktop(app.container.browserSettings, session, noticeUrl, state.url) },
     )
     prompt?.let { SitePromptDialog(it) }
