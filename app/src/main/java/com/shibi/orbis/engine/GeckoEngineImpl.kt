@@ -697,18 +697,25 @@ private class GeckoBrowserSession(
 
     /** Opens the session (never called for a popup child: Gecko opens that one) and applies [init]. */
     fun start(init: SessionInit) {
-        // Reopening a restored tab is not a visit.
-        visits.suppress(init.fallbackUrl)
         session.open(runtime)
         attachReader()
         attachCast()
         attachCompat()
+        restorePage(init.restoredState, init.fallbackUrl)
+    }
+
+    /**
+     * Brings a page back into the open session: from [blob] (a [savedState] string) when it parses, else by loading
+     * [fallbackUrl] (http/https only). The path for a restored tab ([start]) and for a page whose content process died.
+     */
+    private fun restorePage(blob: String?, fallbackUrl: String?) {
+        // Reopening a restored tab is not a visit.
+        visits.suppress(fallbackUrl)
         // A restored page reloads without passing onLoadRequest: its site's choices are applied first.
-        init.fallbackUrl?.takeIf { isWebUrl(it) }?.let { url ->
+        fallbackUrl?.takeIf { isWebUrl(it) }?.let { url ->
             applyTrackingProtection(!trackingExceptions.isExcepted(url, isPrivate))
             applySitePolicy(url)
         }
-        val blob = init.restoredState
         var restored = false
         if (blob != null) {
             val parsed = runCatching { GeckoSession.SessionState.fromString(blob) }.getOrNull()
@@ -718,8 +725,7 @@ private class GeckoBrowserSession(
             debugLog.log("GeckoSession", if (restored) "restored from saved state" else "saved state unusable")
         }
         // The fallback is only for "no state" or "state would not parse"; it never runs on top of a restore.
-        val fallback = init.fallbackUrl
-        if (!restored && fallback != null && isWebUrl(fallback)) session.loadUri(fallback)
+        if (!restored && fallbackUrl != null && isWebUrl(fallbackUrl)) session.loadUri(fallbackUrl)
     }
 
     private fun originHost(): String = hostOfUrl(_state.value.url).orEmpty()
@@ -737,6 +743,8 @@ private class GeckoBrowserSession(
                 perms: List<GeckoSession.PermissionDelegate.ContentPermission>,
                 hasUserGesture: Boolean,
             ) {
+                // The blank document of a session reopened after its content process died is not a page.
+                if (url != null && _state.value.isFreshSessionBlank(url)) return
                 // The only writer of state.url. A load that is pending, halted or failed leaves the OLD page
                 // displayed, so showing its address would let a hostile page spoof the address bar.
                 if (url != null) {
@@ -896,6 +904,8 @@ private class GeckoBrowserSession(
     private fun progressDelegate() =
         object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) {
+                // The blank document of a session reopened after its content process died is not a page.
+                if (_state.value.isFreshSessionBlank(url)) return
                 // History can land here without onLoadRequest. An import forces script; a website reached from
                 // an import gets its site policy back. Either reloads once when the setting had to change.
                 applyImportedScript(url, reloadIfChanged = true)
@@ -909,7 +919,7 @@ private class GeckoBrowserSession(
                 reconciler.onPageStart()
                 applyActive()
                 // url is not written here (see onLocationChange).
-                _state.update { it.afterPageStart() }
+                _state.update { it.afterPageStart(url) }
                 _state.update { it.copy(readerable = false) }
                 visits.onPageStart()
             }
@@ -942,6 +952,9 @@ private class GeckoBrowserSession(
             }
 
             override fun onSessionStateChange(session: GeckoSession, sessionState: GeckoSession.SessionState) {
+                // The reopened blank session must not replace the lost page's state: it is what gets restored, and
+                // what the tab layer persists meanwhile.
+                if (_state.value.contentGone) return
                 // Kept as the engine object; serialised only when somebody asks (see savedState()).
                 latestSessionState = sessionState
                 host?.onSessionStateChanged(this@GeckoBrowserSession)
@@ -1447,8 +1460,10 @@ private class GeckoBrowserSession(
     private fun contentDelegate() =
         object : GeckoSession.ContentDelegate {
             override fun onTitleChange(session: GeckoSession, title: String?) {
+                // The reopened blank session's title is not the lost page's (see SessionState.contentGone).
+                if (_state.value.contentGone) return
                 titleForUrl = _state.value.url
-                _state.update { it.copy(title = title) }
+                _state.update { it.afterTitleChange(title) }
                 visits.onTitleChange(title)?.let { host?.onVisitTitle(this@GeckoBrowserSession, it.url, it.title) }
             }
 
@@ -1499,22 +1514,81 @@ private class GeckoBrowserSession(
                 debugLog.log("GeckoSession", "download offered")
             }
 
-            override fun onCrash(session: GeckoSession) = onContentProcessGone("crash")
+            override fun onCrash(session: GeckoSession) = onContentProcessGone(ContentProcessGone.CRASH)
 
-            override fun onKill(session: GeckoSession) = onContentProcessGone("kill")
+            override fun onKill(session: GeckoSession) = onContentProcessGone(ContentProcessGone.KILL)
         }
 
-    private fun onContentProcessGone(kind: String) {
+    /** When this session last restored its page by itself after a kill (elapsedRealtime), for the loop guard. */
+    private var lastAutoRestoreAt: Long? = null
+
+    /** A kill took the page while the tab was not shown: [setActive] true restores it. */
+    private var restoreWhenShown = false
+
+    private fun onContentProcessGone(kind: ContentProcessGone) {
         if (closed) return
-        debugLog.log("GeckoSession", "content process $kind; reopening session without reload")
+        val now = SystemClock.elapsedRealtime()
+        val action =
+            processGoneAction(
+                kind = kind,
+                isActive = wantActive,
+                millisSinceLastRestore = lastAutoRestoreAt?.let { now - it },
+                hasSavedState = latestSessionState != null,
+                hasUrl = isWebUrl(_state.value.url),
+            )
         // Prompts belong to the dead page; answer them so no GeckoResult is left waiting on a gone process.
         queue.dismissAll()
-        // The session is closed after a crash/kill; reopen it but do not reload (avoids crash loops).
-        // `crashed` is per session: a background tab keeps it until it is selected, then its banner shows.
+        activeMedia = null
+        // Before the reopen: the blank document it reports must find the state already marked (isFreshSessionBlank).
+        // url, title and the saved state keep naming the lost page. A crash never reloads by itself (crash loops).
+        _state.update { it.afterContentProcessGone(showBanner = action == ProcessGoneAction.BANNER) }
         runCatching { session.open(runtime) }
-            .onFailure { debugLog.log("GeckoSession", "reopen after $kind failed: ${it.javaClass.simpleName}") }
+            .onFailure { debugLog.log("GeckoSession", "reopen after ${kind.logName} failed: ${it.javaClass.simpleName}") }
         applyActive()
-        _state.update { it.afterContentProcessGone() }
+        // No URL or host in the log.
+        when (action) {
+            ProcessGoneAction.RESTORE_NOW -> restoreAfterKill()
+            ProcessGoneAction.RESTORE_WHEN_SHOWN -> {
+                restoreWhenShown = true
+                debugLog.log("GeckoSession", "content process kill; restore on show")
+            }
+            ProcessGoneAction.BANNER -> {
+                restoreWhenShown = false
+                debugLog.log(
+                    "GeckoSession",
+                    if (kind == ContentProcessGone.KILL) "content process kill; banner (repeat)" else "content process crash; banner",
+                )
+            }
+            ProcessGoneAction.NOTHING -> {
+                userNavigation()
+                debugLog.log("GeckoSession", "content process ${kind.logName}; no page to restore")
+            }
+        }
+    }
+
+    private val ContentProcessGone.logName: String
+        get() = if (this == ContentProcessGone.KILL) "kill" else "crash"
+
+    /** The automatic restore after a kill; counted by the loop guard. */
+    private fun restoreAfterKill() {
+        lastAutoRestoreAt = SystemClock.elapsedRealtime()
+        restoreLostPage()
+        debugLog.log("GeckoSession", "content process kill; restored")
+    }
+
+    /** Brings back the page whose content process died: its last saved state, else its last committed web address. */
+    private fun restoreLostPage() {
+        restoreWhenShown = false
+        val blob = latestSessionState?.toString()
+        val url = _state.value.url.takeIf { isWebUrl(it) }
+        _state.update { it.afterRestoreRequested() }
+        restorePage(blob, url)
+    }
+
+    /** A navigation the user asked for replaces a lost page: no restore is left waiting for it. */
+    private fun userNavigation() {
+        restoreWhenShown = false
+        _state.update { it.afterNavigationRequested() }
     }
 
     // ---- prompts -------------------------------------------------------------------------------------------
@@ -2294,6 +2368,7 @@ private class GeckoBrowserSession(
             debugLog.log("GeckoSession", "refused non-web load")
             return
         }
+        userNavigation()
         applyTrackingProtection(!trackingExceptions.isExcepted(url, isPrivate))
         applySitePolicy(url)
         session.loadUri(url)
@@ -2304,12 +2379,15 @@ private class GeckoBrowserSession(
     override fun loadExtensionPage(url: String) {
         // Only an installed extension's own page (its settings), opened from Orbis's UI; never a page's request.
         if (closed || !url.startsWith("moz-extension://")) return
+        userNavigation()
         pendingExtensionLoad = true
         session.loadUri(url)
     }
 
     override fun showStartPage() {
         if (closed) return
+        // The start page is about:blank: after a lost page it must count as a page again (see isFreshSessionBlank).
+        userNavigation()
         session.loadUri("about:blank")
         debugLog.log("GeckoSession", "start page requested")
     }
@@ -2320,6 +2398,7 @@ private class GeckoBrowserSession(
             debugLog.log("GeckoSession", "refused non-web external load")
             return
         }
+        userNavigation()
         applyTrackingProtection(!trackingExceptions.isExcepted(url, isPrivate))
         applySitePolicy(url)
         session.load(
@@ -2357,6 +2436,7 @@ private class GeckoBrowserSession(
             debugLog.log("GeckoSession", "refused import load")
             return
         }
+        userNavigation()
         applyImportedScript(url)
         session.loadUri(url)
         debugLog.log("GeckoSession", "import load requested")
@@ -2469,17 +2549,19 @@ private class GeckoBrowserSession(
 
     override fun reload() {
         if (closed) return
-        val current = _state.value
-        // After a crash there is no page to reload; load the last committed url. After a halted load,
-        // retry the url that failed. Otherwise a plain reload.
-        val target =
-            when {
-                current.crashed && current.url.isNotBlank() -> current.url
-                current.loadFailed -> current.failedUrl
-                else -> null
+        val target = reloadTarget(_state.value)
+        when (target) {
+            // The banner's Reload and the toolbar's are this one call.
+            ReloadTarget.LostPage -> restoreLostPage()
+            is ReloadTarget.Load -> {
+                _state.update { it.copy(loadFailed = false, failedUrl = null, httpsOnlyBlocked = false) }
+                session.loadUri(target.url)
             }
-        _state.update { it.copy(crashed = false, loadFailed = false, failedUrl = null, httpsOnlyBlocked = false) }
-        if (target != null) session.loadUri(target) else session.reload()
+            ReloadTarget.Page -> {
+                _state.update { it.copy(loadFailed = false, failedUrl = null, httpsOnlyBlocked = false) }
+                session.reload()
+            }
+        }
     }
 
     override fun stop() {
@@ -2640,6 +2722,8 @@ private class GeckoBrowserSession(
     override fun setActive(active: Boolean) {
         wantActive = active
         applyActive()
+        // A page lost to a kill while the tab was in the background comes back when the tab is shown.
+        if (active && !closed && restoreWhenShown) restoreAfterKill()
     }
 
     override fun savedState(): String? = latestSessionState?.toString()
