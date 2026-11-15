@@ -155,6 +155,7 @@ import com.shibi.orbis.engine.isWebUrl
 import com.shibi.orbis.engine.pickerMimeTypes
 import com.shibi.orbis.tabs.TabEvent
 import com.shibi.orbis.ui.OrbisEmptyState
+import com.shibi.orbis.ui.chromeWindowInsets
 import com.shibi.orbis.ui.theme.rememberMotionEnabled
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -311,6 +312,7 @@ internal fun BrowserFrame(
     showStrip: Boolean,
     toolbarBottom: Boolean,
     modifier: Modifier,
+    insets: WindowInsets = chromeWindowInsets(avoidCutout = showChrome),
     tabStrip: @Composable () -> Unit,
     chrome: @Composable () -> Unit,
     page: @Composable BoxScope.() -> Unit,
@@ -318,7 +320,7 @@ internal fun BrowserFrame(
     Column(
         Modifier
             .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.systemBars)
+            .windowInsetsPadding(insets)
             .imePadding()
             .then(modifier),
     ) {
