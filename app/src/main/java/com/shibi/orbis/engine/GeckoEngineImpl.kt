@@ -609,6 +609,9 @@ private class GeckoBrowserSession(
     /** Host of the last committed web page, lowercase; null for a non-web page. */
     private var committedHost: String? = null
 
+    /** This tab's back/forward list as Orbis saw it commit; Gecko reports its own too late (see [prepareHistoryStep]). */
+    private val tabHistory = TabHistoryTracker()
+
     private val autoDesktop = AutoDesktopRetry()
     private val _autoDesktopKept = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val autoDesktopKept: SharedFlow<Unit> = _autoDesktopKept.asSharedFlow()
@@ -668,6 +671,7 @@ private class GeckoBrowserSession(
             object : GeckoSession.HistoryDelegate {
                 override fun onHistoryStateChange(session: GeckoSession, historyList: GeckoSession.HistoryDelegate.HistoryList) {
                     history = historyList
+                    tabHistory.onReportedList(historyList.map { it.uri }, historyList.currentIndex, _state.value.url)
                 }
             }
         session.contentBlockingDelegate =
@@ -711,6 +715,8 @@ private class GeckoBrowserSession(
     private fun restorePage(blob: String?, fallbackUrl: String?) {
         // Reopening a restored tab is not a visit.
         visits.suppress(fallbackUrl)
+        // A restored state brings back its back/forward list, which Orbis has not seen.
+        if (blob != null) tabHistory.onRestoreStarted()
         // A restored page reloads without passing onLoadRequest: its site's choices are applied first.
         fallbackUrl?.takeIf { isWebUrl(it) }?.let { url ->
             applyTrackingProtection(!trackingExceptions.isExcepted(url, isPrivate))
@@ -753,6 +759,7 @@ private class GeckoBrowserSession(
                     // Back/Forward commits without onLoadRequest. An import forces JavaScript (HTML off, PDF on).
                     // Forward back to a website has to restore that site's setting, or it stays off.
                     applyImportedScript(url, reloadIfChanged = true)
+                    tabHistory.onCommit(url)
                     onCommitForDesktop(url)
                 }
                 // Gecko hands every web page its tracking permission record; ALLOW means a stored (normal) exception.
@@ -894,6 +901,7 @@ private class GeckoBrowserSession(
                     "load error code=0x${error.code.toString(16)} category=0x${error.category.toString(16)}",
                 )
                 visits.onLoadError()
+                tabHistory.onLoadEndedWithoutCommit()
                 _state.update { it.afterLoadError(uri?.takeIf { failed -> isWebUrl(failed) }) }
                 if (error.code == WebRequestError.ERROR_HTTPS_ONLY) _state.update { it.copy(httpsOnlyBlocked = true) }
                 // Null halts the load; the shell shows its own banner.
@@ -1539,6 +1547,8 @@ private class GeckoBrowserSession(
         // Prompts belong to the dead page; answer them so no GeckoResult is left waiting on a gone process.
         queue.dismissAll()
         activeMedia = null
+        // The reopened session's list is not the tab's; the restored page brings the real one back.
+        tabHistory.onRestoreStarted()
         // Before the reopen: the blank document it reports must find the state already marked (isFreshSessionBlank).
         // url, title and the saved state keep naming the lost page. A crash never reloads by itself (crash loops).
         _state.update { it.afterContentProcessGone(showBanner = action == ProcessGoneAction.BANNER) }
@@ -1814,7 +1824,10 @@ private class GeckoBrowserSession(
                         // dismissAll on crash/close). Anything but "leave" means the navigation that raised it will not
                         // happen; no load event follows, so the address bar is told through the state. Gecko dismissing
                         // it because the navigation went ahead anyway also lands here: a harmless early signal.
-                        if (leave != true) _state.update { it.afterNavigationCancelled() }
+                        if (leave != true) {
+                            tabHistory.onLoadEndedWithoutCommit()
+                            _state.update { it.afterNavigationCancelled() }
+                        }
                         complete(
                             result,
                             when (leave) {
@@ -1829,8 +1842,16 @@ private class GeckoBrowserSession(
             override fun onRepostConfirmPrompt(
                 session: GeckoSession,
                 prompt: GeckoSession.PromptDelegate.RepostConfirmPrompt,
-            ): GeckoResult<Response> =
-                present(prompt) { result ->
+            ): GeckoResult<Response> {
+                // The desktop-mode correction reloaded a form result (Back onto it is served from the cache, so its
+                // mode was never sent). Resending a form the user did not resend is not Orbis's call: the reload is
+                // cancelled, the page stays as shown, and the next navigation gets the right mode.
+                if (desktopReloadPending) {
+                    desktopReloadPending = false
+                    debugLog.log("GeckoSession", "desktop mode correction skipped for a form result")
+                    return GeckoResult.fromValue(prompt.confirm(AllowOrDeny.DENY))
+                }
+                return present(prompt) { result ->
                     SitePrompt.Repost(originHost()) { resend ->
                         complete(
                             result,
@@ -1842,6 +1863,7 @@ private class GeckoBrowserSession(
                         )
                     }
                 }
+            }
 
             override fun onFilePrompt(
                 session: GeckoSession,
@@ -2519,15 +2541,17 @@ private class GeckoBrowserSession(
 
     /**
      * Back and Forward skip onLoadRequest, so the entry's site gets its desktop mode here, before its request is sent.
-     * Only when Gecko's back/forward list is current: it is reported several seconds after a navigation (measured on
-     * GeckoView 160), and until then the commit fallback ([onCommitForDesktop]) corrects the mode with one reload.
+     * Gecko honours a mode set here in both directions, desktop to mobile too (measured on GeckoView 160). The entry
+     * comes from [tabHistory]: Gecko reports its own list only after about 10 s without a navigation. When the list is
+     * unknown (a restored tab), Gecko's list is used if it is current; otherwise the commit fallback
+     * ([onCommitForDesktop]) corrects the mode with one reload.
      */
     private fun prepareHistoryStep(offset: Int) {
-        val list = history ?: return
-        val uri = historyStepTarget(list.map { it.uri }, list.currentIndex, offset, _state.value.url)
+        val list = history
+        val uri = historyStepUri(tabHistory, offset, list?.map { it.uri }, list?.currentIndex ?: -1, _state.value.url)
         if (uri == null) {
-            // Gecko reports the list late; a stale one would name the wrong entry. No URL in the log.
-            debugLog.log("GeckoSession", "history step: list not current; desktop mode left to the commit")
+            // No URL in the log.
+            debugLog.log("GeckoSession", "history step: entry not known; desktop mode left to the commit")
             return
         }
         desktopWantedFor(uri)?.let { applyDesktop(it) }
@@ -2536,6 +2560,7 @@ private class GeckoBrowserSession(
     override fun goBack(): Boolean {
         if (closed || !_state.value.canGoBack) return false
         prepareHistoryStep(-1)
+        tabHistory.onStepStarted(-1)
         session.goBack()
         return true
     }
@@ -2543,6 +2568,7 @@ private class GeckoBrowserSession(
     override fun goForward(): Boolean {
         if (closed || !_state.value.canGoForward) return false
         prepareHistoryStep(1)
+        tabHistory.onStepStarted(1)
         session.goForward()
         return true
     }
