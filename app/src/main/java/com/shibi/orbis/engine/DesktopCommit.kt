@@ -66,14 +66,20 @@ internal fun historyStepUri(
  *   cannot be told apart and is counted too. Those entries share the page's host, so the count does not change the
  *   desktop mode a step targets unless replaceState was used.
  * - A commit of the address already current (a reload) changes nothing.
- * - Unknown: a restored tab, and a tab whose content process died, until Gecko reports a current list again. A restore
- *   ignores Gecko's lists until the restored page's first commit. A step that ends without a commit, or commits another
- *   address than its entry, also makes the list unknown.
+ * - A restore (a saved tab, or a page whose content process died) makes the list unknown, ignores the reopened
+ *   session's blank document and Gecko's lists, and decides at the restored page's first commit: the list held before
+ *   the restore, else the list Gecko last reported, if its current entry is that page; otherwise unknown until Gecko
+ *   reports a current list. A step that ends without a commit, or commits another address than its entry, also makes
+ *   the list unknown.
  *
  * Gecko's list replaces this one whenever it is current: its current entry is the page shown and no step is on its way.
  * A wrong list costs what an unknown one does: the commit fallback corrects the mode with one reload.
  */
 internal class TabHistoryTracker {
+    private class Snapshot(val uris: List<String>, val index: Int) {
+        fun shows(url: String): Boolean = uris.getOrNull(index) == url
+    }
+
     /** Null while the list is unknown. */
     private var uris: List<String>? = emptyList()
     private var index = -1
@@ -83,6 +89,12 @@ internal class TabHistoryTracker {
 
     /** The content process died or a saved tab is being restored: Gecko's lists are not taken until the page commits. */
     private var awaitingRestoredCommit = false
+
+    /** The list before the restore; checked against the restored page's first commit. */
+    private var heldForRestore: Snapshot? = null
+
+    /** The list Gecko last reported outside a restore. */
+    private var lastReported: Snapshot? = null
 
     val isKnown: Boolean get() = uris != null
 
@@ -104,6 +116,12 @@ internal class TabHistoryTracker {
             // The reopened session's blank document is not the restored page.
             if (url == "about:blank") return
             awaitingRestoredCommit = false
+            val known = listOfNotNull(heldForRestore, lastReported).firstOrNull { it.shows(url) }
+            heldForRestore = null
+            if (known != null) {
+                uris = known.uris
+                index = known.index
+            }
             return
         }
         val list = uris ?: return
@@ -120,8 +138,11 @@ internal class TabHistoryTracker {
 
     /** Gecko reported its list ([reported], current entry [reportedIndex]); taken when it shows [committedUrl]. */
     fun onReportedList(reported: List<String>, reportedIndex: Int, committedUrl: String) {
-        if (awaitingRestoredCommit || pendingStep != 0) return
-        if (reported.getOrNull(reportedIndex) != committedUrl) return
+        // During a restore the list may be the reopened session's blank one.
+        if (awaitingRestoredCommit) return
+        val report = Snapshot(reported, reportedIndex)
+        lastReported = report
+        if (pendingStep != 0 || !report.shows(committedUrl)) return
         uris = reported
         index = reportedIndex
     }
@@ -133,6 +154,8 @@ internal class TabHistoryTracker {
 
     /** The content process died, or a saved tab is restored: the list is unknown until the page is back. */
     fun onRestoreStarted() {
+        // Called again when the restore itself starts: the list held at the first call stays.
+        uris?.let { heldForRestore = Snapshot(it, index) }
         forget()
         awaitingRestoredCommit = true
     }

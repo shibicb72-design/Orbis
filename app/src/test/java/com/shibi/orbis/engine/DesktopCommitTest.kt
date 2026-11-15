@@ -204,17 +204,45 @@ class DesktopCommitTest {
     @Test
     fun theContentProcessGoingResetsTheListAndIgnoresTheReopenedBlankDocument() {
         val h = tracked(a, b)
+        // The kill, then the restore itself: both reset.
+        h.onRestoreStarted()
         h.onRestoreStarted()
         assertEquals(false, h.isKnown)
+        assertEquals(null, h.stepTarget(-1))
         // The reopened session's blank document and its list are not the tab's.
         h.onCommit("about:blank")
-        h.onReportedList(listOf("about:blank"), reportedIndex = 0, committedUrl = b)
         h.onReportedList(listOf("about:blank"), reportedIndex = 0, committedUrl = "about:blank")
         assertEquals(false, h.isKnown)
-        // The restored page's first commit ends the wait; Gecko's restored list, once current, is taken.
+        // The restored page's first commit is the page the list held: that list is back.
         h.onCommit(b)
+        assertEquals(true, h.isKnown)
+        assertEquals(a, h.stepTarget(-1))
+        h.onStepStarted(-1)
+        h.onCommit(a)
+        assertEquals(b, h.stepTarget(1))
+    }
+
+    @Test
+    fun aRestoreThatBringsBackAnotherPageStaysUnknownUntilGeckoReports() {
+        val h = tracked(a, b)
+        h.onRestoreStarted()
+        // The saved state was older than the last commit: another page came back.
+        h.onCommit(c)
         assertEquals(false, h.isKnown)
-        h.onReportedList(listOf(a, b), reportedIndex = 1, committedUrl = b)
+        h.onReportedList(listOf(a, c), reportedIndex = 1, committedUrl = c)
+        assertEquals(a, h.stepTarget(-1))
+    }
+
+    @Test
+    fun aRestoreUsesGeckosLastListWhenOrbisHadNone() {
+        // Unknown before the kill (a restored tab), but Gecko had reported: that list, when it shows the restored page.
+        val h = TabHistoryTracker()
+        h.onRestoreStarted()
+        h.onCommit(b)
+        h.onReportedList(listOf(a, b), reportedIndex = 1, committedUrl = a) // stale at the time: not taken
+        assertEquals(false, h.isKnown)
+        h.onRestoreStarted()
+        h.onCommit(b)
         assertEquals(a, h.stepTarget(-1))
     }
 
