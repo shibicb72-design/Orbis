@@ -144,7 +144,15 @@ data class SessionState(
     val canGoBack: Boolean = false,
     val canGoForward: Boolean = false,
     val loadFailed: Boolean = false,
+    /** The banner case: the content process died and the page comes back only when the user reloads. */
     val crashed: Boolean = false,
+    /**
+     * The content process died and the session holds only the blank document Gecko reopens it with. [url] and [title]
+     * still name the page that was lost; the reopened session's about:blank does not replace them (see
+     * [isFreshSessionBlank]). Cleared when the page is restored or the user navigates. With [crashed] false the page is
+     * restored automatically when the tab is shown.
+     */
+    val contentGone: Boolean = false,
     val failedUrl: String? = null,
     val desktopMode: Boolean = false,
     val findResult: FindResult? = null,
@@ -207,19 +215,32 @@ data class SessionState(
 // the address bar's tests drive the same transitions the engine applies. url is written only by afterLocationChange
 // (onLocationChange).
 
-internal fun SessionState.afterPageStart(): SessionState =
-    copy(
-        isLoading = true,
-        progress = 0,
-        loadFailed = false,
-        failedUrl = null,
-        httpsOnlyBlocked = false,
-        secure = false,
-        secureBeforeLoad = secure || secureBeforeLoad,
-        crashed = false,
-        findResult = null,
-        loadStarts = loadStarts + 1,
-    )
+/**
+ * After the content process died, Gecko reopens the session on about:blank and reports that document like a page.
+ * Those events describe no page of the user's: they must not clear [SessionState.crashed], replace the lost page's
+ * address or title, or count as a visit. Every callback that carries a URL checks this first and drops the event.
+ */
+internal fun SessionState.isFreshSessionBlank(url: String): Boolean = contentGone && url == "about:blank"
+
+/** [url] is the address Gecko reports for the start; null only in tests that do not care about it. */
+internal fun SessionState.afterPageStart(url: String? = null): SessionState =
+    if (url != null && isFreshSessionBlank(url)) {
+        this
+    } else {
+        copy(
+            isLoading = true,
+            progress = 0,
+            loadFailed = false,
+            failedUrl = null,
+            httpsOnlyBlocked = false,
+            secure = false,
+            secureBeforeLoad = secure || secureBeforeLoad,
+            crashed = false,
+            contentGone = false,
+            findResult = null,
+            loadStarts = loadStarts + 1,
+        )
+    }
 
 internal fun SessionState.afterPageStop(success: Boolean): SessionState =
     copy(
@@ -235,8 +256,14 @@ internal fun SessionState.afterPageStop(success: Boolean): SessionState =
  * change); another origin, or a page that is not http(s), shows no lock until Gecko reports for it.
  */
 internal fun SessionState.afterLocationChange(url: String): SessionState {
+    if (isFreshSessionBlank(url)) return this
     val origin = siteOriginOf(url)
-    return copy(url = url, secure = secure && origin != null && origin == siteOriginOf(this.url), secureBeforeLoad = false)
+    return copy(
+        url = url,
+        secure = secure && origin != null && origin == siteOriginOf(this.url),
+        secureBeforeLoad = false,
+        contentGone = false,
+    )
 }
 
 /**
@@ -262,9 +289,17 @@ internal fun SessionState.afterLoadError(failedUrl: String?): SessionState =
         loadErrors = loadErrors + 1,
     )
 
-internal fun SessionState.afterContentProcessGone(): SessionState =
+/** The page's title. The reopened blank session's title is not the lost page's and is dropped (see [contentGone]). */
+internal fun SessionState.afterTitleChange(title: String?): SessionState = if (contentGone) this else copy(title = title)
+
+/**
+ * The content process died; the session was reopened on about:blank. [showBanner] true: the page waits for the user's
+ * Reload (a crash, or a kill inside the loop guard). False: it is restored without the user, now or when shown.
+ */
+internal fun SessionState.afterContentProcessGone(showBanner: Boolean = true): SessionState =
     copy(
-        crashed = true,
+        crashed = showBanner,
+        contentGone = true,
         isLoading = false,
         secure = false,
         secureBeforeLoad = false,
@@ -278,6 +313,78 @@ internal fun SessionState.afterContentProcessGone(): SessionState =
         loadEnds = loadEnds + 1,
         navigationsCancelled = navigationsCancelled + 1,
     )
+
+/**
+ * The lost page is being restored (automatically or by Reload). The banner goes; [SessionState.contentGone] stays
+ * until the restored page starts, because the reopened session's blank document may still report after this.
+ */
+internal fun SessionState.afterRestoreRequested(): SessionState = if (!crashed) this else copy(crashed = false)
+
+/**
+ * The user asked for a navigation (an address, Home, a shared file): whatever was lost is given up, and the next
+ * page's events count, including about:blank for the start page.
+ */
+internal fun SessionState.afterNavigationRequested(): SessionState =
+    if (!contentGone && !crashed) this else copy(crashed = false, contentGone = false)
+
+enum class ContentProcessGone { KILL, CRASH }
+
+enum class ProcessGoneAction {
+    /** Restore the page now: the tab is on screen. */
+    RESTORE_NOW,
+
+    /** Restore when the tab is next shown, so tabs reclaimed together do not all load at once. */
+    RESTORE_WHEN_SHOWN,
+
+    /** Show the banner; the page comes back with the user's Reload. */
+    BANNER,
+
+    /** Nothing to bring back (a blank tab): the tab shows its start page. */
+    NOTHING,
+}
+
+/** At most one automatic restore per session in this window; another kill inside it shows the banner. */
+const val AUTO_RESTORE_WINDOW_MILLIS = 30_000L
+
+/**
+ * What to do after the content process died. A crash never reloads by itself (the page may crash it again). A kill is
+ * the system reclaiming memory, so the page is restored, unless the last automatic restore was less than
+ * [AUTO_RESTORE_WINDOW_MILLIS] ago ([millisSinceLastRestore] null: never). [hasSavedState] and [hasUrl] say whether
+ * there is a saved session state or a committed web address to restore from.
+ */
+internal fun processGoneAction(
+    kind: ContentProcessGone,
+    isActive: Boolean,
+    millisSinceLastRestore: Long?,
+    hasSavedState: Boolean,
+    hasUrl: Boolean,
+): ProcessGoneAction =
+    when {
+        !hasSavedState && !hasUrl -> ProcessGoneAction.NOTHING
+        kind == ContentProcessGone.CRASH -> ProcessGoneAction.BANNER
+        millisSinceLastRestore != null && millisSinceLastRestore < AUTO_RESTORE_WINDOW_MILLIS -> ProcessGoneAction.BANNER
+        isActive -> ProcessGoneAction.RESTORE_NOW
+        else -> ProcessGoneAction.RESTORE_WHEN_SHOWN
+    }
+
+/** What Reload (the toolbar's or the banner's) does. */
+sealed interface ReloadTarget {
+    /** The content process died: bring the page back from its saved state, else its last committed address. */
+    data object LostPage : ReloadTarget
+
+    /** A load was halted: retry the address that failed. */
+    data class Load(val url: String) : ReloadTarget
+
+    /** A plain reload of the page on screen. */
+    data object Page : ReloadTarget
+}
+
+internal fun reloadTarget(state: SessionState): ReloadTarget =
+    when {
+        state.contentGone || state.crashed -> ReloadTarget.LostPage
+        state.loadFailed && state.failedUrl != null -> ReloadTarget.Load(state.failedUrl)
+        else -> ReloadTarget.Page
+    }
 
 /** A beforeunload prompt ended without the user leaving: the navigation that raised it will not happen. */
 internal fun SessionState.afterNavigationCancelled(): SessionState = copy(navigationsCancelled = navigationsCancelled + 1)
