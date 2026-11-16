@@ -203,6 +203,48 @@ class CastMediaTest {
         assertEquals("v=dQw4w9WgXcQ&t=12", youtubeDialBody("dQw4w9WgXcQ", 12.4))
     }
 
+    private fun withSources(poster: String, vararg src: String): String {
+        val sources = src.joinToString(",") { """{"src":${JSONObject.quote(it)},"type":"video/mp4"}""" }
+        return """{"tag":"video","sources":[$sources],"currentTime":0,"duration":0,"paused":true,"poster":${JSONObject.quote(poster)},"title":""}"""
+    }
+
+    @Test
+    fun publicPageWithOnlyALocalSourceCastsNothing() {
+        val json = probe("t", "https://example.com/p", listOf(withSources("", "http://192.168.1.1/a.mp4")))
+        assertEquals(CastTarget.None, classifyPageMedia("https://example.com/p", json))
+    }
+
+    @Test
+    fun publicPageSkipsTheLocalSourceAndKeepsThePublicOne() {
+        val json =
+            probe(
+                "t",
+                "https://example.com/p",
+                listOf(withSources("", "http://192.168.1.1/a.mp4", "https://cdn.example.com/b.mp4")),
+            )
+        val target = classifyPageMedia("https://example.com/p", json) as CastTarget.Direct
+        assertEquals("https://cdn.example.com/b.mp4", target.media.url)
+    }
+
+    @Test
+    fun localPosterOnAPublicPageIsDropped() {
+        val json =
+            probe(
+                "t",
+                "https://example.com/p",
+                listOf(withSources("http://192.168.1.1/p.jpg", "https://cdn.example.com/b.mp4")),
+            )
+        val target = classifyPageMedia("https://example.com/p", json) as CastTarget.Direct
+        assertNull(target.media.poster)
+    }
+
+    @Test
+    fun localPageKeepsItsLocalSource() {
+        val json = probe("t", "http://192.168.1.10/", listOf(withSources("", "http://192.168.1.1/a.mp4")))
+        val target = classifyPageMedia("http://192.168.1.10/", json) as CastTarget.Direct
+        assertEquals("http://192.168.1.1/a.mp4", target.media.url)
+    }
+
     private fun probe(title: String, href: String, media: List<String>): String =
         """{"title":${JSONObject.quote(title)},"poster":"","href":${JSONObject.quote(href)},"media":[${media.joinToString()}]}"""
 
