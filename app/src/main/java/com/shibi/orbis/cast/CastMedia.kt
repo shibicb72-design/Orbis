@@ -145,7 +145,10 @@ internal fun classifyPageMedia(pageUrl: String, probeJson: String?): CastTarget 
     val elements = probe?.elements.orEmpty()
     val ranked =
         elements.mapNotNull { element ->
-            val classified = element.sources.mapNotNull { classifyMediaUrl(it.url, it.mime) }
+            val classified =
+                element.sources
+                    .filter { castAddressAllowed(it.url, page) }
+                    .mapNotNull { classifyMediaUrl(it.url, it.mime) }
             // A progressive file (mp4, webm, mp3) is what most DLNA renderers can play. HLS or DASH is the fallback.
             val source = classified.firstOrNull { !isAdaptiveMime(it.mime) } ?: classified.firstOrNull() ?: return@mapNotNull null
             element to source
@@ -158,7 +161,7 @@ internal fun classifyPageMedia(pageUrl: String, probeJson: String?): CastTarget 
         )
     val (element, source) = ranked.firstOrNull() ?: return CastTarget.None
     val title = cleanTitle(element.title.ifBlank { probe?.title.orEmpty() }.ifBlank { fileTitle(source.url) })
-    val poster = httpUrl(element.poster) ?: httpUrl(probe?.poster)
+    val poster = (httpUrl(element.poster) ?: httpUrl(probe?.poster))?.takeIf { castAddressAllowed(it, page) }
     val video = if (element.tag == "audio") false else source.video
     return CastTarget.Direct(
         CastableMedia(
