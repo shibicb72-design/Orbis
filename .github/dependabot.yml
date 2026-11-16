@@ -1,0 +1,53 @@
+# Dependabot version updates for Orbis.
+#
+# What this does: once a week Dependabot checks the Gradle libraries (gradle/libs.versions.toml) and the
+# GitHub Actions in .github/workflows for newer releases and opens a small number of pull requests.
+# They are notices for us to act on. Nobody merges one without Shibi's OK.
+#
+# Expected CI failure: gradle/verification-metadata.xml holds a SHA-256 for every artifact, so a pull request
+# that only bumps a version FAILS CI until someone regenerates the metadata with
+#     ./gradlew --write-verification-metadata sha256 help
+# and the new hashes are reviewed.
+#
+# Ignored on purpose (they move by their own process):
+#   - org.mozilla.geckoview:* and org.mozilla.components:* are a matching pair, watched by the Engine
+#     currency workflow.
+#   - org.libtorrent4j:* is tied to our native build (torrent-natives.yml).
+#
+# GitHub Actions stay pinned to full commit SHAs with the release in a comment; Dependabot keeps that form.
+version: 2
+updates:
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: "org.mozilla.geckoview:*"
+      - dependency-name: "org.mozilla.components:*"
+      - dependency-name: "org.libtorrent4j:*"
+    # A library that matches several groups goes to the first one listed, so compose comes before androidx.
+    groups:
+      compose:
+        patterns:
+          - "androidx.compose*"
+      androidx:
+        patterns:
+          - "androidx.*"
+      build-tooling:
+        patterns:
+          - "org.jetbrains.kotlin.*"
+          - "org.jetbrains.kotlin:*"
+          - "com.android.*"
+      test-libraries:
+        patterns:
+          - "junit:*"
+          - "org.robolectric:*"
+          - "org.json:*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
