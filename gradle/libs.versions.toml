@@ -1,18 +1,18 @@
 [versions]
 agp = "9.4.0"
 kotlin = "2.4.10"
-coreKtx = "1.18.0"
+coreKtx = "1.19.1"
 activityCompose = "1.13.0"
 lifecycle = "2.10.0"
 composeBom = "2026.06.01"
-navigation = "2.9.8"
+navigation = "2.10.2"
 coroutines = "1.11.0"
 junit = "4.13.2"
 # Real org.json for unit tests: the android.jar stubs throw "not mocked" on the JVM.
 orgJson = "20240303"
 # Real Compose on the JVM (test only): Robolectric runs the Compose UI test rule without a device.
 robolectric = "4.17"
-appcompat = "1.7.1"
+appcompat = "1.8.0"
 # Matching stable pair from maven.mozilla.org (2026-11-11):
 # browser-engine-gecko 160.0 -> geckoview-omni 160.0.20261104181552
 mozillaAc = "160.0"
