@@ -72,11 +72,14 @@ android {
 
     buildTypes {
         debug {
+            // Own application id: a debug install (public debug key) sits beside the Play app with its own data.
+            applicationIdSuffix = ".debug"
             signingConfig = signingConfigs.getByName("debug")
         }
         // Own application id, so destructive browser-data tests get their own app data and never touch com.shibi.orbis.
         create("fixture") {
             initWith(getByName("debug"))
+            // Replaces the inherited ".debug": the id is com.shibi.orbis.fixture, not com.shibi.orbis.debug.fixture.
             applicationIdSuffix = ".fixture"
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("debug")
