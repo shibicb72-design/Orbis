@@ -1,8 +1,11 @@
 name: Engine currency
 
-# Goes red when GeckoView/AC, libtorrent4j or the bundled OpenSSL is behind its newest release
-# (scripts/check_engine_currency.py). A red run reaches the owner through GitHub's failed-workflow mail.
-# Only official release sources are contacted: maven.mozilla.org, repo1.maven.org, github.com/openssl.
+# Goes red when GeckoView/AC, libtorrent4j, the bundled OpenSSL or the bundled libtorrent is behind its newest
+# release (scripts/check_engine_currency.py). A libtorrent gap the owner accepted is named in
+# scripts/engine-currency-accepted.env and does not turn the run red. A red run reaches the owner through GitHub's
+# failed-workflow mail.
+# Only official release sources are contacted: maven.mozilla.org, repo1.maven.org, github.com/openssl,
+# github.com/arvidn/libtorrent.
 on:
   schedule:
     - cron: "23 5 * * *"

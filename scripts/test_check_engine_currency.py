@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Offline tests for check_engine_currency.py (no network). Run: python3 -I scripts/test_check_engine_currency.py"""
 
+import contextlib
 import http.client
 import importlib.util
+import io
 import os
 import tempfile
 import unittest
@@ -279,6 +281,131 @@ class NetworkGuardTest(unittest.TestCase):
         finally:
             cec.urllib.request.build_opener = original
         self.assertIn("BadStatusLine", str(caught.exception))
+
+
+LIBTORRENT_LS_REMOTE = """aaaa\trefs/tags/v1.2.20
+aaaa\trefs/tags/libtorrent-2.0-RC2
+aaaa\trefs/tags/2.0
+aaaa\trefs/tags/v2.0.9
+aaaa\trefs/tags/v2.0.15
+aaaa\trefs/tags/v2.1.0-rc1
+aaaa\trefs/tags/v2.1.0
+bbbb\trefs/tags/v2.1.0^{}
+aaaa\trefs/tags/v2.1.1
+aaaa\trefs/tags/v2.1.2
+cccc\trefs/tags/v2.1.2^{}
+aaaa\trefs/tags/v2.1.3-rc1
+dddd\trefs/tags/v2.1.9^{}
+"""
+
+ACCEPTED_LINE = "LIBTORRENT_ACCEPTED_NEWEST=2.1.2\n"
+LT_NEWEST = dict(CURRENT, libtorrent="2.1.2")
+LT_COLUMNS = "%-21s current %%-22s newest %%-22s " % "libtorrent"
+
+
+class LibtorrentTagTest(unittest.TestCase):
+    def test_highest_ignores_other_lines_rcs_and_peeled(self):
+        self.assertEqual(cec.libtorrent_highest(LIBTORRENT_LS_REMOTE), "2.1.2")
+
+    def test_numeric_not_lexical(self):
+        self.assertEqual(cec.libtorrent_highest("a\trefs/tags/v2.1.9\na\trefs/tags/v2.1.10\n"), "2.1.10")
+
+    def test_no_tags(self):
+        self.assertIsNone(cec.libtorrent_highest(""))
+        self.assertIsNone(cec.libtorrent_highest("a\trefs/tags/v1.2.20\na\trefs/tags/v2.1.0-rc1\n"))
+
+    def test_unknown_2x_tag_shape_is_an_error(self):
+        for odd in ("v2.2.0-beta1", "v2.1", "v2.1.2.1", "v2.1.2-final", "v2.1.x"):
+            with self.assertRaises(cec.CheckError, msg=odd):
+                cec.libtorrent_highest(LIBTORRENT_LS_REMOTE + "eeee\trefs/tags/%s\n" % odd)
+
+
+class LibtorrentRuleTest(unittest.TestCase):
+    def run_main(self, accepted, newest, current="2.1.0.0", extra=(), others=None):
+        env = "LIBTORRENT4J_VERSION=2.1.0-39\nOPENSSL_VERSION=3.5.5\nOPENSSL_SERIES=3.5\nLIBTORRENT_VERSION=%s\n" % current
+        newest_all = dict(LT_NEWEST, libtorrent=newest, **(others or {}))
+        with tempfile.TemporaryDirectory() as root:
+            write_repo(root, env)
+            if accepted is not None:
+                os.makedirs(os.path.join(root, "scripts"))
+                with open(os.path.join(root, cec.ACCEPTED_FILE), "w", encoding="utf-8") as f:
+                    f.write("# comment\n" + accepted)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = cec.main(["--repo-root", root, *extra], newest_fn=lambda series: newest_all)
+        return out.getvalue().splitlines(), code
+
+    def lt_line(self, lines):
+        return [line for line in lines if line.startswith("libtorrent ")][0]
+
+    def test_accepted_gap_is_reported_and_green(self):
+        lines, code = self.run_main(ACCEPTED_LINE, "2.1.2")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.lt_line(lines), LT_COLUMNS % ("2.1.0.0", "2.1.2") + "BEHIND (accepted up to 2.1.2)")
+
+    def test_mutation_without_accepted_line_is_red(self):
+        for accepted in (None, "# only a comment\n", "LIBTORRENT_ACCEPTED_NEWEST=\n"):
+            lines, code = self.run_main(accepted, "2.1.2")
+            self.assertEqual(code, 1, accepted)
+            self.assertEqual(self.lt_line(lines), LT_COLUMNS % ("2.1.0.0", "2.1.2") + "BEHIND")
+
+    def test_newest_newer_than_accepted_is_red(self):
+        lines, code = self.run_main(ACCEPTED_LINE, "2.1.3")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.lt_line(lines), LT_COLUMNS % ("2.1.0.0", "2.1.3") + "BEHIND")
+
+    def test_current_equals_newest_is_ok_without_accepted(self):
+        lines, code = self.run_main(None, "2.1.2", current="2.1.2")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.lt_line(lines), LT_COLUMNS % ("2.1.2", "2.1.2") + "OK")
+
+    def test_stale_accepted_gap_is_could_not_check(self):
+        lines, code = self.run_main(ACCEPTED_LINE, "2.1.2", current="2.1.2")
+        self.assertEqual(code, 2)
+        self.assertEqual(self.lt_line(lines), LT_COLUMNS % ("2.1.2", "2.1.2")
+                         + "OK, but the accepted gap is stale: remove LIBTORRENT_ACCEPTED_NEWEST")
+
+    def test_accepted_newer_than_newest_is_could_not_check(self):
+        lines, code = self.run_main("LIBTORRENT_ACCEPTED_NEWEST=2.1.5\n", "2.1.2")
+        self.assertEqual(code, 2)
+        self.assertEqual(self.lt_line(lines), LT_COLUMNS % ("2.1.0.0", "2.1.2")
+                         + "accepted gap is newer than the newest release found: could not check")
+
+    def test_current_ahead_is_could_not_check(self):
+        lines, code = self.run_main(None, "2.1.2", current="2.1.3")
+        self.assertEqual(code, 2)
+        self.assertEqual(self.lt_line(lines), LT_COLUMNS % ("2.1.3", "2.1.2")
+                         + "AHEAD of the newest release found: could not check")
+
+    def test_2_1_0_0_equals_2_1_0(self):
+        lines, code = self.run_main(None, "2.1.0")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.lt_line(lines), LT_COLUMNS % ("2.1.0.0", "2.1.0") + "OK")
+
+    def test_warn_only_libtorrent(self):
+        lines, code = self.run_main(None, "2.1.2", extra=("--warn-only", "libtorrent"))
+        self.assertEqual(code, 0)
+        self.assertEqual(self.lt_line(lines), LT_COLUMNS % ("2.1.0.0", "2.1.2") + "BEHIND (warning only)")
+
+    def test_warn_only_does_not_hide_a_stale_gap(self):
+        _, code = self.run_main(ACCEPTED_LINE, "2.1.2", current="2.1.2", extra=("--warn-only", "libtorrent"))
+        self.assertEqual(code, 2)
+
+    def test_missing_libtorrent_version_is_could_not_check(self):
+        with tempfile.TemporaryDirectory() as root:
+            write_repo(root, "LIBTORRENT4J_VERSION=2.1.0-39\nOPENSSL_VERSION=3.5.5\nOPENSSL_SERIES=3.5\n")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = cec.main(["--repo-root", root], newest_fn=lambda series: LT_NEWEST)
+        self.assertEqual(code, 2)
+        self.assertEqual(out.getvalue(), "could not check: missing version entries: LIBTORRENT_VERSION\n")
+
+    def test_other_components_still_fail_beside_an_accepted_gap(self):
+        lines, code = self.run_main(ACCEPTED_LINE, "2.1.2", others={"openssl": "3.5.9"})
+        self.assertEqual(code, 1)
+        self.assertEqual(len(lines), 5)
+        self.assertTrue(lines[3].startswith("openssl") and lines[3].endswith(" BEHIND"))
+        self.assertTrue(lines[4].endswith("BEHIND (accepted up to 2.1.2)"))
 
 
 if __name__ == "__main__":

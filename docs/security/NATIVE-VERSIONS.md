@@ -3,6 +3,12 @@
 The machine-readable record is `native/libtorrent4j/versions.env`. `scripts/check_engine_currency.py` reads it, and
 the daily Engine currency workflow compares it with the newest upstream releases. Change both files together.
 
+libtorrent is behind upstream on purpose (see "Upstream state"). The newest upstream libtorrent release the owner has
+accepted as a known gap is recorded in `scripts/engine-currency-accepted.env` (`LIBTORRENT_ACCEPTED_NEWEST`). While
+upstream's newest release equals it, the workflow reports `BEHIND (accepted up to <version>)` and stays green; a newer
+upstream release turns it red. Only the owner's decision changes that file, and the workflow exits 2 until the line is
+removed once the bundled libtorrent is current.
+
 ## What is bundled today (security PR 7)
 
 | Component | Version | Source |
