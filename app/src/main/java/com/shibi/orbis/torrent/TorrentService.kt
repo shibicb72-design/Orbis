@@ -171,7 +171,7 @@ class TorrentService : Service() {
         /**
          * Debug builds only (BuildConfig.DEBUG): adds [EXTRA_MAGNET] as a normal torrent (a private one with
          * `--ez private true`), for emulator checks. The service is not exported, so the shell needs root (`adb root`,
-         * then `adb shell am start-foreground-service -n com.shibi.orbis/.torrent.TorrentService -a <this> --es magnet '<uri>'`).
+         * then `adb shell am start-foreground-service -n com.shibi.orbis.debug/com.shibi.orbis.torrent.TorrentService -a <this> --es magnet '<uri>'`).
          */
         const val ACTION_DEBUG_ADD = "com.shibi.orbis.torrent.DEBUG_ADD"
         const val EXTRA_ID = "id"
