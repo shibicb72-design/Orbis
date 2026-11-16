@@ -10,16 +10,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -66,6 +65,7 @@ import com.shibi.orbis.engine.hostOfUrl
 import com.shibi.orbis.engine.isWebUrl
 import com.shibi.orbis.engine.noticeStillApplies
 import com.shibi.orbis.tabs.PendingDownload
+import com.shibi.orbis.ui.chromeWindowInsets
 import com.shibi.orbis.ui.browser.AutoDesktopNotice
 import com.shibi.orbis.ui.browser.DownloadConfirmDialog
 import com.shibi.orbis.ui.browser.undoAutoDesktop
@@ -240,7 +240,13 @@ private fun CustomTabScreen(
     val bar = toolbarArgb?.let { Color(it) } ?: MaterialTheme.colorScheme.surfaceContainer
     val onBar = toolbarArgb?.let { Color(contentColorOn(it)) } ?: MaterialTheme.colorScheme.onSurface
     BackHandler { if (!session.goBack()) onClose() }
-    Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars)) {
+    // The background is drawn before the padding, so the strips beside a cutout show the theme's colour.
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .windowInsetsPadding(chromeWindowInsets(avoidCutout = !state.fullScreen)),
+    ) {
         Surface(color = bar, contentColor = onBar) {
             Column {
                 Row(Modifier.fillMaxWidth().height(56.dp).padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
