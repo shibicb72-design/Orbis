@@ -9,13 +9,24 @@ Components and sources (official release sources only, HTTPS only):
   * libtorrent4j (`libtorrent4j`): the highest release version on Maven Central.
   * OpenSSL (`OPENSSL_VERSION` in native/libtorrent4j/versions.env): the highest
     `openssl-<series>.<patch>` tag on github.com/openssl/openssl.
+  * libtorrent (`LIBTORRENT_VERSION` in native/libtorrent4j/versions.env): the highest stable `v2.N.N` tag on
+    github.com/arvidn/libtorrent (`v2.1.0-rc1`-style tags are ignored; any other `v2.*` tag shape is an error;
+    tags that do not start with `v2.`, such as `libtorrent-2.0-RC2`, are other lines and ignored). 2.1.0.0 and
+    2.1.0 are equal. libtorrent is behind on purpose (the bundled libtorrent4j bindings do not fit a newer one),
+    so scripts/engine-currency-accepted.env may name the newest version the owner has accepted as a known gap:
+      current behind, newest == accepted   -> "BEHIND (accepted up to X)", exit code unchanged
+      current behind, newest newer, or no accepted value -> "BEHIND", exit 1
+      current == newest, accepted still set -> exit 2 (the accepted gap is stale: remove it)
+      accepted newer than newest, or current ahead -> exit 2
+    Only the owner changes that file (see docs/security/NATIVE-VERSIONS.md).
 
 Prints one line per component and exits:
   0  everything is current (or only --warn-only components are behind)
-  1  a component is behind
+  1  a component is behind (a libtorrent gap named in the accepted file does not count)
   2  could not check (network failure, unexpected response, missing pom entry, a libtorrent4j version of an
-     unknown shape, the two libtorrent4j records disagreeing, or a current version newer than the newest
-     one found, which means the check is looking at the wrong source)
+     unknown shape, an unknown libtorrent v2.* tag shape, the two libtorrent4j records disagreeing, a stale or
+     too-new accepted libtorrent gap, or a current version newer than the newest one found, which means the
+     check is looking at the wrong source)
 
 A failed check is not a pass: exit 2 also fails the job.
 
@@ -45,14 +56,19 @@ AC_POM_URL = (
 )
 LIBTORRENT4J_METADATA_URL = "https://repo1.maven.org/maven2/org/libtorrent4j/libtorrent4j/maven-metadata.xml"
 OPENSSL_REPO_URL = "https://github.com/openssl/openssl"
+LIBTORRENT_REPO_URL = "https://github.com/arvidn/libtorrent"
+ACCEPTED_FILE = os.path.join("scripts", "engine-currency-accepted.env")
 
-COMPONENTS = ("browser-engine-gecko", "geckoview-omni", "libtorrent4j", "openssl")
+COMPONENTS = ("browser-engine-gecko", "geckoview-omni", "libtorrent4j", "openssl", "libtorrent")
 
 STABLE_AC = re.compile(r"^\d+\.\d+(\.\d+)?$")
 # 2.1.0-39 and 1.2.0.22 are releases; 2.0.4-22-RC1, 2.0.0-beta-1 and 1.2.0.21-alpha1 are not.
 STABLE_LIBTORRENT4J = re.compile(r"^\d+(\.\d+)+(-\d+)?$")
 # Pre-release shapes seen on Maven Central: 1.2.0.1-beta1, 1.2.0.20-RC1, 1.3.0-alpha-1, 2.0.4-22-RC1.
 PRERELEASE_LIBTORRENT4J = re.compile(r"^\d+(\.\d+)+(-\d+)?-(RC|alpha|beta)-?\d+$")
+# libtorrent tags: v2.1.2 is a release; v2.1.0-rc1 is not. Anything else starting v2. is an unknown shape.
+STABLE_LIBTORRENT_TAG = re.compile(r"^refs/tags/v(2\.\d+\.\d+)$")
+PRERELEASE_LIBTORRENT_TAG = re.compile(r"^refs/tags/v2\.\d+\.\d+-(rc|RC)\d+$")
 
 
 class CheckError(Exception):
@@ -129,11 +145,64 @@ def openssl_highest_patch(ls_remote_output, series):
     return "%s.%d" % (series, max(patches))
 
 
+def libtorrent_highest(ls_remote_output):
+    """Highest stable 'v2.N.N' tag of `git ls-remote --tags` output as '2.N.N', or None.
+
+    Peeled ^{} lines, release candidates and tags not starting with v2. are ignored.
+    Any other v2.* tag shape is a CheckError: the check cannot tell whether it is a release.
+    """
+    versions, unknown = [], []
+    for line in ls_remote_output.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 2:
+            continue
+        ref = parts[1].strip()
+        if ref.endswith("^{}") or not ref.startswith("refs/tags/v2."):
+            continue
+        match = STABLE_LIBTORRENT_TAG.match(ref)
+        if match:
+            versions.append(match.group(1))
+        elif not PRERELEASE_LIBTORRENT_TAG.match(ref):
+            unknown.append(ref[len("refs/tags/"):])
+    if unknown:
+        raise CheckError("libtorrent tag of an unknown shape: %s" % ", ".join(unknown[:5]))
+    if not versions:
+        return None
+    return max(versions, key=version_key)
+
+
 def is_behind(current, newest):
     return version_key(newest) > version_key(current)
 
 
+def libtorrent_key(version):
+    """version_key without trailing zero parts, so that 2.1.0.0 and 2.1.0 are equal."""
+    parts = list(version_key(version))
+    while parts and parts[-1] == 0:
+        parts.pop()
+    return tuple(parts)
+
+
 OK, BEHIND, AHEAD = "ok", "behind", "ahead"
+# libtorrent only: behind with the gap accepted; current == newest with an accepted value left over;
+# an accepted value newer than the newest release found.
+ACCEPTED, STALE, ACCEPTED_AHEAD = "accepted", "stale", "accepted-ahead"
+
+
+def libtorrent_state(current, newest, accepted):
+    cur, new = libtorrent_key(current), libtorrent_key(newest)
+    if cur > new:
+        return AHEAD
+    if cur == new:
+        return STALE if accepted else OK
+    if not accepted:
+        return BEHIND
+    acc = libtorrent_key(accepted)
+    if acc == new:
+        return ACCEPTED
+    if acc > new:
+        return ACCEPTED_AHEAD
+    return BEHIND
 
 
 def toml_versions(toml_text):
@@ -165,19 +234,26 @@ def env_values(env_text):
     return values
 
 
-def evaluate(current, newest):
+def evaluate(current, newest, accepted=None):
     """Compare current and newest versions.
 
-    current: browser-engine-gecko, geckoview-omni, libtorrent4j, openssl.
+    current: browser-engine-gecko, geckoview-omni, libtorrent4j, openssl and (added by main) libtorrent;
+    a component missing from current is skipped.
     newest: the same keys; geckoview-omni is the version newest browser-engine-gecko pins.
-    Returns a list of (component, current, newest, state) in COMPONENTS order; state is OK, BEHIND or AHEAD.
+    accepted: the owner-accepted newest libtorrent version, or None; it only affects libtorrent.
+    Returns a list of (component, current, newest, state) in COMPONENTS order; state is OK, BEHIND or AHEAD
+    (libtorrent also ACCEPTED, STALE, ACCEPTED_AHEAD).
     AHEAD (current newer than the newest found) applies to the ordered components only.
     """
     rows = []
     for name in COMPONENTS:
+        if name not in current:
+            continue
         if name == "geckoview-omni":
             # Must equal the exact build the newest AC pins; there is no ordering to trust.
             state = BEHIND if current[name] != newest[name] else OK
+        elif name == "libtorrent":
+            state = libtorrent_state(current[name], newest[name], accepted)
         elif is_behind(current[name], newest[name]):
             state = BEHIND
         elif is_behind(newest[name], current[name]):
@@ -195,6 +271,15 @@ def report(rows, warn_only):
     for name, cur, new, state in rows:
         if state == OK:
             status = "OK"
+        elif state == ACCEPTED:
+            # The gap is the owner's decision; the exit code is not changed.
+            status = "BEHIND (accepted up to %s)" % new
+        elif state == STALE:
+            status = "OK, but the accepted gap is stale: remove LIBTORRENT_ACCEPTED_NEWEST"
+            code = 2
+        elif state == ACCEPTED_AHEAD:
+            status = "accepted gap is newer than the newest release found: could not check"
+            code = 2
         elif state == AHEAD:
             # Ahead of the source means the check is reading the wrong thing; warn-only does not hide it.
             status = "AHEAD of the newest release found: could not check"
@@ -234,11 +319,11 @@ def fetch(url):
     return body.decode("utf-8", errors="replace")
 
 
-def ls_remote_tags(series):
+def ls_remote_tags(repo_url, pattern):
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     try:
         result = subprocess.run(
-            ["git", "ls-remote", "--tags", OPENSSL_REPO_URL, "openssl-%s.*" % series],
+            ["git", "ls-remote", "--tags", repo_url, pattern],
             capture_output=True, timeout=TIMEOUT_SECONDS, env=env, check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -260,10 +345,15 @@ def newest_versions(openssl_series):
     lt4j = newest_libtorrent4j(metadata_versions(fetch(LIBTORRENT4J_METADATA_URL)))
     if lt4j is None:
         raise CheckError("no release libtorrent4j version in the metadata")
-    openssl = openssl_highest_patch(ls_remote_tags(openssl_series), openssl_series)
+    openssl = openssl_highest_patch(ls_remote_tags(OPENSSL_REPO_URL, "openssl-%s.*" % openssl_series),
+                                    openssl_series)
     if openssl is None:
         raise CheckError("no openssl-%s.N tag found" % openssl_series)
-    return {"browser-engine-gecko": ac, "geckoview-omni": omni, "libtorrent4j": lt4j, "openssl": openssl}
+    libtorrent = libtorrent_highest(ls_remote_tags(LIBTORRENT_REPO_URL, "v2.*"))
+    if libtorrent is None:
+        raise CheckError("no stable libtorrent v2.N.N tag found")
+    return {"browser-engine-gecko": ac, "geckoview-omni": omni, "libtorrent4j": lt4j, "openssl": openssl,
+            "libtorrent": libtorrent}
 
 
 def current_versions(repo_root):
@@ -297,8 +387,38 @@ def current_versions(repo_root):
     return wanted, env["OPENSSL_SERIES"]
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description="Fail when GeckoView, libtorrent4j or OpenSSL is behind.")
+def _read_text(repo_root, rel, required=True):
+    try:
+        with open(os.path.join(repo_root, rel), encoding="utf-8") as handle:
+            return handle.read()
+    except FileNotFoundError as exc:
+        if not required:
+            return ""
+        raise CheckError("cannot read %s" % rel) from exc
+    except OSError as exc:
+        raise CheckError("cannot read %s" % rel) from exc
+
+
+def libtorrent_inputs(repo_root):
+    """(LIBTORRENT_VERSION, accepted newest or None) from versions.env and the accepted-gap file."""
+    env = env_values(_read_text(repo_root, os.path.join("native", "libtorrent4j", "versions.env")))
+    accepted = env_values(_read_text(repo_root, ACCEPTED_FILE, required=False)).get("LIBTORRENT_ACCEPTED_NEWEST")
+    if not env.get("LIBTORRENT_VERSION"):
+        raise CheckError("missing version entries: LIBTORRENT_VERSION")
+    for label, value in (("LIBTORRENT_VERSION", env["LIBTORRENT_VERSION"]), ("LIBTORRENT_ACCEPTED_NEWEST", accepted)):
+        if value:
+            try:
+                version_key(value)
+            except ValueError as exc:
+                raise CheckError("unreadable %s" % label) from exc
+    return env["LIBTORRENT_VERSION"], accepted or None
+
+
+def main(argv=None, newest_fn=None):
+    newest_fn = newest_fn or newest_versions
+    parser = argparse.ArgumentParser(
+        description="Fail when GeckoView, libtorrent4j, OpenSSL or libtorrent is behind "
+                    "(a libtorrent gap named in scripts/engine-currency-accepted.env is reported, not failed).")
     parser.add_argument("--warn-only", action="append", default=[], choices=COMPONENTS,
                         help="report this component as a warning instead of failing (repeatable)")
     parser.add_argument("--repo-root", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -306,12 +426,13 @@ def main(argv=None):
 
     try:
         current, series = current_versions(args.repo_root)
-        newest = newest_versions(series)
+        current["libtorrent"], accepted = libtorrent_inputs(args.repo_root)
+        newest = newest_fn(series)
     except CheckError as exc:
         print("could not check: %s" % exc)
         return 2
 
-    lines, code = report(evaluate(current, newest), set(args.warn_only))
+    lines, code = report(evaluate(current, newest, accepted), set(args.warn_only))
     for line in lines:
         print(line)
     return code
