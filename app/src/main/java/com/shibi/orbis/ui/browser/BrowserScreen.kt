@@ -8,10 +8,7 @@ import com.shibi.orbis.engine.SitePermissionKind
 import com.shibi.orbis.engine.siteOriginOf
 import com.shibi.orbis.ui.passwords.copySensitive
 import com.shibi.orbis.passwords.generatePassword
-import androidx.compose.material.icons.filled.Password
-import androidx.compose.material.icons.filled.Tune
 import com.shibi.orbis.engine.normalizeAddressInput
-import androidx.compose.material.icons.filled.VerticalSplit
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -37,14 +34,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.shibi.orbis.clear.ClearState
 import com.shibi.orbis.home.topSites
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.material.icons.outlined.StarBorder
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.QrCodeScanner
-import androidx.compose.material.icons.automirrored.filled.AddToHomeScreen
-import androidx.compose.material.icons.filled.Print
-import androidx.compose.material.icons.filled.Translate
-import androidx.compose.material.icons.automirrored.filled.Article
 import com.shibi.orbis.engine.ReaderArticle
 import com.shibi.orbis.engine.pullTriggersRefresh
 import com.shibi.orbis.engine.PullToRefreshSource
@@ -58,8 +47,6 @@ import kotlinx.coroutines.delay
 import androidx.compose.runtime.produceState
 import com.shibi.orbis.ui.home.StartPage
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
@@ -81,20 +68,13 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Cast
-import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -645,38 +625,32 @@ private fun BrowserContent(
                         IconButton(onClick = { menuOpen = true }) {
                             Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.menu_more))
                         }
-                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                            // Grouped: Page (this page) / Tabs / Library / Settings. The most used page actions are one
-                            // row of icons, so the whole menu fits on a phone screen.
-                            val forwardDescription = stringResource(R.string.forward)
-                            val homeDescription = stringResource(R.string.menu_home)
-                            val bookmarkDescription =
-                                stringResource(if (bookmarked) R.string.menu_remove_bookmark else R.string.menu_add_bookmark)
-                            val shareDescription = stringResource(R.string.menu_share)
-                            Row(
-                                Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceEvenly,
-                            ) {
-                                IconButton(
-                                    enabled = session != null,
-                                    onClick = {
-                                        menuOpen = false
+                        val menuPage = MenuPageState(
+                            hasSession = session != null,
+                            sessionIsPrivate = session?.isPrivate,
+                            url = state.url,
+                            isLoading = state.isLoading,
+                            canGoForward = state.canGoForward,
+                            readerable = state.readerable,
+                            translation = state.translation,
+                            desktopMode = state.desktopMode,
+                            bookmarked = bookmarked,
+                            casting = casting != null,
+                        )
+                        BrowserMenu(
+                            expanded = menuOpen,
+                            onDismiss = { menuOpen = false },
+                            order = DEFAULT_MENU_ORDER,
+                            stateOf = { action, window -> menuItemState(action, menuPage, window) },
+                            onAction = { action ->
+                                when (action) {
+                                    MenuAction.HOME -> {
                                         // Custom homepage, or the start page (a blank tab).
                                         val homepage = container.browserSettings.homepage.value
                                         if (homepage == null) session?.showStartPage() else session?.loadUrl(homepage)
-                                    },
-                                ) { Icon(Icons.Filled.Home, contentDescription = homeDescription) }
-                                IconButton(
-                                    enabled = state.canGoForward,
-                                    onClick = {
-                                        menuOpen = false
-                                        session?.goForward()
-                                    },
-                                ) { Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = forwardDescription) }
-                                IconButton(
-                                    enabled = isWebUrl(state.url),
-                                    onClick = {
-                                        menuOpen = false
+                                    }
+                                    MenuAction.FORWARD -> session?.goForward()
+                                    MenuAction.BOOKMARK_PAGE -> {
                                         val url = state.url
                                         if (bookmarked) {
                                             container.bookmarks.removeByUrl(url)
@@ -692,186 +666,49 @@ private fun BrowserContent(
                                                 }
                                             Toast.makeText(androidContext, message, Toast.LENGTH_SHORT).show()
                                         }
-                                    },
-                                ) {
-                                    Icon(
-                                        if (bookmarked) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                                        contentDescription = bookmarkDescription,
-                                    )
+                                    }
+                                    MenuAction.SHARE -> pageShare.onShare(session, state.url, state.title)
+                                    MenuAction.PRINT -> session?.printPage()
+                                    MenuAction.CAST -> castOpen = true
+                                    MenuAction.ADD_TO_HOME ->
+                                        if (!requestHomeShortcut(androidContext, state.url, state.title.orEmpty())) {
+                                            Toast.makeText(androidContext, R.string.add_home_unavailable, Toast.LENGTH_SHORT).show()
+                                        }
+                                    MenuAction.SPLIT_SCREEN -> openInSplitScreen(androidContext, state.url)
+                                    MenuAction.READER ->
+                                        session?.requestReaderArticle { article ->
+                                            if (article != null) readerArticle = article else Toast.makeText(androidContext, R.string.reader_unavailable, Toast.LENGTH_SHORT).show()
+                                        }
+                                    MenuAction.TRANSLATE -> {
+                                        val translated = state.translation?.translatedTo?.isNotEmpty() == true
+                                        if (translated) {
+                                            session?.showOriginal()
+                                        } else {
+                                            Toast.makeText(androidContext, R.string.translate_started, Toast.LENGTH_SHORT).show()
+                                            session?.translatePage { ok -> if (!ok) Toast.makeText(androidContext, R.string.translate_failed, Toast.LENGTH_LONG).show() }
+                                        }
+                                    }
+                                    MenuAction.FIND -> findOpen = true
+                                    MenuAction.SITE_SETTINGS -> showSiteSettings = true
+                                    MenuAction.GENERATE_PASSWORD -> generatedPassword = generatePassword()
+                                    MenuAction.DESKTOP_SITE -> {
+                                        val s = session
+                                        if (s != null) {
+                                            // Remembered for the site (see Settings > Always request desktop site).
+                                            if (isWebUrl(state.url)) container.browserSettings.rememberDesktop(state.url, !state.desktopMode, s.isPrivate)
+                                            s.setDesktopMode(!state.desktopMode)
+                                        }
+                                    }
+                                    MenuAction.NEW_TAB -> focusAddressFor = tabs.newTab()
+                                    MenuAction.NEW_PRIVATE_TAB -> focusAddressFor = tabs.newPrivateTab()
+                                    MenuAction.SCAN_QR -> onOpenQrScanner()
+                                    MenuAction.BOOKMARKS -> onOpenBookmarks()
+                                    MenuAction.HISTORY -> onOpenHistory()
+                                    MenuAction.DOWNLOADS -> onOpenDownloads()
+                                    MenuAction.SETTINGS -> onOpenSettings()
                                 }
-                                IconButton(
-                                    enabled = shareTargetFor(state.url, session != null) != ShareTarget.NONE,
-                                    onClick = {
-                                        menuOpen = false
-                                        pageShare.onShare(session, state.url, state.title)
-                                    },
-                                ) { Icon(Icons.Filled.Share, contentDescription = shareDescription) }
-                            }
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_print)) },
-                                leadingIcon = { Icon(Icons.Filled.Print, contentDescription = null) },
-                                enabled = session != null && isWebUrl(state.url) && !state.isLoading,
-                                onClick = {
-                                    menuOpen = false
-                                    session?.printPage()
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_cast)) },
-                                leadingIcon = {
-                                    Icon(if (casting != null) Icons.Filled.CastConnected else Icons.Filled.Cast, contentDescription = null)
-                                },
-                                enabled = session != null,
-                                onClick = {
-                                    menuOpen = false
-                                    castOpen = true
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_add_home)) },
-                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.AddToHomeScreen, contentDescription = null) },
-                                // Not from a private tab: the shortcut would keep the address on the home screen.
-                                enabled = isWebUrl(state.url) && session?.isPrivate == false,
-                                onClick = {
-                                    menuOpen = false
-                                    if (!requestHomeShortcut(androidContext, state.url, state.title.orEmpty())) {
-                                        Toast.makeText(androidContext, R.string.add_home_unavailable, Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                            )
-                            val menuWidthDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
-                            val inMultiWindow = (androidContext as? android.app.Activity)?.isInMultiWindowMode == true
-                            if (showsTabStrip(menuWidthDp) || inMultiWindow) {
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.menu_split_screen)) },
-                                    leadingIcon = { Icon(Icons.Filled.VerticalSplit, contentDescription = null) },
-                                    // Not a private page: the second window is a normal (non-private) one.
-                                    enabled = isWebUrl(state.url) && session?.isPrivate == false,
-                                    onClick = {
-                                        menuOpen = false
-                                        openInSplitScreen(androidContext, state.url)
-                                    },
-                                )
-                            }
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_reader)) },
-                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Article, contentDescription = null) },
-                                enabled = state.readerable && session != null,
-                                onClick = {
-                                    menuOpen = false
-                                    session?.requestReaderArticle { article ->
-                                        if (article != null) readerArticle = article else Toast.makeText(androidContext, R.string.reader_unavailable, Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                            )
-                            val translation = state.translation
-                            val translated = translation?.translatedTo?.isNotEmpty() == true
-                            // Shown only when the page can be translated (or already is): most pages are in the phone's language.
-                            if (session != null && (translated || translation?.canTranslate == true)) DropdownMenuItem(
-                                text = { Text(stringResource(if (translated) R.string.menu_show_original else R.string.menu_translate)) },
-                                leadingIcon = { Icon(Icons.Filled.Translate, contentDescription = null) },
-                                onClick = {
-                                    menuOpen = false
-                                    if (translated) {
-                                        session.showOriginal()
-                                    } else {
-                                        Toast.makeText(androidContext, R.string.translate_started, Toast.LENGTH_SHORT).show()
-                                        session.translatePage { ok -> if (!ok) Toast.makeText(androidContext, R.string.translate_failed, Toast.LENGTH_LONG).show() }
-                                    }
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_find)) },
-                                enabled = session != null,
-                                onClick = {
-                                    menuOpen = false
-                                    findOpen = true
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_site_settings)) },
-                                leadingIcon = { Icon(Icons.Filled.Tune, contentDescription = null) },
-                                enabled = session != null && isWebUrl(state.url),
-                                onClick = {
-                                    menuOpen = false
-                                    showSiteSettings = true
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_generate_password)) },
-                                leadingIcon = { Icon(Icons.Filled.Password, contentDescription = null) },
-                                onClick = {
-                                    menuOpen = false
-                                    generatedPassword = generatePassword()
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_desktop_site)) },
-                                enabled = session != null,
-                                trailingIcon = { Checkbox(checked = state.desktopMode, onCheckedChange = null) },
-                                onClick = {
-                                    menuOpen = false
-                                    val s = session ?: return@DropdownMenuItem
-                                    // Remembered for the site (see Settings > Always request desktop site).
-                                    if (isWebUrl(state.url)) container.browserSettings.rememberDesktop(state.url, !state.desktopMode, s.isPrivate)
-                                    s.setDesktopMode(!state.desktopMode)
-                                },
-                            )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_new_tab)) },
-                                onClick = {
-                                    menuOpen = false
-                                    focusAddressFor = tabs.newTab()
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_new_private_tab)) },
-                                onClick = {
-                                    menuOpen = false
-                                    focusAddressFor = tabs.newPrivateTab()
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_scan_qr)) },
-                                leadingIcon = { Icon(Icons.Filled.QrCodeScanner, contentDescription = null) },
-                                onClick = {
-                                    menuOpen = false
-                                    onOpenQrScanner()
-                                },
-                            )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_bookmarks)) },
-                                onClick = {
-                                    menuOpen = false
-                                    onOpenBookmarks()
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_history)) },
-                                onClick = {
-                                    menuOpen = false
-                                    onOpenHistory()
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_downloads)) },
-                                onClick = {
-                                    menuOpen = false
-                                    onOpenDownloads()
-                                },
-                            )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.settings)) },
-                                onClick = {
-                                    menuOpen = false
-                                    onOpenSettings()
-                                },
-                            )
-                        }
+                            },
+                        )
                     }
                 }
                 Row(
