@@ -99,6 +99,35 @@ class BackupFormatTest {
         assertEquals(failed(BackupError.NOT_A_BACKUP), open(negative))
     }
 
+    /** Android's JSON parser has no depth limit; this must be refused before it reaches the parser. */
+    @Test
+    fun aHeaderOfFourThousandOpenBracketsIsNotABackup() {
+        val nested = "{\"v\":" + "[".repeat(4000)
+        assertTrue(nested.length <= BackupFormat.MAX_HEADER_BYTES)
+        assertEquals(failed(BackupError.NOT_A_BACKUP), open(file(nested)))
+    }
+
+    /**
+     * Otherwise valid headers with any nesting are refused, so the guard itself is tested even where the JVM parser
+     * would cope with deep nesting. (Mutation check: without the flat check these open as far as decryption and give
+     * WRONG_PASSWORD_OR_DAMAGED.)
+     */
+    @Test
+    fun aHeaderWithAnyNestingIsNotABackup() {
+        for (extra in listOf(",\"x\":[1]", ",\"x\":{}", ",\"x\":{\"y\":1}")) {
+            val h = goodHeader.dropLast(1) + extra + "}"
+            assertEquals(extra, failed(BackupError.NOT_A_BACKUP), open(file(h)))
+        }
+    }
+
+    @Test
+    fun headerTextKeepsOnlySafeCharactersUpToSixtyFour() {
+        assertEquals("1.0 debug x", BackupFormat.headerText("1.0 [debug] {x}"))
+        assertEquals("0.7.5-beta_2+r8", BackupFormat.headerText("0.7.5-beta_2+r8"))
+        assertEquals("abc", BackupFormat.headerText("a\"b\\c\né"))
+        assertEquals(64, BackupFormat.headerText("x".repeat(200)).length)
+    }
+
     @Test
     fun aFileOverSixtyFourMegabytesIsTooLarge() {
         val f = file(goodHeader, body = ByteArray(BackupFormat.MAX_FILE_BYTES))

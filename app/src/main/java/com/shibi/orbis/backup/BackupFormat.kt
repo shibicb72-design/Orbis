@@ -74,6 +74,8 @@ object BackupFormat {
     /**
      * The header bytes, written by hand so the key order is fixed on every JSON library (Android's `org.json` keeps
      * insertion order, the JVM one does not). The bytes are authenticated as written; readers never re-encode them.
+     * [BackupHeader.created] and [BackupHeader.app] pass through [headerText], so the header stays flat and short
+     * enough for [parse] to accept it.
      */
     internal fun encodeHeader(header: BackupHeader): ByteArray {
         val enc = Base64.getEncoder()
@@ -83,9 +85,29 @@ object BackupFormat {
                 "\"iter\":${header.iterations}," +
                 "\"salt\":\"${enc.encodeToString(header.salt)}\"," +
                 "\"nonce\":\"${enc.encodeToString(header.nonce)}\"," +
-                "\"created\":${JSONObject.quote(header.created)}," +
-                "\"app\":${JSONObject.quote(header.app)}}"
+                "\"created\":${JSONObject.quote(headerText(header.created))}," +
+                "\"app\":${JSONObject.quote(headerText(header.app))}}"
         return json.toByteArray(Charsets.UTF_8)
+    }
+
+    /** Keeps only ASCII letters, digits, space and `. - _ +`, at most [MAX_HEADER_TEXT] characters. */
+    internal fun headerText(s: String): String =
+        s.filter { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it in " .-_+" }.take(MAX_HEADER_TEXT)
+
+    internal const val MAX_HEADER_TEXT = 64
+
+    /**
+     * The version 1 header is one flat object: one `{` and no `[`. Anything else is refused before the JSON parser
+     * sees it, because Android's parser recurses without a depth limit and 4 KB of nesting could overflow the stack
+     * (a [StackOverflowError], which no `catch` here would cover).
+     */
+    private fun isFlat(bytes: ByteArray): Boolean {
+        var braces = 0
+        for (b in bytes) {
+            if (b == '['.code.toByte()) return false
+            if (b == '{'.code.toByte() && ++braces > 1) return false
+        }
+        return true
     }
 
     /** Magic, length and header: the start of the file, and the additional authenticated data. */
@@ -108,14 +130,16 @@ object BackupFormat {
             return Parsed.Failed(BackupError.NOT_A_BACKUP)
         }
         val prefixEnd = PREFIX_BYTES + headerLength
+        val headerBytes = file.copyOfRange(PREFIX_BYTES, prefixEnd)
+        if (!isFlat(headerBytes)) return Parsed.Failed(BackupError.NOT_A_BACKUP)
         val header =
-            when (val h = decodeHeader(file.copyOfRange(PREFIX_BYTES, prefixEnd))) {
+            when (val h = decodeHeader(headerBytes)) {
                 is HeaderResult.Ok -> h.header
                 is HeaderResult.Failed -> return Parsed.Failed(h.error)
             }
         // Shorter than a tag: cut off. GCM would refuse it anyway; say so without trying.
         if (file.size - prefixEnd < TAG_BYTES) return Parsed.Failed(BackupError.WRONG_PASSWORD_OR_DAMAGED)
-        return Parsed.Ok(header, aad = file.copyOfRange(0, prefixEnd), ciphertext = file.copyOfRange(prefixEnd, file.size))
+        return Parsed.Ok(header, file, prefixEnd)
     }
 
     private fun decodeHeader(bytes: ByteArray): HeaderResult =
@@ -148,7 +172,8 @@ object BackupFormat {
         }
 
     internal sealed interface Parsed {
-        class Ok(val header: BackupHeader, val aad: ByteArray, val ciphertext: ByteArray) : Parsed
+        /** No copies: the AAD is `file[0, prefixEnd)` and the ciphertext is `file[prefixEnd, file.size)`. */
+        class Ok(val header: BackupHeader, val file: ByteArray, val prefixEnd: Int) : Parsed
 
         data class Failed(val error: BackupError) : Parsed
     }

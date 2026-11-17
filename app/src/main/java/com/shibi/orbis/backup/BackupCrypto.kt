@@ -138,8 +138,9 @@ class BackupCrypto internal constructor(
                     } finally {
                         key.fill(0)
                     }
-                cipher.updateAAD(parsed.aad)
-                BackupOpenResult.Opened(header, cipher.doFinal(parsed.ciphertext))
+                cipher.updateAAD(parsed.file, 0, parsed.prefixEnd)
+                val payload = cipher.doFinal(parsed.file, parsed.prefixEnd, parsed.file.size - parsed.prefixEnd)
+                BackupOpenResult.Opened(header, payload)
             } catch (_: GeneralSecurityException) {
                 // AEADBadTagException in practice: wrong key or changed bytes, indistinguishable by design. (A platform
                 // without HmacSHA256 or AES-GCM would land here too; Android 12+ has both.)

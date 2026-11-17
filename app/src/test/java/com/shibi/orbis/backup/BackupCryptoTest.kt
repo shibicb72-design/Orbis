@@ -55,6 +55,19 @@ class BackupCryptoTest {
         assertEquals("dark", decoded.payload.sections.getValue("settings").getString("theme"))
     }
 
+    /** seal must never write a header that open refuses: brackets and braces in the version name are dropped. */
+    @Test
+    fun aFileSealedWithBracketsInTheAppVersionOpensAgain() {
+        runBlocking {
+            for ((app, kept) in listOf("1.0 [debug] {x}" to "1.0 debug x", "v".repeat(500) to "v".repeat(64))) {
+                val file = (fast.seal(payload, pw(), app, LocalDate.of(2026, 11, 17)) as BackupSealResult.Sealed).file
+                val r = fast.open(file, pw()) as BackupOpenResult.Opened
+                assertArrayEquals(payload, r.payload)
+                assertEquals(kept, r.header.app)
+            }
+        }
+    }
+
     @Test
     fun fullStrengthRoundTripUsesSixHundredThousandIterations() {
         val crypto = BackupCrypto(Dispatchers.Unconfined)
