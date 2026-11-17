@@ -14,8 +14,8 @@ import com.shibi.orbis.R
 
 /**
  * The Material You theme: the colours come from the phone's wallpaper, so they cannot be checked at build time.
- * Two things are therefore fixed by Orbis, as in every other theme: the private-tab plum (tertiary roles) and a
- * minimum OKLab distance between that plum and the surfaces a tab chip can sit on.
+ * Orbis fixes the private-tab plum (tertiary roles) as in every other theme; the chip background may move up to 15%
+ * toward the darker plum so it stays at least 0.044 OKLab from the surfaces. Wallpaper surfaces are never changed.
  */
 
 /** Stored id; never change it. Its light and dark hold the Orbis Teal palettes: the fallback, and what a preview without a context shows. */
@@ -32,38 +32,45 @@ internal val MaterialYouTheme =
 /** Orbis Teal's weakest light gap between the plum chip and a neighbour (0.044); the dynamic theme keeps at least this. */
 internal const val MIN_DYNAMIC_PRIVATE_GAP = 0.044
 
-/** The most a surface is moved toward the text colour to clear the plum, so it keeps the wallpaper's look. */
-private const val MAX_PLUM_NUDGE = 0.2f
+/** The most the private chip is moved toward the darker plum (tertiary) to clear the surfaces. */
+internal const val MAX_CHIP_SHIFT = 0.15f
 
 /** The system's wallpaper scheme, or null when the phone cannot give one (the caller then uses the Orbis Teal fallback). */
 internal fun dynamicBaseScheme(context: Context, dark: Boolean): ColorScheme? =
     runCatching { if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context) }.getOrNull()
 
-/** [color] moved toward [toward] in the smallest 1% steps until it is [min] away from [plum] (at most [MAX_PLUM_NUDGE]). */
-private fun clearOf(plum: Color, color: Color, toward: Color, min: Double): Color {
-    if (okLabDistance(plum, color) >= min) return color
-    var t = 0.01f
-    while (t <= MAX_PLUM_NUDGE) {
-        val moved = lerp(color, toward, t)
-        if (okLabDistance(plum, moved) >= min) return moved
-        t += 0.01f
+/**
+ * The private chip background: [plum] moved toward [tertiary] in 1% steps until it is [min] away from every one of
+ * [surfaces], at most [MAX_CHIP_SHIFT]. The wallpaper's own surfaces are never changed.
+ */
+internal fun chipClearOf(plum: Color, tertiary: Color, surfaces: List<Color>, min: Double): Color {
+    var t = 0f
+    while (true) {
+        val chip = if (t == 0f) plum else lerp(plum, tertiary, t)
+        if (surfaces.all { okLabDistance(chip, it) >= min } || t >= MAX_CHIP_SHIFT) return chip
+        t = (t + 0.01f).coerceAtMost(MAX_CHIP_SHIFT)
     }
-    return lerp(color, toward, MAX_PLUM_NUDGE)
 }
 
-/** [base] with Orbis's private-tab plum in the tertiary roles, and the tab-chip neighbours kept clear of it. */
+/**
+ * [base] with Orbis's private-tab colours in the tertiary roles. The wallpaper's surfaces stay exactly as the system
+ * gives them; only the chip background (tertiaryContainer) moves, a little, so it stays apart from them.
+ */
 internal fun withOrbisPrivateLook(base: ColorScheme, dark: Boolean): ColorScheme {
-    val container = if (dark) PrivateColors.Dark.second else PrivateColors.Light.second
-    fun clear(c: Color) = clearOf(container, c, base.onSurface, MIN_DYNAMIC_PRIVATE_GAP)
+    val plum = if (dark) PrivateColors.Dark.second else PrivateColors.Light.second
+    val tertiary = if (dark) PrivateColors.Dark.first else PrivateColors.Light.first
+    val chip =
+        chipClearOf(
+            plum,
+            tertiary,
+            listOf(base.surface, base.background, base.surfaceContainer, base.surfaceContainerLow),
+            MIN_DYNAMIC_PRIVATE_GAP,
+        )
     return base.copy(
-        tertiary = if (dark) PrivateColors.Dark.first else PrivateColors.Light.first,
+        tertiary = tertiary,
         onTertiary = if (dark) PrivateColors.OnTertiaryDark else PrivateColors.OnTertiaryLight,
-        tertiaryContainer = container,
+        tertiaryContainer = chip,
         onTertiaryContainer = if (dark) PrivateColors.Dark.third else PrivateColors.Light.third,
-        surfaceContainer = clear(base.surfaceContainer),
-        surfaceContainerLow = clear(base.surfaceContainerLow),
-        surface = clear(base.surface),
-        background = clear(base.background),
     )
 }
 
