@@ -171,7 +171,8 @@ fun BrowserMenu(
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         // Read inside the popup, as the menu always did.
         val widthDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
-        val inMultiWindow = (LocalContext.current as? android.app.Activity)?.isInMultiWindowMode == true
+        val androidContext = LocalContext.current
+        val inMultiWindow = (androidContext as? android.app.Activity)?.isInMultiWindowMode == true
         val window = MenuWindow(widthDp, inMultiWindow)
         val shown = order.filter { stateOf(it, window).visible }
         var previous: MenuGroup? = null
