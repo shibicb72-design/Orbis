@@ -38,8 +38,10 @@ fun validDohAddress(input: String): String? {
     val text = input.trim()
     if (text.length > DOH_ADDRESS_MAX_LENGTH) return null
     if (!text.startsWith("https://", ignoreCase = true)) return null
-    val host = runCatching { URI(text).host }.getOrNull()
-    return if (host.isNullOrBlank()) null else text
+    val uri = runCatching { URI(text) }.getOrNull() ?: return null
+    // A name and password in the address would be stored in clear text and sent to the provider.
+    if (uri.userInfo != null) return null
+    return if (uri.host.isNullOrBlank()) null else text
 }
 
 interface DohPrefs {
