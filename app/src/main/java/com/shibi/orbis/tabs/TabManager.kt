@@ -56,10 +56,19 @@ data class Tab(
      * tab (a tab id never changes mode), and inherited by every tab it opens.
      */
     val isPrivate: Boolean = false,
+    /** The [TabGroup] this tab belongs to, or null. Only a normal tab can have one. */
+    val groupId: Long? = null,
 )
 
-/** What the tab switcher draws. */
-data class TabUi(val id: Long, val title: String, val url: String, val selected: Boolean, val isPrivate: Boolean = false)
+/** What the tab switcher draws. [groupId] is the tab's [TabGroup], or null. */
+data class TabUi(
+    val id: Long,
+    val title: String,
+    val url: String,
+    val selected: Boolean,
+    val isPrivate: Boolean = false,
+    val groupId: Long? = null,
+)
 
 /** One-shot messages for the UI. */
 enum class TabEvent { TAB_LIMIT }
@@ -137,6 +146,10 @@ class TabManager(
     private var selectedId: Long
     private var nextId = 1L
 
+    /** The groups that have at least one tab, in the order of their first tab. See [settleGroups]. */
+    private val groupList = ArrayList<TabGroup>()
+    private var nextGroupId = 1L
+
     /** The normal tab the user last looked at; what a saved snapshot selects while a private tab is selected. */
     private var lastNormalSelectedId: Long? = null
 
@@ -183,6 +196,11 @@ class TabManager(
 
     private val _tabs = MutableStateFlow<List<TabUi>>(emptyList())
     val tabs: StateFlow<List<TabUi>> = _tabs.asStateFlow()
+
+    private val _groups = MutableStateFlow<List<TabGroup>>(emptyList())
+
+    /** The tab groups in the order of their first tab. Each has at least one tab, all next to each other in [tabs]. */
+    val groups: StateFlow<List<TabGroup>> = _groups.asStateFlow()
 
     private val _selected: MutableStateFlow<Tab>
 
@@ -255,10 +273,14 @@ class TabManager(
             if (pristine && snapshot != null && snapshot.tabs.isNotEmpty()) {
                 list.clear()
                 for (p in snapshot.tabs) {
-                    list += Tab(p.id, null, p.title, p.url, p.desktop, p.savedState, null)
+                    list += Tab(p.id, null, p.title, p.url, p.desktop, p.savedState, null, groupId = p.groupId)
                 }
+                groupList.clear()
+                groupList += snapshot.groups
                 selectedId = snapshot.selectedId
                 nextId = maxOf(nextId, (snapshot.tabs.maxOf { it.id }) + 1)
+                nextGroupId = maxOf(nextGroupId, (snapshot.groups.maxOfOrNull { it.id } ?: 0L) + 1)
+                settleGroups()
                 publish()
                 log("restored ${list.size} tabs")
             }
@@ -269,7 +291,7 @@ class TabManager(
         }
     }
 
-    private fun snapshot(): TabsSnapshot = persistableSnapshot(list, selectedId, lastNormalSelectedId)
+    private fun snapshot(): TabsSnapshot = persistableSnapshot(list, selectedId, lastNormalSelectedId, groupList)
 
     private fun enqueueWrite() {
         // Before the stored list has been read, the in-memory one is just a placeholder: never overwrite with it.
@@ -314,15 +336,26 @@ class TabManager(
 
     private fun publish() {
         val sel = list.firstOrNull { it.id == selectedId } ?: list.first().also { selectedId = it.id }
-        _tabs.value = list.map { TabUi(it.id, it.title, it.url, it.id == selectedId, it.isPrivate) }
+        _tabs.value = list.map { TabUi(it.id, it.title, it.url, it.id == selectedId, it.isPrivate, it.groupId) }
+        _groups.value = groupList.toList()
         if (!sel.isPrivate) lastNormalSelectedId = sel.id
         _selected.value = sel
     }
 
     private fun changed() {
         pristine = false
+        settleGroups()
         publish()
         schedulePersist()
+    }
+
+    /** Applies the group rules after any change: each group's tabs next to each other, no group without a tab. */
+    private fun settleGroups() {
+        val arranged = arrangeGroups(list, groupList, { it.groupId }, { it.copy(groupId = null) })
+        list.clear()
+        list += arranged.items
+        groupList.clear()
+        groupList += arranged.groups
     }
 
     private fun notifyLimit() {
@@ -553,14 +586,23 @@ class TabManager(
         changed()
     }
 
-    private fun createTab(url: String?, openerId: Long?, external: Boolean, isPrivate: Boolean = false): Long? {
+    /** A [groupId] (normal tabs only) puts the new tab in that group, right after its opener. */
+    private fun createTab(
+        url: String?,
+        openerId: Long?,
+        external: Boolean,
+        isPrivate: Boolean = false,
+        groupId: Long? = null,
+    ): Long? {
         if (list.size >= maxTabs) {
             notifyLimit()
             return null
         }
         val id = nextId++
         list.firstOrNull { it.id == selectedId }?.session?.setActive(false)
-        list += Tab(id, null, "", "", false, null, openerId, isPrivate)
+        val tab = Tab(id, null, "", "", false, null, openerId, isPrivate, groupId = groupId.takeIf { !isPrivate })
+        val openerIndex = openerId?.let { indexOf(it) } ?: -1
+        if (tab.groupId != null && openerIndex >= 0) list.add(openerIndex + 1, tab) else list += tab
         selectedId = id
         val session = ensureSession(id)?.session
         session?.setActive(foreground)
@@ -699,6 +741,89 @@ class TabManager(
         if (_ready.value) flush()
     }
 
+    // ---- tab groups ----------------------------------------------------------------------------------------
+    // Every call below persists and publishes. The group rules (contiguous tabs, no empty group) are applied by
+    // [settleGroups] in [changed]. Recently closed tabs do not remember their group.
+
+    /**
+     * A new group of the open tabs [tabIds] (unknown ids are ignored), gathered at the place of the first of them in
+     * list order. A tab already in another group leaves it. Null, and nothing changes, when [name] is not valid (see
+     * [tabGroupName]), when no listed tab is open, when any of them is private, or at [MAX_TABS] groups.
+     */
+    fun createGroup(tabIds: List<Long>, name: String, color: TabGroupColor): Long? {
+        val clean = tabGroupName(name) ?: return null
+        val members = tabIds.distinct().mapNotNull { id -> list.firstOrNull { it.id == id } }
+        if (members.isEmpty() || members.any { it.isPrivate }) return null
+        if (groupList.size >= maxTabs) return null
+        val groupId = nextGroupId++
+        groupList += TabGroup(groupId, clean, color, collapsed = false)
+        for (member in members) {
+            val i = indexOf(member.id)
+            list[i] = list[i].copy(groupId = groupId)
+        }
+        changed()
+        return groupId
+    }
+
+    /**
+     * Moves normal tab [tabId] to the end of group [groupId]. It leaves its old group, if any. Nothing happens for a
+     * private tab, an unknown tab or group, or a tab already in that group.
+     */
+    fun addToGroup(tabId: Long, groupId: Long) {
+        val i = indexOf(tabId)
+        if (i < 0) return
+        val tab = list[i]
+        if (tab.isPrivate || tab.groupId == groupId || groupList.none { it.id == groupId }) return
+        list.removeAt(i)
+        val last = list.indexOfLast { it.groupId == groupId }
+        list.add(if (last >= 0) last + 1 else i, tab.copy(groupId = groupId))
+        changed()
+    }
+
+    /** Takes [tabId] out of its group and puts it right after the group's remaining tabs. */
+    fun removeFromGroup(tabId: Long) {
+        val i = indexOf(tabId)
+        if (i < 0) return
+        val tab = list[i]
+        val groupId = tab.groupId ?: return
+        list.removeAt(i)
+        val last = list.indexOfLast { it.groupId == groupId }
+        list.add(if (last >= 0) last + 1 else i, tab.copy(groupId = null))
+        changed()
+    }
+
+    /** Renames group [id]. Ignored when [name] is not valid (see [tabGroupName]). */
+    fun renameGroup(id: Long, name: String) {
+        val clean = tabGroupName(name) ?: return
+        updateGroup(id) { it.copy(name = clean) }
+    }
+
+    fun setGroupColor(id: Long, color: TabGroupColor) = updateGroup(id) { it.copy(color = color) }
+
+    fun setGroupCollapsed(id: Long, collapsed: Boolean) = updateGroup(id) { it.copy(collapsed = collapsed) }
+
+    private fun updateGroup(id: Long, change: (TabGroup) -> TabGroup) {
+        val i = groupList.indexOfFirst { it.id == id }
+        if (i < 0) return
+        groupList[i] = change(groupList[i])
+        changed()
+    }
+
+    /** Removes group [id]; its tabs stay open, where they are, with no group. */
+    fun ungroup(id: Long) {
+        if (groupList.none { it.id == id }) return
+        groupList.removeAll { it.id == id }
+        for (i in list.indices) if (list[i].groupId == id) list[i] = list[i].copy(groupId = null)
+        changed()
+    }
+
+    /** Closes every tab of group [id], each one as [close] does (a web tab goes to Recently closed). */
+    fun closeGroup(id: Long) {
+        // The selected tab last, so the selection never steps onto (and opens) a tab that is about to close.
+        val members = list.filter { it.groupId == id }.map { it.id }.sortedBy { it == selectedId }
+        for (tabId in members) close(tabId)
+    }
+
     private fun endPrivateBrowsing() {
         try {
             onPrivateBrowsingEnded()
@@ -748,11 +873,12 @@ class TabManager(
         _linkMenu.value = null
     }
 
-    /** Long-press "open in new tab" from the link menu. */
+    /** Long-press "open in new tab" from the link menu. From a grouped tab, the new tab joins that group after it. */
     fun openLinkInNewTab(request: LinkMenuRequest) {
         _linkMenu.value = null
         if (!isWebUrl(request.url)) return
-        createTab(request.url, openerId = request.tabId, external = false, isPrivate = request.isPrivate)
+        val group = list.firstOrNull { it.id == request.tabId }?.groupId
+        createTab(request.url, openerId = request.tabId, external = false, isPrivate = request.isPrivate, groupId = group)
     }
 
     /** Long-press "open image in new tab". Same mode as the tab it came from. */
@@ -962,17 +1088,24 @@ class TabManager(
  * What goes to disk for [tabs]: normal tabs only, and the engine state is read from no private session at all. The
  * selection is [selectedId] when that tab is normal, else [lastNormalSelectedId] if it is still listed, else the first
  * normal tab. With no normal tab the snapshot is empty and selects -1; the codec then yields nothing and the next launch
- * starts with one blank tab.
+ * starts with one blank tab. Of [groups], only those with a normal tab are written.
  */
-internal fun persistableSnapshot(tabs: List<Tab>, selectedId: Long, lastNormalSelectedId: Long?): TabsSnapshot {
+internal fun persistableSnapshot(
+    tabs: List<Tab>,
+    selectedId: Long,
+    lastNormalSelectedId: Long?,
+    groups: List<TabGroup> = emptyList(),
+): TabsSnapshot {
     val normal = tabs.filter { !it.isPrivate }
     if (normal.isEmpty()) return TabsSnapshot(emptyList(), -1L)
     val selected =
         normal.firstOrNull { it.id == selectedId }
             ?: normal.firstOrNull { it.id == lastNormalSelectedId }
             ?: normal.first()
-    return TabsSnapshot(
-        tabs = normal.map { PersistedTab(it.id, it.url, it.title, it.desktopMode, it.session?.savedState() ?: it.savedState) },
-        selectedId = selected.id,
-    )
+    val persisted =
+        normal.map {
+            PersistedTab(it.id, it.url, it.title, it.desktopMode, it.session?.savedState() ?: it.savedState, it.groupId)
+        }
+    val arranged = arrangeGroups(persisted, groups, { it.groupId }, { it.copy(groupId = null) })
+    return TabsSnapshot(tabs = arranged.items, selectedId = selected.id, groups = arranged.groups)
 }

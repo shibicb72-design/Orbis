@@ -121,4 +121,99 @@ class TabCodecTest {
         val decoded = TabCodec.decode(TabCodec.encode(TabsSnapshot(many, 1)))!!
         assertEquals(MAX_TABS, decoded.tabs.size)
     }
+
+    // ---- tab groups (version 2) ----
+
+    private fun grouped(id: Long, group: Long?) = tab(id).copy(groupId = group)
+
+    @Test
+    fun aVersionOneFileDecodesToTheSameTabsWithNoGroups() {
+        val v1 =
+            """{"version":1,"selected":2,"tabs":[
+              {"id":1,"url":"https://a.example/","title":"A","desktop":false,"state":"S1"},
+              {"id":2,"url":"https://b.example/","title":"B","desktop":true}]}"""
+        val decoded = TabCodec.decode(v1)
+        assertEquals(
+            TabsSnapshot(
+                listOf(
+                    PersistedTab(1, "https://a.example/", "A", false, "S1"),
+                    PersistedTab(2, "https://b.example/", "B", true, null),
+                ),
+                selectedId = 2,
+            ),
+            decoded,
+        )
+        assertTrue(decoded!!.groups.isEmpty())
+        // Even a stray group in a version 1 file is not read: that version has none.
+        val strayGroups =
+            """{"version":1,"selected":1,"groups":[{"id":4,"name":"W","color":"RED"}],
+              "tabs":[{"id":1,"url":"https://a.example/","group":4}]}"""
+        val stray = TabCodec.decode(strayGroups)!!
+        assertTrue(stray.groups.isEmpty())
+        assertNull(stray.tabs.single().groupId)
+    }
+
+    @Test
+    fun roundTripKeepsGroupIdsNamesColoursCollapsedFlagsAndMembership() {
+        val work = TabGroup(7, "Work", TabGroupColor.PURPLE, collapsed = true)
+        val trip = TabGroup(3, "Trip \"2027\" été", TabGroupColor.CYAN, collapsed = false)
+        val snapshot =
+            TabsSnapshot(
+                listOf(grouped(1, 7), grouped(2, 7), grouped(3, null), grouped(4, 3)),
+                selectedId = 4,
+                groups = listOf(work, trip),
+            )
+        val json = TabCodec.encode(snapshot)
+        assertEquals(2, org.json.JSONObject(json).getInt("version"))
+        assertEquals(snapshot, TabCodec.decode(json))
+    }
+
+    @Test
+    fun aTabNamingAMissingGroupDecodesUngroupedAndEmptyGroupsAreDropped() {
+        val text =
+            """{"version":2,"selected":1,"groups":[{"id":5,"name":"Kept","color":"GREEN","collapsed":false},
+              {"id":6,"name":"Empty","color":"RED"}],
+              "tabs":[{"id":1,"url":"https://a.example/","group":5},{"id":2,"url":"https://b.example/","group":99}]}"""
+        val decoded = TabCodec.decode(text)!!
+        assertEquals(listOf(5L, null), decoded.tabs.map { it.groupId })
+        assertEquals(listOf(TabGroup(5, "Kept", TabGroupColor.GREEN, false)), decoded.groups)
+    }
+
+    @Test
+    fun badGroupEntriesAreSkippedAndAnUnknownColourIsGrey() {
+        val text =
+            """{"version":2,"selected":1,"groups":[7,{"id":0,"name":"Zero"},{"name":"No id"},{"id":1,"name":"   "},
+              {"id":2,"name":"${"n".repeat(MAX_TAB_GROUP_NAME_CHARS + 1)}"},
+              {"id":3,"name":" Fine ","color":"ORANGE","collapsed":null},{"id":3,"name":"Dupe","color":"RED"},
+              {"id":4,"name":"NoColour"}],
+              "tabs":[{"id":1,"url":"https://a.example/","group":1},{"id":2,"url":"https://a.example/","group":2},
+              {"id":3,"url":"https://a.example/","group":3},{"id":4,"url":"https://a.example/","group":4},
+              {"id":5,"url":"https://a.example/","group":"x"}]}"""
+        val decoded = TabCodec.decode(text)!!
+        assertEquals(
+            listOf(TabGroup(3, "Fine", TabGroupColor.GREY, false), TabGroup(4, "NoColour", TabGroupColor.GREY, false)),
+            decoded.groups,
+        )
+        assertEquals(listOf(null, null, 3L, 4L, null), decoded.tabs.map { it.groupId })
+    }
+
+    @Test
+    fun aGroupsTabsAreMadeContiguousOnDecode() {
+        val text =
+            """{"version":2,"selected":4,"groups":[{"id":1,"name":"A"},{"id":2,"name":"B"}],
+              "tabs":[{"id":1,"url":"https://a.example/","group":1},{"id":2,"url":"https://a.example/"},
+              {"id":3,"url":"https://a.example/","group":2},{"id":4,"url":"https://a.example/","group":1},
+              {"id":5,"url":"https://a.example/","group":2}]}"""
+        val decoded = TabCodec.decode(text)!!
+        assertEquals(listOf(1L, 4L, 2L, 3L, 5L), decoded.tabs.map { it.id })
+        assertEquals(4L, decoded.selectedId)
+        assertTrue(groupsAreContiguous(decoded.tabs) { it.groupId })
+    }
+
+    @Test
+    fun anUngroupedSnapshotWritesNoGroupFieldOnItsTabs() {
+        val json = org.json.JSONObject(TabCodec.encode(TabsSnapshot(listOf(tab(1)), 1)))
+        assertFalse(json.getJSONArray("tabs").getJSONObject(0).has("group"))
+        assertEquals(0, json.getJSONArray("groups").length())
+    }
 }
