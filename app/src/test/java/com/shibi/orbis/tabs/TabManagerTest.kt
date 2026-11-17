@@ -807,4 +807,286 @@ class TabManagerTest {
         m.downloadTorrentLink(LinkMenuRequest("https://example.com/", m.selected.value.id))
         assertNull(m.pendingTorrentIntake.value)
     }
+
+    // ---- tab groups ----
+
+    private fun TabManager.groupOf(id: Long) = tabs.value.first { it.id == id }.groupId
+
+    private fun TabManager.ids() = tabs.value.map { it.id }
+
+    /** Every group has a tab, the groups are listed in tab order, members are contiguous, and no private tab is grouped. */
+    private fun assertGroupRules(m: TabManager) {
+        val tabs = m.tabs.value
+        assertTrue("contiguous: $tabs", groupsAreContiguous(tabs) { it.groupId })
+        assertEquals(tabs.mapNotNull { it.groupId }.distinct(), m.groups.value.map { it.id })
+        assertTrue(tabs.none { it.isPrivate && it.groupId != null })
+    }
+
+    @Test
+    fun createGroupGathersItsTabsAtTheFirstOneAndPublishesTheGroup() {
+        val m = manager()
+        m.openSelected()
+        val a = m.selected.value.id
+        val b = m.newTab()!!
+        val c = m.newTab()!!
+        val d = m.newTab()!!
+        val g = m.createGroup(listOf(d, b), "  Work ", TabGroupColor.BLUE)!!
+        assertEquals(listOf(TabGroup(g, "Work", TabGroupColor.BLUE, collapsed = false)), m.groups.value)
+        assertEquals(listOf(a, b, d, c), m.ids())
+        assertEquals(listOf(null, g, g, null), m.tabs.value.map { it.groupId })
+        assertEquals(g, m.selected.value.groupId)
+        assertGroupRules(m)
+    }
+
+    @Test
+    fun createGroupRefusesABadNameAndUnknownTabs() {
+        val m = manager()
+        m.openSelected()
+        val a = m.selected.value.id
+        assertNull(m.createGroup(listOf(a), "   ", TabGroupColor.RED))
+        assertNull(m.createGroup(listOf(a), "x".repeat(MAX_TAB_GROUP_NAME_CHARS + 1), TabGroupColor.RED))
+        assertNull(m.createGroup(listOf(999L), "Ok", TabGroupColor.RED))
+        assertNull(m.createGroup(emptyList(), "Ok", TabGroupColor.RED))
+        assertTrue(m.groups.value.isEmpty())
+        assertNull(m.groupOf(a))
+    }
+
+    @Test
+    fun aPrivateTabCannotBeGrouped() {
+        val m = manager()
+        m.openSelected()
+        val a = m.selected.value.id
+        val p = m.newPrivateTab()!!
+        assertNull(m.createGroup(listOf(p), "Secret", TabGroupColor.RED))
+        assertNull(m.createGroup(listOf(a, p), "Mixed", TabGroupColor.RED))
+        assertTrue(m.groups.value.isEmpty())
+        assertNull(m.groupOf(p))
+        assertNull(m.groupOf(a))
+
+        val g = m.createGroup(listOf(a), "Normal", TabGroupColor.GREEN)!!
+        val before = m.ids()
+        m.addToGroup(p, g)
+        assertNull(m.groupOf(p))
+        assertEquals(before, m.ids())
+        assertEquals(listOf(a), m.tabs.value.filter { it.groupId == g }.map { it.id })
+        // A link opened in a new tab from a private tab is private and ungrouped.
+        m.openLinkInNewTab(LinkMenuRequest("https://x.example/", p, isPrivate = true))
+        assertTrue(m.selected.value.isPrivate)
+        assertNull(m.selected.value.groupId)
+        assertGroupRules(m)
+    }
+
+    @Test
+    fun addToGroupMovesTheTabToTheEndOfTheGroup() {
+        val m = manager()
+        m.openSelected()
+        val a = m.selected.value.id
+        val b = m.newTab()!!
+        val c = m.newTab()!!
+        val d = m.newTab()!!
+        val g = m.createGroup(listOf(b, c), "G", TabGroupColor.RED)!!
+        m.addToGroup(a, g)
+        assertEquals(listOf(b, c, a, d), m.ids())
+        m.addToGroup(d, g)
+        assertEquals(listOf(b, c, a, d), m.ids())
+        assertEquals(g, m.groupOf(d))
+        // Already a member, or no such group: nothing moves.
+        m.addToGroup(b, g)
+        m.addToGroup(c, 12345L)
+        assertEquals(listOf(b, c, a, d), m.ids())
+        assertEquals(g, m.groupOf(c))
+        assertGroupRules(m)
+    }
+
+    @Test
+    fun movingTheLastTabToAnotherGroupRemovesTheOldGroup() {
+        val m = manager()
+        m.openSelected()
+        val a = m.selected.value.id
+        val b = m.newTab()!!
+        val g1 = m.createGroup(listOf(a), "One", TabGroupColor.RED)!!
+        val g2 = m.createGroup(listOf(b), "Two", TabGroupColor.BLUE)!!
+        m.addToGroup(a, g2)
+        assertEquals(listOf(g2), m.groups.value.map { it.id })
+        assertTrue(g1 != g2)
+        assertEquals(listOf(b, a), m.ids())
+    }
+
+    @Test
+    fun removeFromGroupPutsTheTabJustAfterTheGroup() {
+        val m = manager()
+        m.openSelected()
+        val a = m.selected.value.id
+        val b = m.newTab()!!
+        val c = m.newTab()!!
+        val d = m.newTab()!!
+        assertNotNull(m.createGroup(listOf(a, b, c), "G", TabGroupColor.RED))
+        m.removeFromGroup(a)
+        assertEquals(listOf(b, c, a, d), m.ids())
+        assertNull(m.groupOf(a))
+        m.removeFromGroup(c)
+        assertEquals(listOf(b, c, a, d), m.ids())
+        m.removeFromGroup(b)
+        assertTrue(m.groups.value.isEmpty())
+        assertTrue(m.tabs.value.all { it.groupId == null })
+    }
+
+    @Test
+    fun renameRecolourCollapseAndUngroup() {
+        val m = manager()
+        m.openSelected()
+        val a = m.selected.value.id
+        val b = m.newTab()!!
+        val g = m.createGroup(listOf(a, b), "Old", TabGroupColor.GREY)!!
+        m.renameGroup(g, " New name ")
+        m.renameGroup(g, "  ")
+        m.renameGroup(g, "y".repeat(MAX_TAB_GROUP_NAME_CHARS + 1))
+        m.setGroupColor(g, TabGroupColor.PINK)
+        m.setGroupCollapsed(g, true)
+        assertEquals(listOf(TabGroup(g, "New name", TabGroupColor.PINK, collapsed = true)), m.groups.value)
+        m.setGroupCollapsed(g, false)
+        assertFalse(m.groups.value.single().collapsed)
+        m.ungroup(g)
+        assertTrue(m.groups.value.isEmpty())
+        assertEquals(listOf(a, b), m.ids())
+        assertTrue(m.tabs.value.all { it.groupId == null })
+    }
+
+    @Test
+    fun closingTheLastTabOfAGroupRemovesTheGroup() {
+        val m = manager()
+        m.openSelected()
+        val a = m.selected.value.id
+        val b = m.newTab()!!
+        val c = m.newTab()!!
+        val g = m.createGroup(listOf(b, c), "G", TabGroupColor.RED)!!
+        m.close(b)
+        assertEquals(listOf(g), m.groups.value.map { it.id })
+        m.close(c)
+        assertTrue(m.groups.value.isEmpty())
+        assertEquals(listOf(a), m.ids())
+    }
+
+    @Test
+    fun closeGroupClosesItsTabsAndEachWebTabGoesToRecentlyClosed() {
+        val m = manager()
+        m.openSelected()
+        val a = m.selected.value.id
+        created[0].navigate("https://keep.example/", "Keep")
+        val b = m.newTab("https://b.example/")!!
+        created.last().navigate("https://b.example/", "B")
+        val c = m.newTab("https://c.example/")!!
+        created.last().navigate("https://c.example/", "C")
+        val blank = m.newTab()!!
+        val g = m.createGroup(listOf(b, c, blank), "G", TabGroupColor.RED)!!
+        m.select(c)
+        m.closeGroup(g)
+        assertEquals(listOf(a), m.ids())
+        assertEquals(a, m.selected.value.id)
+        assertTrue(m.groups.value.isEmpty())
+        assertEquals(
+            setOf("https://b.example/", "https://c.example/"),
+            m.recentlyClosed.value.map { it.url }.toSet(),
+        )
+        assertEquals(2, m.recentlyClosed.value.size)
+        // Reopened tabs do not remember their group.
+        m.reopen(m.recentlyClosed.value.first())
+        assertNull(m.selected.value.groupId)
+    }
+
+    @Test
+    fun openInNewTabFromAGroupedTabJoinsTheGroupAfterItsOpener() {
+        val m = manager()
+        m.openSelected()
+        val a = m.selected.value.id
+        val b = m.newTab()!!
+        val c = m.newTab()!!
+        val g = m.createGroup(listOf(a, b), "G", TabGroupColor.RED)!!
+        m.openLinkInNewTab(LinkMenuRequest("https://link.example/", a))
+        val child = m.selected.value.id
+        assertEquals(listOf(a, child, b, c), m.ids())
+        assertEquals(g, m.groupOf(child))
+        assertEquals(a, m.selected.value.openerTabId)
+        // From an ungrouped tab, and the menu's new tab: ungrouped, at the end, as before.
+        m.openLinkInNewTab(LinkMenuRequest("https://link2.example/", c))
+        val fromUngrouped = m.selected.value.id
+        assertNull(m.groupOf(fromUngrouped))
+        assertEquals(fromUngrouped, m.ids().last())
+        m.select(a)
+        val plain = m.newTab()!!
+        assertNull(m.groupOf(plain))
+        assertEquals(plain, m.ids().last())
+        assertGroupRules(m)
+    }
+
+    @Test
+    fun closeAllNormalRemovesEveryGroup() {
+        val m = manager()
+        m.openSelected()
+        val a = m.selected.value.id
+        m.createGroup(listOf(a), "G", TabGroupColor.RED)
+        m.closeAllNormal()
+        assertTrue(m.groups.value.isEmpty())
+        assertNull(m.selected.value.groupId)
+    }
+
+    @Test
+    fun groupsArePersistedAndRestored() {
+        val store = MemoryStore()
+        val m = manager(store)
+        m.openSelected()
+        val a = m.selected.value.id
+        val b = m.newTab()!!
+        val p = m.newPrivateTab()!!
+        val g = m.createGroup(listOf(a, b), "Work", TabGroupColor.YELLOW)!!
+        m.setGroupCollapsed(g, true)
+        m.flush()
+        scheduler.runCurrent()
+        val saved = store.snapshot!!
+        assertEquals(listOf(TabGroup(g, "Work", TabGroupColor.YELLOW, collapsed = true)), saved.groups)
+        assertEquals(listOf(g, g), saved.tabs.map { it.groupId })
+        assertTrue(saved.tabs.none { it.id == p })
+
+        // Through the real file format, into a new manager.
+        val reread = TabCodec.decode(TabCodec.encode(saved))
+        created.clear()
+        val m2 = manager(MemoryStore(reread))
+        assertEquals(listOf(TabGroup(g, "Work", TabGroupColor.YELLOW, collapsed = true)), m2.groups.value)
+        assertEquals(listOf(a, b), m2.ids())
+        assertEquals(listOf(g, g), m2.tabs.value.map { it.groupId })
+        // New group ids never collide with restored ones.
+        val c = m2.newTab()!!
+        assertTrue(m2.createGroup(listOf(c), "New", TabGroupColor.RED)!! > g)
+    }
+
+    @Test
+    fun eachGroupStaysContiguousAfterAnySequenceOfChanges() {
+        for (seed in 1..40) {
+            val random = kotlin.random.Random(seed)
+            val m = manager(max = 12)
+            m.openSelected()
+            val colours = TabGroupColor.entries
+            repeat(150) { step ->
+                val ids = m.ids()
+                val groupIds = m.groups.value.map { it.id }
+                fun anyTab() = ids[random.nextInt(ids.size)]
+                when (random.nextInt(11)) {
+                    0 -> m.newTab()
+                    1 -> m.newPrivateTab()
+                    2 -> m.createGroup(List(random.nextInt(1, 4)) { anyTab() }, "G$step", colours.random(random))
+                    3, 4 -> if (groupIds.isNotEmpty()) m.addToGroup(anyTab(), groupIds.random(random))
+                    5 -> m.removeFromGroup(anyTab())
+                    6 -> m.close(anyTab())
+                    7 -> if (groupIds.isNotEmpty()) m.closeGroup(groupIds.random(random))
+                    8 -> {
+                        val opener = m.tabs.value[random.nextInt(ids.size)]
+                        m.openLinkInNewTab(LinkMenuRequest("https://l$step.example/", opener.id, opener.isPrivate))
+                    }
+                    9 -> if (groupIds.isNotEmpty()) m.ungroup(groupIds.random(random))
+                    else -> m.select(anyTab())
+                }
+                assertGroupRules(m)
+            }
+        }
+    }
 }
