@@ -42,7 +42,7 @@ class ThemePaletteGoldenTest {
 
     @Test
     fun everyThemePaletteMatchesTheGolden() {
-        val actual = AppThemes.all.flatMap { dump(it) }
+        val actual = AppThemes.fixed.flatMap { dump(it) }
         if (System.getenv("UPDATE_GOLDEN") == "true") {
             File("src/test/resources/golden/theme_palettes.txt").writeText(actual.joinToString("\n") + "\n")
         }

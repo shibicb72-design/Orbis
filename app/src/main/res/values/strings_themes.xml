@@ -22,4 +22,6 @@
     <string name="theme_desc_ember" translatable="false">Warm terracotta on off-white or charcoal.</string>
     <string name="theme_name_paper" translatable="false">Paper</string>
     <string name="theme_desc_paper" translatable="false">Sepia ink on parchment, like a printed page.</string>
+    <string name="theme_name_material_you" translatable="false">Material You</string>
+    <string name="theme_desc_material_you" translatable="false">Colours from your wallpaper.</string>
 </resources>
