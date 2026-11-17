@@ -43,6 +43,8 @@ import com.shibi.orbis.passwords.KeystoreLoginCrypto
 import com.shibi.orbis.passwords.LoginBridgeImpl
 import com.shibi.orbis.passwords.LoginManager
 import com.shibi.orbis.settings.BrowserSettings
+import com.shibi.orbis.settings.DohSettings
+import com.shibi.orbis.settings.SharedPreferencesDohPrefs
 import com.shibi.orbis.suggest.HttpSearchSuggestSource
 import com.shibi.orbis.suggest.SearchSuggestSource
 import com.shibi.orbis.settings.SharedPreferencesBrowserPrefs
@@ -164,6 +166,9 @@ class OrbisApp : Application() {
         appScope.launch {
             browserSettings.websiteColorScheme().collect { engine.setWebsiteColorScheme(it) }
         }
+        val doh =
+            DohSettings(SharedPreferencesDohPrefs(getSharedPreferences(SharedPreferencesDohPrefs.FILE_NAME, Context.MODE_PRIVATE)))
+        appScope.launch { doh.config.collect { engine.setSecureDns(it.resolverUrl) } }
         val ubo =
             UboOnboardingController(
                 host = engine.extensions,
@@ -394,6 +399,7 @@ class OrbisApp : Application() {
                 searchEngine = searchEngine,
                 browserSettings = browserSettings,
                 logins = logins,
+                doh = doh,
             )
         // A tab that starts playing brings up the media notification (and keeps playback alive in the background).
         appScope.launch {
@@ -489,6 +495,8 @@ class AppContainer(
     /** Which engine address-bar searches go to; one choice for normal and private tabs. */
     val searchEngine: SearchEngineSettings,
     val browserSettings: BrowserSettings,
+    /** Settings > Secure DNS; the engine follows it. */
+    val doh: DohSettings,
     val logins: LoginManager,
     /** Page media across tabs (notification, background playback, picture-in-picture). */
     val media: MediaCenter = MediaCenter(tabs, kotlinx.coroutines.MainScope()),

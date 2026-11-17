@@ -3,6 +3,7 @@ package com.shibi.orbis.ui.settings
 import android.widget.Toast
 import com.shibi.orbis.settings.DarkMode
 import com.shibi.orbis.settings.BrowserSettings
+import com.shibi.orbis.settings.DohConfig
 import com.shibi.orbis.settings.HttpsOnlyMode
 import com.shibi.orbis.settings.MagnetHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -154,6 +155,9 @@ fun SettingsScreen(
     onOpenTorrents: () -> Unit = {},
     /** Browsing > Theme: the theme picker (dark mode and colour theme). */
     onOpenThemes: () -> Unit = {},
+    /** Privacy > Secure DNS: the DNS-over-HTTPS choice. The row is hidden when null (screen tests). */
+    dohFlow: StateFlow<DohConfig>? = null,
+    onOpenSecureDns: () -> Unit = {},
 ) {
     var httpsDialogOpen by remember { mutableStateOf(false) }
     if (site != null) {
@@ -393,6 +397,21 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.fillMaxWidth().padding(16.dp),
                     )
+                }
+                if (dohFlow != null) {
+                    val doh by dohFlow.collectAsStateWithLifecycle()
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.doh_title)) },
+                        supportingContent = {
+                            Text(
+                                stringResource(
+                                    if (doh.resolverUrl == null) R.string.doh_summary_off else dohProviderLabel(doh.provider),
+                                ),
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenSecureDns),
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
                 if (site != null) {
                     val https by site.httpsOnly.collectAsStateWithLifecycle()

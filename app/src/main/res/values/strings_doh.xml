@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="doh_title" translatable="false">Secure DNS</string>
+    <string name="doh_switch" translatable="false">Use secure DNS</string>
+    <string name="doh_summary_off" translatable="false">Off</string>
+    <string name="doh_provider_quad9" translatable="false">Quad9</string>
+    <string name="doh_provider_cloudflare" translatable="false">Cloudflare</string>
+    <string name="doh_provider_mullvad" translatable="false">Mullvad</string>
+    <string name="doh_provider_custom" translatable="false">Custom address</string>
+    <string name="doh_custom_label" translatable="false">Address</string>
+    <string name="doh_custom_save" translatable="false">Save</string>
+    <string name="doh_custom_error" translatable="false">Enter an address that starts with https://</string>
+    <string name="doh_note" translatable="false">Off: Orbis uses your phone\'s DNS, including its Private DNS setting. On: Orbis sends the names of the sites you open to the provider you choose, encrypted, instead of to your network. If the provider cannot be reached, Orbis uses your phone\'s DNS.</string>
+</resources>

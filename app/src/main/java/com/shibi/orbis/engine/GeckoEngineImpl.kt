@@ -197,6 +197,26 @@ class GeckoEngineImpl(
         runtime?.let(::applyPagePrefs)
     }
 
+    @Volatile private var secureDnsUrl: String? = null
+
+    override fun setSecureDns(url: String?) {
+        secureDnsUrl = url
+        runtime?.let(::applySecureDns)
+    }
+
+    private fun applySecureDns(rt: GeckoRuntime) {
+        val url = secureDnsUrl
+        runCatching {
+            if (url == null) {
+                rt.settings.setTrustedRecursiveResolverMode(GeckoRuntimeSettings.TRR_MODE_OFF)
+            } else {
+                rt.settings.setTrustedRecursiveResolverUri(url)
+                rt.settings.setTrustedRecursiveResolverMode(GeckoRuntimeSettings.TRR_MODE_FIRST)
+            }
+        }.onFailure { debugLog.log("GeckoEngine", "secure dns failed: ${it.javaClass.simpleName}") }
+        debugLog.log("GeckoEngine", "secure dns on=${url != null}")
+    }
+
     override fun setWebsiteColorScheme(dark: Boolean?) {
         websiteDark = dark
         runtime?.let(::applyPagePrefs)
@@ -275,15 +295,21 @@ class GeckoEngineImpl(
                     .enhancedTrackingProtectionCategory(ContentBlocking.EtpCategory.STRICT)
                     .strictSocialTrackingProtection(true)
                     .build()
+            val dnsUrl = secureDnsUrl
             val settings =
                 GeckoRuntimeSettings.Builder()
                     .aboutConfigEnabled(false)
                     .contentBlocking(contentBlocking)
+                    .trustedRecursiveResolverMode(
+                        if (dnsUrl == null) GeckoRuntimeSettings.TRR_MODE_OFF else GeckoRuntimeSettings.TRR_MODE_FIRST,
+                    )
+                    .apply { if (dnsUrl != null) trustedRecursiveResolverUri(dnsUrl) }
                     .build()
             val created = GeckoRuntime.create(appContext, settings)
             defaultAutomaticFontSize = created.settings.automaticFontSizeAdjustment
             applyDisplayPrefs(created)
             applyPagePrefs(created)
+            applySecureDns(created)
             // The darken extension may already be installed from an earlier run: find it, then match the setting.
             created.webExtensionController.list().accept(
                 { list ->

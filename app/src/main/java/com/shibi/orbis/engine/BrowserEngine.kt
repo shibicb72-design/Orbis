@@ -77,6 +77,11 @@ interface BrowserEngine {
     fun setForceZoom(enabled: Boolean) {}
     /** HTTPS-only mode: http pages are upgraded, and refused when the site has no https version. */
     fun setHttpsOnly(normalTabs: Boolean, privateTabs: Boolean) {}
+    /**
+     * Secure DNS (DNS over HTTPS): the provider address (https), or null to follow the phone's DNS. When the provider
+     * cannot be reached the engine falls back to the phone's DNS. Applies now and to a runtime created later.
+     */
+    fun setSecureDns(url: String?) {}
     /** The color scheme pages are asked for (prefers-color-scheme): true dark, false light, null the system's. */
     fun setWebsiteColorScheme(dark: Boolean?) {}
     /** Darkens light pages that have no dark design (a built-in extension; images and videos keep their colours). */
