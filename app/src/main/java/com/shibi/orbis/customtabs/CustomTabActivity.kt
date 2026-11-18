@@ -94,6 +94,8 @@ class CustomTabActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // First: a fresh start with Clear on exit on wipes before this page's session exists.
+        app.container.clearOnExit.onActivityCreated(hasSavedState = savedInstanceState != null)
         enableEdgeToEdge()
         val url = intent?.dataString?.takeIf { isWebUrl(it) }
         if (url == null) {
@@ -102,11 +104,17 @@ class CustomTabActivity : ComponentActivity() {
         }
         val toolbar = if (intent.hasExtra(EXTRA_ORBIS_TOOLBAR_COLOR)) intent.getIntExtra(EXTRA_ORBIS_TOOLBAR_COLOR, 0) else null
         val showTitle = intent.getBooleanExtra(EXTRA_ORBIS_SHOW_TITLE, false)
+        app.container.clearOnExit.afterWipe { if (!isFinishing && !isDestroyed) showPage(url, toolbar, showTitle) }
+    }
+
+    private fun showPage(url: String, toolbar: Int?, showTitle: Boolean) {
         // The page loads once the view is attached (see CustomTabScreen): loading before leaves Gecko's idea of the
         // page's screen position at 0,0, which misplaces screen-reader focus.
         val s = app.container.engine.createSession(SessionInit())
         s.host = host
         session = s
+        // Shown after a wipe, onStart may already have run.
+        if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) s.setActive(true)
         setContent {
             val settings = app.container.browserSettings
             val darkMode by settings.darkMode.collectAsStateWithLifecycle()
@@ -141,6 +149,7 @@ class CustomTabActivity : ComponentActivity() {
         pendingDownload.value = null
         if (!handedOff) session?.close()
         session = null
+        app.container.clearOnExit.onActivityDestroyed()
         super.onDestroy()
     }
 

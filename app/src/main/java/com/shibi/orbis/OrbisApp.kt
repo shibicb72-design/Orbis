@@ -13,6 +13,9 @@ import com.shibi.orbis.bookmarks.BookmarkManager
 import com.shibi.orbis.bookmarks.FileBookmarkStore
 import com.shibi.orbis.clear.BrowsingDataClearer
 import com.shibi.orbis.clear.ClearController
+import com.shibi.orbis.clear.ClearOnExit
+import com.shibi.orbis.clear.ClearOnExitHooks
+import com.shibi.orbis.clear.SharedPreferencesClearOnExitPrefs
 import com.shibi.orbis.clear.ClearTargets
 import com.shibi.orbis.clear.clearDownloadLists
 import com.shibi.orbis.clear.clearSavedLogins
@@ -211,10 +214,11 @@ class OrbisApp : Application() {
         var torrentsRef: TorrentManager? = null
         // The tab manager creates NO session here: sessions appear only once the browser screen asks for them, which
         // is after the onboarding decision. restore() only reads the stored tab list.
+        val tabsFile = File(filesDir, "tabs/tabs.json")
         val tabs =
             TabManager(
                 factory = { init -> engine.createSession(init) },
-                store = FileTabStore(File(filesDir, "tabs/tabs.json")),
+                store = FileTabStore(tabsFile),
                 scope = appScope,
                 log = { debugLog.log("Tabs", it) },
                 torrentLog = { debugLog.log(TorrentLog.TAG, it) },
@@ -381,6 +385,34 @@ class OrbisApp : Application() {
                 clearer = BrowsingDataClearer(clearTargets, log = { debugLog.log("Clear", it) }),
                 scope = appScope,
             )
+        // Settings > Clear on exit. Only the history part of the shared targets is used; bookmarks, passwords and the
+        // Downloads list are never reached from here.
+        val clearOnExit =
+            ClearOnExit(
+                prefs = SharedPreferencesClearOnExitPrefs(getSharedPreferences(SharedPreferencesClearOnExitPrefs.FILE_NAME, MODE_PRIVATE)),
+                targets = clearTargets,
+                hooks =
+                    object : ClearOnExitHooks {
+                        override suspend fun discardStoredTabs() =
+                            withContext(Dispatchers.IO) {
+                                for (f in listOf(tabsFile, File(tabsFile.parentFile, tabsFile.name + ".tmp"))) {
+                                    if (f.exists() && !f.delete()) throw java.io.IOException("tab list not deleted")
+                                }
+                            }
+
+                        override fun closeOpenTabs() {
+                            tabs.closeAllPrivate()
+                            tabs.closeAllNormal()
+                            container.thumbnails.clear()
+                        }
+
+                        override fun restoreTabs() = tabs.restore()
+
+                        override suspend fun clearEngine(exceptions: Set<String>): Boolean = engine.clearProfileDataExcept(exceptions)
+                    },
+                scope = appScope,
+                log = { debugLog.log("ClearOnExit", it) },
+            )
         val cast = CastCoordinator(this, appScope, log = { debugLog.log("Cast", it) })
         tabs.onPrivateTabDisposed = { id -> cast.onPrivateTabClosed(id) }
         container =
@@ -399,6 +431,7 @@ class OrbisApp : Application() {
                 bookmarks = bookmarks,
                 history = history,
                 clear = clear,
+                clearOnExit = clearOnExit,
                 searchEngine = searchEngine,
                 browserSettings = browserSettings,
                 logins = logins,
@@ -437,7 +470,8 @@ class OrbisApp : Application() {
         // Both lists are read before any tab can load a page; changes made before they arrive are replayed on top.
         bookmarks.load()
         history.load()
-        tabs.restore()
+        // Reads the tab list now, or (Clear on exit on) leaves it to the first activity: a fresh start wipes first.
+        clearOnExit.onAppStart()
         downloads.restore()
         // After restore(): restored entries are never IN_PROGRESS, so this cannot start the service at launch.
         downloadForeground =
@@ -497,6 +531,8 @@ class AppContainer(
     val history: HistoryManager,
     /** Clear browsing data. Runs in the app scope, so a clear in flight outlives the screen that started it. */
     val clear: ClearController,
+    /** Settings > Clear on exit; every activity reports its onCreate and onDestroy to it. */
+    val clearOnExit: ClearOnExit,
     /** Which engine address-bar searches go to; one choice for normal and private tabs. */
     val searchEngine: SearchEngineSettings,
     val browserSettings: BrowserSettings,

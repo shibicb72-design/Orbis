@@ -96,6 +96,9 @@ class GeckoEngineImpl(
     /** Notices blocked YouTube ad requests for the on-device time-saved estimate. Not installed in private tabs. */
     private val youtubeAdObserver = YoutubeAdExtensionHolder(onEvent = { onYoutubeAdEvent }, log = { debugLog.log("GeckoEngine", it) })
 
+    /** Keeps the clear-on-exit exceptions' cookies (see clearProfileDataExcept). Disabled except during that wipe. */
+    private val clearExit = ClearExitExtensionHolder { debugLog.log("GeckoEngine", it) }
+
     /** Sites with tracking protection turned off by the user (see TrackingExceptions). */
     private val trackingExceptions = TrackingExceptions()
 
@@ -339,6 +342,7 @@ class GeckoEngineImpl(
             if (AUTO_DESKTOP_RETRY) compatExtension.install(created)
             youtubeAdObserver.install(created)
             YoutubePipExtension.install(created) { debugLog.log("GeckoEngine", it) }
+            clearExit.install(created)
             // Without a prompt delegate, WebExtensionController.install() hangs forever.
             created.webExtensionController.setPromptDelegate(extensionHost.promptDelegate)
             runtime = created
@@ -472,6 +476,43 @@ class GeckoEngineImpl(
         } catch (e: Exception) {
             debugLog.log("GeckoEngine", "profile data clear failed: ${e.javaClass.simpleName}")
             false
+        }
+    }
+
+    /**
+     * Clear on exit (candidate A): the excepted sites' cookies are read by the built-in clearexit extension, everything
+     * is cleared with [clearProfileData], then the extension writes those cookies back. A complete wipe: when the
+     * extension does not answer in time the wipe still runs and the exceptions lose their cookies too. Logs counts only.
+     */
+    override suspend fun clearProfileDataExcept(exceptions: Set<String>): Boolean {
+        val rt = runtime
+        if (rt == null) {
+            debugLog.log("GeckoEngine", "clear on exit skipped: engine not running")
+            return false
+        }
+        if (exceptions.isEmpty()) return clearProfileData(cookiesAndSiteData = true, cache = true)
+        val kept =
+            try {
+                withTimeoutOrNull(CLEAR_EXIT_KEEP_TIMEOUT_MILLIS) { clearExit.snapshot(rt, exceptions) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                debugLog.log("GeckoEngine", "clear on exit: exceptions read failed: ${e.javaClass.simpleName}")
+                null
+            }
+        if (kept == null) debugLog.log("GeckoEngine", "clear on exit: exceptions not read; wiping without them")
+        try {
+            val ok = clearProfileData(cookiesAndSiteData = true, cache = true)
+            if (ok && kept != null && kept > 0) {
+                val restored = withTimeoutOrNull(CLEAR_EXIT_RESTORE_TIMEOUT_MILLIS) { clearExit.restore() }
+                debugLog.log(
+                    "GeckoEngine",
+                    if (restored == null) "clear on exit: exceptions not written back" else "clear on exit: exceptions kept=${restored.first} failed=${restored.second}",
+                )
+            }
+            return ok
+        } finally {
+            clearExit.stop(rt)
         }
     }
 
@@ -3244,6 +3285,144 @@ internal fun activityOf(context: android.content.Context): android.app.Activity?
 /** The first byte of a Content-Range header ("bytes 100-999/1000" gives 100), or null. */
 internal fun rangeStart(contentRange: String?): Long? =
     contentRange?.trim()?.removePrefix("bytes")?.trim()?.substringBefore('-')?.trim()?.toLongOrNull()?.takeIf { it >= 0 }
+
+internal const val CLEAR_EXIT_KEEP_TIMEOUT_MILLIS = 4_000L
+internal const val CLEAR_EXIT_RESTORE_TIMEOUT_MILLIS = 3_000L
+
+/**
+ * The built-in clearexit extension (assets/extensions/clearexit): reads and writes back the cookies of the clear-on-exit
+ * exceptions. It stays disabled between wipes, so it never runs while the user browses. Enabling it is also what starts
+ * its background script at once: at app start Gecko delays an enabled extension's background until the first page
+ * window exists, and a wipe runs before any. Cookie values stay inside the extension; only counts come back. Main thread.
+ */
+internal class ClearExitExtensionHolder(private val log: (String) -> Unit) {
+    private val installed = kotlinx.coroutines.CompletableDeferred<WebExtension?>()
+    private var ext: WebExtension? = null
+    private var livePort: WebExtension.Port? = null
+    private var portWaiter: kotlinx.coroutines.CancellableContinuation<WebExtension.Port>? = null
+    private val replies = HashMap<Int, kotlinx.coroutines.CancellableContinuation<JSONObject>>()
+    private var nextId = 1
+
+    private val delegate =
+        object : WebExtension.MessageDelegate {
+            override fun onConnect(port: WebExtension.Port) {
+                val connected = port
+                livePort = connected
+                connected.setDelegate(
+                    object : WebExtension.PortDelegate {
+                        override fun onPortMessage(message: Any, port: WebExtension.Port) = onReply(message)
+
+                        override fun onDisconnect(port: WebExtension.Port) {
+                            if (livePort === port) livePort = null
+                            val waiting = replies.values.toList()
+                            replies.clear()
+                            waiting.forEach { if (it.isActive) it.resume(JSONObject().put("type", "error")) }
+                        }
+                    },
+                )
+                portWaiter?.let { waiter ->
+                    portWaiter = null
+                    if (waiter.isActive) waiter.resume(connected)
+                }
+            }
+        }
+
+    fun install(runtime: GeckoRuntime) {
+        val controller = runtime.webExtensionController
+        controller.ensureBuiltIn(CLEAR_EXIT_ASSET_URL, CLEAR_EXIT_ID).accept(
+            { found ->
+                if (found == null) {
+                    installed.complete(null)
+                    return@accept
+                }
+                attach(found)
+                if (!found.metaData.enabled) {
+                    installed.complete(found)
+                    return@accept
+                }
+                controller.disable(found, WebExtensionController.EnableSource.APP).accept(
+                    { disabled ->
+                        disabled?.let(::attach)
+                        installed.complete(disabled ?: found)
+                    },
+                    { installed.complete(found) },
+                )
+            },
+            {
+                log("clear on exit extension install failed: ${it?.javaClass?.simpleName}")
+                installed.complete(null)
+            },
+        )
+    }
+
+    private fun attach(extension: WebExtension) {
+        ext = extension
+        runCatching { extension.setMessageDelegate(delegate, CLEAR_EXIT_NATIVE_APP) }
+            .onFailure { log("clear on exit extension delegate failed: ${it.javaClass.simpleName}") }
+    }
+
+    /** Enables the extension and has it keep the cookies of [domains]. Their count, or null without an answer. */
+    suspend fun snapshot(runtime: GeckoRuntime, domains: Set<String>): Int? {
+        val found = installed.await() ?: return null
+        attach(found)
+        val enabled =
+            suspendCancellableCoroutine<WebExtension?> { cont ->
+                runtime.webExtensionController.enable(found, WebExtensionController.EnableSource.APP).accept(
+                    { if (cont.isActive) cont.resume(it) },
+                    { if (cont.isActive) cont.resume(null) },
+                )
+            }
+        enabled?.let(::attach)
+        val connected = livePort ?: suspendCancellableCoroutine { cont ->
+            portWaiter = cont
+            cont.invokeOnCancellation { if (portWaiter === cont) portWaiter = null }
+        }
+        val reply = request(connected, JSONObject().put("type", "snapshot").put("domains", org.json.JSONArray(domains.toList())))
+        return if (reply.optString("type") == "snapshot") reply.optInt("count", 0) else null
+    }
+
+    /** Writes the kept cookies back: (written, refused), or null without an answer. */
+    suspend fun restore(): Pair<Int, Int>? {
+        val connected = livePort ?: return null
+        val reply = request(connected, JSONObject().put("type", "restore"))
+        return if (reply.optString("type") == "restored") reply.optInt("ok", 0) to reply.optInt("failed", 0) else null
+    }
+
+    /** Disables the extension again; anything it still holds in memory goes with its background script. */
+    fun stop(runtime: GeckoRuntime) {
+        val current = ext ?: return
+        runCatching {
+            runtime.webExtensionController.disable(current, WebExtensionController.EnableSource.APP).accept(
+                { disabled -> disabled?.let(::attach) },
+                { log("clear on exit extension disable failed") },
+            )
+        }.onFailure { log("clear on exit extension disable failed: ${it.javaClass.simpleName}") }
+    }
+
+    private suspend fun request(to: WebExtension.Port, message: JSONObject): JSONObject =
+        suspendCancellableCoroutine { cont ->
+            val id = nextId++
+            replies[id] = cont
+            cont.invokeOnCancellation { replies.remove(id) }
+            try {
+                to.postMessage(message.put("id", id))
+            } catch (e: Exception) {
+                replies.remove(id)
+                if (cont.isActive) cont.resume(JSONObject().put("type", "error"))
+            }
+        }
+
+    private fun onReply(message: Any) {
+        val json = message as? JSONObject ?: (message as? String)?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return
+        if (!json.has("id")) return
+        val waiter = replies.remove(json.optInt("id", -1)) ?: return
+        if (waiter.isActive) waiter.resume(json)
+    }
+}
+
+internal const val CLEAR_EXIT_ID = "clearexit@orbis.shibi.com"
+internal const val CLEAR_EXIT_ASSET_URL = "resource://android/assets/extensions/clearexit/"
+internal const val CLEAR_EXIT_NATIVE_APP = "orbisClearExit"
 
 /** The built-in Force dark extension (assets/extensions/darken). */
 internal const val DARKEN_ID = "darken@orbis.shibi.com"

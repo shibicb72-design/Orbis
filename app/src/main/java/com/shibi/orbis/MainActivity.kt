@@ -59,6 +59,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // First: a fresh start with Clear on exit on wipes before the tab list is restored or anything is opened.
+        app.container.clearOnExit.onActivityCreated(hasSavedState = savedInstanceState != null)
         // Back reaches the app before any view (GeckoView swallowed it once a page was touched); see routeBackKey.
         window.callback = BackKeyWindowCallback(window.callback) { onBackPressedDispatcher.onBackPressed() }
         enableEdgeToEdge()
@@ -92,7 +94,10 @@ class MainActivity : ComponentActivity() {
         // A recreated activity (savedInstanceState != null) or one resumed from Recents still carries the intent
         // that started it; reading it again would reopen a link the user already dealt with.
         if (savedInstanceState == null && (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) {
-            takeViewIntent(intent)
+            // The intent is taken at once, so a later recreate cannot see it; what it opens waits for a running wipe.
+            val incoming = intent
+            setIntent(Intent())
+            app.container.clearOnExit.afterWipe { if (!isDestroyed) takeViewIntent(incoming) }
         }
         setContent {
             val settings = app.container.browserSettings
@@ -107,7 +112,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        takeViewIntent(intent)
+        setIntent(Intent())
+        app.container.clearOnExit.afterWipe { if (!isDestroyed) takeViewIntent(intent) }
     }
 
     override fun onStart() {
@@ -204,6 +210,7 @@ class MainActivity : ComponentActivity() {
         // A destroyed activity must not leave a closed window's media playing.
         pipCloseHandler.removeCallbacks(confirmPipClose)
         pipExit.confirmClose()
+        app.container.clearOnExit.onActivityDestroyed()
         super.onDestroy()
     }
 

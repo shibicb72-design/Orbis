@@ -119,6 +119,16 @@ interface BrowserEngine {
      * the engine is not running, refused, or failed. Selecting neither returns true without calling Gecko.
      */
     suspend fun clearProfileData(cookiesAndSiteData: Boolean, cache: Boolean): Boolean
+
+    /**
+     * Clear on exit: clears every cookie, all site data and the caches, as [clearProfileData] with both, then writes back
+     * the cookies of the sites in [exceptions] (registrable domains, lower case; subdomains included). An excepted site
+     * keeps its cookies only; its other site data and cache go. When the exceptions cannot be read in time the wipe still
+     * runs without them: a wipe that misses data is worse than an exception that loses its sign-in. Same rules as
+     * [clearProfileData] (no private tab open, main thread). True only when the engine confirmed the wipe; keeping the
+     * exceptions does not change it. The default keeps no exception.
+     */
+    suspend fun clearProfileDataExcept(exceptions: Set<String>): Boolean = clearProfileData(cookiesAndSiteData = true, cache = true)
     fun shutdown()
 }
 
