@@ -2999,6 +2999,7 @@ private class GeckoExtensionHost(
             version = metaData.version,
             enabled = metaData.enabled,
             disabledByUser = (metaData.disabledFlags and WebExtension.DisabledFlags.USER) != 0,
+            disabledReason = disabledReasonOf(metaData.enabled, metaData.disabledFlags),
             optionsPageUrl = metaData.optionsPageUrl,
             name = metaData.name,
             allowedInPrivate = metaData.allowedInPrivateBrowsing,
@@ -3168,30 +3169,50 @@ private class GeckoExtensionHost(
     override suspend fun checkForUpdate(id: String): InstalledExtension? =
         withContext(Dispatchers.Main.immediate) {
             val extension = findGecko(id) ?: return@withContext null
-            controller().update(extension).awaitResult()?.toInstalled()
-        }
-
-    private fun mapInstallError(code: Int): ExtensionInstallError =
-        when (code) {
-            WebExtension.InstallException.ErrorCodes.ERROR_NETWORK_FAILURE -> ExtensionInstallError.NETWORK
-            WebExtension.InstallException.ErrorCodes.ERROR_INCORRECT_HASH,
-            WebExtension.InstallException.ErrorCodes.ERROR_CORRUPT_FILE,
-            -> ExtensionInstallError.CORRUPT
-            WebExtension.InstallException.ErrorCodes.ERROR_SIGNEDSTATE_REQUIRED -> ExtensionInstallError.SIGNATURE
-            WebExtension.InstallException.ErrorCodes.ERROR_INCORRECT_ID,
-            WebExtension.InstallException.ErrorCodes.ERROR_UNEXPECTED_ADDON_TYPE,
-            -> ExtensionInstallError.WRONG_EXTENSION
-            WebExtension.InstallException.ErrorCodes.ERROR_BLOCKLISTED,
-            WebExtension.InstallException.ErrorCodes.ERROR_SOFT_BLOCKED,
-            WebExtension.InstallException.ErrorCodes.ERROR_ADMIN_INSTALL_ONLY,
-            -> ExtensionInstallError.BLOCKED
-            WebExtension.InstallException.ErrorCodes.ERROR_INCOMPATIBLE,
-            WebExtension.InstallException.ErrorCodes.ERROR_UNSUPPORTED_ADDON_TYPE,
-            -> ExtensionInstallError.INCOMPATIBLE
-            WebExtension.InstallException.ErrorCodes.ERROR_USER_CANCELED -> ExtensionInstallError.CANCELLED
-            else -> ExtensionInstallError.UNKNOWN
+            try {
+                controller().update(extension).awaitResult()?.toInstalled()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: WebExtension.InstallException) {
+                // A denied update (onUpdatePrompt) arrives as code ERROR_USER_CANCELED, as a refused install prompt does.
+                val error = mapInstallError(e.code)
+                debugLog.log("Extensions", "update failed: code=${e.code} -> $error")
+                throw ExtensionInstallException(error, "update failed, code ${e.code}")
+            }
         }
 }
+
+/** Maps the engine's install error code. [WebExtension.InstallException.ErrorCodes.ERROR_USER_CANCELED] is also what a denied update gives. */
+internal fun mapInstallError(code: Int): ExtensionInstallError =
+    when (code) {
+        WebExtension.InstallException.ErrorCodes.ERROR_NETWORK_FAILURE -> ExtensionInstallError.NETWORK
+        WebExtension.InstallException.ErrorCodes.ERROR_INCORRECT_HASH,
+        WebExtension.InstallException.ErrorCodes.ERROR_CORRUPT_FILE,
+        -> ExtensionInstallError.CORRUPT
+        WebExtension.InstallException.ErrorCodes.ERROR_SIGNEDSTATE_REQUIRED -> ExtensionInstallError.SIGNATURE
+        WebExtension.InstallException.ErrorCodes.ERROR_INCORRECT_ID,
+        WebExtension.InstallException.ErrorCodes.ERROR_UNEXPECTED_ADDON_TYPE,
+        -> ExtensionInstallError.WRONG_EXTENSION
+        WebExtension.InstallException.ErrorCodes.ERROR_BLOCKLISTED,
+        WebExtension.InstallException.ErrorCodes.ERROR_SOFT_BLOCKED,
+        WebExtension.InstallException.ErrorCodes.ERROR_ADMIN_INSTALL_ONLY,
+        -> ExtensionInstallError.BLOCKED
+        WebExtension.InstallException.ErrorCodes.ERROR_INCOMPATIBLE,
+        WebExtension.InstallException.ErrorCodes.ERROR_UNSUPPORTED_ADDON_TYPE,
+        -> ExtensionInstallError.INCOMPATIBLE
+        WebExtension.InstallException.ErrorCodes.ERROR_USER_CANCELED -> ExtensionInstallError.CANCELLED
+        else -> ExtensionInstallError.UNKNOWN
+    }
+
+/** The reason an extension is off, from the engine's disabled flags. Null when enabled. */
+internal fun disabledReasonOf(enabled: Boolean, flags: Int): ExtensionDisabledReason? =
+    when {
+        enabled -> null
+        flags and (WebExtension.DisabledFlags.BLOCKLIST or WebExtension.DisabledFlags.SOFT_BLOCKLIST) != 0 -> ExtensionDisabledReason.BLOCKLIST
+        flags and WebExtension.DisabledFlags.SIGNATURE != 0 -> ExtensionDisabledReason.SIGNATURE
+        flags and WebExtension.DisabledFlags.USER != 0 -> ExtensionDisabledReason.USER
+        else -> ExtensionDisabledReason.OTHER
+    }
 
 /**
  * Gecko stores every location answer for good (EXPIRE_NEVER) and then never asks us again for that site. Our decision

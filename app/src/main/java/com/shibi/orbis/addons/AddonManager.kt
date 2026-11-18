@@ -1,6 +1,7 @@
 package com.shibi.orbis.addons
 
 import com.shibi.orbis.engine.AddonAccess
+import com.shibi.orbis.engine.ExtensionDisabledReason
 import com.shibi.orbis.engine.ExtensionHost
 import com.shibi.orbis.engine.ExtensionInstallError
 import com.shibi.orbis.engine.ExtensionInstallException
@@ -45,6 +46,8 @@ sealed interface AddonState {
         val updateBlocked: Boolean = false,
         /** The engine turned it off (blocklist or signature), not the user. It has no switch. */
         val disabledByBrowser: Boolean = false,
+        /** Off for a reason that is neither the user nor the blocklist or signature. It has no switch either. */
+        val disabledOther: Boolean = false,
     ) : AddonState
     data class Failed(val reason: AddonFailure) : AddonState
 }
@@ -287,7 +290,8 @@ class AddonManager(
             allowedInPrivate = allowedInPrivate,
             optionsPageUrl = optionsPageUrl,
             updateBlocked = prefs.updateBlocked(id),
-            disabledByBrowser = !enabled && !disabledByUser,
+            disabledByBrowser = disabledReason == ExtensionDisabledReason.BLOCKLIST || disabledReason == ExtensionDisabledReason.SIGNATURE,
+            disabledOther = disabledReason == ExtensionDisabledReason.OTHER,
         )
 
     private fun set(id: String, state: AddonState) {

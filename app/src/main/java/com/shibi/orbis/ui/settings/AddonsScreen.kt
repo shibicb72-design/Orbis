@@ -288,6 +288,13 @@ private fun AddonRow(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.error,
                     )
+                } else if (state.disabledOther) {
+                    // Off for a reason the engine does not name as the blocklist or signature: no claim about safety.
+                    Text(
+                        stringResource(R.string.addons_turned_off_other),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 } else {
                     SwitchRow(R.string.addons_on, state.enabled) { manager.setEnabled(addon.id, it) }
                     SwitchRow(R.string.addons_allow_private, state.allowedInPrivate) { manager.setAllowedInPrivate(addon.id, it) }
@@ -300,7 +307,7 @@ private fun AddonRow(
                     )
                 }
                 val options = state.optionsPageUrl
-                if (options != null && !state.disabledByBrowser) {
+                if (options != null && !state.disabledByBrowser && !state.disabledOther) {
                     OutlinedButton(onClick = { onOpenExtensionPage(options) }, modifier = Modifier.fillMaxWidth()) {
                         Text(stringResource(R.string.addons_open_settings))
                     }

@@ -34,6 +34,7 @@
     <string name="addons_failed_wrong_extension" translatable="false">Mozilla Add-ons sent a different add-on than expected, so it was not installed.</string>
     <string name="addons_update_blocked" translatable="false">An update needs more access. Remove and add it again to review the new access.</string>
     <string name="addons_turned_off" translatable="false">Turned off by the browser for your safety.</string>
+    <string name="addons_turned_off_other" translatable="false">Turned off by the browser.</string>
 
     <string name="addons_failed_other" translatable="false">This add-on could not be installed.</string>
 </resources>
