@@ -207,6 +207,118 @@ class ClearOnExitTest {
             assertTrue(s.logs.contains("ClearOnExit: tabs failed: IOException"))
         }
 
+    // The eight cases of feat08-3d, with the setting on. Each starts a new process unless it says otherwise. Activities
+    // report as on Android 16 (scratch\feat08-3d\step2-signals.md); MainActivity never passes the Recents signal.
+
+    /** True when anything of the wipe ran. */
+    private fun Setup.wiped() = recorder.calls.any { it in setOf("history", "discardTabs", "engine", "closeOpenTabs") }
+
+    /** Main started from the launcher with no saved state (rows 1 and 2). */
+    private fun TestScope.launcherAfterFullClose(): Setup {
+        val s = Setup(this, enabled = true)
+        s.clearOnExit.onAppStart()
+        s.clearOnExit.onActivityCreated(hasSavedState = false)
+        advanceUntilIdle()
+        return s
+    }
+
+    /** A link from another app: the router, then the browser activity. Returns whether the link was opened. */
+    private fun TestScope.link(s: Setup, browserTaskInRecents: Boolean, mainHasSavedState: Boolean): Boolean {
+        var opened = false
+        s.clearOnExit.onActivityCreated(hasSavedState = false, browserTaskInRecents = browserTaskInRecents)
+        s.clearOnExit.onActivityDestroyed()
+        s.clearOnExit.onActivityCreated(hasSavedState = mainHasSavedState)
+        s.clearOnExit.afterWipe { opened = s.recorder.ready }
+        advanceUntilIdle()
+        return opened
+    }
+
+    @Test
+    fun row1SwipedThenLauncherWipes() =
+        runTest(StandardTestDispatcher()) {
+            assertTrue(launcherAfterFullClose().wiped())
+        }
+
+    @Test
+    fun row2ForceStoppedThenLauncherWipes() =
+        runTest(StandardTestDispatcher()) {
+            val s = launcherAfterFullClose()
+            assertEquals(listOf("history", "discardTabs", "engine", "restore"), s.recorder.calls)
+        }
+
+    @Test
+    fun row3BackgroundKillThenRecentsWipesNothing() =
+        runTest(StandardTestDispatcher()) {
+            val s = Setup(this, enabled = true)
+            s.clearOnExit.onAppStart()
+            s.clearOnExit.onActivityCreated(hasSavedState = true)
+            advanceUntilIdle()
+            assertEquals(listOf("restore"), s.recorder.calls)
+        }
+
+    @Test
+    fun row4BackgroundKillThenLinkWipesNothingAndOpensTheLinkWithTheOldTabs() =
+        runTest(StandardTestDispatcher()) {
+            val s = Setup(this, enabled = true)
+            s.clearOnExit.onAppStart()
+            val opened = link(s, browserTaskInRecents = true, mainHasSavedState = true)
+            assertEquals(listOf("restore"), s.recorder.calls)
+            assertTrue(opened)
+            assertFalse(s.clearOnExit.wiping.value)
+        }
+
+    @Test
+    fun row5BackgroundKillThenCustomTabWipesNothing() =
+        runTest(StandardTestDispatcher()) {
+            val s = Setup(this, enabled = true)
+            var shown = false
+            s.clearOnExit.onAppStart()
+            // The router, in the browser's task; then the Custom Tab, in a task of its own, with no saved state.
+            s.clearOnExit.onActivityCreated(hasSavedState = false, browserTaskInRecents = true)
+            s.clearOnExit.onActivityDestroyed()
+            s.clearOnExit.onActivityCreated(hasSavedState = false, browserTaskInRecents = true)
+            s.clearOnExit.afterWipe { shown = true }
+            advanceUntilIdle()
+            assertEquals(listOf("restore"), s.recorder.calls)
+            assertTrue(shown)
+        }
+
+    @Test
+    fun row6SwipedThenLinkWipesThenOpensTheLink() =
+        runTest(StandardTestDispatcher()) {
+            val s = Setup(this, enabled = true)
+            s.clearOnExit.onAppStart()
+            val opened = link(s, browserTaskInRecents = false, mainHasSavedState = false)
+            assertEquals(listOf("history", "discardTabs", "engine", "restore"), s.recorder.calls)
+            // Opened after the wipe, with the (empty) tab list ready.
+            assertTrue(opened)
+        }
+
+    @Test
+    fun row7ForceStoppedThenLinkWipesThenOpensTheLink() =
+        runTest(StandardTestDispatcher()) {
+            val s = Setup(this, enabled = true)
+            s.clearOnExit.onAppStart()
+            val opened = link(s, browserTaskInRecents = false, mainHasSavedState = false)
+            assertEquals(1, s.recorder.count("engine"))
+            assertEquals(1, s.recorder.count("restore"))
+            assertTrue(opened)
+        }
+
+    @Test
+    fun row8DontKeepActivitiesThenLinkWipesNothing() =
+        runTest(StandardTestDispatcher()) {
+            val s = Setup(this, enabled = true)
+            s.clearOnExit.onAppStart()
+            s.clearOnExit.onActivityCreated(hasSavedState = true)
+            advanceUntilIdle()
+            // Home with "Don't keep activities": the browser activity is destroyed, the process and the task stay.
+            s.clearOnExit.onActivityDestroyed()
+            val opened = link(s, browserTaskInRecents = true, mainHasSavedState = true)
+            assertEquals(listOf("restore"), s.recorder.calls)
+            assertTrue(opened)
+        }
+
     @Test
     fun exceptionDomainsAreNormalised() {
         assertEquals("example.com", clearOnExitDomain(" https://www.Example.com/path?q=1 "))

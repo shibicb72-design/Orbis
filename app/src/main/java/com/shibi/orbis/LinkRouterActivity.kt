@@ -1,6 +1,7 @@
 package com.shibi.orbis
 
 import android.app.Activity
+import android.app.ActivityManager
 import androidx.core.net.toUri
 import android.content.Intent
 import android.os.Bundle
@@ -25,8 +26,11 @@ class LinkRouterActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // A link that starts Orbis after it was fully closed: Clear on exit wipes before the page opens. The activity
-        // it starts waits for the wipe.
-        (application as OrbisApp).container.clearOnExit.onActivityCreated(hasSavedState = savedInstanceState != null)
+        // it starts waits for the wipe. Not after a background kill: the browser's task is then still in Recents.
+        (application as OrbisApp).container.clearOnExit.onActivityCreated(
+            hasSavedState = savedInstanceState != null,
+            browserTaskInRecents = browserTaskInRecents(),
+        )
         val incoming = intent
         val magnet = externalMagnetFrom(incoming?.action, incoming?.dataString)
         if (magnet != null) {
@@ -65,3 +69,21 @@ class LinkRouterActivity : Activity() {
         super.onDestroy()
     }
 }
+
+/**
+ * True when Recents still holds a task whose bottom activity is [MainActivity]: the user only switched apps, even if
+ * Android has since killed the process or destroyed the activity. A swipe out of Recents removes that task, and after a
+ * force stop it is no longer listed (checked on Android 16); a link then lands in a new task whose base is
+ * [LinkRouterActivity]. A link that starts while the task exists joins it on top of [MainActivity], so the caller's own
+ * task counts too. For [LinkRouterActivity] and the Custom Tab only; see [com.shibi.orbis.clear.UiSessionTracker].
+ * If the list cannot be read, the answer is true: a missed wipe is caught at the next full close, a wrong one loses
+ * the user's tabs.
+ */
+internal fun Activity.browserTaskInRecents(): Boolean =
+    try {
+        getSystemService(ActivityManager::class.java).appTasks.any { task ->
+            task.taskInfo?.baseActivity?.className == MainActivity::class.java.name
+        }
+    } catch (e: RuntimeException) {
+        true
+    }
