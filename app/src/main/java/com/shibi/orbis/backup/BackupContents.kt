@@ -32,6 +32,9 @@ import com.shibi.orbis.settings.TEXT_ZOOM_STEPS
 import com.shibi.orbis.settings.ToolbarButton
 import com.shibi.orbis.settings.mergeMenuHidden
 import com.shibi.orbis.settings.mergeMenuOrder
+import com.shibi.orbis.torrent.SharedPreferencesTorrentPrefs
+import com.shibi.orbis.torrent.TorrentSettings
+import com.shibi.orbis.torrent.TorrentSettingsStore
 import com.shibi.orbis.settings.CUSTOMIZABLE_MENU_ACTIONS
 import com.shibi.orbis.tabs.MAX_TABS
 import com.shibi.orbis.tabs.PersistedTab
@@ -206,6 +209,19 @@ abstract class SettingType {
             }?.takeIf { it in range }
     }
 
+    /** The seed ratio limit: a number the store accepts (0.1..100, one decimal), or JSON null for no limit ([NoValue]). */
+    object SeedRatio : SettingType() {
+        override fun parse(raw: Any?): Any? {
+            if (raw == JSONObject.NULL) return NoValue
+            val d = (raw as? Number)?.toDouble() ?: return null
+            if (d.isNaN() || d < TorrentSettings.MIN_RATIO.toDouble() || d > TorrentSettings.MAX_RATIO.toDouble()) return null
+            return TorrentSettings.clampRatio(d.toFloat())
+        }
+
+        // The float's own digits (0.1), not its double expansion.
+        override fun toJson(value: Any): Any = if (value is Float) value.toString().toDouble() else super.toJson(value)
+    }
+
     class OneOf(private val names: List<String>) : SettingType() {
         override fun parse(raw: Any?): Any? = (raw as? String)?.takeIf { it in names }
     }
@@ -284,7 +300,7 @@ private val CUSTOMIZABLE_NAMES = CUSTOMIZABLE_MENU_ACTIONS.map { it.name }.toSet
  * written or read back (never a raw dump). Left out on purpose: `browser_prefs` hidden_sites (no way to un-hide a site
  * on restore), torrent_ip_note_seen (a one-time notice); the per-site JavaScript and desktop lists (in the
  * sitePermissions section instead); search_prefs custom_next (a local counter); addon_prefs and ubo_prefs entirely;
- * torrent prefs.
+ * torrent_settings listen_port (the engine's own random port) and schema (a migration marker).
  */
 object SettingsAllowList {
     val files: Map<String, Map<String, SettingType>> =
@@ -339,6 +355,18 @@ object SettingsAllowList {
                 linkedMapOf(
                     "enabled" to SettingType.Bool,
                     "exceptions" to SettingType.Strings(asSet = true) { list -> com.shibi.orbis.clear.cleanExceptions(list) },
+                ),
+            SharedPreferencesTorrentPrefs.FILE_NAME to
+                linkedMapOf(
+                    TorrentSettingsStore.KEY_WIFI_ONLY to SettingType.Bool,
+                    TorrentSettingsStore.KEY_STOP_SEEDING to SettingType.Bool,
+                    TorrentSettingsStore.KEY_SEED_RATIO to SettingType.SeedRatio,
+                    TorrentSettingsStore.KEY_DHT to SettingType.Bool,
+                    TorrentSettingsStore.KEY_PEX to SettingType.Bool,
+                    TorrentSettingsStore.KEY_LSD to SettingType.Bool,
+                    // 0 is no limit; the screen accepts at most MAX_KBPS KB/s.
+                    TorrentSettingsStore.KEY_DOWN_BPS to SettingType.IntIn(0..TorrentSettings.kbpsToBps(TorrentSettings.MAX_KBPS)),
+                    TorrentSettingsStore.KEY_UP_BPS to SettingType.IntIn(0..TorrentSettings.kbpsToBps(TorrentSettings.MAX_KBPS)),
                 ),
         )
 

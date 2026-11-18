@@ -41,6 +41,8 @@ import com.shibi.orbis.settings.ToolbarSettings
 import com.shibi.orbis.tabs.TabManager
 import com.shibi.orbis.tabs.TabStore
 import com.shibi.orbis.tabs.TabsSnapshot
+import com.shibi.orbis.torrent.TorrentPrefs
+import com.shibi.orbis.torrent.TorrentSettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -113,6 +115,20 @@ internal class MemClearPrefs : ClearOnExitPrefs {
 
 internal class MemPrivacyPrefs : PrivacyPrefs {
     override var lockPrivateTabs = false
+}
+
+internal class MemTorrentPrefs : TorrentPrefs {
+    val map = HashMap<String, Any>()
+
+    override fun boolean(key: String): Boolean? = map[key] as? Boolean
+
+    override fun int(key: String): Int? = map[key] as? Int
+
+    override fun float(key: String): Float? = map[key] as? Float
+
+    override fun write(values: Map<String, Any?>) {
+        for ((k, v) in values) if (v == null) map.remove(k) else map[k] = v
+    }
 }
 
 internal class MemBookmarkStore(var data: List<Bookmark> = emptyList()) : BookmarkStore {
@@ -209,6 +225,8 @@ internal class BackupWorld(
     val doh by lazy { DohSettings(MemDohPrefs()) }
     val clearPrefs = MemClearPrefs()
     val privacy = MemPrivacyPrefs()
+    val torrentPrefs = MemTorrentPrefs()
+    val torrentSettings by lazy { TorrentSettingsStore(torrentPrefs) }
     val bookmarks by lazy { BookmarkManager(bookmarkStore, scope, {}, { 5_000L }, dispatcher) }
     val logins by lazy { LoginManager(loginStore, browserPrefs, scope, {}, { 5_000L }, dispatcher, newGuid = { "{g${guid++}}" }) }
     private var guid = 1
@@ -232,6 +250,7 @@ internal class BackupWorld(
             sitePermissions = sitePermissions,
             tabs = tabs,
             history = history,
+            torrentSettings = torrentSettings,
             addonStates = { addonStates },
             ublockInstalled = { ublockInstalled },
         )
