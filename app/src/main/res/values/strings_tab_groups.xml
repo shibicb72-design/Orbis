@@ -24,6 +24,14 @@
     <string name="tab_group_colour_title" translatable="false">Change group colour</string>
     <string name="tab_group_close_confirm" translatable="false">Close</string>
     <string name="tab_group_in_group" translatable="false">In group %1$s, %2$s</string>
+    <plurals name="tab_group_strip_expanded" translatable="false">
+        <item quantity="one">Group %1$s, %2$d tab, expanded</item>
+        <item quantity="other">Group %1$s, %2$d tabs, expanded</item>
+    </plurals>
+    <plurals name="tab_group_strip_collapsed" translatable="false">
+        <item quantity="one">Group %1$s, %2$d tab, collapsed</item>
+        <item quantity="other">Group %1$s, %2$d tabs, collapsed</item>
+    </plurals>
     <string name="tab_group_colour_grey" translatable="false">Grey</string>
     <string name="tab_group_colour_blue" translatable="false">Blue</string>
     <string name="tab_group_colour_red" translatable="false">Red</string>

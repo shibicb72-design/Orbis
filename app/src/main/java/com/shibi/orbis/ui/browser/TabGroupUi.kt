@@ -27,20 +27,26 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.shibi.orbis.R
@@ -271,7 +277,17 @@ internal fun TabGroupEditDialog(
     onConfirm: (name: String, color: TabGroupColor) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var name by remember { mutableStateOf(initialName) }
+    // The cursor starts at the end of an existing name (Rename).
+    var name by remember { mutableStateOf(TextFieldValue(initialName, TextRange(initialName.length))) }
+    val nameFocus = remember { FocusRequester() }
+    // Once, after the first composition: the keyboard comes up with the dialog. Not for the colour-only dialog.
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(Unit) {
+        if (askName) {
+            nameFocus.requestFocus()
+            keyboard?.show()
+        }
+    }
     var color by remember { mutableStateOf(initialColor) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -281,10 +297,16 @@ internal fun TabGroupEditDialog(
                 if (askName) {
                     OutlinedTextField(
                         value = name,
-                        onValueChange = { name = it.take(MAX_TAB_GROUP_NAME_CHARS) },
+                        onValueChange = { value ->
+                            name = if (value.text.length > MAX_TAB_GROUP_NAME_CHARS) {
+                                TextFieldValue(value.text.take(MAX_TAB_GROUP_NAME_CHARS), TextRange(MAX_TAB_GROUP_NAME_CHARS))
+                            } else {
+                                value
+                            }
+                        },
                         placeholder = { Text(stringResource(R.string.tab_group_name_hint)) },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth().testTag(GROUP_NAME_FIELD_TAG),
+                        modifier = Modifier.fillMaxWidth().focusRequester(nameFocus).testTag(GROUP_NAME_FIELD_TAG),
                     )
                 }
                 if (askColor) {
@@ -308,8 +330,8 @@ internal fun TabGroupEditDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(name, color) },
-                enabled = !askName || tabGroupName(name) != null,
+                onClick = { onConfirm(name.text, color) },
+                enabled = !askName || tabGroupName(name.text) != null,
             ) { Text(confirmLabel) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.tab_group_cancel)) } },
