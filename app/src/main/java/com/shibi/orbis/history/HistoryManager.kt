@@ -55,6 +55,7 @@ class HistoryManager(
         class Visit(val url: String, val title: String, val at: Long) : Change
         class Title(val url: String, val title: String) : Change
         class Delete(val url: String) : Change
+        class Import(val entries: List<HistoryEntry>) : Change
         object Clear : Change
     }
 
@@ -166,6 +167,38 @@ class HistoryManager(
         if (loaded) writeNow() else queued += change
     }
 
+    /**
+     * Adds rows from a backup and returns how many were added. Only storable web addresses; an address already in the
+     * history is skipped, never merged or re-dated. Each row keeps its own time and visit count, the list stays newest
+     * first by those times, and past [MAX_HISTORY_ENTRIES] the oldest rows go. Titles are cleaned as the codec cleans
+     * them. Before [load] has finished the change is queued like any other and replayed on the stored list; the count
+     * returned then is against the rows known so far.
+     */
+    fun importEntries(entries: List<HistoryEntry>): Int {
+        val change = Change.Import(entries)
+        val added = applyImport(change)
+        if (added == 0) return 0
+        publish()
+        if (loaded) schedulePersist() else queued += change
+        return added
+    }
+
+    private fun applyImport(change: Change.Import): Int {
+        val known = items.mapTo(HashSet()) { it.url }
+        val fresh =
+            change.entries
+                .filter { isStorableWebUrl(it.url) && known.add(it.url) }
+                .map {
+                    HistoryEntry(it.url, cleanStoredTitle(it.title), it.visitedAt.coerceAtLeast(0L), it.visits.coerceIn(1, MAX_VISIT_COUNT))
+                }
+        if (fresh.isEmpty()) return 0
+        // Stable: rows with the same time keep their order, the existing ones first.
+        val merged = (items + fresh).sortedByDescending { it.visitedAt }.take(MAX_HISTORY_ENTRIES)
+        items = ArrayList(merged)
+        val kept = merged.mapTo(HashSet()) { it.url }
+        return fresh.count { it.url in kept }
+    }
+
     fun clearAll() {
         val change = Change.Clear
         apply(change)
@@ -189,6 +222,8 @@ class HistoryManager(
             }
 
             is Change.Delete -> items.removeAll { it.url == change.url }
+
+            is Change.Import -> applyImport(change)
 
             Change.Clear -> items.clear()
         }

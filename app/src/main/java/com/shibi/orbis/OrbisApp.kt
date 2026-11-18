@@ -437,6 +437,29 @@ class OrbisApp : Application() {
             )
         val cast = CastCoordinator(this, appScope, log = { debugLog.log("Cast", it) })
         tabs.onPrivateTabDisposed = { id -> cast.onPrivateTabClosed(id) }
+        val privacyPrefs = SharedPreferencesPrivacyPrefs(getSharedPreferences(SharedPreferencesPrivacyPrefs.FILE_NAME, MODE_PRIVATE))
+        val backup =
+            com.shibi.orbis.backup.BackupManager(
+                sources =
+                    com.shibi.orbis.backup.BackupSources(
+                        bookmarks = bookmarks,
+                        logins = logins,
+                        browserSettings = browserSettings,
+                        // Read only: the per-site JavaScript and desktop lists. Writes go through browserSettings.
+                        browserPrefs = SharedPreferencesBrowserPrefs(prefsFile),
+                        searchEngine = searchEngine,
+                        toolbar = toolbar,
+                        doh = doh,
+                        clearOnExit = clearOnExit.prefs,
+                        privacy = privacyPrefs,
+                        sitePermissions = sitePermissions,
+                        tabs = tabs,
+                        history = history,
+                        addonStates = { addons.states.value },
+                        ublockInstalled = { ubo.state.value is com.shibi.orbis.ubo.UboState.Installed },
+                    ),
+                appVersion = BuildConfig.VERSION_NAME,
+            )
         container =
             AppContainer(
                 debugLog = debugLog,
@@ -459,7 +482,8 @@ class OrbisApp : Application() {
                 logins = logins,
                 doh = doh,
                 toolbar = toolbar,
-                privacyPrefs = SharedPreferencesPrivacyPrefs(getSharedPreferences(SharedPreferencesPrivacyPrefs.FILE_NAME, MODE_PRIVATE)),
+                privacyPrefs = privacyPrefs,
+                backup = backup,
             )
         // A tab that starts playing brings up the media notification (and keeps playback alive in the background).
         appScope.launch {
@@ -572,6 +596,8 @@ class AppContainer(
     /** Settings > Lock private tabs (off by default). */
     val privacyPrefs: PrivacyPrefs,
     val logins: LoginManager,
+    /** Backup files: makes them and restores them (the screen is feat08-5c). */
+    val backup: com.shibi.orbis.backup.BackupManager,
     /** Page media across tabs (notification, background playback, picture-in-picture). */
     val media: MediaCenter = MediaCenter(tabs, kotlinx.coroutines.MainScope()),
     /** Live search suggestions; only asked for normal tabs with the setting on (see BrowserScreen). */
