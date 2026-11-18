@@ -24,6 +24,9 @@ import com.shibi.orbis.torrent.IntakeRequest
 class LinkRouterActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // A link that starts Orbis after it was fully closed: Clear on exit wipes before the page opens. The activity
+        // it starts waits for the wipe.
+        (application as OrbisApp).container.clearOnExit.onActivityCreated(hasSavedState = savedInstanceState != null)
         val incoming = intent
         val magnet = externalMagnetFrom(incoming?.action, incoming?.dataString)
         if (magnet != null) {
@@ -55,5 +58,10 @@ class LinkRouterActivity : Activity() {
             runCatching { startActivity(next) }
         }
         finish()
+    }
+
+    override fun onDestroy() {
+        (application as OrbisApp).container.clearOnExit.onActivityDestroyed()
+        super.onDestroy()
     }
 }

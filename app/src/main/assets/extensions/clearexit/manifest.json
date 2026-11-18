@@ -1,0 +1,10 @@
+{
+  "manifest_version": 2,
+  "name": "Orbis clear on exit",
+  "version": "1.0",
+  "description": "Keeps the sign-in cookies of the sites on the clear-on-exit exceptions list while Orbis wipes browsing data. Enabled only during that wipe. Sends nothing off the phone. Does not run in private tabs.",
+  "browser_specific_settings": { "gecko": { "id": "clearexit@orbis.shibi.com" } },
+  "incognito": "not_allowed",
+  "permissions": ["cookies", "nativeMessaging", "geckoViewAddons", "<all_urls>"],
+  "background": { "scripts": ["background.js"] }
+}
