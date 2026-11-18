@@ -271,6 +271,11 @@ class OrbisApp : Application() {
             val url = searchEngine.selected.value.searchUrl(text)
             if (isPrivate) tabs.newPrivateTab(url) else tabs.newTab(url)
         }
+        // An add-on panel's own page (uBlock Origin's dashboard): a new normal tab, also from a private tab, as the
+        // Add-ons screen's "Settings" opens one. The browser screen, where panels show, then shows it.
+        engine.extensions.onOpenAddonPage = { url ->
+            tabs.newTab()?.let { tabs.sessionOf(it)?.loadExtensionPage(url) }
+        }
         val downloads =
             DownloadManager(
                 dir = { getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: File(filesDir, "downloads") },

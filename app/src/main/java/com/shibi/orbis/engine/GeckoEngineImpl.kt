@@ -3028,6 +3028,36 @@ private class GeckoExtensionHost(
             }
         }
 
+    override var onOpenAddonPage: ((url: String) -> Unit)? = null
+
+    /** The one page the last panel the user opened may still open (that panel open or closed); null before the first. */
+    private var lastPanelPages: PanelPages? = null
+
+    // tabs.create. uBlock Origin's dashboard button and Dark Reader's links ask this way, from the panel or from the
+    // add-on's background page. Only the panel's own add-on page, once per opening, while it is open or just after
+    // its own page closed it (see PanelPages); the panel then closes and the page opens in a new normal tab through
+    // onOpenAddonPage. No session goes back: the engine's call then ends without a tab, which the add-ons tolerate.
+    private val tabDelegate =
+        object : WebExtension.TabDelegate {
+            override fun onNewTab(source: WebExtension, details: WebExtension.CreateTabDetails): GeckoResult<GeckoSession>? {
+                val refusal = openFromPanel(lastPanelPages, source.id, details.url, selectedSession)
+                if (refusal != null) {
+                    debugLog.log("Extensions", "new tab for ${source.id} refused: $refusal")
+                    return null
+                }
+                val url = details.url ?: return null
+                closePopup()
+                val opener = onOpenAddonPage
+                if (opener == null) {
+                    debugLog.log("Extensions", "page of ${source.id} not opened: no page opener")
+                } else {
+                    opener(url)
+                    debugLog.log("Extensions", "page of ${source.id} opened from its panel")
+                }
+                return null
+            }
+        }
+
     private fun onAction(extension: WebExtension, session: GeckoSession?, action: WebExtension.Action) {
         if (isBuiltInExtension(extension.id)) return
         if (session == null) {
@@ -3090,6 +3120,8 @@ private class GeckoExtensionHost(
             addons.forEach { ext ->
                 runCatching { ext.setActionDelegate(actionDelegate) }
                     .onFailure { debugLog.log("Extensions", "button delegate failed for ${ext.id}: ${it.javaClass.simpleName}") }
+                runCatching { ext.setTabDelegate(tabDelegate) }
+                    .onFailure { debugLog.log("Extensions", "tab delegate failed for ${ext.id}: ${it.javaClass.simpleName}") }
             }
             watchedSessions.clear()
             selectedSession?.let(::watchSession)
@@ -3159,7 +3191,10 @@ private class GeckoExtensionHost(
                     .useTrackingProtection(true)
                     .build(),
             )
-        val panel = GeckoAddonPopup(extension.id, name, popupSession, runtimeProvider, debugLog) { closed ->
+        val tab = selectedSession ?: return null
+        val pages = PanelPages(extension.id, extension.metaData.baseUrl.orEmpty(), tab, SystemClock::elapsedRealtime)
+        lastPanelPages = pages
+        val panel = GeckoAddonPopup(extension.id, name, pages, popupSession, runtimeProvider, debugLog) { closed ->
             if (_popup.value === closed) _popup.value = null
         }
         _popup.value = panel
@@ -3387,12 +3422,13 @@ private const val POPUP_AFTER_TAP_MILLIS = 10_000L
 
 /**
  * One add-on panel: the session the engine loads the panel's page into. It only shows the add-on's own pages: any other
- * load and any new window or tab the panel asks for are refused, and the page's window.close() closes the panel.
- * Main thread.
+ * load and any new window the panel asks for are refused, and the page's window.close() closes the panel. [pages] is
+ * the one own page it may open in a new tab (see GeckoExtensionHost's tab delegate). Main thread.
  */
 private class GeckoAddonPopup(
     override val extensionId: String,
     override val title: String,
+    private val pages: PanelPages,
     private val session: GeckoSession,
     private val runtime: () -> GeckoRuntime,
     private val debugLog: DebugLog,
@@ -3421,7 +3457,11 @@ private class GeckoAddonPopup(
             }
         session.contentDelegate =
             object : GeckoSession.ContentDelegate {
-                override fun onCloseRequest(session: GeckoSession) = close()
+                // The panel's own page (window.close): the only close after which its one page may still open.
+                override fun onCloseRequest(session: GeckoSession) {
+                    debugLog.log("Extensions", "panel of $extensionId asked to close")
+                    close(bySelf = true)
+                }
 
                 override fun onCrash(session: GeckoSession) = close()
 
@@ -3452,9 +3492,13 @@ private class GeckoAddonPopup(
         if (closed) endSession()
     }
 
-    override fun close() {
+    /** Closed by the user or by Orbis (Close, Back, a tap outside, another tab, the lock, add-on off, crash). */
+    override fun close() = close(bySelf = false)
+
+    private fun close(bySelf: Boolean) {
         if (closed) return
         closed = true
+        pages.closed(bySelf)
         onClosed(this)
         // While a view still shows it, the session ends once the view lets go of it (detachFrom).
         if (attachedTo == null) endSession()
