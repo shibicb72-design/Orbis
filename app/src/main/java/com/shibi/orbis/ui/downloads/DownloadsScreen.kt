@@ -98,6 +98,8 @@ fun DownloadsScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     log: (String) -> Unit = {},
+    /** Private tabs are locked: a private download shows no name and cannot be opened or shared until unlock. */
+    privateLocked: Boolean = false,
 ) {
     val entries by manager.entries.collectAsStateWithLifecycle()
     val noTorrents = remember { MutableStateFlow<List<TorrentEntry>>(emptyList()) }
@@ -179,6 +181,7 @@ fun DownloadsScreen(
                             onRetry = { t.retry(entry.id) },
                             onStopSeeding = { t.stopSeeding(entry.id) },
                             onSaveToDownloads = { t.saveKept(entry.id) },
+                            privateLocked = privateLocked,
                             onOpen = {
                                 scope.launch {
                                     val result =
@@ -196,6 +199,7 @@ fun DownloadsScreen(
                     DownloadRow(
                         entry = entry,
                         motionEnabled = motionEnabled,
+                        privateLocked = privateLocked,
                         onCancel = { manager.cancel(entry.id) },
                         onPause = if (manager.canPause) ({ manager.pause(entry.id) }) else null,
                         onResume = { manager.resume(entry.id) },
@@ -343,7 +347,10 @@ internal fun TorrentRow(
     onRemove: () -> Unit,
     onStopSeeding: () -> Unit = {},
     onSaveToDownloads: () -> Unit = {},
+    privateLocked: Boolean = false,
 ) {
+    // The row already has no name when private. Locked: what leaves the app (open, save to Downloads) waits for unlock.
+    val actionsLocked = privateLocked && model.isPrivate
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
     // Same neutral actions as a file row: the name and progress carry the hierarchy.
@@ -410,10 +417,10 @@ internal fun TorrentRow(
                     TextButton(onClick = onRetry, colors = textButton) { Text(stringResource(R.string.torrents_retry)) }
                 }
                 if (RowAction.SAVE_TO_DOWNLOADS in model.actions) {
-                    TextButton(onClick = onSaveToDownloads, colors = textButton) { Text(stringResource(R.string.torrents_action_save_to_downloads)) }
+                    TextButton(onClick = onSaveToDownloads, enabled = !actionsLocked, colors = textButton) { Text(stringResource(R.string.torrents_action_save_to_downloads)) }
                 }
                 if (RowAction.OPEN in model.actions) {
-                    IconButton(onClick = onOpen, colors = iconButton) {
+                    IconButton(onClick = onOpen, enabled = !actionsLocked, colors = iconButton) {
                         Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = stringResource(R.string.downloads_open))
                     }
                 }
@@ -487,7 +494,10 @@ internal fun DownloadRow(
     onOpen: () -> Unit,
     onShare: () -> Unit,
     onDelete: () -> Unit,
+    privateLocked: Boolean = false,
 ) {
+    // Locked private download: no name, source or type, and no Open or Share. Size, date and place stay; Delete and Cancel work.
+    val masked = privateLocked && entry.isPrivate
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
     // Keep row actions neutral so the file name and progress carry the hierarchy.
@@ -503,12 +513,12 @@ internal fun DownloadRow(
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                entry.fileName,
+                if (masked) stringResource(R.string.downloads_private_locked_name) else entry.fileName,
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            entry.sourceHost?.let { host ->
+            entry.sourceHost?.takeUnless { masked }?.let { host ->
                 Text(
                     stringResource(R.string.downloads_from_host, host),
                     style = MaterialTheme.typography.bodySmall,
@@ -582,11 +592,15 @@ internal fun DownloadRow(
                 }
                 DownloadStatus.COMPLETED -> {
                     Text(
-                        stringResource(
-                            R.string.downloads_detail_type_size,
-                            fileTypeLabel(entry.mimeType, entry.fileName).label,
-                            Formatter.formatShortFileSize(context, entry.receivedBytes),
-                        ),
+                        if (masked) {
+                            Formatter.formatShortFileSize(context, entry.receivedBytes)
+                        } else {
+                            stringResource(
+                                R.string.downloads_detail_type_size,
+                                fileTypeLabel(entry.mimeType, entry.fileName).label,
+                                Formatter.formatShortFileSize(context, entry.receivedBytes),
+                            )
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = secondary,
                         maxLines = 1,
@@ -617,13 +631,13 @@ internal fun DownloadRow(
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Spacer(Modifier.weight(1f))
-                        IconButton(onClick = onOpen, colors = iconButton) {
+                        IconButton(onClick = onOpen, enabled = !masked, colors = iconButton) {
                             Icon(
                                 Icons.AutoMirrored.Filled.OpenInNew,
                                 contentDescription = stringResource(R.string.downloads_open),
                             )
                         }
-                        IconButton(onClick = onShare, colors = iconButton) {
+                        IconButton(onClick = onShare, enabled = !masked, colors = iconButton) {
                             Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.downloads_share))
                         }
                         IconButton(onClick = onDelete, colors = iconButton) {

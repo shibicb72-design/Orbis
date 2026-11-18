@@ -377,8 +377,9 @@ internal fun TabSwitcher(
                                 Icon(Icons.Filled.Close, contentDescription = closeDescription)
                             }
                         }
+                        // A locked private card never draws its stored preview: it would show the page through the lock.
                         TabPreview(
-                            image = thumbnails[tab.id]?.takeIf { host != null },
+                            image = if (masked) null else thumbnails[tab.id]?.takeIf { host != null },
                             letter = if (masked) "" else (host?.removePrefix("www.")?.firstOrNull()?.uppercaseChar() ?: '+').toString(),
                             host = host,
                         )
@@ -459,7 +460,7 @@ private fun TabPreview(image: ImageBitmap?, letter: String, host: String?) {
         modifier = Modifier.padding(start = 6.dp, end = 6.dp, bottom = 6.dp).fillMaxWidth().aspectRatio(0.8f).clearAndSetSemantics {},
     ) {
         if (image != null) {
-            Image(image, contentDescription = null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxSize())
+            Image(image, contentDescription = null, modifier = Modifier.fillMaxSize().testTag(TAB_PREVIEW_IMAGE_TAG), contentScale = ContentScale.Crop, alignment = Alignment.TopCenter)
         } else {
             Column(verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(letter, style = MaterialTheme.typography.displaySmall)
@@ -476,6 +477,8 @@ private fun TabPreview(image: ImageBitmap?, letter: String, host: String?) {
         }
     }
 }
+
+internal const val TAB_PREVIEW_IMAGE_TAG = "tab_preview_image"
 
 internal const val CURRENT_TAB_LABEL_TAG = "current_tab_label"
 

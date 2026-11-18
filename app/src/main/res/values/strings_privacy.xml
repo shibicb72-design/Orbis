@@ -8,4 +8,5 @@
     <string name="private_lock_auth_title" translatable="false">Unlock private tabs</string>
     <string name="private_lock_auth_subtitle" translatable="false">Confirm it\'s you</string>
     <string name="private_lock_card_title" translatable="false">Private tab</string>
+    <string name="downloads_private_locked_name" translatable="false">Private download</string>
 </resources>

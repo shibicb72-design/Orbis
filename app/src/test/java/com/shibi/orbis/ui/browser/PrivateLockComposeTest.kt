@@ -1,6 +1,7 @@
 package com.shibi.orbis.ui.browser
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -8,6 +9,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -40,6 +42,21 @@ class PrivateLockComposeTest {
             TabUi(3, "Secret page", "https://secret.example/", selected = false, isPrivate = true),
         )
 
+    /** Robolectric has no native bitmaps, so the stored preview is a stand-in that only has to exist. */
+    private class FakeBitmap : ImageBitmap {
+        override val width = 8
+        override val height = 8
+        override val colorSpace get() = androidx.compose.ui.graphics.colorspace.ColorSpaces.Srgb
+        override val hasAlpha = false
+        override val config = androidx.compose.ui.graphics.ImageBitmapConfig.Argb8888
+
+        override fun readPixels(buffer: IntArray, startX: Int, startY: Int, width: Int, height: Int, bufferOffset: Int, stride: Int) {}
+
+        override fun prepareToDraw() {}
+    }
+
+    private val thumbnails = mapOf<Long, ImageBitmap>(3L to FakeBitmap(), 1L to FakeBitmap())
+
     private fun showSwitcher() {
         rule.setContent {
             MaterialTheme {
@@ -51,6 +68,7 @@ class PrivateLockComposeTest {
                     onNewPrivateTab = {},
                     onClosePrivateTabs = { events += "closePrivate" },
                     onDismiss = {},
+                    thumbnails = thumbnails,
                     privateLocked = locked,
                     onUnlockRequest = { events += "unlock:$it" },
                 )
@@ -67,6 +85,22 @@ class PrivateLockComposeTest {
         rule.onNodeWithText("Private tab").assertExists()
         // Normal tabs are untouched.
         rule.onNodeWithText("Alpha page").assertExists()
+    }
+
+    private fun previewCount() = rule.onAllNodesWithTag(TAB_PREVIEW_IMAGE_TAG, useUnmergedTree = true).fetchSemanticsNodes().size
+
+    @Test(timeout = 60_000)
+    fun aLockedPrivateCardWithAStoredThumbnailDrawsNoImage() {
+        showSwitcher()
+        // Both tabs have a thumbnail; only the normal tab's is drawn.
+        assertEquals(1, previewCount())
+    }
+
+    @Test(timeout = 60_000)
+    fun anUnlockedPrivateCardDrawsItsThumbnail() {
+        locked = false
+        showSwitcher()
+        assertEquals(2, previewCount())
     }
 
     @Test(timeout = 60_000)
