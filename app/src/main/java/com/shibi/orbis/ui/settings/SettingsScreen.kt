@@ -109,6 +109,8 @@ fun SettingsScreen(
     onOpenSecureDns: () -> Unit = {},
     /** Browsing > Search engine: the engine list, where engines can be added and removed. */
     onOpenSearchEngines: () -> Unit = {},
+    /** Privacy > Add-ons: the curated add-on list. The row is hidden when null (screen tests). */
+    onOpenAddons: (() -> Unit)? = null,
 ) {
     var httpsDialogOpen by remember { mutableStateOf(false) }
     if (site != null) {
@@ -401,6 +403,16 @@ fun SettingsScreen(
                         .fillMaxWidth()
                         .clickable(onClick = onOpenUbo),
                 )
+                if (onOpenAddons != null) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.addons_title)) },
+                        supportingContent = { Text(stringResource(R.string.addons_settings_summary)) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onOpenAddons),
+                    )
+                }
             }
             SettingsSection(R.string.settings_section_support) {
                 SettingsItem(

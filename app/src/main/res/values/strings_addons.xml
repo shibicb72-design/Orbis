@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="addons_title" translatable="false">Add-ons</string>
+    <string name="addons_settings_summary" translatable="false">Extra features from Mozilla\'s add-on store</string>
+    <string name="addons_note" translatable="false">These add-ons are made by other people, not by Orbis. Each one is downloaded from Mozilla\'s add-on store. An add-on can see the pages it has access to.</string>
+    <string name="addons_advanced" translatable="false">Advanced</string>
+
+    <string name="addons_access_sponsorblock" translatable="false">Can access: YouTube pages. Contacts sponsor.ajay.app to look up videos.</string>
+    <string name="addons_access_consent_o_matic" translatable="false">Can access: every page you open.</string>
+    <string name="addons_access_clearurls" translatable="false">Can access: every page you open, and can change or block requests.</string>
+    <string name="addons_access_dark_reader" translatable="false">Can access: every page you open. Use this or Force dark, not both.</string>
+    <string name="addons_access_violentmonkey" translatable="false">Can access: every page you open, cookies, and can change or block requests. Runs scripts you install; only install scripts you trust.</string>
+
+    <string name="addons_add" translatable="false">Add</string>
+    <string name="addons_cancel" translatable="false">Cancel</string>
+    <string name="addons_installing" translatable="false">Adding...</string>
+    <string name="addons_try_again" translatable="false">Try again</string>
+    <string name="addons_on" translatable="false">On</string>
+    <string name="addons_allow_private" translatable="false">Allow in private tabs</string>
+    <string name="addons_open_settings" translatable="false">Settings</string>
+    <string name="addons_remove" translatable="false">Remove</string>
+
+    <string name="addons_add_title" translatable="false">Add %1$s?</string>
+    <string name="addons_asks_for" translatable="false">It asks for:</string>
+    <string name="addons_asks_nothing" translatable="false">No special access.</string>
+    <string name="addons_remove_title" translatable="false">Remove %1$s?</string>
+
+    <string name="addons_failed_network" translatable="false">Could not reach Mozilla Add-ons. Check your connection and try again.</string>
+    <string name="addons_failed_timeout" translatable="false">The install took too long. Check your connection and try again.</string>
+    <string name="addons_failed_signature" translatable="false">Mozilla Add-ons did not provide a verified copy of this add-on, so it was not installed.</string>
+    <string name="addons_failed_blocked" translatable="false">Mozilla has blocked this add-on, so it was not installed.</string>
+    <string name="addons_failed_incompatible" translatable="false">This add-on does not work with this version of Orbis.</string>
+    <string name="addons_failed_corrupt" translatable="false">The download was damaged. Try again.</string>
+    <string name="addons_failed_wrong_extension" translatable="false">Mozilla Add-ons sent a different add-on than expected, so it was not installed.</string>
+    <string name="addons_failed_other" translatable="false">This add-on could not be installed.</string>
+</resources>

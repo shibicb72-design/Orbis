@@ -31,6 +31,7 @@ import com.shibi.orbis.ui.settings.SettingsScreen
 import com.shibi.orbis.ui.settings.SitePermissionsScreen
 import com.shibi.orbis.ui.settings.ThemePickerScreen
 import com.shibi.orbis.ui.settings.TorrentSettingsScreen
+import com.shibi.orbis.ui.settings.AddonsScreen
 import com.shibi.orbis.ui.settings.UboOnboardingScreen
 import com.shibi.orbis.ui.settings.UboSettingsScreen
 import com.shibi.orbis.ui.passwords.PasswordsScreen
@@ -49,6 +50,7 @@ private object Routes {
     const val Settings = "settings"
     const val ErrorLog = "settings/error_log"
     const val Ubo = "settings/ubo"
+    const val Addons = "settings/addons"
     const val SitePermissions = "settings/site_permissions"
     const val ClearData = "settings/clear_data"
     const val Passwords = "settings/passwords"
@@ -226,6 +228,7 @@ fun OrbisRoot(container: AppContainer) {
                     dohFlow = container.doh.config,
                     onOpenSecureDns = { nav.navigate(Routes.SecureDns) },
                     onOpenSearchEngines = { nav.navigate(Routes.SearchEngines) },
+                    onOpenAddons = { nav.navigate(Routes.Addons) },
                 )
             }
             composable(Routes.SearchEngines) {
@@ -269,6 +272,17 @@ fun OrbisRoot(container: AppContainer) {
                 DebugLogScreen(
                     container = container,
                     onBack = { nav.popBackStack() },
+                )
+            }
+            composable(Routes.Addons) {
+                AddonsScreen(
+                    manager = container.addons,
+                    onBack = { nav.popBackStack() },
+                    onOpenExtensionPage = { url ->
+                        // A new normal tab; the browser screen then shows it.
+                        container.tabs.newTab()?.let { container.tabs.sessionOf(it)?.loadExtensionPage(url) }
+                        nav.popBackStack(Routes.Browser, inclusive = false)
+                    },
                 )
             }
             composable(Routes.Ubo) {
