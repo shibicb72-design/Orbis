@@ -234,6 +234,22 @@ class DownloadManager(
         }
     }
 
+    /** The finished file was also copied to the phone's Download folder. Private downloads are never copied. */
+    fun markCopiedToDownloads(id: Long) {
+        var changed = false
+        _entries.update { list ->
+            list.map { e ->
+                if (e.id == id && !e.isPrivate && e.status == DownloadStatus.COMPLETED && e.savedTo != SavedTo.DOWNLOADS) {
+                    changed = true
+                    e.copy(savedTo = SavedTo.DOWNLOADS)
+                } else {
+                    e
+                }
+            }
+        }
+        if (changed) saveNow()
+    }
+
     fun cancel(id: Long) {
         pausedDownloads.remove(id)?.let { p ->
             p.reservation.partFile.delete()
@@ -447,6 +463,8 @@ class DownloadManager(
                         filePath = if (status == DownloadStatus.COMPLETED || status == DownloadStatus.PAUSED) r?.finalFile?.absolutePath else null,
                         receivedBytes = if (status == DownloadStatus.COMPLETED || status == DownloadStatus.PAUSED) received else e.receivedBytes,
                         totalBytes = if (status == DownloadStatus.COMPLETED && e.totalBytes < 0) received else e.totalBytes,
+                        finishedAt = if (status == DownloadStatus.COMPLETED) now() else e.finishedAt,
+                        savedTo = if (status == DownloadStatus.COMPLETED) SavedTo.ORBIS else e.savedTo,
                     )
                 }
             }

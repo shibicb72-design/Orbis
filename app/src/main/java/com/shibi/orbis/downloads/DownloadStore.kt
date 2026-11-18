@@ -26,6 +26,8 @@ object DownloadCodec {
             o.put("status", e.status.name)
             e.filePath?.let { o.put("path", it) }
             o.put("started", e.startedAt)
+            e.finishedAt?.let { o.put("finished", it) }
+            if (e.savedTo != SavedTo.UNKNOWN) o.put("saved", e.savedTo.name)
             array.put(o)
         }
         return JSONObject().put("version", VERSION).put("entries", array).toString()
@@ -61,6 +63,8 @@ object DownloadCodec {
                 status = status,
                 filePath = if (o.has("path") && !o.isNull("path")) o.getString("path") else null,
                 startedAt = o.optLong("started", 0L),
+                finishedAt = if (o.has("finished") && !o.isNull("finished")) o.optLong("finished", 0L).takeIf { it > 0L } else null,
+                savedTo = SavedTo.entries.firstOrNull { it.name == o.optString("saved", "") } ?: SavedTo.UNKNOWN,
             )
         } catch (e: JSONException) {
             null

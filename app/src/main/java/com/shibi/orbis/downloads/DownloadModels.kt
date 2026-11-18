@@ -24,4 +24,11 @@ data class DownloadEntry(
      * DownloadManager.privateDir, and leaves the list, its file deleted, when private browsing ends (OD-3).
      */
     val isPrivate: Boolean = false,
+    /** When the download completed (epoch ms). Null while running, and for downloads made before this was recorded. */
+    val finishedAt: Long? = null,
+    /** Where the finished file is kept. UNKNOWN for downloads made before this was recorded. */
+    val savedTo: SavedTo = SavedTo.UNKNOWN,
 )
+
+/** Entry names are stored in the index: never rename them. */
+enum class SavedTo { UNKNOWN, ORBIS, DOWNLOADS }

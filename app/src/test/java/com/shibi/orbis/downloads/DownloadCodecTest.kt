@@ -136,4 +136,41 @@ class DownloadCodecTest {
         store.save(listOf(entry(1)))
         assertEquals(listOf(entry(1)), store.load())
     }
+
+    @Test
+    fun anEntryWrittenBeforeFinishedAndSavedExistReadsAsNullAndUnknown() {
+        val old =
+            """{"version":1,"entries":[{"id":7,"name":"a.pdf","mime":"application/pdf","total":5,"received":5,""" +
+                """"status":"COMPLETED","path":"/data/a.pdf","started":1700000000000}]}"""
+        val e = DownloadCodec.decode(old).single()
+        assertNull(e.finishedAt)
+        assertEquals(SavedTo.UNKNOWN, e.savedTo)
+        assertEquals(1_700_000_000_000L, e.startedAt)
+    }
+
+    @Test
+    fun finishedAndSavedToRoundTrip() {
+        val list =
+            listOf(
+                entry(1).copy(finishedAt = 1_700_000_005_000L, savedTo = SavedTo.DOWNLOADS),
+                entry(2).copy(finishedAt = 1_700_000_006_000L, savedTo = SavedTo.ORBIS),
+                entry(3),
+            )
+        assertEquals(list, DownloadCodec.decode(DownloadCodec.encode(list)))
+        val text = DownloadCodec.encode(list)
+        assertTrue(text.contains("\"saved\":\"DOWNLOADS\""))
+        // Nothing is written for an entry that has neither value.
+        assertEquals(2, Regex("\"finished\"").findAll(text).count())
+        assertEquals(2, Regex("\"saved\"").findAll(text).count())
+    }
+
+    @Test
+    fun anUnknownSavedValueReadsAsUnknown() {
+        val text =
+            """{"version":1,"entries":[{"id":7,"name":"a.pdf","total":5,"received":5,"status":"COMPLETED",""" +
+                """"started":10,"finished":20,"saved":"CLOUD"}]}"""
+        val e = DownloadCodec.decode(text).single()
+        assertEquals(SavedTo.UNKNOWN, e.savedTo)
+        assertEquals(20L, e.finishedAt)
+    }
 }

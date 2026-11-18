@@ -10,6 +10,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -1232,5 +1233,47 @@ class DownloadManagerTest {
         m.forgetPrivate()
         advanceUntilIdle()
         assertEquals("n", File(dir, "n.txt").readText())
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun aFinishedDownloadRecordsItsFinishTimeAndIsSavedInOrbis() = runTest {
+        tickStep = 0
+        val m = manager()
+        val id = m.start(FakeDownload(contentDisposition = cd("a.txt"), contentLength = 5, body = { ChunkStream(bytes("hello")) }))
+        assertEquals(null, m.byId(id).finishedAt)
+        assertEquals(SavedTo.UNKNOWN, m.byId(id).savedTo)
+        tick = 9_000L
+        advanceUntilIdle()
+        val e = m.byId(id)
+        assertEquals(1_000L, e.startedAt)
+        assertEquals(9_000L, e.finishedAt)
+        assertEquals(SavedTo.ORBIS, e.savedTo)
+        assertEquals(listOf(e), store.load())
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun markCopiedToDownloadsSurvivesAReload() = runTest {
+        val m = manager()
+        val id = m.start(FakeDownload(contentDisposition = cd("a.txt"), body = { ChunkStream(bytes("hello")) }))
+        advanceUntilIdle()
+        m.markCopiedToDownloads(id)
+        assertEquals(SavedTo.DOWNLOADS, m.byId(id).savedTo)
+        val reloaded = store.load().single()
+        assertEquals(SavedTo.DOWNLOADS, reloaded.savedTo)
+        assertEquals(m.byId(id).finishedAt, reloaded.finishedAt)
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun aPrivateDownloadIsNeverMarkedAsSavedInDownloads() = runTest {
+        val m = manager()
+        val id = m.start(FakeDownload(contentDisposition = cd("p.txt"), body = { ChunkStream(bytes("hello")) }), isPrivate = true)
+        advanceUntilIdle()
+        assertEquals(SavedTo.ORBIS, m.byId(id).savedTo)
+        m.markCopiedToDownloads(id)
+        assertEquals(SavedTo.ORBIS, m.byId(id).savedTo)
+        assertTrue(store.load().isEmpty())
     }
 }

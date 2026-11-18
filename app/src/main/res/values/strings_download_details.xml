@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="downloads_detail_type_size" translatable="false">%1$s &#183; %2$s</string>
+    <string name="downloads_detail_time_place" translatable="false">%1$s &#183; %2$s</string>
+    <string name="downloads_saved_in_downloads" translatable="false">Saved in Downloads</string>
+    <string name="downloads_saved_in_orbis" translatable="false">Saved in Orbis only</string>
+    <string name="downloads_kept_private" translatable="false">Kept in Orbis until private browsing ends</string>
+</resources>

@@ -1,11 +1,13 @@
 package com.shibi.orbis.ui.downloads
 
+import android.text.format.DateFormat
 import android.text.format.DateUtils
 import android.text.format.Formatter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -51,6 +53,10 @@ import com.shibi.orbis.downloads.DownloadEntry
 import com.shibi.orbis.downloads.DownloadIntents
 import com.shibi.orbis.downloads.DownloadManager
 import com.shibi.orbis.downloads.DownloadStatus
+import com.shibi.orbis.downloads.SavedTo
+import com.shibi.orbis.downloads.downloadedAt
+import com.shibi.orbis.downloads.fileTypeLabel
+import com.shibi.orbis.downloads.formatDownloadTime
 import com.shibi.orbis.torrent.TorrentEntry
 import com.shibi.orbis.torrent.TorrentErrorKind
 import com.shibi.orbis.torrent.TorrentManager
@@ -575,13 +581,42 @@ internal fun DownloadRow(
                     }
                 }
                 DownloadStatus.COMPLETED -> {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
+                    Text(
+                        stringResource(
+                            R.string.downloads_detail_type_size,
+                            fileTypeLabel(entry.mimeType, entry.fileName).label,
                             Formatter.formatShortFileSize(context, entry.receivedBytes),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = secondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val timeText = downloadedAt(entry)?.let { formatDownloadTime(it, DateFormat.is24HourFormat(context)) }
+                    val placeText =
+                        when {
+                            entry.isPrivate -> stringResource(R.string.downloads_kept_private)
+                            entry.savedTo == SavedTo.DOWNLOADS -> stringResource(R.string.downloads_saved_in_downloads)
+                            entry.savedTo == SavedTo.ORBIS -> stringResource(R.string.downloads_saved_in_orbis)
+                            else -> null
+                        }
+                    val whenAndWhere =
+                        when {
+                            timeText != null && placeText != null ->
+                                stringResource(R.string.downloads_detail_time_place, timeText, placeText)
+                            else -> timeText ?: placeText
+                        }
+                    if (whenAndWhere != null) {
+                        Text(
+                            whenAndWhere,
                             style = MaterialTheme.typography.bodySmall,
                             color = secondary,
-                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Spacer(Modifier.weight(1f))
                         IconButton(onClick = onOpen, colors = iconButton) {
                             Icon(
                                 Icons.AutoMirrored.Filled.OpenInNew,
