@@ -186,11 +186,13 @@ fun OrbisRoot(container: AppContainer) {
                 )
             }
             composable(Routes.Downloads) {
+                val privateLocked by container.privateLock.locked.collectAsStateWithLifecycle()
                 DownloadsScreen(
                     manager = container.downloads,
                     torrents = container.torrents,
                     onBack = { nav.popBackStack() },
                     log = TorrentLog.sink(container.debugLog),
+                    privateLocked = privateLocked,
                 )
             }
             composable(Routes.Passwords) {
@@ -236,6 +238,7 @@ fun OrbisRoot(container: AppContainer) {
                     onOpenAddons = { nav.navigate(Routes.Addons) },
                     clearOnExitEnabled = container.clearOnExit.prefs.enabled,
                     onOpenClearOnExit = { nav.navigate(Routes.ClearOnExit) },
+                    privacyPrefs = container.privacyPrefs,
                 )
             }
             composable(Routes.SearchEngines) {

@@ -53,7 +53,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.shibi.orbis.OrbisApp
 import com.shibi.orbis.R
 import com.shibi.orbis.privacy.PrivacyPrefs
 import com.shibi.orbis.ui.isScreenLockSet
@@ -154,8 +153,8 @@ fun SettingsScreen(
     /** Privacy > Clear when Orbis is closed. The row is hidden when null (screen tests). */
     clearOnExitEnabled: Boolean? = null,
     onOpenClearOnExit: () -> Unit = {},
-    /** Privacy > Lock private tabs. Hidden when null (screen tests); the app's own prefs by default. */
-    privacyPrefs: PrivacyPrefs? = (LocalContext.current.applicationContext as? OrbisApp)?.container?.privacyPrefs,
+    /** Privacy > Lock private tabs. Hidden when null (screen tests); OrbisRoot passes the app's prefs. */
+    privacyPrefs: PrivacyPrefs? = null,
 ) {
     var httpsDialogOpen by remember { mutableStateOf(false) }
     if (site != null) {
