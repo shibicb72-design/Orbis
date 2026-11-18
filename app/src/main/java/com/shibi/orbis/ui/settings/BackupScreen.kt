@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -54,7 +55,13 @@ import com.shibi.orbis.backup.BackupError
 import com.shibi.orbis.backup.BackupFormat
 import com.shibi.orbis.backup.BackupNotReadyException
 import com.shibi.orbis.backup.BackupOptions
+import com.shibi.orbis.backup.BackupPasswordVault
 import com.shibi.orbis.backup.BackupRefusedException
+import com.shibi.orbis.backup.BiometricCipherPrompt
+import com.shibi.orbis.backup.FileBackupPasswordVault
+import com.shibi.orbis.backup.VaultCipher
+import com.shibi.orbis.backup.hasStrongBiometric
+import com.shibi.orbis.backup.systemCipherPrompt
 import com.shibi.orbis.backup.BackupSealError
 import com.shibi.orbis.backup.BackupSection
 import com.shibi.orbis.backup.RestoreResult
@@ -70,8 +77,11 @@ import com.shibi.orbis.ui.passwords.writePickedBytes
 import com.shibi.orbis.ui.secondaryReadingWidth
 import java.text.Normalizer
 import java.time.LocalDate
+import javax.crypto.Cipher
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** What the screen needs from the backup code. The app passes `container.backup` and `container.addons`; tests pass fakes. */
 class BackupActions(
@@ -210,6 +220,12 @@ fun BackupScreen(
     startUnlocked: Boolean = false,
     /** Test hook: the screen-lock prompt. */
     authenticator: (Context, String, String, () -> Unit) -> Unit = ::authenticate,
+    /** The backup password kept behind the fingerprint on this phone. */
+    vault: BackupPasswordVault = LocalContext.current.let { remember(it) { FileBackupPasswordVault.forApp(it) } },
+    /** Test hook: whether a class 3 biometric is enrolled. */
+    strongBiometric: (Context) -> Boolean = ::hasStrongBiometric,
+    /** Test hook: the fingerprint prompt for a vault cipher. */
+    cipherPrompt: BiometricCipherPrompt = systemCipherPrompt,
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
@@ -229,11 +245,35 @@ fun BackupScreen(
     var outcome by remember { mutableStateOf<BackupOutcome?>(null) }
     var pickerOpen by remember { mutableStateOf(false) }
 
+    // Fingerprint (feat08-5d). Shown only with a class 3 biometric enrolled.
+    var biometric by remember { mutableStateOf(strongBiometric(context)) }
+    var stored by remember { mutableStateOf(false) }
+    // The password of the last successful typed operation, offered for storing; zeroed when dropped.
+    var lastPassword by remember { mutableStateOf<CharArray?>(null) }
+    // The stored password read for one Create while the file picker is open; zeroed when used or dropped.
+    var vaultChars by remember { mutableStateOf<CharArray?>(null) }
+    // The stored password did not open the chosen file (or the prompt was cancelled): type it instead.
+    var restoreTyped by remember { mutableStateOf(false) }
+    val useFingerprint = biometric && stored
+
+    fun dropLastPassword() {
+        lastPassword?.fill('\u0000')
+        lastPassword = null
+    }
+
+    fun dropVaultChars() {
+        vaultChars?.fill('\u0000')
+        vaultChars = null
+    }
+
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer =
             LifecycleEventObserver { _, event ->
-                if (event == Lifecycle.Event.ON_RESUME) lockSet = screenLockSet(context)
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    lockSet = screenLockSet(context)
+                    biometric = strongBiometric(context)
+                }
                 if (event == Lifecycle.Event.ON_STOP && !pickerOpen) {
                     unlocked = false
                     password = ""
@@ -242,10 +282,80 @@ fun BackupScreen(
                     restoreFile = null
                     confirmRestore = false
                     showPasswords = false
+                    restoreTyped = false
+                    dropLastPassword()
+                    dropVaultChars()
                 }
             }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            dropLastPassword()
+            dropVaultChars()
+        }
+    }
+
+    LaunchedEffect(unlocked) { if (unlocked) stored = withContext(Dispatchers.IO) { vault.hasPassword } }
+
+    fun prompt(cipher: Cipher, onCipher: (Cipher) -> Unit, onNone: () -> Unit) =
+        cipherPrompt.show(
+            context,
+            resources.getString(R.string.backup_auth_title),
+            resources.getString(R.string.backup_auth_subtitle),
+            resources.getString(R.string.backup_cancel),
+            cipher,
+        ) { c -> if (c != null) onCipher(c) else onNone() }
+
+    /** Prompts for the fingerprint and hands the stored password to [use] (which zeroes it); [onNone] when there is none. */
+    fun withStoredPassword(use: (CharArray) -> Unit, onNone: () -> Unit) {
+        scope.launch {
+            when (val c = withContext(Dispatchers.IO) { vault.cipherToRead() }) {
+                VaultCipher.KeyInvalidated -> {
+                    stored = false
+                    outcome = BackupOutcome(listOf(resources.getString(R.string.backup_fingerprint_invalidated)))
+                    onNone()
+                }
+                VaultCipher.Unavailable -> {
+                    stored = withContext(Dispatchers.IO) { vault.hasPassword }
+                    onNone()
+                }
+                is VaultCipher.Ready ->
+                    prompt(c.cipher, { authed ->
+                        scope.launch {
+                            val chars = withContext(Dispatchers.IO) { vault.read(authed) }
+                            if (chars != null) use(chars) else onNone()
+                        }
+                    }, onNone)
+            }
+        }
+    }
+
+    fun storeLastPassword() {
+        scope.launch {
+            val c = withContext(Dispatchers.IO) { vault.cipherToStore() }
+            if (c !is VaultCipher.Ready) {
+                outcome = BackupOutcome(listOf(resources.getString(R.string.backup_fingerprint_unavailable)))
+                return@launch
+            }
+            prompt(c.cipher, { authed ->
+                scope.launch {
+                    val pw = lastPassword ?: return@launch
+                    val ok = withContext(Dispatchers.IO) { runCatching { vault.store(pw, authed) }.isSuccess }
+                    if (!ok) {
+                        withContext(Dispatchers.IO) { vault.clear() }
+                        outcome = BackupOutcome(listOf(resources.getString(R.string.backup_fingerprint_unavailable)))
+                    }
+                    stored = withContext(Dispatchers.IO) { vault.hasPassword }
+                    dropLastPassword()
+                }
+            }, {})
+        }
+    }
+
+    /** Keeps [typed] (a copy the caller no longer needs) for the switch when nothing is stored yet; otherwise zeroes it. */
+    fun offerToStore(typed: CharArray) {
+        dropLastPassword()
+        if (biometric && !stored) lastPassword = typed else typed.fill('\u0000')
     }
 
     val unlock = {
@@ -254,17 +364,22 @@ fun BackupScreen(
     LaunchedEffect(Unit) { if (lockSet && !unlocked) unlock() }
 
     fun startCreate(uri: Uri) {
+        val fromVault = vaultChars
+        vaultChars = null
         val pw = password
         val options = BackupOptions(includeTabs = includeTabs, includeHistory = includeHistory)
         scope.launch {
             working = true
             outcome = null
-            val chars = pw.toCharArray()
+            val chars = fromVault ?: pw.toCharArray()
+            val typed = if (fromVault == null) chars.copyOf() else null
             outcome =
                 try {
                     actions.refreshAddons()
                     val bytes = actions.create(chars, options)
-                    BackupOutcome(listOf(resources.getString(if (files.write(uri, bytes)) R.string.backup_saved else R.string.backup_save_failed)))
+                    val saved = files.write(uri, bytes)
+                    if (saved && typed != null) offerToStore(typed.copyOf())
+                    BackupOutcome(listOf(resources.getString(if (saved) R.string.backup_saved else R.string.backup_save_failed)))
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: BackupRefusedException) {
@@ -276,6 +391,7 @@ fun BackupScreen(
                     BackupOutcome(listOf(resources.getString(R.string.backup_save_failed)))
                 } finally {
                     chars.fill('\u0000')
+                    typed?.fill('\u0000')
                     working = false
                 }
         }
@@ -289,6 +405,7 @@ fun BackupScreen(
                 is BackupFileRead.Bytes -> {
                     restoreFile = r.bytes
                     restorePassword = ""
+                    restoreTyped = false
                 }
                 BackupFileRead.TooLarge -> outcome = BackupOutcome(listOf(resources.getString(R.string.backup_file_too_large)))
                 BackupFileRead.Unreadable -> outcome = BackupOutcome(listOf(resources.getString(R.string.backup_file_unreadable)))
@@ -297,9 +414,9 @@ fun BackupScreen(
         }
     }
 
-    fun startRestore() {
-        val file = restoreFile ?: return
-        val chars = restorePassword.toCharArray()
+    /** Restores [file] with [chars] (zeroed). [fromVault]: the stored password, so a wrong one falls back to typing. */
+    fun runRestore(file: ByteArray, chars: CharArray, fromVault: Boolean) {
+        val typed = if (fromVault) null else chars.copyOf()
         scope.launch {
             working = true
             outcome = null
@@ -309,6 +426,10 @@ fun BackupScreen(
                 if (result is RestoreResult.Restored) {
                     restoreFile = null
                     restorePassword = ""
+                    restoreTyped = false
+                    if (typed != null) offerToStore(typed.copyOf())
+                } else if (fromVault && (result as RestoreResult.Failed).error == BackupError.WRONG_PASSWORD_OR_DAMAGED) {
+                    restoreTyped = true
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -318,15 +439,26 @@ fun BackupScreen(
                 outcome = BackupOutcome(listOf(resources.getString(R.string.backup_file_unreadable)))
             } finally {
                 chars.fill('\u0000')
+                typed?.fill('\u0000')
                 working = false
             }
+        }
+    }
+
+    fun startRestore() {
+        val file = restoreFile ?: return
+        if (useFingerprint && !restoreTyped) {
+            // The stored password is tried first; if it is missing or does not open the file, the password field shows.
+            withStoredPassword(use = { chars -> runRestore(file, chars, fromVault = true) }, onNone = { restoreTyped = true })
+        } else {
+            runRestore(file, restorePassword.toCharArray(), fromVault = false)
         }
     }
 
     val createLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(BackupFormat.MIME_TYPE)) { uri ->
             pickerOpen = false
-            if (uri != null) startCreate(uri)
+            if (uri != null) startCreate(uri) else dropVaultChars()
         }
     val openLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -340,12 +472,26 @@ fun BackupScreen(
             pickerOpen = true
             pickers.create(name) { uri ->
                 pickerOpen = false
-                if (uri != null) startCreate(uri)
+                if (uri != null) startCreate(uri) else dropVaultChars()
             }
         } else {
             pickerOpen = true
-            if (runCatching { createLauncher.launch(name) }.isFailure) pickerOpen = false
+            if (runCatching { createLauncher.launch(name) }.isFailure) {
+                pickerOpen = false
+                dropVaultChars()
+            }
         }
+    }
+
+    fun createWithFingerprint() {
+        withStoredPassword(
+            use = { chars ->
+                dropVaultChars()
+                vaultChars = chars
+                pickCreate()
+            },
+            onNone = {},
+        )
     }
 
     fun pickOpen() {
@@ -407,8 +553,15 @@ fun BackupScreen(
                 visualTransformation = passwordTransformation,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
-            TextButton(onClick = { showPasswords = !showPasswords }) {
-                Text(stringResource(if (showPasswords) R.string.backup_hide_passwords else R.string.backup_show_passwords))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { showPasswords = !showPasswords }) {
+                    Text(stringResource(if (showPasswords) R.string.backup_hide_passwords else R.string.backup_show_passwords))
+                }
+                if (useFingerprint) {
+                    OutlinedButton(onClick = { createWithFingerprint() }, enabled = !working, modifier = Modifier.padding(start = 8.dp)) {
+                        Text(stringResource(R.string.backup_use_fingerprint))
+                    }
+                }
             }
             Text(stringResource(R.string.backup_password_rule), style = MaterialTheme.typography.bodySmall)
             Button(
@@ -426,18 +579,21 @@ fun BackupScreen(
             }
             if (restoreFile != null) {
                 Text(stringResource(R.string.backup_file_chosen), modifier = Modifier.padding(top = 8.dp))
-                OutlinedTextField(
-                    value = restorePassword,
-                    onValueChange = { restorePassword = it },
-                    singleLine = true,
-                    enabled = !working,
-                    label = { Text(stringResource(R.string.backup_password)) },
-                    visualTransformation = passwordTransformation,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                )
+                val typeIt = !useFingerprint || restoreTyped
+                if (typeIt) {
+                    OutlinedTextField(
+                        value = restorePassword,
+                        onValueChange = { restorePassword = it },
+                        singleLine = true,
+                        enabled = !working,
+                        label = { Text(stringResource(R.string.backup_password)) },
+                        visualTransformation = passwordTransformation,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    )
+                }
                 Button(
                     onClick = { confirmRestore = true },
-                    enabled = !working && restorePassword.isNotEmpty(),
+                    enabled = !working && (!typeIt || restorePassword.isNotEmpty()),
                     modifier = Modifier.padding(top = 12.dp),
                 ) { Text(stringResource(R.string.backup_restore)) }
             }
@@ -448,6 +604,33 @@ fun BackupScreen(
                     for (line in o.lines) Text(line)
                     if (o.offerAddons) Button(onClick = onOpenAddons, modifier = Modifier.padding(top = 8.dp)) { Text(stringResource(R.string.backup_open_addons)) }
                 }
+            }
+
+            if (biometric && (stored || lastPassword != null)) {
+                HorizontalDivider(Modifier.padding(vertical = 16.dp))
+                if (stored) {
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                withContext(Dispatchers.IO) { vault.clear() }
+                                stored = withContext(Dispatchers.IO) { vault.hasPassword }
+                                restoreTyped = false
+                            }
+                        },
+                        enabled = !working,
+                    ) { Text(stringResource(R.string.backup_forget_password)) }
+                } else {
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .toggleable(value = false, enabled = !working, role = Role.Switch) { on -> if (on) storeLastPassword() }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(R.string.backup_fingerprint_switch), modifier = Modifier.weight(1f))
+                        Switch(checked = false, onCheckedChange = null, enabled = !working)
+                    }
+                }
+                Text(stringResource(R.string.backup_fingerprint_note), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
             }
         }
     }
