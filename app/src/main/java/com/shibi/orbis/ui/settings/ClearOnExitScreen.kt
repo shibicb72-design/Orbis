@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -31,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
@@ -93,17 +95,20 @@ fun ClearOnExitScreen(prefs: ClearOnExitPrefs, onBack: () -> Unit, modifier: Mod
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState())) {
+            // The whole row toggles, as on the other switch rows (DohScreen): the switch itself only shows the state.
             ListItem(
                 headlineContent = { Text(stringResource(R.string.clear_exit_switch)) },
-                trailingContent = {
-                    Switch(
-                        checked = enabled,
-                        onCheckedChange = {
-                            enabled = it
-                            prefs.enabled = it
-                        },
-                    )
-                },
+                trailingContent = { Switch(checked = enabled, onCheckedChange = null) },
+                modifier =
+                    Modifier.fillMaxWidth()
+                        .toggleable(
+                            value = enabled,
+                            role = Role.Switch,
+                            onValueChange = {
+                                enabled = it
+                                prefs.enabled = it
+                            },
+                        ),
             )
             Text(
                 stringResource(R.string.clear_exit_note),

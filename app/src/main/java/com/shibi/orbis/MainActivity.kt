@@ -45,6 +45,7 @@ import com.shibi.orbis.media.onPipWindowClosed
 import com.shibi.orbis.media.pipAspectRatio
 import com.shibi.orbis.media.pipShapes
 import com.shibi.orbis.ui.BackKeyWindowCallback
+import com.shibi.orbis.ui.isScreenLockSet
 import com.shibi.orbis.ui.theme.AppThemes
 import com.shibi.orbis.ui.theme.OrbisTheme
 import kotlinx.coroutines.flow.combine
@@ -74,6 +75,12 @@ class MainActivity : ComponentActivity() {
             ) { anyPrivate, sensitive -> anyPrivate to sensitive }
                 .distinctUntilChanged()
                 .collect { (anyPrivate, sensitive) -> applyPrivacyWindow(anyPrivate, sensitive) }
+        }
+        // The last private tab closing ends the lock: there is nothing left to hide.
+        lifecycleScope.launch {
+            app.container.tabs.tabs.map { list -> list.any { it.isPrivate } }.distinctUntilChanged().collect { anyPrivate ->
+                if (!anyPrivate) app.container.privateLock.onPrivateBrowsingEnded()
+            }
         }
         // Picture-in-picture: a fullscreen page playing media shrinks into a window when the user leaves (Home).
         lifecycleScope.launch {
@@ -265,13 +272,25 @@ class MainActivity : ComponentActivity() {
         // Invisible: the selected page must not keep running at foreground priority, unless another instance is
         // started (a link opened right after Back starts one before this one stops; see StartedActivities). First, so
         // a closed PiP window below already knows whether another instance is started.
-        app.startedActivities.onStop()
+        val leftScreen = app.startedActivities.onStop()
+        // Hidden for good: not another instance of ours taking over, not a window turning (rotation), not the PiP window.
+        if (leftScreen && !isChangingConfigurations && !isInPictureInPictureMode) lockPrivateTabsIfOn()
         pipExit.onStop()
         // The process can be killed any time after this; make sure the tab list is on its way to disk.
         app.container.tabs.flush()
         app.container.bookmarks.flush()
         app.container.history.flush()
         super.onStop()
+    }
+
+    /** Settings > Lock private tabs: Orbis left the screen, so the private tabs hide until the user unlocks. */
+    private fun lockPrivateTabsIfOn() {
+        val container = app.container
+        // A phone whose screen lock was removed has nothing to unlock with: the lock then stays off.
+        val settingOn = container.privacyPrefs.lockPrivateTabs && isScreenLockSet(this)
+        container.privateLock.onAppHidden(container.tabs.hasPrivateTabs, settingOn)
+        // The page behind the lock panel must not keep playing sound.
+        if (container.privateLock.locked.value) container.tabs.selected.value.takeIf { it.isPrivate }?.session?.pausePageMedia()
     }
 
     private val privacyWindow =

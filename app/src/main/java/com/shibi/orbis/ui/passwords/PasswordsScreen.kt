@@ -1,15 +1,10 @@
 package com.shibi.orbis.ui.passwords
 
-import android.app.Activity
 import android.app.KeyguardManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.ContextWrapper
-import android.hardware.biometrics.BiometricManager
-import android.hardware.biometrics.BiometricPrompt
 import android.os.Build
-import android.os.CancellationSignal
 import android.os.PersistableBundle
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -71,6 +66,7 @@ import com.shibi.orbis.passwords.SensitiveClip
 import com.shibi.orbis.ui.GuardedTextButton
 import com.shibi.orbis.ui.ObscuredTouchFilter
 import com.shibi.orbis.ui.OrbisTopAppBar
+import com.shibi.orbis.ui.authenticate
 import com.shibi.orbis.ui.secondaryReadingWidth
 import java.util.Locale
 import kotlinx.coroutines.launch
@@ -388,34 +384,3 @@ internal fun copySensitive(context: Context, text: String, sensitive: Boolean, s
     clipboard.setPrimaryClip(clip)
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) Toast.makeText(context, R.string.passwords_copied, Toast.LENGTH_SHORT).show()
 }
-
-/**
- * What the unlock prompt accepts: a strong (class 3) biometric or the screen lock (PIN, pattern, password); a weak
- * biometric alone is not enough.
- */
-internal fun allowedAuthenticators(): Int =
-    BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
-
-/** Android's own biometric/screen-lock prompt (no extra library); [onSuccess] runs on the main thread. */
-private fun authenticate(context: Context, title: String, subtitle: String, onSuccess: () -> Unit) {
-    val activity = context.findActivity() ?: return
-    val builder = BiometricPrompt.Builder(activity).setTitle(title).setSubtitle(subtitle)
-    builder.setAllowedAuthenticators(allowedAuthenticators())
-    val failed = runCatching {
-        builder.build().authenticate(
-            CancellationSignal(),
-            activity.mainExecutor,
-            object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) = onSuccess()
-            },
-        )
-    }.isFailure
-    if (failed) Toast.makeText(context, R.string.passwords_auth_unavailable, Toast.LENGTH_LONG).show()
-}
-
-private tailrec fun Context.findActivity(): Activity? =
-    when (this) {
-        is Activity -> this
-        is ContextWrapper -> baseContext.findActivity()
-        else -> null
-    }

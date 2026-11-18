@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="private_lock_title" translatable="false">Lock private tabs</string>
+    <string name="private_lock_summary" translatable="false">Ask for your fingerprint or screen lock when you come back to Orbis.</string>
+    <string name="private_lock_needs_screen_lock" translatable="false">Set a screen lock on this phone to lock private tabs.</string>
+    <string name="private_lock_panel_title" translatable="false">Private tabs are locked</string>
+    <string name="private_lock_unlock" translatable="false">Unlock</string>
+    <string name="private_lock_auth_title" translatable="false">Unlock private tabs</string>
+    <string name="private_lock_auth_subtitle" translatable="false">Confirm it\'s you</string>
+    <string name="private_lock_card_title" translatable="false">Private tab</string>
+</resources>

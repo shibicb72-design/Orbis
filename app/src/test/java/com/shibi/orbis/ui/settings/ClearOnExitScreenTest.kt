@@ -91,6 +91,15 @@ class ClearOnExitScreenTest {
         assertTrue(prefs.enabled)
     }
 
+    @Test(timeout = 60_000)
+    fun aTapOnTheRowsWordsTurnsTheSettingOn() {
+        show()
+        rule.onNodeWithText("Clear browsing data when Orbis is closed").performClick()
+        assertTrue(prefs.enabled)
+        rule.onNodeWithText("Clear browsing data when Orbis is closed").performClick()
+        assertFalse(prefs.enabled)
+    }
+
     @Test
     fun addingTheSameSiteTwiceLeavesOneRow() {
         show()

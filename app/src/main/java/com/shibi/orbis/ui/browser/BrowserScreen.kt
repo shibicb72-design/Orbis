@@ -120,6 +120,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shibi.orbis.AppContainer
 import com.shibi.orbis.R
 import com.shibi.orbis.settings.MagnetHandler
+import com.shibi.orbis.privacy.pageHiddenByLock
 import com.shibi.orbis.torrent.IntakeLog
 import com.shibi.orbis.torrent.TorrentIntakeReader
 import com.shibi.orbis.torrent.TorrentLimits
@@ -348,6 +349,7 @@ private fun BrowserContent(
     val scope = rememberCoroutineScope()
     val snackbars = remember { SnackbarHostState() }
     val closedMessage = stringResource(R.string.tabs_closed_snackbar)
+    val lockedTabTitle = stringResource(R.string.private_lock_card_title)
     val undoLabel = stringResource(R.string.undo)
     // Tab previews: taken of the page shown when it finishes loading and when the tab list opens. Memory only.
     var contentView by remember { mutableStateOf<android.view.View?>(null) }
@@ -360,12 +362,19 @@ private fun BrowserContent(
     val torrentIpNoteSeen by container.browserSettings.torrentIpNoteSeen.collectAsStateWithLifecycle()
     val linkMenu by tabs.linkMenu.collectAsStateWithLifecycle()
     val session = selectedTab.session
+    // Settings > Lock private tabs: while locked, a selected private tab's page is replaced by the lock panel and nothing
+    // in the toolbar or menu may act on it.
+    val privateLocked by container.privateLock.locked.collectAsStateWithLifecycle()
+    val pageHidden = pageHiddenByLock(privateLocked, selectedTab.isPrivate)
     val state by (session?.state ?: IDLE_STATE).collectAsStateWithLifecycle()
     // The menu entry follows the committed address, never a pending one.
     val bookmarkList by container.bookmarks.entries.collectAsStateWithLifecycle()
     val bookmarked = remember(bookmarkList, state.url) { container.bookmarks.isBookmarked(state.url) }
     val historyEntries by container.history.entries.collectAsStateWithLifecycle()
-    val prompt by (session?.prompts ?: NO_PROMPT).collectAsStateWithLifecycle()
+    val pagePrompt by (session?.prompts ?: NO_PROMPT).collectAsStateWithLifecycle()
+    // A hidden page's questions wait until it is unlocked.
+    val prompt = if (pageHidden) null else pagePrompt
+    val unlockPrivate = rememberPrivateUnlock(container.privateLock)
     val keyboardController = LocalSoftwareKeyboardController.current
     // Where focus goes after Go. focusManager.clearFocus() is not enough: after a key event (hardware Enter) the app is
     // out of touch mode and the view system hands focus straight back to the first focusable, the address field.
@@ -375,7 +384,7 @@ private fun BrowserContent(
     var showTabs by remember { mutableStateOf(false) }
     fun capturePreview() {
         // Only a web page: the start page is drawn over the page area, so a capture of a blank tab is empty.
-        if (!isWebUrl(state.url)) return
+        if (!isWebUrl(state.url) || pageHidden) return
         val tabId = selectedTab.id
         (contentView as? PageCapture)?.capturePage { bmp -> if (bmp != null) container.thumbnails.put(tabId, bmp) }
     }
@@ -441,11 +450,23 @@ private fun BrowserContent(
     val fullScreen = state.fullScreen && session != null
     FullScreenWindowEffect(fullScreen, landscape = fullScreen && state.fullScreenVideoLandscape)
 
+    // Locking closes everything that shows or acts on the hidden page, and pauses its media.
+    LaunchedEffect(pageHidden) {
+        if (!pageHidden) return@LaunchedEffect
+        showSiteSettings = false
+        findOpen = false
+        readerArticle = null
+        castOpen = false
+        menuOpen = false
+        tabs.dismissLinkMenu()
+        session?.pausePageMedia()
+    }
+
     val blankTab = isBlankAddress(selectedTab.url) && isBlankAddress(state.url)
     val hasLiveOpener = selectedTab.openerTabId?.let { id -> tabList.any { it.id == id } } == true
 
     // Back order: close find bar, then history, then a tab opened from another tab, then the system default.
-    BackHandler(enabled = findOpen || state.canGoBack || hasLiveOpener) {
+    BackHandler(enabled = !pageHidden && (findOpen || state.canGoBack || hasLiveOpener)) {
         when {
             findOpen -> {
                 findOpen = false
@@ -588,11 +609,12 @@ private fun BrowserContent(
                 val windowWidthDp = with(density) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
                 val twoRow = toolbarWraps(density.fontScale, windowWidthDp)
                 val backButton: @Composable () -> Unit = {
-                    IconButton(onClick = { session?.goBack() }, enabled = state.canGoBack) {
+                    IconButton(onClick = { session?.goBack() }, enabled = state.canGoBack && !pageHidden) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 }
                 val tabsAndMenu: @Composable () -> Unit = {
+                    // Locked with a private tab selected: no session and an empty page, so the page entries and the toolbar button are off.
                     val menuPage = MenuPageState(
                         hasSession = session != null,
                         sessionIsPrivate = session?.isPrivate,
@@ -604,7 +626,7 @@ private fun BrowserContent(
                         desktopMode = state.desktopMode,
                         bookmarked = bookmarked,
                         casting = casting != null,
-                    )
+                    ).whileHidden(pageHidden)
                     // The menu entry and the extra toolbar button run this same handler.
                     val runMenuAction: (MenuAction) -> Unit = { action ->
                         when (action) {
@@ -712,7 +734,7 @@ private fun BrowserContent(
                     if (showsToolbarCast(windowWidthDp, twoRow)) {
                         ToolbarCastButton(
                             connected = casting != null,
-                            enabled = session != null,
+                            enabled = session != null && !pageHidden,
                             deviceName = casting?.deviceName,
                             onClick = { castOpen = true },
                         )
@@ -739,7 +761,10 @@ private fun BrowserContent(
                     // The production address bar (BrowserAddressBar.kt): keyed by tab inside, so typed text, focus, edit mode and
                     // the pending submit never leak from one tab into another. It reads the selected tab's OWN url and session
                     // flow, never the `state` collected above, which lags a frame behind a tab switch.
-                    BrowserAddressBar(
+                    if (pageHidden) {
+                        // Locked: no address and no input while the private page is hidden.
+                        PrivateLockAddressStub(Modifier.weight(1f))
+                    } else BrowserAddressBar(
                         tabId = selectedTab.id,
                         isPrivate = selectedTab.isPrivate,
                         tabUrl = selectedTab.url,
@@ -820,7 +845,7 @@ private fun BrowserContent(
                     }
                 }
                 LoadingBar(state.isLoading, state.progress / 100f, motionEnabled, Modifier.fillMaxWidth().height(4.dp))
-                if (state.crashed || state.loadFailed) {
+                if ((state.crashed || state.loadFailed) && !pageHidden) {
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
                         contentColor = MaterialTheme.colorScheme.onErrorContainer,
@@ -855,7 +880,8 @@ private fun BrowserContent(
             },
             tabStrip = {
                 TabStrip(
-                    tabs = tabList,
+                    // Locked: a private tab shows no title or address in the strip either.
+                    tabs = if (privateLocked) tabList.map { if (it.isPrivate) it.copy(title = lockedTabTitle, url = "") else it } else tabList,
                     onSelect = tabs::select,
                     onClose = { tabs.close(it) },
                     onNewTab = { focusAddressFor = tabs.newTab() },
@@ -869,7 +895,8 @@ private fun BrowserContent(
             page = {
                 // ONE content view for all tabs; the tab shown is swapped in update(), which may run any number of
                 // times and so only acts when the selected session differs from the attached one.
-                AndroidView(
+                // Locked: the view is left out, which releases the session from it; the lock panel stands in for the page.
+                if (!pageHidden) AndroidView(
                     factory = { context ->
                         container.engine.createContentView(context).also { view ->
                             view.layoutParams =
@@ -905,7 +932,13 @@ private fun BrowserContent(
                     },
                     modifier = Modifier.fillMaxSize(),
                 )
-                readerArticle?.let { article ->
+                if (pageHidden) {
+                    PrivateLockPanel(
+                        onUnlock = { unlockPrivate {} },
+                        onClosePrivate = { tabs.closeAllPrivate() },
+                    )
+                }
+                readerArticle?.takeUnless { pageHidden }?.let { article ->
                     val readerSize by container.browserSettings.readerTextSize.collectAsStateWithLifecycle()
                     val readerSerif by container.browserSettings.readerSerif.collectAsStateWithLifecycle()
                     val readerTheme by container.browserSettings.readerTheme.collectAsStateWithLifecycle()
@@ -942,7 +975,7 @@ private fun BrowserContent(
                         modifier = Modifier.align(Alignment.TopCenter),
                     )
                 }
-                if (blankTab && !state.isLoading) {
+                if (blankTab && !state.isLoading && !pageHidden) {
                     if (selectedTab.isPrivate) {
                         // A private tab keeps its notice; the start page (history-based Top sites) is never shown here.
                         OrbisEmptyState(stringResource(R.string.browser_private_empty_state_files), Icons.Filled.VisibilityOff)
@@ -1005,7 +1038,7 @@ private fun BrowserContent(
                 }
                 // Suggestions while typing, over the page (the engine view is never resized or moved for them).
                 val query = addressBridge.query
-                if (query.isNotBlank() && !fullScreen) {
+                if (query.isNotBlank() && !fullScreen && !pageHidden) {
                     val suggestOn by container.browserSettings.searchSuggestions.collectAsStateWithLifecycle()
                     val engine by container.searchEngine.selected.collectAsStateWithLifecycle()
                     // Live suggestions send what is typed to the search engine: never from a private tab.
@@ -1159,6 +1192,13 @@ private fun BrowserContent(
                 showTabs = false
             },
             onDismiss = { showTabs = false },
+            privateLocked = privateLocked,
+            onUnlockRequest = { id ->
+                unlockPrivate {
+                    tabs.select(id)
+                    showTabs = false
+                }
+            },
             groups = tabGroups,
             groupActions = TabGroupActions(
                 onCreate = { tabId, name, color -> tabs.createGroup(listOf(tabId), name, color) },
@@ -1218,7 +1258,8 @@ private fun BrowserContent(
         requestNotificationPermission()
     }
     DownloadOffer(
-        pending = pendingDownload,
+        // A private download's name and source wait until the private tabs are unlocked.
+        pending = pendingDownload?.takeUnless { privateLocked && it.isPrivate },
         onStart = ::startDownload,
         dialog = { pending ->
             DownloadConfirmDialog(
