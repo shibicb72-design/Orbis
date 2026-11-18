@@ -34,7 +34,9 @@ class BookmarkManager(
     private var nextId = 1L
 
     private var loadStarted = false
-    private var loaded = false
+    /** True once the stored list has been read (also when it was missing or unreadable) and queued changes replayed. */
+    var loaded = false
+        private set
     private val queued = ArrayList<Change>()
 
     /** Snapshots queue here and one writer coroutine saves them in order, so an old write can never land last. */

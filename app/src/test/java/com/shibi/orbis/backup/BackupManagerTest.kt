@@ -106,6 +106,7 @@ class BackupManagerTest {
         w.clearPrefs.enabled = true
         w.clearPrefs.exceptions = setOf("example.com")
         w.privacy.lockPrivateTabs = true
+        w.torrentSettings.update { it.copy(wifiOnly = false, stopSeeding = false, seedRatioLimit = 2.5f, dht = false, pex = false, lsd = true, downBps = 500_000, upBps = 120_000) }
         w.sitePermissions.record(camera, allow = true, remember = true)
         w.sitePermissions.record(location, allow = false, remember = true)
         w.sitePermissions.record(SitePermissionKey(SitePermissionKind.MICROPHONE, "https://once.example"), allow = true, remember = false)
@@ -328,6 +329,101 @@ class BackupManagerTest {
             } catch (e: BackupNotReadyException) {
                 assertEquals(BackupSection.PASSWORDS, e.section)
             }
+        }
+
+    /** Passwords and tabs ready, so only the stores left out of [bookmarks] and [history] are in question. */
+    private fun partlyLoaded(bookmarks: Boolean = true, history: Boolean = true): BackupWorld =
+        BackupWorld(scope, dispatcher, scheduler).apply {
+            bookmarkStore.data = listOf(com.shibi.orbis.bookmarks.Bookmark(1, "https://kept.example/", "Kept", 1L))
+            logins.load()
+            tabs.restore()
+            if (bookmarks) this.bookmarks.load()
+            if (history) this.history.load()
+            scheduler.advanceUntilIdle()
+        }
+
+    @Test(timeout = 60_000)
+    fun createWaitsForBookmarksThenHoldsThem() =
+        runTest(dispatcher) {
+            val w = partlyLoaded(bookmarks = false)
+            assertFalse(w.bookmarks.loaded)
+            try {
+                w.manager.create(pw())
+                fail("backup made before the bookmarks loaded")
+            } catch (e: BackupNotReadyException) {
+                assertEquals(BackupSection.BOOKMARKS, e.section)
+            }
+            w.bookmarks.load()
+            scheduler.advanceUntilIdle()
+            assertTrue(w.bookmarks.loaded)
+            val opened = crypto.open(w.manager.create(pw()), pw()) as BackupOpenResult.Opened
+            assertTrue(String(opened.payload, Charsets.UTF_8).contains("https://kept.example/"))
+        }
+
+    @Test(timeout = 60_000)
+    fun historyIsWaitedForOnlyWhenAskedFor() =
+        runTest(dispatcher) {
+            val w = partlyLoaded(history = false)
+            assertFalse(w.history.loaded)
+            w.manager.create(pw())
+            try {
+                w.manager.create(pw(), BackupOptions(includeHistory = true))
+                fail("history backup made before history loaded")
+            } catch (e: BackupNotReadyException) {
+                assertEquals(BackupSection.HISTORY, e.section)
+            }
+            w.history.load()
+            scheduler.advanceUntilIdle()
+            w.manager.create(pw(), BackupOptions(includeHistory = true))
+        }
+
+    @Test(timeout = 60_000)
+    fun aRestoreBeforeBookmarksHaveLoadedChangesNothingAndSaysSo() =
+        runTest(dispatcher) {
+            val file = filled().manager.create(pw())
+            val to = partlyLoaded(bookmarks = false)
+            try {
+                to.manager.restore(file, pw())
+                fail("restored before the bookmarks loaded")
+            } catch (e: BackupNotReadyException) {
+                assertEquals(BackupSection.BOOKMARKS, e.section)
+            }
+            assertEquals(HttpsOnlyMode.ALL, to.browserSettings.httpsOnly.value)
+            assertEquals(emptyList<Any>(), to.logins.logins.value)
+            // Once loaded, the stored bookmark is still there: nothing was lost to the late load.
+            to.bookmarks.load()
+            scheduler.advanceUntilIdle()
+            assertEquals(listOf("https://kept.example/"), to.bookmarks.entries.value.map { it.url })
+        }
+
+    @Test(timeout = 60_000)
+    fun everyTorrentSettingIsRestoredAndAnOutOfRangeValueIsSkipped() =
+        runTest(dispatcher) {
+            val from = filled()
+            val to = world()
+            val result = to.manager.restore(from.manager.create(pw()), pw()) as RestoreResult.Restored
+            assertEquals(from.torrentSettings.settings.value, to.torrentSettings.settings.value)
+            assertEquals(2.5f, to.torrentSettings.settings.value.seedRatioLimit)
+            assertEquals(emptySet<String>(), result.failedSections)
+
+            val bad = world()
+            val torrent =
+                JSONObject()
+                    .put("wifi_only", false)
+                    .put("down_bps", -5)
+                    .put("up_bps", 2_000_000_000)
+                    .put("seed_ratio", 500)
+                    .put("listen_port", 50_000)
+                    .put("schema", 1)
+            val files = JSONObject().put("torrent_settings", torrent)
+            val r = bad.manager.restore(seal(mapOf(BackupSection.SETTINGS to JSONObject().put("v", 1).put("files", files))), pw()) as RestoreResult.Restored
+            val t = bad.torrentSettings.settings.value
+            assertEquals(false, t.wifiOnly)
+            assertEquals(0, t.downBps)
+            assertEquals(0, t.upBps)
+            assertEquals(null, t.seedRatioLimit)
+            assertFalse(bad.torrentPrefs.map.containsKey("listen_port"))
+            assertEquals(SectionCounts(replaced = 1, skipped = 5), r.counts[BackupSection.SETTINGS])
         }
 
     @Test(timeout = 10_000)

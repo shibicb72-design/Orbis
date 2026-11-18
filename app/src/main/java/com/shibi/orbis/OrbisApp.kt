@@ -455,6 +455,7 @@ class OrbisApp : Application() {
                         sitePermissions = sitePermissions,
                         tabs = tabs,
                         history = history,
+                        torrentSettings = torrentSettings,
                         addonStates = { addons.states.value },
                         ublockInstalled = { ubo.state.value is com.shibi.orbis.ubo.UboState.Installed },
                     ),
