@@ -316,6 +316,7 @@ class OrbisApp : Application() {
                 launch(Dispatchers.IO) {
                     for (e in fresh) {
                         val ok = com.shibi.orbis.downloads.copyToPublicDownloads(this@OrbisApp, File(e.filePath!!), e.fileName, e.mimeType) != null
+                        if (ok) downloads.markCopiedToDownloads(e.id)
                         debugLog.log("Downloads", if (ok) "copied to Download folder" else "copy to Download folder failed")
                     }
                 }
