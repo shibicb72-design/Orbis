@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="download_feedback_downloading" translatable="false">Downloading&#8230;</string>
+    <string name="download_feedback_saved" translatable="false">Saved to Downloads</string>
+    <string name="download_feedback_finished" translatable="false">Download finished</string>
+    <string name="download_feedback_saved_private" translatable="false">Saved in Orbis until private browsing ends</string>
+    <string name="download_feedback_failed" translatable="false">Download failed</string>
+    <string name="download_feedback_open" translatable="false">Open</string>
+</resources>

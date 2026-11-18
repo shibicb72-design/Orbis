@@ -2859,6 +2859,7 @@ private class GeckoIncomingDownload(private val response: WebResponse, override 
     override val contentDisposition: String? get() = header("content-disposition")
     override val contentType: String? get() = header("content-type")
     override val validator: String? get() = resumeValidator(header("etag"), header("last-modified"))
+    override val userRequested: Boolean get() = response.skipConfirmation
     // -1 (unknown) when the body may have been decoded: the length header then describes the compressed bytes, and a
     // known length that differs from what is received would be mistaken for a truncated download.
     override val contentLength: Long
