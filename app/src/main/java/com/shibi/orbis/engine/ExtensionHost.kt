@@ -29,6 +29,14 @@ interface ExtensionHost {
     /** The add-on panel that is open now, or null. Only a [clickAction] opens one; an add-on cannot open it on its own. */
     val popup: StateFlow<AddonPopup?> get() = NO_ADDON_POPUP
 
+    /**
+     * Opens one of an add-on's own pages ([url], `moz-extension://`) in a new normal tab. The engine calls it when the
+     * open [popup] asks for one of its own add-on's pages (see [openFromPanel]), after it has closed that panel. Set
+     * once by the app; null opens nothing.
+     */
+    var onOpenAddonPage: ((url: String) -> Unit)?
+        get() = null
+        set(_) {}
 
     suspend fun find(id: String): InstalledExtension?
 
@@ -119,6 +127,95 @@ internal val BUILT_IN_EXTENSION_IDS: Set<String> =
     )
 
 internal fun isBuiltInExtension(id: String): Boolean = id in BUILT_IN_EXTENSION_IDS || id.endsWith("@orbis.shibi.com")
+
+/**
+ * True only when [url] is one of the panel's own add-on's pages: it starts with that add-on's own address
+ * [panelExtensionBaseUrl] (`moz-extension://<its id>/`). Web pages, files, `about:`, `data:`, `javascript:`, another
+ * add-on's pages and an empty address are all false.
+ */
+internal fun mayOpenFromPanel(url: String, panelExtensionBaseUrl: String): Boolean {
+    val base = panelExtensionBaseUrl
+    val wellFormed = base.startsWith("moz-extension://") && base.endsWith("/") && base.length > "moz-extension://".length + 1
+    return wellFormed && url.startsWith(base)
+}
+
+/**
+ * How long after an add-on's panel closed because its own page asked to (window.close) it may still open its one page.
+ * uBlock Origin's dashboard button asks to close first and for the page second (48 ms apart on the emulator).
+ */
+internal const val PANEL_SELF_CLOSE_GRACE_MILLIS = 1_000L
+
+/** Why a request to open a page was refused. Logged with the add-on's id, never with the address. */
+internal enum class PanelPageRefusal {
+    /** No add-on panel was opened since Orbis started. */
+    NO_PANEL,
+
+    /** The last panel belongs to another add-on. */
+    OTHER_ADDON,
+
+    /** Not one of the panel's own add-on's pages. */
+    NOT_OWN_PAGE,
+
+    /** This opening of the panel has already opened its one page. */
+    ALREADY_OPENED,
+
+    /** The tab selected while the panel was open is no longer selected, or the private-tab lock hides it. */
+    OTHER_TAB,
+
+    /** The user or Orbis closed the panel (Close, Back, a tap outside, another tab, the lock, add-on off, crash). */
+    CLOSED,
+
+    /** The panel's page closed it more than [PANEL_SELF_CLOSE_GRACE_MILLIS] ago. */
+    GRACE_OVER,
+}
+
+/**
+ * The one page an opening of an add-on panel may open: one of its own add-on's pages, once, while the panel is open or
+ * up to [PANEL_SELF_CLOSE_GRACE_MILLIS] after its own page asked to close it, and only for the tab it was opened on.
+ * [tab] is that tab (compared by identity); [now] is a monotonic clock in milliseconds. Main thread.
+ */
+internal class PanelPages(
+    val extensionId: String,
+    private val baseUrl: String,
+    private val tab: Any,
+    private val now: () -> Long,
+) {
+    private var opened = false
+    private var closedAt: Long? = null
+    private var closedBySelf = false
+
+    /** The panel closed; [bySelf] only when its own page asked (window.close). The first call counts. */
+    fun closed(bySelf: Boolean) {
+        if (closedAt != null) return
+        closedAt = now()
+        closedBySelf = bySelf
+    }
+
+    /**
+     * Null when [url] may open now, which uses up this opening's one page; otherwise why not. [selectedTab] is the
+     * tab selected now, null when none is or the private-tab lock hides it.
+     */
+    fun claim(requesterId: String, url: String?, selectedTab: Any?): PanelPageRefusal? {
+        if (requesterId != extensionId) return PanelPageRefusal.OTHER_ADDON
+        if (url == null || !mayOpenFromPanel(url, baseUrl)) return PanelPageRefusal.NOT_OWN_PAGE
+        if (opened) return PanelPageRefusal.ALREADY_OPENED
+        if (selectedTab !== tab) return PanelPageRefusal.OTHER_TAB
+        val closedAt = closedAt
+        if (closedAt != null) {
+            if (!closedBySelf) return PanelPageRefusal.CLOSED
+            if (now() - closedAt > PANEL_SELF_CLOSE_GRACE_MILLIS) return PanelPageRefusal.GRACE_OVER
+        }
+        opened = true
+        return null
+    }
+}
+
+/**
+ * Whether add-on [requesterId] may open [url] now, given the last panel the user opened ([last], open or closed; null
+ * when none was). See [PanelPages.claim]. Null when it may.
+ */
+internal fun openFromPanel(last: PanelPages?, requesterId: String, url: String?, selectedTab: Any?): PanelPageRefusal? =
+    if (last == null) PanelPageRefusal.NO_PANEL else last.claim(requesterId, url, selectedTab)
 
 /**
  * The buttons the "Add-ons" list shows, sorted by name: not Orbis's built-in extensions, only add-ons that are
