@@ -38,6 +38,9 @@ const val MAX_TABS = 50
 
 private const val PERSIST_DEBOUNCE_MILLIS = 1_000L
 
+/** Longest title [TabManager.addRestoredTabs] keeps: the limit TabCodec applies to a stored title. */
+private const val RESTORED_TITLE_MAX_CHARS = 300
+
 /**
  * One tab. [session] is null for a tab restored from disk that has not been shown yet: only the selected tab is
  * opened after a process death. [url] and [title] mirror the session (or the stored values while it is null).
@@ -768,6 +771,52 @@ class TabManager(
         changed()
         // Not ready yet: the write is skipped, and restore() writes once the stored list has been read.
         if (_ready.value) flush()
+    }
+
+    // ---- backup --------------------------------------------------------------------------------------------
+
+    /**
+     * The normal tabs for a backup: never a private tab, no saved state on any tab, and the order and groups that
+     * [persistableSnapshot] gives. Reads only what the list already mirrors, never a session.
+     */
+    fun normalTabsForBackup(): TabsSnapshot =
+        persistableSnapshot(list.map { it.copy(session = null, savedState = null) }, selectedId, lastNormalSelectedId, groupList)
+
+    /**
+     * Appends tabs from a backup after the open ones, as many as fit under the tab cap, in order, and returns how many
+     * were added. Each gets a fresh tab id, and each group with a valid name a fresh group id; a tab whose group was
+     * dropped comes in ungrouped. Only web addresses; titles are cut to [RESTORED_TITLE_MAX_CHARS]. The tabs have no
+     * session and are never selected or private, so nothing loads until the user opens one. The selected tab and Recently
+     * closed are untouched. Returns 0, and adds nothing, before the stored tab list has been read: an earlier change
+     * would make [restore] drop the stored tabs.
+     */
+    fun addRestoredTabs(tabs: List<PersistedTab>, groups: List<TabGroup>): Int {
+        if (!_ready.value) return 0
+        val fileGroups = groups.associateBy { it.id }
+        val freshGroupIds = HashMap<Long, Long?>()
+        var added = 0
+        for (p in tabs) {
+            if (list.size >= maxTabs) break
+            if (!isWebUrl(p.url)) continue
+            val groupId =
+                p.groupId?.let { fileId ->
+                    freshGroupIds.getOrPut(fileId) {
+                        val g = fileGroups[fileId]
+                        val name = g?.let { tabGroupName(it.name) }
+                        if (g == null || name == null) {
+                            null
+                        } else {
+                            val id = nextGroupId++
+                            groupList += TabGroup(id, name, g.color, g.collapsed)
+                            id
+                        }
+                    }
+                }
+            list += Tab(nextId++, null, p.title.take(RESTORED_TITLE_MAX_CHARS), p.url, p.desktop, null, null, groupId = groupId)
+            added++
+        }
+        if (added > 0) changed()
+        return added
     }
 
     // ---- tab groups ----------------------------------------------------------------------------------------
