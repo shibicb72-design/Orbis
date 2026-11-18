@@ -2,6 +2,7 @@ package com.shibi.orbis.suggest
 
 import com.shibi.orbis.bookmarks.Bookmark
 import com.shibi.orbis.engine.SearchEngine
+import com.shibi.orbis.engine.SearchProvider
 import com.shibi.orbis.engine.hostOfUrl
 import com.shibi.orbis.history.HistoryEntry
 import com.shibi.orbis.home.isSearchResultPage
@@ -63,8 +64,7 @@ private fun matches(q: String, url: String, title: String): Boolean {
  * session (Brave answered with a web page instead of suggestions when checked on 2026-11-08). All four answer in the
  * OpenSearch form `["query", ["s1", "s2", ...], ...]`.
  */
-fun suggestUrl(engine: SearchEngine, query: String): String? {
-    val q = URLEncoder.encode(query, "UTF-8")
+fun suggestUrl(engine: SearchEngine, query: String): String? {    val q = URLEncoder.encode(query, "UTF-8")
     return when (engine) {
         SearchEngine.DUCKDUCKGO -> "https://duckduckgo.com/ac/?q=$q&type=list"
         SearchEngine.GOOGLE -> "https://suggestqueries.google.com/complete/search?client=firefox&q=$q"
@@ -73,6 +73,16 @@ fun suggestUrl(engine: SearchEngine, query: String): String? {
         SearchEngine.BRAVE -> null
     }
 }
+
+/**
+ * As above for a built-in engine. An engine the user added never gets suggestions: a suggestion address would send
+ * every keystroke to a server the user has not chosen for that (feat08 ruling 9).
+ */
+fun suggestUrl(engine: SearchProvider, query: String): String? =
+    when (engine) {
+        is SearchProvider.BuiltIn -> suggestUrl(engine.engine, query)
+        is SearchProvider.Custom -> null
+    }
 
 /** The suggestion strings of an OpenSearch response, or empty for anything else. Never throws. */
 fun parseOpenSearchSuggestions(body: String, limit: Int = SEARCH_SUGGESTION_LIMIT): List<String> =

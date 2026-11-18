@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="search_engines_add" translatable="false">Add search engine</string>
+    <string name="search_engines_remove" translatable="false">Remove</string>
+    <string name="search_engines_name" translatable="false">Name</string>
+    <string name="search_engines_address" formatted="false" translatable="false">Address with %s in place of the search words</string>
+    <string name="search_engines_add_confirm" translatable="false">Add</string>
+    <string name="search_engines_note" translatable="false">A search engine you add receives everything you search for from the address bar.</string>
+    <string name="search_engines_error_https" translatable="false">The address must start with https://</string>
+    <string name="search_engines_error_placeholder" formatted="false" translatable="false">Put %s once where the search words go</string>
+    <string name="search_engines_error_address" translatable="false">Enter a full web address</string>
+    <string name="search_engines_error_name" translatable="false">Enter a name</string>
+    <string name="search_engines_error_name_used" translatable="false">That name is already used</string>
+    <string name="search_engines_error_limit" translatable="false">You can add up to 10 search engines</string>
+</resources>

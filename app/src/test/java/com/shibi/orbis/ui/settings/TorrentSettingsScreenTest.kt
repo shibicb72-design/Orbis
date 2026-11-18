@@ -12,7 +12,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.core.app.ApplicationProvider
-import com.shibi.orbis.engine.SearchEngine
+import com.shibi.orbis.engine.SearchProvider
 import com.shibi.orbis.settings.BrowserSettings
 import com.shibi.orbis.settings.MagnetHandler
 import com.shibi.orbis.settings.SharedPreferencesBrowserPrefs
@@ -184,8 +184,7 @@ class TorrentSettingsScreenTest {
             MaterialTheme {
                 SettingsScreen(
                     uboStateFlow = MutableStateFlow(UboState.NotInstalled),
-                    searchEngineFlow = MutableStateFlow(SearchEngine.DEFAULT),
-                    onSelectSearchEngine = {},
+                    searchEngineFlow = MutableStateFlow(SearchProvider.DEFAULT),
                     homepageFlow = MutableStateFlow(null),
                     onSetHomepage = {},
                     searchSuggestionsFlow = MutableStateFlow(true),

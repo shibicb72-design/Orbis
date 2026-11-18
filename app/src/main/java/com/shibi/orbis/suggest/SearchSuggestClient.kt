@@ -1,6 +1,6 @@
 package com.shibi.orbis.suggest
 
-import com.shibi.orbis.engine.SearchEngine
+import com.shibi.orbis.engine.SearchProvider
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.coroutines.CoroutineDispatcher
@@ -9,7 +9,7 @@ import kotlinx.coroutines.withContext
 
 /** Fetches live search suggestions. Callers must only use it for normal tabs with the setting on. */
 interface SearchSuggestSource {
-    suspend fun suggest(engine: SearchEngine, query: String): List<String>
+    suspend fun suggest(engine: SearchProvider, query: String): List<String>
 }
 
 /**
@@ -17,7 +17,7 @@ interface SearchSuggestSource {
  * a small response cap. Any failure gives no suggestions; nothing is logged with the query (it is what the user types).
  */
 class HttpSearchSuggestSource(private val io: CoroutineDispatcher = Dispatchers.IO) : SearchSuggestSource {
-    override suspend fun suggest(engine: SearchEngine, query: String): List<String> {
+    override suspend fun suggest(engine: SearchProvider, query: String): List<String> {
         val url = suggestUrl(engine, query) ?: return emptyList()
         return withContext(io) {
             runCatching {

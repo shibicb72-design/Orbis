@@ -28,7 +28,7 @@ import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.text.input.ImeAction
 import com.shibi.orbis.engine.IncomingDownload
-import com.shibi.orbis.engine.SearchEngine
+import com.shibi.orbis.engine.SearchProvider
 import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.engine.afterContentProcessGone
 import com.shibi.orbis.engine.afterLoadError
@@ -100,7 +100,7 @@ class PendingSubmitComposeTest {
             goNow = {
                 submitFromAddressBar(
                     typed = typed,
-                    searchEngine = SearchEngine.DEFAULT,
+                    searchEngine = SearchProvider.DEFAULT,
                     sessionState = flow.value,
                     pending = pending,
                     loadUrl = { loads += it },

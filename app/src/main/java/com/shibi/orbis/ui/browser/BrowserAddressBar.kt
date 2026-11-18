@@ -51,7 +51,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.shibi.orbis.R
-import com.shibi.orbis.engine.SearchEngine
+import com.shibi.orbis.engine.SearchProvider
 import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.tabs.PendingDownload
 import com.shibi.orbis.ui.theme.ADDRESS_FOCUS_MS
@@ -101,7 +101,7 @@ internal fun BrowserAddressBar(
     downloadOffer: PendingDownload?,
     isLoading: Boolean,
     canReload: Boolean,
-    searchEngine: () -> SearchEngine,
+    searchEngine: () -> SearchProvider,
     focusOnStart: Boolean,
     onFocusOnStartConsumed: () -> Unit,
     loadUrl: (String) -> Unit,

@@ -56,23 +56,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shibi.orbis.R
 import com.shibi.orbis.about.installedVersionName
 import com.shibi.orbis.about.openPlayListing
-import com.shibi.orbis.engine.SearchEngine
+import com.shibi.orbis.engine.SearchProvider
 import com.shibi.orbis.role.BrowserRoleStatus
 import com.shibi.orbis.role.DefaultBrowserRole
 import com.shibi.orbis.ubo.UboState
 import com.shibi.orbis.ui.OrbisTopAppBar
 import com.shibi.orbis.ui.theme.AppThemes
 import kotlinx.coroutines.flow.StateFlow
-
-@StringRes
-private fun searchEngineLabel(engine: SearchEngine): Int =
-    when (engine) {
-        SearchEngine.DUCKDUCKGO -> R.string.search_engine_duckduckgo
-        SearchEngine.GOOGLE -> R.string.search_engine_google
-        SearchEngine.BING -> R.string.search_engine_bing
-        SearchEngine.BRAVE -> R.string.search_engine_brave
-        SearchEngine.STARTPAGE -> R.string.search_engine_startpage
-    }
 
 @StringRes
 private fun defaultBrowserSummary(status: BrowserRoleStatus): Int =
@@ -82,52 +72,11 @@ private fun defaultBrowserSummary(status: BrowserRoleStatus): Int =
         BrowserRoleStatus.UNAVAILABLE -> R.string.default_browser_unavailable
     }
 
-@Composable
-private fun SearchEngineDialog(
-    selected: SearchEngine,
-    onSelect: (SearchEngine) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.search_engine_dialog_title)) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()).selectableGroup()) {
-                SearchEngine.entries.forEach { engine ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 48.dp)
-                            .selectable(selected = engine == selected, role = Role.RadioButton, onClick = { onSelect(engine) })
-                            .padding(vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = engine == selected, onClick = null)
-                        Text(
-                            text = stringResource(searchEngineLabel(engine)),
-                            modifier = Modifier.padding(start = 16.dp),
-                        )
-                    }
-                }
-                Text(
-                    text = stringResource(R.string.search_engine_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.prompt_cancel)) }
-        },
-    )
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     uboStateFlow: StateFlow<UboState>,
-    searchEngineFlow: StateFlow<SearchEngine>,
-    onSelectSearchEngine: (SearchEngine) -> Unit,
+    searchEngineFlow: StateFlow<SearchProvider>,
     homepageFlow: StateFlow<String?>,
     onSetHomepage: (String?) -> Unit,
     searchSuggestionsFlow: StateFlow<Boolean>,
@@ -158,6 +107,8 @@ fun SettingsScreen(
     /** Privacy > Secure DNS: the DNS-over-HTTPS choice. The row is hidden when null (screen tests). */
     dohFlow: StateFlow<DohConfig>? = null,
     onOpenSecureDns: () -> Unit = {},
+    /** Browsing > Search engine: the engine list, where engines can be added and removed. */
+    onOpenSearchEngines: () -> Unit = {},
 ) {
     var httpsDialogOpen by remember { mutableStateOf(false) }
     if (site != null) {
@@ -178,7 +129,6 @@ fun SettingsScreen(
     }
     val uboState by uboStateFlow.collectAsStateWithLifecycle()
     val searchEngine by searchEngineFlow.collectAsStateWithLifecycle()
-    var searchDialogOpen by remember { mutableStateOf(false) }
     val homepage by homepageFlow.collectAsStateWithLifecycle()
     val searchSuggestions by searchSuggestionsFlow.collectAsStateWithLifecycle()
     val textZoom by textZoomFlow.collectAsStateWithLifecycle()
@@ -216,16 +166,6 @@ fun SettingsScreen(
         roleStatus = DefaultBrowserRole.status(context)
         onPauseOrDispose {}
     }
-    if (searchDialogOpen) {
-        SearchEngineDialog(
-            selected = searchEngine,
-            onSelect = {
-                onSelectSearchEngine(it)
-                searchDialogOpen = false
-            },
-            onDismiss = { searchDialogOpen = false },
-        )
-    }
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
@@ -251,10 +191,10 @@ fun SettingsScreen(
             SettingsSection(R.string.settings_section_browsing) {
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.search_engine_title)) },
-                    supportingContent = { Text(stringResource(searchEngineLabel(searchEngine))) },
+                    supportingContent = { Text(searchProviderName(searchEngine)) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { searchDialogOpen = true },
+                        .clickable(onClick = onOpenSearchEngines),
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsItem(

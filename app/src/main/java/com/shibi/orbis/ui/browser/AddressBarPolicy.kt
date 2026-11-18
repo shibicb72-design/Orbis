@@ -14,7 +14,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.PlatformTextInputMethodRequest
-import com.shibi.orbis.engine.SearchEngine
+import com.shibi.orbis.engine.SearchProvider
 import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.engine.normalizeAddressInput
 import com.shibi.orbis.tabs.PendingDownload
@@ -227,7 +227,7 @@ internal fun rememberPendingSubmit(
  */
 internal fun submitFromAddressBar(
     typed: String,
-    searchEngine: SearchEngine,
+    searchEngine: SearchProvider,
     sessionState: SessionState?,
     pending: PendingSubmitState,
     loadUrl: (String) -> Unit,

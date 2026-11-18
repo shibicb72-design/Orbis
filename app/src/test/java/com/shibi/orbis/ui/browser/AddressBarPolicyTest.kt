@@ -3,7 +3,7 @@ package com.shibi.orbis.ui.browser
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import androidx.compose.ui.platform.PlatformTextInputMethodRequest
-import com.shibi.orbis.engine.SearchEngine
+import com.shibi.orbis.engine.SearchProvider
 import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.engine.afterContentProcessGone
 import com.shibi.orbis.engine.afterLoadError
@@ -399,7 +399,7 @@ class AddressBarPolicyTest {
         val ok =
             submitFromAddressBar(
                 typed = "  https://new.example/ ",
-                searchEngine = SearchEngine.DEFAULT,
+                searchEngine = SearchProvider.DEFAULT,
                 sessionState = loading(),
                 pending = pending,
                 loadUrl = { log += "load:$it"; log += "pendingAtLoad:${pending.text}" },
@@ -417,7 +417,7 @@ class AddressBarPolicyTest {
         var touched = false
         val ok =
             submitFromAddressBar(
-                "   ", SearchEngine.DEFAULT, idle, pending,
+                "   ", SearchProvider.DEFAULT, idle, pending,
                 loadUrl = { touched = true }, hideKeyboard = { touched = true }, moveFocusToSink = { touched = true },
             )
         assertFalse(ok)
