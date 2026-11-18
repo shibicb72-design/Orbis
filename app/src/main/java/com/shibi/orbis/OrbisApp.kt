@@ -48,6 +48,8 @@ import com.shibi.orbis.passwords.LoginManager
 import com.shibi.orbis.settings.BrowserSettings
 import com.shibi.orbis.settings.DohSettings
 import com.shibi.orbis.settings.SharedPreferencesDohPrefs
+import com.shibi.orbis.settings.SharedPreferencesToolbarPrefs
+import com.shibi.orbis.settings.ToolbarSettings
 import com.shibi.orbis.suggest.HttpSearchSuggestSource
 import com.shibi.orbis.suggest.SearchSuggestSource
 import com.shibi.orbis.settings.SharedPreferencesBrowserPrefs
@@ -177,6 +179,8 @@ class OrbisApp : Application() {
         val doh =
             DohSettings(SharedPreferencesDohPrefs(getSharedPreferences(SharedPreferencesDohPrefs.FILE_NAME, Context.MODE_PRIVATE)))
         appScope.launch { doh.config.collect { engine.setSecureDns(it.resolverUrl) } }
+        val toolbar =
+            ToolbarSettings(SharedPreferencesToolbarPrefs(getSharedPreferences(SharedPreferencesToolbarPrefs.FILE_NAME, Context.MODE_PRIVATE)))
         val ubo =
             UboOnboardingController(
                 host = engine.extensions,
@@ -451,6 +455,7 @@ class OrbisApp : Application() {
                 browserSettings = browserSettings,
                 logins = logins,
                 doh = doh,
+                toolbar = toolbar,
             )
         // A tab that starts playing brings up the media notification (and keeps playback alive in the background).
         appScope.launch {
@@ -558,6 +563,8 @@ class AppContainer(
     val browserSettings: BrowserSettings,
     /** Settings > Secure DNS; the engine follows it. */
     val doh: DohSettings,
+    /** Settings > Menu and toolbar: the page menu's order and hidden entries, and the extra toolbar button. */
+    val toolbar: ToolbarSettings,
     val logins: LoginManager,
     /** Page media across tabs (notification, background playback, picture-in-picture). */
     val media: MediaCenter = MediaCenter(tabs, kotlinx.coroutines.MainScope()),

@@ -109,6 +109,8 @@ fun SettingsScreen(
     onOpenSecureDns: () -> Unit = {},
     /** Browsing > Search engine: the engine list, where engines can be added and removed. */
     onOpenSearchEngines: () -> Unit = {},
+    /** Browsing > Menu and toolbar. The row is hidden when null (screen tests). */
+    onOpenMenuToolbar: (() -> Unit)? = null,
     /** Privacy > Add-ons: the curated add-on list. The row is hidden when null (screen tests). */
     onOpenAddons: (() -> Unit)? = null,
     /** Privacy > Clear when Orbis is closed. The row is hidden when null (screen tests). */
@@ -255,6 +257,14 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth().toggleable(value = toolbarBottom, role = Role.Switch, onValueChange = site::setToolbarBottom),
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    if (onOpenMenuToolbar != null) {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.toolbar_menu_title)) },
+                            supportingContent = { Text(stringResource(R.string.toolbar_menu_summary)) },
+                            modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenMenuToolbar),
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
                     SettingsItem(
                         headlineContent = { Text(stringResource(R.string.theme_title)) },
                         supportingContent = {
