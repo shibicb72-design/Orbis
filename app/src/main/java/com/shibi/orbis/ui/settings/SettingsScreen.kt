@@ -129,6 +129,7 @@ fun SettingsScreen(
     onOpenClearData: () -> Unit,
     modifier: Modifier = Modifier,
     onOpenPasswords: () -> Unit = {},
+    onOpenBackup: () -> Unit = {},
     /** Theme, desktop site, HTTPS-only and JavaScript rows; hidden when null (screen tests). */
     site: BrowserSettings? = null,
     /** Installed version shown under About. Null reads it from the package manager. */
@@ -430,6 +431,14 @@ fun SettingsScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable(onClick = onOpenPasswords),
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsItem(
+                    headlineContent = { Text(stringResource(R.string.backup_title)) },
+                    supportingContent = { Text(stringResource(R.string.backup_summary)) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onOpenBackup),
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsItem(

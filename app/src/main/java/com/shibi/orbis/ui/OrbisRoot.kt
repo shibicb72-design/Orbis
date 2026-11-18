@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import kotlinx.coroutines.flow.update
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
@@ -34,6 +33,8 @@ import com.shibi.orbis.ui.settings.SitePermissionsScreen
 import com.shibi.orbis.ui.settings.ThemePickerScreen
 import com.shibi.orbis.ui.settings.TorrentSettingsScreen
 import com.shibi.orbis.ui.settings.AddonsScreen
+import com.shibi.orbis.ui.settings.BackupActions
+import com.shibi.orbis.ui.settings.BackupScreen
 import com.shibi.orbis.ui.settings.UboOnboardingScreen
 import com.shibi.orbis.ui.settings.UboSettingsScreen
 import com.shibi.orbis.ui.passwords.PasswordsScreen
@@ -43,6 +44,12 @@ import com.shibi.orbis.ui.theme.ThemeFade
 import com.shibi.orbis.ui.theme.rememberMotionEnabled
 import com.shibi.orbis.ui.theme.routeFades
 import com.shibi.orbis.ui.theme.themeFades
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withTimeoutOrNull
+
+/** How long the backup screen waits for the add-on list before it makes the file. */
+private const val ADDONS_REFRESH_WAIT_MS = 3_000L
 
 private object Routes {
     const val Browser = "browser"
@@ -57,6 +64,7 @@ private object Routes {
     const val ClearData = "settings/clear_data"
     const val ClearOnExit = "settings/clear_on_exit"
     const val Passwords = "settings/passwords"
+    const val Backup = "settings/backup"
     const val Licences = "settings/licences"
     const val Torrents = "settings/torrents"
     const val Themes = "settings/themes"
@@ -209,6 +217,26 @@ fun OrbisRoot(container: AppContainer) {
                     sensitiveClip = container.sensitiveClip,
                 )
             }
+            composable(Routes.Backup) {
+                // Handles the passwords the backup holds: the window is protected while this screen is up.
+                DisposableEffect(Unit) {
+                    container.sensitiveScreens.update { it + 1 }
+                    onDispose { container.sensitiveScreens.update { it - 1 } }
+                }
+                BackupScreen(
+                    actions =
+                        BackupActions(
+                            create = { password, options -> container.backup.create(password, options) },
+                            restore = { file, password -> container.backup.restore(file, password) },
+                            refreshAddons = {
+                                container.addons.refresh()
+                                withTimeoutOrNull(ADDONS_REFRESH_WAIT_MS) { container.addons.states.first { it.isNotEmpty() } }
+                            },
+                        ),
+                    onOpenAddons = { nav.navigate(Routes.Addons) },
+                    onBack = { nav.popBackStack() },
+                )
+            }
             composable(Routes.Settings) {
                 SettingsScreen(
                     uboStateFlow = container.ubo.state,
@@ -227,6 +255,7 @@ fun OrbisRoot(container: AppContainer) {
                     onOpenSitePermissions = { nav.navigate(Routes.SitePermissions) },
                     onOpenClearData = { nav.navigate(Routes.ClearData) },
                     onOpenPasswords = { nav.navigate(Routes.Passwords) },
+                    onOpenBackup = { nav.navigate(Routes.Backup) },
                     site = container.browserSettings,
                     onOpenLicences = { nav.navigate(Routes.Licences) },
                     onOpenTorrents = { nav.navigate(Routes.Torrents) },
