@@ -23,6 +23,7 @@ fun topSites(
     limit: Int = TOP_SITES_LIMIT,
     pinned: List<PinnedSite> = emptyList(),
     hiddenHosts: Set<String> = emptySet(),
+    customTemplates: List<String> = emptyList(),
 ): List<TopSite> {
     val seenHosts = HashSet<String>()
     val out = ArrayList<TopSite>(limit)
@@ -33,7 +34,7 @@ fun topSites(
         if (!seenHosts.add(host)) continue
         out += TopSite(p.url, p.title.ifBlank { host.removePrefix("www.") }, host, pinned = true)
     }
-    val ranked = history.filterNot { isSearchResultPage(it.url) }
+    val ranked = history.filterNot { isSearchResultPage(it.url, customTemplates) }
         .sortedWith(compareByDescending<HistoryEntry> { it.visits }.thenByDescending { it.visitedAt })
     for (entry in ranked) {
         if (out.size >= limit) break
@@ -45,8 +46,22 @@ fun topSites(
     return out
 }
 
-/** A results page of one of the built-in search engines. */
-fun isSearchResultPage(url: String): Boolean = SearchEngine.entries.any { url.startsWith(it.searchPrefix) }
+/**
+ * A results page of one of the built-in search engines, or of a custom engine given by its [customTemplates] (each holds
+ * %s once). A template matches by the part before %s, and only when that part holds ? or a path longer than /,
+ * so a template such as https://s.example/%s matches nothing and never hides a whole site.
+ */
+fun isSearchResultPage(url: String, customTemplates: List<String> = emptyList()): Boolean =
+    SearchEngine.entries.any { url.startsWith(it.searchPrefix) } || customTemplates.any { matchesCustomTemplate(url, it) }
+
+private fun matchesCustomTemplate(url: String, template: String): Boolean {
+    val at = template.indexOf("%s")
+    if (at < 0) return false
+    val prefix = template.substring(0, at)
+    val path = prefix.substringAfter("://", "").substringAfter('/', "")
+    if (!prefix.contains('?') && path.isEmpty()) return false
+    return url.startsWith(prefix)
+}
 
 /** The letter a site's tile shows: the first letter or digit of its host without "www.", or "?". */
 fun tileLetter(host: String): String =

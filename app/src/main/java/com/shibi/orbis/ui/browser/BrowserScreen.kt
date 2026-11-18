@@ -998,8 +998,9 @@ private fun BrowserContent(
                     } else {
                         val pinned by container.browserSettings.pinnedSites.collectAsStateWithLifecycle()
                         val hidden by container.browserSettings.hiddenSites.collectAsStateWithLifecycle()
-                        val sites = remember(historyEntries, pinned, hidden) {
-                            topSites(historyEntries, pinned = pinned, hiddenHosts = hidden)
+                        val customEngines by container.searchEngine.custom.collectAsStateWithLifecycle()
+                        val sites = remember(historyEntries, pinned, hidden, customEngines) {
+                            topSites(historyEntries, pinned = pinned, hiddenHosts = hidden, customTemplates = customEngines.map { it.template })
                         }
                         StartPage(
                             topSites = sites,
@@ -1059,7 +1060,10 @@ private fun BrowserContent(
                     val engine by container.searchEngine.selected.collectAsStateWithLifecycle()
                     // Live suggestions send what is typed to the search engine: never from a private tab.
                     val remoteAllowed = suggestOn && !selectedTab.isPrivate
-                    val local = remember(query, historyEntries, bookmarkList) { localSuggestions(query, historyEntries, bookmarkList) }
+                    val customEngines by container.searchEngine.custom.collectAsStateWithLifecycle()
+                    val local = remember(query, historyEntries, bookmarkList, customEngines) {
+                        localSuggestions(query, historyEntries, bookmarkList, customTemplates = customEngines.map { it.template })
+                    }
                     val remote by produceState(emptyList<String>(), query, engine, remoteAllowed) {
                         if (!remoteAllowed) {
                             value = emptyList()

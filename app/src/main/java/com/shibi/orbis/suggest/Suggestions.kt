@@ -36,6 +36,7 @@ fun localSuggestions(
     history: List<HistoryEntry>,
     bookmarks: List<Bookmark>,
     limit: Int = LOCAL_SUGGESTION_LIMIT,
+    customTemplates: List<String> = emptyList(),
 ): List<Suggestion.Page> {
     val q = query.trim().lowercase(Locale.ROOT)
     if (q.isEmpty()) return emptyList()
@@ -45,7 +46,7 @@ fun localSuggestions(
     val bookmarkHits = bookmarks.filter { matches(q, it.url, it.title) }
         .sortedByDescending { visits[it.url]?.visits ?: 0 }
     for (b in bookmarkHits) out.putIfAbsent(b.url, Suggestion.Page(b.url, b.title, bookmarked = true))
-    val historyHits = history.filter { !isSearchResultPage(it.url) && matches(q, it.url, it.title) }
+    val historyHits = history.filter { !isSearchResultPage(it.url, customTemplates) && matches(q, it.url, it.title) }
         .sortedWith(compareByDescending<HistoryEntry> { it.visits }.thenByDescending { it.visitedAt })
     for (h in historyHits) out.putIfAbsent(h.url, Suggestion.Page(h.url, h.title, h.url in bookmarkedUrls))
     return out.values.take(limit)
@@ -64,7 +65,8 @@ private fun matches(q: String, url: String, title: String): Boolean {
  * session (Brave answered with a web page instead of suggestions when checked on 2026-11-08). All four answer in the
  * OpenSearch form `["query", ["s1", "s2", ...], ...]`.
  */
-fun suggestUrl(engine: SearchEngine, query: String): String? {    val q = URLEncoder.encode(query, "UTF-8")
+fun suggestUrl(engine: SearchEngine, query: String): String? {
+    val q = URLEncoder.encode(query, "UTF-8")
     return when (engine) {
         SearchEngine.DUCKDUCKGO -> "https://duckduckgo.com/ac/?q=$q&type=list"
         SearchEngine.GOOGLE -> "https://suggestqueries.google.com/complete/search?client=firefox&q=$q"
