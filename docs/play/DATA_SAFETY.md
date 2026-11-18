@@ -34,7 +34,8 @@ the app. Data a user sends to websites they visit, through a browser, is not col
   - Add-ons: five optional add-ons (SponsorBlock, Consent-O-Matic, ClearURLs, Dark Reader, Violentmonkey), each
     downloaded from Mozilla's add-on store (`addons.mozilla.org`) when the user adds it, and updated from there. They
     are made by third parties and can see the pages they have access to (the list shows that access). SponsorBlock
-    contacts `sponsor.ajay.app`; ClearURLs fetches its rule list from its own project site. The user starts each of
+    contacts `sponsor.ajay.app`. Other add-ons may also contact their own services; each add-on's own privacy policy
+    applies. The user starts each of
     these by adding the add-on; none is installed at first. Nothing goes to the developers.
   - Custom search engines: an engine the user adds receives what they search for from the address bar. Orbis does not
     request suggestions from it. Same basis as the built-in engines.

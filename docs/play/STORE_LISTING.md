@@ -16,7 +16,7 @@ Privacy
 - Private tabs that leave no history, cookies or downloads list behind
 - Site settings: camera, microphone, location, JavaScript and data, per site
 - Optional secure DNS: pick a provider, or type your own address
-- Clear browsing data when Orbis is closed, with sites to keep signed in
+- Clear browsing data when Orbis is closed, with a list of sites whose cookies are kept
 - Lock private tabs with your fingerprint or screen lock
 - Optional add-ons from Mozilla's add-on store, added one at a time, each with its access shown (made by other people)
 

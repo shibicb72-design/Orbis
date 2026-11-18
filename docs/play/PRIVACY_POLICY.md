@@ -40,7 +40,7 @@ your fingerprint or face data stays with Android. Orbis is available in English 
   Dark Reader and Violentmonkey. Each is downloaded from Mozilla's add-on store (addons.mozilla.org) when you add it,
   and updated from there. They are made by other people, not by Orbis. An add-on can see the pages it has access to;
   the Add-ons list shows that access before you add it. SponsorBlock contacts sponsor.ajay.app to look up videos.
-  ClearURLs fetches its rule list from its own project site. Each add-on's own privacy policy applies. An add-on's
+  Other add-ons may also contact their own services. Each add-on's own privacy policy applies. An add-on's
   button or panel can open one of that add-on's own pages in a new tab; it cannot open other addresses that way.
 - **Page translation**: done on your phone; the language models are downloaded from Mozilla the first time.
 - **Safe Browsing**: Gecko's built-in protection checks pages against lists from Google's Safe Browsing service.

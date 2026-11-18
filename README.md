@@ -16,8 +16,7 @@ Pinned versions live in `gradle/libs.versions.toml` (stable matching pair from m
 ## uBlock Origin
 
 Optional install of **unmodified Mozilla-signed uBlock Origin** from Mozilla's add-on store (`addons.mozilla.org`), offered on first run.  
-**Not bundled in the APK** — there is no XPI under `assets/` / `res/`. Orbis downloads it when you agree, and Mozilla
-updates it.
+**Not bundled in the APK** — there is no XPI under `assets/` / `res/`. Orbis downloads it when you agree and checks Mozilla's store for updates.
 
 Baseline defense in depth: GeckoView **ETP Strict** / ContentBlocking is enabled in the engine impl.
 
