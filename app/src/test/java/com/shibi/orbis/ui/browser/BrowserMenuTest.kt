@@ -9,9 +9,12 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import com.shibi.orbis.engine.TranslationInfo
+import com.shibi.orbis.settings.ToolbarButton
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -55,6 +58,7 @@ class BrowserMenuTest {
         page: MenuPageState,
         window: MenuWindow = narrow,
         order: List<MenuAction> = DEFAULT_MENU_ORDER,
+        hidden: Set<MenuAction> = emptySet(),
         onAction: (MenuAction) -> Unit = {},
     ) {
         rule.setContent {
@@ -64,6 +68,7 @@ class BrowserMenuTest {
                         expanded = true,
                         onDismiss = {},
                         order = order,
+                        hidden = hidden,
                         stateOf = { action, _ -> menuItemState(action, page, window) },
                         onAction = onAction,
                     )
@@ -205,5 +210,114 @@ class BrowserMenuTest {
     fun forwardIsDisabledWhenThereIsNothingToGoForwardTo() {
         assertFalse(menuItemState(MenuAction.FORWARD, web, narrow).enabled)
         assertTrue(menuItemState(MenuAction.FORWARD, web.copy(canGoForward = true), narrow).enabled)
+    }
+
+    @Test
+    fun aHiddenActionIsNotInTheMenu() {
+        show(web, hidden = setOf(MenuAction.HISTORY, MenuAction.PRINT))
+        assertEquals((pageEntries + restEntries) - setOf("History", "Print or save as PDF"), entryTexts())
+    }
+
+    @Test
+    fun settingsIsShownLastEvenIfHiddenAndEvenIfTheOrderPutsItFirst() {
+        val order = listOf(MenuAction.SETTINGS) + DEFAULT_MENU_ORDER.take(4) + DEFAULT_MENU_ORDER.drop(4).filter { it != MenuAction.SETTINGS }.reversed()
+        show(web, order = order, hidden = setOf(MenuAction.SETTINGS))
+        assertEquals(DEFAULT_MENU_ORDER.last(), pinnedMenuOrder(order).last())
+        assertEquals("Settings", entryTexts().last())
+        // The icon row stays first and unchanged.
+        assertEquals(listOf("Home", "Forward", "Add bookmark", "Share"), iconDescriptions())
+        assertEquals((pageEntries + restEntries).reversed().filter { it != "Settings" } + "Settings", entryTexts())
+    }
+
+    @Test
+    fun theMenuFollowsTheGivenOrder() {
+        val swapped = DEFAULT_MENU_ORDER.toMutableList().also {
+            val a = it.indexOf(MenuAction.HISTORY)
+            it[a] = MenuAction.DOWNLOADS
+            it[a + 1] = MenuAction.HISTORY
+        }
+        show(web, order = swapped)
+        assertEquals(pageEntries + restEntries.map { if (it == "History") "Downloads" else if (it == "Downloads") "History" else it }, entryTexts())
+    }
+
+    @Test
+    fun dividersAreAsTodayForTheShippedOrderAndTwoForAnyOther() {
+        val shipped = menuBlocks(DEFAULT_MENU_ORDER, shippedOrder = true)
+        assertEquals(
+            listOf(MenuGroup.QUICK, MenuGroup.PAGE, MenuGroup.TABS, MenuGroup.LIBRARY, MenuGroup.SETTINGS),
+            shipped.map { it.first().group },
+        )
+        val reversed = pinnedMenuOrder(DEFAULT_MENU_ORDER.reversed())
+        val custom = menuBlocks(reversed, shippedOrder = false)
+        assertEquals(3, custom.size)
+        assertEquals(DEFAULT_MENU_ORDER.take(4).toSet(), custom[0].toSet())
+        assertEquals(listOf(MenuAction.SETTINGS), custom[2])
+        // Everything hidden but one entry: icon row, entry, Settings; and with no entries left only one divider.
+        assertEquals(3, menuBlocks(listOf(MenuAction.HOME, MenuAction.FIND, MenuAction.SETTINGS), shippedOrder = false).size)
+        assertEquals(2, menuBlocks(listOf(MenuAction.HOME, MenuAction.SETTINGS), shippedOrder = false).size)
+    }
+
+    @Test
+    fun theReloadToolbarButtonCallsTheReloadHandlerOnce() {
+        var reloads = 0
+        val actions = mutableListOf<MenuAction>()
+        rule.setContent {
+            MaterialTheme {
+                ToolbarButtonView(
+                    button = ToolbarButton.RELOAD,
+                    item = toolbarButtonState(ToolbarButton.RELOAD, web, narrow),
+                    onMenuAction = { actions += it },
+                    onReload = { reloads++ },
+                )
+            }
+        }
+        rule.onNodeWithTag(TOOLBAR_BUTTON_TAG).performClick()
+        rule.waitForIdle()
+        assertEquals(1, reloads)
+        assertTrue(actions.isEmpty())
+    }
+
+    @Test
+    fun aMenuToolbarButtonRunsTheMenuEntry() {
+        var reloads = 0
+        val actions = mutableListOf<MenuAction>()
+        rule.setContent {
+            MaterialTheme {
+                ToolbarButtonView(
+                    button = ToolbarButton.DUPLICATE_TAB,
+                    item = toolbarButtonState(ToolbarButton.DUPLICATE_TAB, web, narrow),
+                    onMenuAction = { actions += it },
+                    onReload = { reloads++ },
+                )
+            }
+        }
+        rule.onNodeWithTag(TOOLBAR_BUTTON_TAG).performClick()
+        rule.waitForIdle()
+        assertEquals(listOf(MenuAction.DUPLICATE_TAB), actions)
+        assertEquals(0, reloads)
+    }
+
+    @Test
+    fun theToolbarButtonUsesTheMenuEntrysEnabledRule() {
+        for (button in ToolbarButton.entries) {
+            val action = button.menuAction ?: continue
+            for (page in listOf(web, startPage, privateTab, web.copy(hasSession = false), web.copy(canGoForward = true))) {
+                assertEquals(
+                    "$button",
+                    menuItemState(action, page, narrow).enabled,
+                    toolbarButtonState(button, page, narrow).enabled,
+                )
+            }
+        }
+        assertTrue(toolbarButtonState(ToolbarButton.RELOAD, startPage, narrow).enabled)
+        assertFalse(toolbarButtonState(ToolbarButton.RELOAD, web.copy(hasSession = false), narrow).enabled)
+        assertFalse(toolbarButtonState(ToolbarButton.FORWARD, web, narrow).enabled)
+    }
+
+    @Test
+    fun theToolbarButtonIsLeftOutOnlyWhenTheToolbarWrapsOnANarrowWindow() {
+        assertFalse(showsToolbarButton(twoRow = true, windowWidthDp = 359))
+        assertTrue(showsToolbarButton(twoRow = true, windowWidthDp = 360))
+        assertTrue(showsToolbarButton(twoRow = false, windowWidthDp = 320))
     }
 }

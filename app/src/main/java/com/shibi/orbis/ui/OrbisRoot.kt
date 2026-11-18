@@ -26,6 +26,7 @@ import com.shibi.orbis.ui.settings.ClearBrowsingDataScreen
 import com.shibi.orbis.ui.settings.ClearOnExitScreen
 import com.shibi.orbis.ui.settings.DebugLogScreen
 import com.shibi.orbis.ui.settings.DohScreen
+import com.shibi.orbis.ui.settings.ToolbarCustomizeScreen
 import com.shibi.orbis.ui.settings.LicencesScreen
 import com.shibi.orbis.ui.settings.SearchEnginesScreen
 import com.shibi.orbis.ui.settings.SettingsScreen
@@ -61,6 +62,7 @@ private object Routes {
     const val Themes = "settings/themes"
     const val SecureDns = "settings/secure_dns"
     const val SearchEngines = "settings/search_engines"
+    const val MenuToolbar = "settings/menu_toolbar"
     const val QrScan = "qr_scan"
 }
 
@@ -230,6 +232,7 @@ fun OrbisRoot(container: AppContainer) {
                     dohFlow = container.doh.config,
                     onOpenSecureDns = { nav.navigate(Routes.SecureDns) },
                     onOpenSearchEngines = { nav.navigate(Routes.SearchEngines) },
+                    onOpenMenuToolbar = { nav.navigate(Routes.MenuToolbar) },
                     onOpenAddons = { nav.navigate(Routes.Addons) },
                     clearOnExitEnabled = container.clearOnExit.prefs.enabled,
                     onOpenClearOnExit = { nav.navigate(Routes.ClearOnExit) },
@@ -237,6 +240,9 @@ fun OrbisRoot(container: AppContainer) {
             }
             composable(Routes.SearchEngines) {
                 SearchEnginesScreen(settings = container.searchEngine, onBack = { nav.popBackStack() })
+            }
+            composable(Routes.MenuToolbar) {
+                ToolbarCustomizeScreen(settings = container.toolbar, onBack = { nav.popBackStack() })
             }
             composable(Routes.SecureDns) {
                 DohScreen(settings = container.doh, onBack = { nav.popBackStack() })

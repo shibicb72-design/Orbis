@@ -340,6 +340,9 @@ private fun BrowserContent(
     var generatedPassword by remember { mutableStateOf<String?>(null) }
     val pageShare = rememberPageShare()
     val toolbarBottom by container.browserSettings.toolbarBottom.collectAsStateWithLifecycle()
+    val menuOrder by container.toolbar.menuOrder.collectAsStateWithLifecycle()
+    val menuHidden by container.toolbar.menuHidden.collectAsStateWithLifecycle()
+    val toolbarButton by container.toolbar.toolbarButton.collectAsStateWithLifecycle()
     // A picture-in-picture window shows only the page: no toolbar, tab strip or Cast button.
     val inPip by container.pictureInPicture.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -590,6 +593,96 @@ private fun BrowserContent(
                     }
                 }
                 val tabsAndMenu: @Composable () -> Unit = {
+                    val menuPage = MenuPageState(
+                        hasSession = session != null,
+                        sessionIsPrivate = session?.isPrivate,
+                        url = state.url,
+                        isLoading = state.isLoading,
+                        canGoForward = state.canGoForward,
+                        readerable = state.readerable,
+                        translation = state.translation,
+                        desktopMode = state.desktopMode,
+                        bookmarked = bookmarked,
+                        casting = casting != null,
+                    )
+                    // The menu entry and the extra toolbar button run this same handler.
+                    val runMenuAction: (MenuAction) -> Unit = { action ->
+                        when (action) {
+                            MenuAction.HOME -> {
+                                // Custom homepage, or the start page (a blank tab).
+                                val homepage = container.browserSettings.homepage.value
+                                if (homepage == null) session?.showStartPage() else session?.loadUrl(homepage)
+                            }
+                            MenuAction.FORWARD -> session?.goForward()
+                            MenuAction.BOOKMARK_PAGE -> {
+                                val url = state.url
+                                if (bookmarked) {
+                                    container.bookmarks.removeByUrl(url)
+                                    Toast.makeText(androidContext, R.string.bookmark_removed, Toast.LENGTH_SHORT).show()
+                                } else {
+                                    val title = state.title?.takeIf { it.isNotBlank() } ?: url
+                                    val message =
+                                        when (container.bookmarks.add(url, title)) {
+                                            AddResult.ADDED -> R.string.bookmark_added
+                                            AddResult.EXISTS -> R.string.bookmark_exists
+                                            AddResult.FULL -> R.string.bookmark_full
+                                            AddResult.INVALID -> R.string.bookmark_invalid
+                                        }
+                                    Toast.makeText(androidContext, message, Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            MenuAction.SHARE -> pageShare.onShare(session, state.url, state.title)
+                            MenuAction.PRINT -> session?.printPage()
+                            MenuAction.CAST -> castOpen = true
+                            MenuAction.ADD_TO_HOME ->
+                                if (!requestHomeShortcut(androidContext, state.url, state.title.orEmpty())) {
+                                    Toast.makeText(androidContext, R.string.add_home_unavailable, Toast.LENGTH_SHORT).show()
+                                }
+                            MenuAction.SPLIT_SCREEN -> openInSplitScreen(androidContext, state.url)
+                            MenuAction.READER ->
+                                session?.requestReaderArticle { article ->
+                                    if (article != null) readerArticle = article else Toast.makeText(androidContext, R.string.reader_unavailable, Toast.LENGTH_SHORT).show()
+                                }
+                            MenuAction.TRANSLATE -> {
+                                val translated = state.translation?.translatedTo?.isNotEmpty() == true
+                                if (translated) {
+                                    session?.showOriginal()
+                                } else {
+                                    Toast.makeText(androidContext, R.string.translate_started, Toast.LENGTH_SHORT).show()
+                                    session?.translatePage { ok -> if (!ok) Toast.makeText(androidContext, R.string.translate_failed, Toast.LENGTH_LONG).show() }
+                                }
+                            }
+                            MenuAction.FIND -> findOpen = true
+                            MenuAction.SITE_SETTINGS -> showSiteSettings = true
+                            MenuAction.GENERATE_PASSWORD -> generatedPassword = generatePassword()
+                            MenuAction.DESKTOP_SITE -> {
+                                val s = session
+                                if (s != null) {
+                                    // Remembered for the site (see Settings > Always request desktop site).
+                                    if (isWebUrl(state.url)) container.browserSettings.rememberDesktop(state.url, !state.desktopMode, s.isPrivate)
+                                    s.setDesktopMode(!state.desktopMode)
+                                }
+                            }
+                            MenuAction.NEW_TAB -> focusAddressFor = tabs.newTab()
+                            MenuAction.NEW_PRIVATE_TAB -> focusAddressFor = tabs.newPrivateTab()
+                            MenuAction.DUPLICATE_TAB -> tabs.duplicate(selectedTab.id)
+                            MenuAction.SCAN_QR -> onOpenQrScanner()
+                            MenuAction.BOOKMARKS -> onOpenBookmarks()
+                            MenuAction.HISTORY -> onOpenHistory()
+                            MenuAction.DOWNLOADS -> onOpenDownloads()
+                            MenuAction.SETTINGS -> onOpenSettings()
+                        }
+                    }
+                    val extraButton = toolbarButton
+                    if (extraButton != null && showsToolbarButton(twoRow, windowWidthDp)) {
+                        ToolbarButtonView(
+                            button = extraButton,
+                            // None of the choices depends on the window (split screen is not one of them).
+                            item = toolbarButtonState(extraButton, menuPage, MenuWindow(windowWidthDp, inMultiWindow = false)),
+                            onMenuAction = runMenuAction,
+                            onReload = { session?.reload() },
+                        )
+                    }
                     val tabsDescription =
                         stringResource(if (selectedTab.isPrivate) R.string.tabs_button_private else R.string.tabs_button, tabList.size)
                     val tabsColor = if (selectedTab.isPrivate) MaterialTheme.colorScheme.tertiary else LocalContentColor.current
@@ -628,90 +721,13 @@ private fun BrowserContent(
                         IconButton(onClick = { menuOpen = true }) {
                             Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.menu_more))
                         }
-                        val menuPage = MenuPageState(
-                            hasSession = session != null,
-                            sessionIsPrivate = session?.isPrivate,
-                            url = state.url,
-                            isLoading = state.isLoading,
-                            canGoForward = state.canGoForward,
-                            readerable = state.readerable,
-                            translation = state.translation,
-                            desktopMode = state.desktopMode,
-                            bookmarked = bookmarked,
-                            casting = casting != null,
-                        )
                         BrowserMenu(
                             expanded = menuOpen,
                             onDismiss = { menuOpen = false },
-                            order = DEFAULT_MENU_ORDER,
+                            order = menuOrder,
+                            hidden = menuHidden,
                             stateOf = { action, window -> menuItemState(action, menuPage, window) },
-                            onAction = { action ->
-                                when (action) {
-                                    MenuAction.HOME -> {
-                                        // Custom homepage, or the start page (a blank tab).
-                                        val homepage = container.browserSettings.homepage.value
-                                        if (homepage == null) session?.showStartPage() else session?.loadUrl(homepage)
-                                    }
-                                    MenuAction.FORWARD -> session?.goForward()
-                                    MenuAction.BOOKMARK_PAGE -> {
-                                        val url = state.url
-                                        if (bookmarked) {
-                                            container.bookmarks.removeByUrl(url)
-                                            Toast.makeText(androidContext, R.string.bookmark_removed, Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            val title = state.title?.takeIf { it.isNotBlank() } ?: url
-                                            val message =
-                                                when (container.bookmarks.add(url, title)) {
-                                                    AddResult.ADDED -> R.string.bookmark_added
-                                                    AddResult.EXISTS -> R.string.bookmark_exists
-                                                    AddResult.FULL -> R.string.bookmark_full
-                                                    AddResult.INVALID -> R.string.bookmark_invalid
-                                                }
-                                            Toast.makeText(androidContext, message, Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                    MenuAction.SHARE -> pageShare.onShare(session, state.url, state.title)
-                                    MenuAction.PRINT -> session?.printPage()
-                                    MenuAction.CAST -> castOpen = true
-                                    MenuAction.ADD_TO_HOME ->
-                                        if (!requestHomeShortcut(androidContext, state.url, state.title.orEmpty())) {
-                                            Toast.makeText(androidContext, R.string.add_home_unavailable, Toast.LENGTH_SHORT).show()
-                                        }
-                                    MenuAction.SPLIT_SCREEN -> openInSplitScreen(androidContext, state.url)
-                                    MenuAction.READER ->
-                                        session?.requestReaderArticle { article ->
-                                            if (article != null) readerArticle = article else Toast.makeText(androidContext, R.string.reader_unavailable, Toast.LENGTH_SHORT).show()
-                                        }
-                                    MenuAction.TRANSLATE -> {
-                                        val translated = state.translation?.translatedTo?.isNotEmpty() == true
-                                        if (translated) {
-                                            session?.showOriginal()
-                                        } else {
-                                            Toast.makeText(androidContext, R.string.translate_started, Toast.LENGTH_SHORT).show()
-                                            session?.translatePage { ok -> if (!ok) Toast.makeText(androidContext, R.string.translate_failed, Toast.LENGTH_LONG).show() }
-                                        }
-                                    }
-                                    MenuAction.FIND -> findOpen = true
-                                    MenuAction.SITE_SETTINGS -> showSiteSettings = true
-                                    MenuAction.GENERATE_PASSWORD -> generatedPassword = generatePassword()
-                                    MenuAction.DESKTOP_SITE -> {
-                                        val s = session
-                                        if (s != null) {
-                                            // Remembered for the site (see Settings > Always request desktop site).
-                                            if (isWebUrl(state.url)) container.browserSettings.rememberDesktop(state.url, !state.desktopMode, s.isPrivate)
-                                            s.setDesktopMode(!state.desktopMode)
-                                        }
-                                    }
-                                    MenuAction.NEW_TAB -> focusAddressFor = tabs.newTab()
-                                    MenuAction.NEW_PRIVATE_TAB -> focusAddressFor = tabs.newPrivateTab()
-                                    MenuAction.DUPLICATE_TAB -> tabs.duplicate(selectedTab.id)
-                                    MenuAction.SCAN_QR -> onOpenQrScanner()
-                                    MenuAction.BOOKMARKS -> onOpenBookmarks()
-                                    MenuAction.HISTORY -> onOpenHistory()
-                                    MenuAction.DOWNLOADS -> onOpenDownloads()
-                                    MenuAction.SETTINGS -> onOpenSettings()
-                                }
-                            },
+                            onAction = runMenuAction,
                         )
                     }
                 }

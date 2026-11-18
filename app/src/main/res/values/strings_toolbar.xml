@@ -1,4 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="menu_duplicate_tab" translatable="false">Duplicate tab</string>
+    <string name="toolbar_menu_title" translatable="false">Menu and toolbar</string>
+    <string name="toolbar_menu_summary" translatable="false">Choose, hide and reorder the menu entries</string>
+    <string name="toolbar_button_title" translatable="false">Toolbar button</string>
+    <string name="toolbar_button_none" translatable="false">None</string>
+    <string name="toolbar_button_bookmark" translatable="false">Bookmark this page</string>
+    <string name="toolbar_menu_section" translatable="false">Menu</string>
+    <string name="toolbar_menu_note" translatable="false">The four icons at the top of the menu stay where they are.</string>
+    <string name="toolbar_show" translatable="false">Show</string>
+    <string name="toolbar_settings_pinned" translatable="false">Always shown, always last</string>
+    <string name="toolbar_move_up" translatable="false">Move %1$s up</string>
+    <string name="toolbar_move_down" translatable="false">Move %1$s down</string>
+    <string name="toolbar_reset" translatable="false">Reset to default</string>
+    <string name="toolbar_reset_question" translatable="false">Reset the menu and toolbar?</string>
+    <string name="toolbar_reset_confirm" translatable="false">Reset</string>
 </resources>

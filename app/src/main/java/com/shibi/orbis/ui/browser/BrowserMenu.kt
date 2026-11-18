@@ -8,12 +8,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AddToHomeScreen
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Article
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Translate
@@ -26,9 +31,12 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -38,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import com.shibi.orbis.R
 import com.shibi.orbis.engine.TranslationInfo
 import com.shibi.orbis.engine.isWebUrl
+import com.shibi.orbis.settings.ToolbarButton
 
 /**
  * Every action the page menu can offer. The names are stable ids (they will be stored by the customizable menu): never
@@ -82,6 +91,29 @@ enum class MenuGroup { QUICK, PAGE, TABS, LIBRARY, SETTINGS }
 
 /** The menu as it ships: the icon row, then Page, Tabs, Library and Settings. */
 val DEFAULT_MENU_ORDER: List<MenuAction> = MenuAction.entries
+
+/** [order] with the icon row (QUICK) first and Settings last, whatever the order says. The rest keep their order. */
+fun pinnedMenuOrder(order: List<MenuAction>): List<MenuAction> =
+    order.filter { it.group == MenuGroup.QUICK } +
+        order.filter { it.group != MenuGroup.QUICK && it.group != MenuGroup.SETTINGS } +
+        order.filter { it.group == MenuGroup.SETTINGS }
+
+/**
+ * Splits the visible entries into the blocks a divider separates. With the shipped order, a block is a run of one
+ * [MenuGroup], as the menu always drew it. With the user's own order there are at most three blocks: the icon row, the
+ * entries, and Settings, so a reordered menu is not cut by a divider between almost every entry.
+ */
+internal fun menuBlocks(shown: List<MenuAction>, shippedOrder: Boolean): List<List<MenuAction>> {
+    val blocks = mutableListOf<MutableList<MenuAction>>()
+    var previous: MenuGroup? = null
+    for (action in shown) {
+        val key = if (shippedOrder || action.group == MenuGroup.QUICK || action.group == MenuGroup.SETTINGS) action.group else MenuGroup.PAGE
+        if (key != previous) blocks += mutableListOf<MenuAction>()
+        blocks.last() += action
+        previous = key
+    }
+    return blocks
+}
 
 /** What [menuItemState] needs to know about the page. [sessionIsPrivate] is null when the tab has no session. */
 data class MenuPageState(
@@ -159,8 +191,10 @@ fun menuItemState(action: MenuAction, page: MenuPageState, window: MenuWindow): 
 }
 
 /**
- * The page menu: the QUICK actions as one row of icon buttons, the others as text entries, a divider between groups.
- * Choosing an action closes the menu ([onDismiss]) and then calls [onAction]; the caller runs what the action does.
+ * The page menu: the QUICK actions as one row of icon buttons, the others as text entries. [order] is the user's order
+ * (the icon row is always first and Settings always last) and [hidden] the entries they turned off; Settings is shown
+ * whatever [hidden] says. Dividers: see [menuBlocks]. Choosing an action closes the menu ([onDismiss]) and then calls
+ * [onAction]; the caller runs what the action does.
  */
 @Composable
 fun BrowserMenu(
@@ -169,6 +203,7 @@ fun BrowserMenu(
     order: List<MenuAction>,
     stateOf: (MenuAction, MenuWindow) -> MenuItemState,
     onAction: (MenuAction) -> Unit,
+    hidden: Set<MenuAction> = emptySet(),
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         // Read inside the popup, as the menu always did.
@@ -176,21 +211,16 @@ fun BrowserMenu(
         val androidContext = LocalContext.current
         val inMultiWindow = (androidContext as? android.app.Activity)?.isInMultiWindowMode == true
         val window = MenuWindow(widthDp, inMultiWindow)
-        val shown = order.filter { stateOf(it, window).visible }
-        var previous: MenuGroup? = null
-        var index = 0
-        while (index < shown.size) {
-            val group = shown[index].group
-            if (previous != null) HorizontalDivider()
-            previous = group
-            val run = shown.drop(index).takeWhile { it.group == group }
-            index += run.size
-            if (group == MenuGroup.QUICK) {
+        val pinned = pinnedMenuOrder(order)
+        val shown = pinned.filter { (it !in hidden || it.group == MenuGroup.SETTINGS) && stateOf(it, window).visible }
+        for ((blockIndex, block) in menuBlocks(shown, shippedOrder = pinned == DEFAULT_MENU_ORDER).withIndex()) {
+            if (blockIndex > 0) HorizontalDivider()
+            if (block.first().group == MenuGroup.QUICK) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                 ) {
-                    for (action in run) {
+                    for (action in block) {
                         val item = stateOf(action, window)
                         IconButton(
                             enabled = item.enabled,
@@ -202,7 +232,7 @@ fun BrowserMenu(
                     }
                 }
             } else {
-                for (action in run) {
+                for (action in block) {
                     val item = stateOf(action, window)
                     DropdownMenuItem(
                         text = { Text(stringResource(item.labelRes)) },
@@ -223,6 +253,55 @@ fun BrowserMenu(
         }
     }
 }
+
+/** How the extra toolbar button looks now: the menu entry's own rule, or for Reload the address bar's (a session). */
+fun toolbarButtonState(button: ToolbarButton, page: MenuPageState, window: MenuWindow): MenuItemState =
+    button.menuAction?.let { menuItemState(it, page, window) } ?: MenuItemState(true, page.hasSession, R.string.reload)
+
+/** The extra button is left out on a narrow window whose toolbar already wraps to two rows. */
+fun showsToolbarButton(twoRow: Boolean, windowWidthDp: Int): Boolean = !(twoRow && windowWidthDp < 360)
+
+/** Test tag of the extra toolbar button. */
+const val TOOLBAR_BUTTON_TAG = "toolbar_button"
+
+/**
+ * The extra toolbar button. A tap runs the same handler as the menu entry ([onMenuAction]); Reload has no menu entry, so
+ * it calls [onReload], the address bar's own reload.
+ */
+@Composable
+fun ToolbarButtonView(
+    button: ToolbarButton,
+    item: MenuItemState,
+    onMenuAction: (MenuAction) -> Unit,
+    onReload: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    IconButton(
+        enabled = item.enabled,
+        onClick = { button.menuAction?.let(onMenuAction) ?: onReload() },
+        modifier = modifier.testTag(TOOLBAR_BUTTON_TAG),
+    ) {
+        Icon(
+            toolbarIcon(button, item),
+            contentDescription = stringResource(item.labelRes),
+            tint = if (button == ToolbarButton.DESKTOP_SITE && item.checked == true) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+        )
+    }
+}
+
+private fun toolbarIcon(button: ToolbarButton, item: MenuItemState): ImageVector =
+    when (button) {
+        ToolbarButton.NEW_TAB -> Icons.Filled.Add
+        ToolbarButton.RELOAD -> Icons.Filled.Refresh
+        ToolbarButton.SHARE -> Icons.Filled.Share
+        ToolbarButton.BOOKMARK_PAGE -> if (item.checked == true) Icons.Filled.Star else Icons.Outlined.StarBorder
+        ToolbarButton.FIND -> Icons.Filled.Search
+        ToolbarButton.HOME -> Icons.Filled.Home
+        ToolbarButton.FORWARD -> Icons.AutoMirrored.Filled.ArrowForward
+        ToolbarButton.READER -> Icons.AutoMirrored.Filled.Article
+        ToolbarButton.DESKTOP_SITE -> Icons.Filled.DesktopWindows
+        ToolbarButton.DUPLICATE_TAB -> Icons.Filled.ContentCopy
+    }
 
 private fun quickIcon(action: MenuAction, item: MenuItemState): ImageVector =
     when (action) {
