@@ -1,13 +1,20 @@
 package com.shibi.orbis.ui.browser
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.text.TextRange
 import com.shibi.orbis.tabs.MAX_TAB_GROUP_NAME_CHARS
 import com.shibi.orbis.tabs.TabGroupColor
 import org.junit.Assert.assertEquals
@@ -95,5 +102,27 @@ class TabGroupDialogTest {
         for (name in listOf("Grey", "Blue", "Red", "Yellow", "Green", "Pink", "Purple", "Cyan")) {
             rule.onNodeWithText(name).assertExists()
         }
+    }
+
+    @Test
+    fun theNameFieldTakesFocusWhenTheDialogOpens() {
+        showDialog(askName = true, askColor = true)
+        rule.onNodeWithTag(GROUP_NAME_FIELD_TAG).assertIsFocused()
+    }
+
+    @Test
+    fun renamePutsTheCursorAtTheEndOfTheName() {
+        showDialog(askName = true, askColor = false, initialName = "Work")
+        rule.onNodeWithTag(GROUP_NAME_FIELD_TAG).assertIsFocused()
+        rule.onNodeWithTag(GROUP_NAME_FIELD_TAG).assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.TextSelectionRange, TextRange(4)),
+        )
+    }
+
+    @Test
+    fun theColourDialogRequestsNoFocusAndGoesIdle() {
+        showDialog(askName = false, askColor = true, initialName = "Work")
+        rule.onNodeWithTag(GROUP_NAME_FIELD_TAG).assertDoesNotExist()
+        rule.onAllNodes(hasSetTextAction()).assertCountEquals(0)
     }
 }

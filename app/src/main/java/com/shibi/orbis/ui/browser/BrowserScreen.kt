@@ -843,6 +843,8 @@ private fun BrowserContent(
                     onDropOpen = { text ->
                         normalizeAddressInput(text, container.searchEngine.selected.value)?.let { tabs.newTab(it) }
                     },
+                    groups = tabGroups,
+                    onToggleGroup = { id, collapsed -> tabs.setGroupCollapsed(id, collapsed) },
                 )
             },
             page = {

@@ -8,13 +8,18 @@ import android.view.View
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.draganddrop.dragAndDropSource
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -24,6 +29,8 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,12 +50,17 @@ import androidx.compose.ui.draganddrop.DragAndDropTransferData
 import androidx.compose.ui.draganddrop.mimeTypes
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -56,6 +68,7 @@ import com.shibi.orbis.R
 import com.shibi.orbis.customtabs.CustomTabActivity
 import com.shibi.orbis.engine.hostOfUrl
 import com.shibi.orbis.engine.isWebUrl
+import com.shibi.orbis.tabs.TabGroup
 import com.shibi.orbis.tabs.TabUi
 import com.shibi.orbis.ui.theme.TAB_ENTER_MS
 import com.shibi.orbis.ui.theme.TAB_EXIT_MS
@@ -72,6 +85,42 @@ internal const val TAB_STRIP_TAG = "tab_strip"
 
 internal fun tabChipTag(id: Long) = "tab_chip_$id"
 
+internal fun stripGroupLabelTag(groupId: Long) = "tab_strip_group_$groupId"
+
+internal fun tabChipLineTag(tabId: Long) = "tab_chip_line_$tabId"
+
+/** What the strip's row holds, in order: a group's label, then its chips. [key] is stable and cannot clash between kinds. */
+internal sealed interface StripItem {
+    val key: Any
+
+    data class Label(val group: TabGroup, val tabCount: Int) : StripItem {
+        override val key: Any get() = "group_${group.id}"
+    }
+
+    data class Chip(val tab: TabUi, val group: TabGroup?) : StripItem {
+        override val key: Any get() = tab.id
+    }
+}
+
+/**
+ * The row for [tabs] (already in display order, a group's tabs together): a [StripItem.Label] before the first tab of
+ * each group, and every tab as a chip, except the tabs of a collapsed group, of which only the selected one stays.
+ * A tab whose group is not in [groups] is an ordinary tab.
+ */
+internal fun stripItems(tabs: List<TabUi>, groups: List<TabGroup>): List<StripItem> {
+    val byId = groups.associateBy { it.id }
+    val counts = tabs.groupingBy { it.groupId }.eachCount()
+    val labelled = HashSet<Long>()
+    val items = ArrayList<StripItem>(tabs.size + groups.size)
+    for (tab in tabs) {
+        val group = tab.groupId?.let(byId::get)
+        if (group != null && labelled.add(group.id)) items += StripItem.Label(group, counts[group.id] ?: 0)
+        if (group != null && group.collapsed && !tab.selected) continue
+        items += StripItem.Chip(tab, group)
+    }
+    return items
+}
+
 /**
  * A row of the open tabs (title, close button; the current one marked for screen readers and by its frame),
  * with New tab at the end. A tab can be dragged out (its address, to another app or window); a link or text dropped on
@@ -85,11 +134,14 @@ internal fun TabStrip(
     onNewTab: () -> Unit,
     onDropOpen: (String) -> Unit,
     modifier: Modifier = Modifier,
+    groups: List<TabGroup> = emptyList(),
+    onToggleGroup: (groupId: Long, collapsed: Boolean) -> Unit = { _, _ -> },
 ) {
     val motionEnabled = rememberMotionEnabled()
     val listState = rememberLazyListState()
     val selectedId = tabs.firstOrNull { it.selected }?.id
-    val selectedIndex by rememberUpdatedState(tabs.indexOfFirst { it.selected })
+    val items = stripItems(tabs, groups)
+    val selectedIndex by rememberUpdatedState(items.indexOfFirst { it is StripItem.Chip && it.tab.selected })
     // Keyed on the id: closing a tab before the current one shifts its index but is not a reason to scroll.
     LaunchedEffect(selectedId) {
         if (selectedId == null || listState.showsWhole(selectedId)) return@LaunchedEffect
@@ -115,18 +167,23 @@ internal fun TabStrip(
             modifier = Modifier.weight(1f).selectableGroup(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            items(tabs, key = { it.id }) { tab ->
-                TabChip(
-                    tab,
-                    onSelect = { onSelect(tab.id) },
-                    onClose = { onClose(tab.id) },
-                    // Opacity and position only: the chip keeps its 180 x 36 dp size on every frame.
-                    modifier = Modifier.animateItem(
-                        fadeInSpec = motionTweenOrNull(motionEnabled, TAB_ENTER_MS),
-                        placementSpec = motionTweenOrNull(motionEnabled, TAB_PLACEMENT_MS),
-                        fadeOutSpec = motionTweenOrNull(motionEnabled, TAB_EXIT_MS),
-                    ),
+            items(items, key = { it.key }) { item ->
+                // Opacity and position only: a chip keeps its 180 x 36 dp size on every frame.
+                val animation = Modifier.animateItem(
+                    fadeInSpec = motionTweenOrNull(motionEnabled, TAB_ENTER_MS),
+                    placementSpec = motionTweenOrNull(motionEnabled, TAB_PLACEMENT_MS),
+                    fadeOutSpec = motionTweenOrNull(motionEnabled, TAB_EXIT_MS),
                 )
+                when (item) {
+                    is StripItem.Label -> GroupLabel(item.group, item.tabCount, { onToggleGroup(item.group.id, !item.group.collapsed) }, animation)
+                    is StripItem.Chip -> TabChip(
+                        item.tab,
+                        onSelect = { onSelect(item.tab.id) },
+                        onClose = { onClose(item.tab.id) },
+                        modifier = animation,
+                        group = item.group,
+                    )
+                }
             }
         }
         IconButton(onClick = onNewTab) { Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.tabs_new)) }
@@ -143,9 +200,41 @@ private fun LazyListState.showsWhole(id: Long): Boolean {
     return item.offset >= info.viewportStartOffset && item.offset + item.size <= info.viewportEndOffset
 }
 
+/** The coloured name that starts a group in the strip; a tap collapses or expands the group. */
+@Composable
+private fun GroupLabel(group: TabGroup, tabCount: Int, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    val color = group.color.themedColor()
+    val onColor = if (color.luminance() > 0.5f) Color.Black else Color.White
+    val description = pluralStringResource(
+        if (group.collapsed) R.plurals.tab_group_strip_collapsed else R.plurals.tab_group_strip_expanded,
+        tabCount,
+        group.name,
+        tabCount,
+    )
+    Surface(
+        color = color,
+        contentColor = onColor,
+        shape = MaterialTheme.shapes.small,
+        modifier = modifier
+            .height(36.dp)
+            .testTag(stripGroupLabelTag(group.id))
+            .semantics(mergeDescendants = true) { contentDescription = description }
+            .clickable(role = Role.Button, onClick = onToggle),
+    ) {
+        Row(Modifier.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(group.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge, modifier = Modifier.widthIn(max = 120.dp))
+            Icon(
+                if (group.collapsed) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowUp,
+                contentDescription = null,
+                modifier = Modifier.padding(start = 2.dp).size(16.dp),
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TabChip(tab: TabUi, onSelect: () -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier) {
+private fun TabChip(tab: TabUi, onSelect: () -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier, group: TabGroup? = null) {
     val host = hostOfUrl(tab.url)
     val title = tab.title.ifBlank { host ?: stringResource(R.string.tabs_blank_title) }
     val container =
@@ -178,7 +267,8 @@ private fun TabChip(tab: TabUi, onSelect: () -> Unit, onClose: () -> Unit, modif
             )
             .selectable(selected = tab.selected, role = Role.Tab, onClick = onSelect),
     ) {
-        Row(Modifier.padding(start = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.fillMaxSize()) {
+        Row(Modifier.padding(start = 10.dp).fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
             if (tab.isPrivate) {
                 Icon(
                     Icons.Filled.VisibilityOff,
@@ -191,6 +281,17 @@ private fun TabChip(tab: TabUi, onSelect: () -> Unit, onClose: () -> Unit, modif
             IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) {
                 Icon(Icons.Filled.Close, contentDescription = closeDescription, modifier = Modifier.size(16.dp))
             }
+        }
+        if (group != null) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .background(group.color.themedColor())
+                    .testTag(tabChipLineTag(tab.id)),
+            )
+        }
         }
     }
 }
