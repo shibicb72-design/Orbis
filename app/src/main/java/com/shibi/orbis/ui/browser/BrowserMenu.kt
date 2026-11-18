@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DesktopWindows
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Print
@@ -44,6 +45,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.shibi.orbis.R
+import com.shibi.orbis.engine.AddonAction
 import com.shibi.orbis.engine.TranslationInfo
 import com.shibi.orbis.engine.isWebUrl
 import com.shibi.orbis.settings.ToolbarButton
@@ -70,6 +72,8 @@ enum class MenuAction(val group: MenuGroup) {
     SITE_SETTINGS(MenuGroup.PAGE),
     GENERATE_PASSWORD(MenuGroup.PAGE),
     DESKTOP_SITE(MenuGroup.PAGE),
+    /** Opens the list of the add-ons' toolbar buttons. Shown only while at least one add-on has a button. */
+    ADDONS(MenuGroup.PAGE),
 
     // Tabs
     NEW_TAB(MenuGroup.TABS),
@@ -127,6 +131,8 @@ data class MenuPageState(
     val desktopMode: Boolean,
     val bookmarked: Boolean,
     val casting: Boolean,
+    /** At least one add-on has a toolbar button for this tab (the "Add-ons" entry). */
+    val hasAddonActions: Boolean = false,
 )
 
 /** The window the menu is drawn in: split-screen entries depend on it. */
@@ -179,6 +185,7 @@ fun menuItemState(action: MenuAction, page: MenuPageState, window: MenuWindow): 
         MenuAction.SITE_SETTINGS -> MenuItemState(true, page.hasSession && web, R.string.menu_site_settings)
         MenuAction.GENERATE_PASSWORD -> MenuItemState(true, true, R.string.menu_generate_password)
         MenuAction.DESKTOP_SITE -> MenuItemState(true, page.hasSession, R.string.menu_desktop_site, checked = page.desktopMode)
+        MenuAction.ADDONS -> MenuItemState(page.hasAddonActions, page.hasSession, R.string.menu_addons)
         MenuAction.NEW_TAB -> MenuItemState(true, true, R.string.menu_new_tab)
         MenuAction.NEW_PRIVATE_TAB -> MenuItemState(true, true, R.string.menu_new_private_tab)
         MenuAction.DUPLICATE_TAB -> MenuItemState(true, page.hasSession && web, R.string.menu_duplicate_tab)
@@ -323,5 +330,39 @@ private fun entryIcon(action: MenuAction, item: MenuItemState): ImageVector? =
         MenuAction.SITE_SETTINGS -> Icons.Filled.Tune
         MenuAction.GENERATE_PASSWORD -> Icons.Filled.Password
         MenuAction.SCAN_QR -> Icons.Filled.QrCodeScanner
+        MenuAction.ADDONS -> Icons.Filled.Extension
         else -> null
     }
+
+/** Test tag of the "Add-ons" list; each row's tag is [addonActionTag]. */
+const val ADDON_ACTIONS_TAG = "addon_actions"
+
+fun addonActionTag(extensionId: String): String = "addon_action:$extensionId"
+
+/**
+ * The "Add-ons" list: one row per add-on button, its name and its badge text. Choosing a row closes the list
+ * ([onDismiss]) and then calls [onAction] with the add-on's id.
+ */
+@Composable
+fun AddonActionsMenu(
+    expanded: Boolean,
+    actions: List<AddonAction>,
+    onDismiss: () -> Unit,
+    onAction: (String) -> Unit,
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, modifier = Modifier.testTag(ADDON_ACTIONS_TAG)) {
+        for (action in actions) {
+            DropdownMenuItem(
+                text = { Text(action.title) },
+                leadingIcon = { Icon(Icons.Filled.Extension, contentDescription = null) },
+                trailingIcon = action.badgeText?.let { badge -> { Text(badge, style = MaterialTheme.typography.labelMedium) } },
+                enabled = action.enabled,
+                onClick = {
+                    onDismiss()
+                    onAction(action.extensionId)
+                },
+                modifier = Modifier.testTag(addonActionTag(action.extensionId)),
+            )
+        }
+    }
+}
