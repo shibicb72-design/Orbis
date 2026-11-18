@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="backup_title" translatable="false">Backup and restore</string>
+    <string name="backup_summary" translatable="false">Save your bookmarks, passwords and settings to a file</string>
+
+    <string name="backup_auth_title" translatable="false">Orbis backup</string>
+    <string name="backup_auth_subtitle" translatable="false">Confirm it\'s you</string>
+    <string name="backup_locked" translatable="false">Unlock to make or restore a backup.</string>
+    <string name="backup_unlock" translatable="false">Unlock</string>
+
+    <string name="backup_create_heading" translatable="false">Create backup</string>
+    <string name="backup_include_tabs" translatable="false">Include open tabs</string>
+    <string name="backup_include_history" translatable="false">Include browsing history</string>
+    <string name="backup_password" translatable="false">Password</string>
+    <string name="backup_password_repeat" translatable="false">Repeat password</string>
+    <string name="backup_show_passwords" translatable="false">Show passwords</string>
+    <string name="backup_hide_passwords" translatable="false">Hide passwords</string>
+    <string name="backup_password_rule" translatable="false">At least 10 characters. If you forget this password, the backup cannot be opened. Nobody can recover it.</string>
+    <string name="backup_save" translatable="false">Save backup file</string>
+    <string name="backup_note" translatable="false">The file contains your saved passwords and bookmarks. It is encrypted with your password. It does not contain cookies or sign-ins, downloads or private tabs. Sites where you turned tracking protection off are not included.</string>
+
+    <string name="backup_restore_heading" translatable="false">Restore from backup</string>
+    <string name="backup_choose_file" translatable="false">Choose backup file</string>
+    <string name="backup_file_chosen" translatable="false">Backup file chosen.</string>
+    <string name="backup_restore" translatable="false">Restore</string>
+    <string name="backup_cancel" translatable="false">Cancel</string>
+    <string name="backup_confirm_restore" translatable="false">Restore this backup? Bookmarks and passwords are added to the ones on this phone. Settings are replaced.</string>
+
+    <string name="backup_working" translatable="false">Working…</string>
+
+    <string name="backup_saved" translatable="false">Backup saved</string>
+    <string name="backup_save_failed" translatable="false">The backup could not be saved.</string>
+    <string name="backup_too_large_to_save" translatable="false">There is too much data for one backup file. Untick Include browsing history and try again.</string>
+    <string name="backup_not_ready" translatable="false">Orbis is still starting. Try again in a moment.</string>
+    <string name="backup_wrong_password" translatable="false">Wrong password, or the file is damaged.</string>
+    <string name="backup_not_a_backup" translatable="false">This is not an Orbis backup file.</string>
+    <string name="backup_newer" translatable="false">This backup was made by a newer version of Orbis.</string>
+    <string name="backup_file_too_large" translatable="false">That file is too large to be an Orbis backup.</string>
+    <string name="backup_file_unreadable" translatable="false">That file could not be read.</string>
+
+    <string name="backup_restored" translatable="false">Restored: %1$s.</string>
+    <string name="backup_restored_nothing" translatable="false">Restored: nothing.</string>
+    <string name="backup_part_settings" translatable="false">settings</string>
+    <plurals name="backup_part_bookmarks" translatable="false">
+        <item quantity="one">%1$d bookmark</item>
+        <item quantity="other">%1$d bookmarks</item>
+    </plurals>
+    <plurals name="backup_part_passwords" translatable="false">
+        <item quantity="one">%1$d password</item>
+        <item quantity="other">%1$d passwords</item>
+    </plurals>
+    <plurals name="backup_part_tabs" translatable="false">
+        <item quantity="one">%1$d tab</item>
+        <item quantity="other">%1$d tabs</item>
+    </plurals>
+    <plurals name="backup_part_history" translatable="false">
+        <item quantity="one">%1$d history entry</item>
+        <item quantity="other">%1$d history entries</item>
+    </plurals>
+    <string name="backup_failed_sections" translatable="false">Some parts could not be restored: %1$s.</string>
+    <string name="backup_skipped_newer" translatable="false">Some parts were made by a newer version of Orbis and were left out.</string>
+    <string name="backup_name_settings" translatable="false">settings</string>
+    <string name="backup_name_site_permissions" translatable="false">site permissions</string>
+    <string name="backup_name_bookmarks" translatable="false">bookmarks</string>
+    <string name="backup_name_passwords" translatable="false">passwords</string>
+    <string name="backup_name_tabs" translatable="false">tabs</string>
+    <string name="backup_name_history" translatable="false">browsing history</string>
+    <string name="backup_name_addons" translatable="false">add-ons</string>
+    <string name="backup_addons_note" translatable="false">Add-ons are not restored automatically. Open Add-ons to add them again.</string>
+    <string name="backup_open_addons" translatable="false">Open Add-ons</string>
+</resources>
