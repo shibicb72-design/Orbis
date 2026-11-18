@@ -133,6 +133,8 @@ import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.engine.SitePrompt
 import com.shibi.orbis.engine.isWebUrl
 import com.shibi.orbis.engine.pickerMimeTypes
+import com.shibi.orbis.downloads.DownloadIntents
+import com.shibi.orbis.tabs.PendingDownload
 import com.shibi.orbis.tabs.TabEvent
 import com.shibi.orbis.ui.OrbisEmptyState
 import com.shibi.orbis.ui.chromeWindowInsets
@@ -1186,22 +1188,55 @@ private fun BrowserContent(
         )
     }
 
-    pendingDownload?.let { pending ->
-        DownloadConfirmDialog(
-            pending = pending,
-            onConfirm = {
-                // A private tab's download keeps no source host in the index; the file itself stays.
-                container.downloads.start(pending.download, isPrivate = pending.isPrivate)
-                tabs.resolveDownload(pending)
-                // After start: the notification permission never delays or blocks the download.
-                requestNotificationPermission()
-            },
-            onCancel = {
-                pending.download.discard()
-                tabs.resolveDownload(pending)
-            },
-        )
+    // The message after any file download from this screen: "Downloading...", then "Saved to Downloads" with Open.
+    var feedbackId by remember { mutableStateOf<Long?>(null) }
+    val openChooser = stringResource(R.string.downloads_open_chooser)
+    val openMissing = stringResource(R.string.downloads_file_missing)
+    val openNoApp = stringResource(R.string.downloads_no_app)
+    val openFailed = stringResource(R.string.downloads_action_failed)
+    fun startDownload(pending: PendingDownload) {
+        // A private tab's download keeps no source host in the index; the file itself stays.
+        feedbackId = container.downloads.start(pending.download, isPrivate = pending.isPrivate)
+        tabs.resolveDownload(pending)
+        // After start: the notification permission never delays or blocks the download.
+        requestNotificationPermission()
     }
+    DownloadOffer(
+        pending = pendingDownload,
+        onStart = ::startDownload,
+        dialog = { pending ->
+            DownloadConfirmDialog(
+                pending = pending,
+                onConfirm = { startDownload(pending) },
+                onCancel = {
+                    pending.download.discard()
+                    tabs.resolveDownload(pending)
+                },
+            )
+        },
+    )
+    DownloadFeedback(
+        host = snackbars,
+        entries = container.downloads.entries,
+        downloadId = feedbackId,
+        onOpen = { id ->
+            // What the Downloads screen's Open button does for the entry; never opens that screen.
+            val entry = container.downloads.entries.value.firstOrNull { it.id == id }
+            val message =
+                when (if (entry == null) DownloadIntents.Result.MISSING else DownloadIntents.open(androidContext, entry, openChooser)) {
+                    DownloadIntents.Result.OK -> null
+                    DownloadIntents.Result.MISSING -> openMissing
+                    DownloadIntents.Result.NO_APP -> openNoApp
+                    DownloadIntents.Result.FAILED -> openFailed
+                }
+            if (message != null) {
+                scope.launch {
+                    snackbars.currentSnackbarData?.dismiss()
+                    snackbars.showSnackbar(message)
+                }
+            }
+        },
+    )
 
     pendingTorrent?.let { pending ->
         val torrentLog = remember(container) { TorrentLog.sink(container.debugLog) }

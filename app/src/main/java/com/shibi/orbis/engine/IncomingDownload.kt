@@ -20,6 +20,12 @@ interface IncomingDownload {
     val startOffset: Long get() = 0L
 
     /**
+     * The user asked for this file in the page itself (the engine's PDF viewer Download button), so no question is
+     * needed. False for every other download.
+     */
+    val userRequested: Boolean get() = false
+
+    /**
      * What identifies this version of the file for a later resume (`If-Range`): a strong ETag, else Last-Modified;
      * null when the response carries neither (see [resumeValidator]).
      */
