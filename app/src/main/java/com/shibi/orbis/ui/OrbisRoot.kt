@@ -23,6 +23,7 @@ import com.shibi.orbis.ui.browser.BrowserScreen
 import com.shibi.orbis.ui.downloads.DownloadsScreen
 import com.shibi.orbis.ui.history.HistoryScreen
 import com.shibi.orbis.ui.settings.ClearBrowsingDataScreen
+import com.shibi.orbis.ui.settings.ClearOnExitScreen
 import com.shibi.orbis.ui.settings.DebugLogScreen
 import com.shibi.orbis.ui.settings.DohScreen
 import com.shibi.orbis.ui.settings.LicencesScreen
@@ -53,6 +54,7 @@ private object Routes {
     const val Addons = "settings/addons"
     const val SitePermissions = "settings/site_permissions"
     const val ClearData = "settings/clear_data"
+    const val ClearOnExit = "settings/clear_on_exit"
     const val Passwords = "settings/passwords"
     const val Licences = "settings/licences"
     const val Torrents = "settings/torrents"
@@ -229,6 +231,8 @@ fun OrbisRoot(container: AppContainer) {
                     onOpenSecureDns = { nav.navigate(Routes.SecureDns) },
                     onOpenSearchEngines = { nav.navigate(Routes.SearchEngines) },
                     onOpenAddons = { nav.navigate(Routes.Addons) },
+                    clearOnExitEnabled = container.clearOnExit.prefs.enabled,
+                    onOpenClearOnExit = { nav.navigate(Routes.ClearOnExit) },
                 )
             }
             composable(Routes.SearchEngines) {
@@ -259,6 +263,9 @@ fun OrbisRoot(container: AppContainer) {
                     controller = container.clear,
                     onBack = { nav.popBackStack() },
                 )
+            }
+            composable(Routes.ClearOnExit) {
+                ClearOnExitScreen(prefs = container.clearOnExit.prefs, onBack = { nav.popBackStack() })
             }
             composable(Routes.SitePermissions) {
                 SitePermissionsScreen(

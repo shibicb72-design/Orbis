@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="clear_exit_title" translatable="false">Clear when Orbis is closed</string>
+    <string name="clear_exit_summary_off" translatable="false">Off</string>
+    <string name="clear_exit_summary_on" translatable="false">On</string>
+    <string name="clear_exit_switch" translatable="false">Clear browsing data when Orbis is closed</string>
+    <string name="clear_exit_note" translatable="false">When you swipe Orbis out of your recent apps, or it is stopped, Orbis clears your open tabs, history, cookies, site data and cache the next time it starts, before any page loads. Bookmarks, saved passwords, downloads and settings are kept. Switching to another app does not clear anything.</string>
+    <string name="clear_exit_sites_title" translatable="false">Sites to keep</string>
+    <string name="clear_exit_sites_note" translatable="false">Orbis keeps these sites\' cookies, so you usually stay signed in. Their other stored data is still cleared.</string>
+    <string name="clear_exit_site_hint" translatable="false">Site, like example.com</string>
+    <string name="clear_exit_add" translatable="false">Add</string>
+    <string name="clear_exit_error" translatable="false">Enter a site name, like example.com</string>
+    <string name="clear_exit_remove_description" translatable="false">Remove %1$s</string>
+    <string name="clear_exit_remove" translatable="false">Remove</string>
+    <string name="clear_exit_full" translatable="false">The list is full.</string>
+</resources>
