@@ -331,6 +331,7 @@ private fun BrowserContent(
     // below ever closes one. Leaving composition only releases the session from the view.
     val selectedTab by tabs.selected.collectAsStateWithLifecycle()
     val tabList by tabs.tabs.collectAsStateWithLifecycle()
+    val tabGroups by tabs.groups.collectAsStateWithLifecycle()
     val recentlyClosed by tabs.recentlyClosed.collectAsStateWithLifecycle()
     var showRecentlyClosed by remember { mutableStateOf(false) }
     var showSiteSettings by remember { mutableStateOf(false) }
@@ -1137,6 +1138,17 @@ private fun BrowserContent(
                 showTabs = false
             },
             onDismiss = { showTabs = false },
+            groups = tabGroups,
+            groupActions = TabGroupActions(
+                onCreate = { tabId, name, color -> tabs.createGroup(listOf(tabId), name, color) },
+                onAdd = tabs::addToGroup,
+                onRemove = tabs::removeFromGroup,
+                onRename = tabs::renameGroup,
+                onColor = tabs::setGroupColor,
+                onCollapsed = tabs::setGroupCollapsed,
+                onUngroup = tabs::ungroup,
+                onCloseGroup = tabs::closeGroup,
+            ),
         )
     }
 
