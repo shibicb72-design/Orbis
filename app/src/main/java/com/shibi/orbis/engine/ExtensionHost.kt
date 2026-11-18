@@ -39,7 +39,10 @@ interface ExtensionHost {
 
     suspend fun uninstall(id: String)
 
-    /** Returns the updated extension, or null when no update was available. */
+    /**
+     * Returns the updated extension, or null when no update was available. Throws [ExtensionInstallException] when the
+     * engine refused the update; [ExtensionInstallError.CANCELLED] means it asks for more access than was agreed to.
+     */
     suspend fun checkForUpdate(id: String): InstalledExtension?
 }
 
@@ -55,6 +58,8 @@ data class InstalledExtension(
     val enabled: Boolean,
     /** True when the user (not the browser, blocklist or signature check) disabled it. */
     val disabledByUser: Boolean,
+    /** Why it is off, from the engine's flags; null when it is enabled. */
+    val disabledReason: ExtensionDisabledReason? = null,
     /** The extension's own settings page (moz-extension://...), or null when it has none. */
     val optionsPageUrl: String? = null,
     val name: String? = null,
@@ -64,6 +69,14 @@ data class InstalledExtension(
     /** Required host permissions (origins), as the engine reports them. */
     val origins: List<String> = emptyList(),
 )
+
+/** Why the engine has an extension switched off. Precedence when several apply: BLOCKLIST, SIGNATURE, USER, OTHER. */
+enum class ExtensionDisabledReason {
+    USER,
+    BLOCKLIST,
+    SIGNATURE,
+    OTHER,
+}
 
 enum class ExtensionInstallError {
     NETWORK,

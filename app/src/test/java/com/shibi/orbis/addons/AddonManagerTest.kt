@@ -1,6 +1,7 @@
 package com.shibi.orbis.addons
 
 import com.shibi.orbis.engine.AddonAccess
+import com.shibi.orbis.engine.ExtensionDisabledReason
 import com.shibi.orbis.engine.ExtensionHost
 import com.shibi.orbis.engine.ExtensionInstallError
 import com.shibi.orbis.engine.ExtensionInstallException
@@ -70,7 +71,11 @@ private class FakeHost : ExtensionHost {
 
     override suspend fun setEnabled(id: String, enabled: Boolean): InstalledExtension {
         calls += "setEnabled $id $enabled"
-        return installed.getValue(id).copy(enabled = enabled, disabledByUser = !enabled).also { installed[id] = it }
+        return installed.getValue(id).copy(
+            enabled = enabled,
+            disabledByUser = !enabled,
+            disabledReason = if (enabled) null else ExtensionDisabledReason.USER,
+        ).also { installed[id] = it }
     }
 
     override suspend fun allowInPrivateBrowsing(id: String) {
@@ -436,21 +441,64 @@ class AddonManagerTest {
             assertFalse(prefs.updateBlocked(DARK_READER.id))
         }
 
+    private fun TestScope.stateWhenOff(reason: ExtensionDisabledReason): AddonState.Installed {
+        val host = FakeHost().apply {
+            installed[DARK_READER.id] =
+                ext(DARK_READER.id).copy(enabled = false, disabledByUser = reason == ExtensionDisabledReason.USER, disabledReason = reason)
+        }
+        val m = manager(host)
+        m.refresh()
+        advanceUntilIdle()
+        return m.states.value[DARK_READER.id] as AddonState.Installed
+    }
+
     @Test
-    fun `an add-on the engine turned off, not the user, is reported as disabled by the browser`() =
+    fun `an add-on the blocklist turned off is reported as disabled by the browser`() =
         runTest {
-            val host = FakeHost().apply {
-                installed[DARK_READER.id] = ext(DARK_READER.id).copy(enabled = false, disabledByUser = false)
-            }
-            val m = manager(host)
-
-            m.refresh()
-            advanceUntilIdle()
-
-            assertTrue((m.states.value[DARK_READER.id] as AddonState.Installed).disabledByBrowser)
+            val state = stateWhenOff(ExtensionDisabledReason.BLOCKLIST)
+            assertTrue(state.disabledByBrowser)
+            assertFalse(state.disabledOther)
         }
 
     @Test
+    fun `an add-on turned off by the signature check is reported as disabled by the browser`() =
+        runTest {
+            val state = stateWhenOff(ExtensionDisabledReason.SIGNATURE)
+            assertTrue(state.disabledByBrowser)
+            assertFalse(state.disabledOther)
+        }
+
+    @Test
+    fun `an add-on turned off for another reason is the other state, not the safety one`() =
+        runTest {
+            val state = stateWhenOff(ExtensionDisabledReason.OTHER)
+            assertFalse(state.disabledByBrowser)
+            assertTrue(state.disabledOther)
+        }
+
+    @Test
+    fun `an add-on the user turned off is a normal row with the switch off`() =
+        runTest {
+            val state = stateWhenOff(ExtensionDisabledReason.USER)
+            assertFalse(state.disabledByBrowser)
+            assertFalse(state.disabledOther)
+            assertFalse(state.enabled)
+        }
+
+    @Test
+    fun `an enabled add-on is neither`() =
+        runTest {
+            val host = FakeHost().apply { installed[DARK_READER.id] = ext(DARK_READER.id) }
+            val m = manager(host)
+            m.refresh()
+            advanceUntilIdle()
+            val state = m.states.value[DARK_READER.id] as AddonState.Installed
+            assertFalse(state.disabledByBrowser)
+            assertFalse(state.disabledOther)
+        }
+
+    // A real time limit: a broken 5-minute cap must fail in seconds, not hold the Gradle slot.
+    @Test(timeout = 10_000)
     fun `a confirm that never answers ends NotInstalled after 5 minutes and another add-on can then be installed`() =
         runTest {
             val host = FakeHost()

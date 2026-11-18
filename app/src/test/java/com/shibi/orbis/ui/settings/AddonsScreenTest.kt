@@ -26,6 +26,7 @@ import com.shibi.orbis.engine.AddonAccess
 import com.shibi.orbis.engine.ExtensionHost
 import com.shibi.orbis.engine.ExtensionInstallError
 import com.shibi.orbis.engine.ExtensionInstallException
+import com.shibi.orbis.engine.ExtensionDisabledReason
 import com.shibi.orbis.engine.InstalledExtension
 import com.shibi.orbis.ui.browser.ComposeActivityRegistration
 import kotlinx.coroutines.CoroutineScope
@@ -299,12 +300,45 @@ class AddonsScreenTest {
 
     @Test
     fun an_add_on_the_browser_turned_off_has_the_safety_line_and_no_on_switch() {
-        host.installed[DARK_READER.id] = ext(DARK_READER.id).copy(enabled = false, disabledByUser = false)
+        host.installed[DARK_READER.id] =
+            ext(DARK_READER.id).copy(enabled = false, disabledByUser = false, disabledReason = ExtensionDisabledReason.BLOCKLIST)
         show()
         rule.onNodeWithText("Turned off by the browser for your safety.").performScrollTo().assertExists()
+        rule.onAllNodesWithText("Turned off by the browser.").assertCountEquals(0)
         rule.onAllNodesWithText("On").assertCountEquals(0)
         rule.onAllNodesWithText("Allow in private tabs").assertCountEquals(0)
         rule.onNodeWithText("Remove").assertExists()
+    }
+
+    @Test
+    fun an_add_on_the_browser_turned_off_by_the_signature_check_has_the_safety_line() {
+        host.installed[DARK_READER.id] =
+            ext(DARK_READER.id).copy(enabled = false, disabledByUser = false, disabledReason = ExtensionDisabledReason.SIGNATURE)
+        show()
+        rule.onNodeWithText("Turned off by the browser for your safety.").performScrollTo().assertExists()
+        rule.onAllNodesWithText("On").assertCountEquals(0)
+    }
+
+    @Test
+    fun an_add_on_turned_off_for_another_reason_has_the_plain_line_and_no_on_switch() {
+        host.installed[DARK_READER.id] =
+            ext(DARK_READER.id).copy(enabled = false, disabledByUser = false, disabledReason = ExtensionDisabledReason.OTHER)
+        show()
+        rule.onNodeWithText("Turned off by the browser.").performScrollTo().assertExists()
+        rule.onAllNodesWithText("Turned off by the browser for your safety.").assertCountEquals(0)
+        rule.onAllNodesWithText("On").assertCountEquals(0)
+        rule.onAllNodesWithText("Allow in private tabs").assertCountEquals(0)
+        rule.onNodeWithText("Remove").assertExists()
+    }
+
+    @Test
+    fun an_add_on_the_user_turned_off_has_the_switch_off_and_neither_line() {
+        host.installed[DARK_READER.id] =
+            ext(DARK_READER.id).copy(enabled = false, disabledByUser = true, disabledReason = ExtensionDisabledReason.USER)
+        show()
+        rule.onNodeWithText("On").performScrollTo().assertIsOff()
+        rule.onAllNodesWithText("Turned off by the browser.").assertCountEquals(0)
+        rule.onAllNodesWithText("Turned off by the browser for your safety.").assertCountEquals(0)
     }
 
     @Test
