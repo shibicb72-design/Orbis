@@ -31,6 +31,7 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -2839,13 +2840,25 @@ private class GeckoExtensionHost(
 ) : ExtensionHost {
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    /** Id of the install currently in flight (main thread). The prompt only grants for this id. */
-    @Volatile
-    private var installingId: String? = null
+    /**
+     * The install in flight (main thread). The prompt only grants for [id], and only when [confirm] returns true.
+     * [grantPrivate] is true for uBlock Origin only. [curated] adds the signature and blocklist refusals of the
+     * catalogue path (uBlock Origin's path keeps its checks as they were).
+     */
+    private class PendingInstall(
+        val id: String,
+        val confirm: suspend (AddonAccess) -> Boolean,
+        val grantPrivate: Boolean,
+        val curated: Boolean,
+        val scope: CoroutineScope,
+    )
 
-    /** True when the prompt for this install was denied because the extension id did not match. */
     @Volatile
-    private var deniedForeignId = false
+    private var pending: PendingInstall? = null
+
+    /** Why the prompt for this install was denied without asking, or null when it was not. */
+    @Volatile
+    private var promptDenial: ExtensionInstallError? = null
 
     val promptDelegate =
         object : WebExtensionController.PromptDelegate {
@@ -2855,21 +2868,55 @@ private class GeckoExtensionHost(
                 origins: Array<String>,
                 dataCollectionPermissions: Array<String>,
             ): GeckoResult<WebExtension.PermissionPromptResponse> {
-                val granted = installingId != null && extension.id == installingId
-                if (granted) {
+                val install = pending
+                if (install == null || extension.id != install.id) {
+                    promptDenial = ExtensionInstallError.WRONG_EXTENSION
+                    debugLog.log("Extensions", "install prompt denied for unexpected extension ${extension.id}")
+                    return GeckoResult.fromValue(WebExtension.PermissionPromptResponse(false, false, false))
+                }
+                if (install.curated) {
+                    flaggedBeforeInstall(extension.metaData)?.let { flag ->
+                        promptDenial = flag
+                        debugLog.log(
+                            "Extensions",
+                            "install prompt denied for ${extension.id}: $flag (signedState=" +
+                                "${extension.metaData.signedState}, blocklistState=${extension.metaData.blocklistState})",
+                        )
+                        return GeckoResult.fromValue(WebExtension.PermissionPromptResponse(false, false, false))
+                    }
+                }
+                val access = AddonAccess(permissions.toList(), origins.toList())
+                val result = GeckoResult<WebExtension.PermissionPromptResponse>()
+                val answered = AtomicBoolean(false)
+                fun answer(granted: Boolean) {
+                    if (!answered.compareAndSet(false, true)) return
                     debugLog.log(
                         "Extensions",
-                        "install prompt granted for ${extension.id}: " +
+                        "install prompt ${if (granted) "granted" else "refused"} for ${extension.id}: " +
                             "${permissions.size} permissions, ${origins.size} origins, " +
                             "${dataCollectionPermissions.size} data permissions (not granted)",
                     )
-                } else {
-                    deniedForeignId = true
-                    debugLog.log("Extensions", "install prompt denied for unexpected extension ${extension.id}")
+                    // Data collection always stays off. Private mode only for uBlock Origin, so the content blocker
+                    // also works in private tabs; other add-ons start off there until the user switches them on.
+                    result.complete(
+                        WebExtension.PermissionPromptResponse(granted, granted && install.grantPrivate, false),
+                    )
                 }
-                // Data collection stays off. Private mode is granted with the install that was granted, so the content
-                // blocker also works in private tabs.
-                return GeckoResult.fromValue(WebExtension.PermissionPromptResponse(granted, granted, false))
+                // UNDISPATCHED: a confirm that does not suspend (uBlock Origin's) answers before this returns, as before.
+                install.scope
+                    .launch(start = CoroutineStart.UNDISPATCHED) {
+                        val granted =
+                            try {
+                                install.confirm(access)
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                debugLog.log("Extensions", "install confirm failed: ${e.javaClass.simpleName}")
+                                false
+                            }
+                        answer(granted)
+                    }.invokeOnCompletion { answer(false) }
+                return result
             }
 
             override fun onUpdatePrompt(
@@ -2911,30 +2958,69 @@ private class GeckoExtensionHost(
             enabled = metaData.enabled,
             disabledByUser = (metaData.disabledFlags and WebExtension.DisabledFlags.USER) != 0,
             optionsPageUrl = metaData.optionsPageUrl,
+            name = metaData.name,
+            allowedInPrivate = metaData.allowedInPrivateBrowsing,
+            permissions = metaData.requiredPermissions.toList(),
+            origins = metaData.requiredOrigins.toList(),
         )
 
     override suspend fun find(id: String): InstalledExtension? =
         withContext(Dispatchers.Main.immediate) { findGecko(id)?.toInstalled() }
 
+    override suspend fun list(): List<InstalledExtension> =
+        withContext(Dispatchers.Main.immediate) { controller().list().awaitResult().orEmpty().map { it.toInstalled() } }
+
     override suspend fun install(xpiUrl: String, expectedId: String): InstalledExtension =
+        install(
+            xpiUrl,
+            expectedId,
+            confirm = { true },
+            grantPrivate = true,
+            curated = false,
+            method = WebExtensionController.INSTALLATION_METHOD_ONBOARDING,
+        )
+
+    override suspend fun install(
+        xpiUrl: String,
+        expectedId: String,
+        confirm: suspend (AddonAccess) -> Boolean,
+    ): InstalledExtension =
+        install(
+            xpiUrl,
+            expectedId,
+            confirm,
+            grantPrivate = false,
+            curated = true,
+            method = WebExtensionController.INSTALLATION_METHOD_MANAGER,
+        )
+
+    private suspend fun install(
+        xpiUrl: String,
+        expectedId: String,
+        confirm: suspend (AddonAccess) -> Boolean,
+        grantPrivate: Boolean,
+        curated: Boolean,
+        method: String,
+    ): InstalledExtension =
         withContext(Dispatchers.Main.immediate) {
-            if (installingId != null) {
+            if (pending != null) {
                 throw ExtensionInstallException(ExtensionInstallError.UNKNOWN, "an install is already in flight")
             }
-            installingId = expectedId
-            deniedForeignId = false
+            pending = PendingInstall(expectedId, confirm, grantPrivate, curated, this)
+            promptDenial = null
             try {
                 val result: WebExtension? =
                     try {
                         controller()
-                            .install(xpiUrl, WebExtensionController.INSTALLATION_METHOD_ONBOARDING)
+                            .install(xpiUrl, method)
                             .awaitResult()
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: WebExtension.InstallException) {
                         var error = mapInstallError(e.code)
-                        if (error == ExtensionInstallError.CANCELLED && deniedForeignId) {
-                            error = ExtensionInstallError.WRONG_EXTENSION
+                        val denial = promptDenial
+                        if (error == ExtensionInstallError.CANCELLED && denial != null) {
+                            error = denial
                         }
                         debugLog.log("Extensions", "install failed: code=${e.code} -> $error")
                         throw ExtensionInstallException(error, "install failed, code ${e.code}")
@@ -2958,11 +3044,31 @@ private class GeckoExtensionHost(
                         "signedState=${installed.metaData.signedState}",
                     )
                 }
+                if (curated && installed.metaData.blocklistState != WebExtension.BlocklistStateFlags.NOT_BLOCKED) {
+                    removeQuietly(installed)
+                    throw ExtensionInstallException(
+                        ExtensionInstallError.BLOCKED,
+                        "blocklistState=${installed.metaData.blocklistState}",
+                    )
+                }
                 debugLog.log("Extensions", "installed $expectedId ${installed.metaData.version}")
                 installed.toInstalled()
             } finally {
-                installingId = null
+                pending = null
             }
+        }
+
+    /**
+     * A flag the engine already shows at the prompt: on the blocklist in any way, or a signature that is not Mozilla's
+     * (missing, preliminary, system, privileged). UNKNOWN is not refused here: the strict SIGNED check after the
+     * install still applies.
+     */
+    private fun flaggedBeforeInstall(meta: WebExtension.MetaData): ExtensionInstallError? =
+        when {
+            meta.blocklistState != WebExtension.BlocklistStateFlags.NOT_BLOCKED -> ExtensionInstallError.BLOCKED
+            meta.signedState != WebExtension.SignedStateFlags.SIGNED &&
+                meta.signedState != WebExtension.SignedStateFlags.UNKNOWN -> ExtensionInstallError.SIGNATURE
+            else -> null
         }
 
     private suspend fun removeQuietly(extension: WebExtension) {
@@ -2997,6 +3103,17 @@ private class GeckoExtensionHost(
             debugLog.log("Extensions", "allowed in private browsing: $id")
         }
     }
+
+    override suspend fun setAllowedInPrivateBrowsing(id: String, allowed: Boolean): InstalledExtension =
+        withContext(Dispatchers.Main.immediate) {
+            val extension = findGecko(id) ?: error("extension not installed")
+            if (extension.metaData.allowedInPrivateBrowsing == allowed) return@withContext extension.toInstalled()
+            val updated =
+                controller().setAllowedInPrivateBrowsing(extension, allowed).awaitResult()
+                    ?: error("setAllowedInPrivateBrowsing returned nothing")
+            debugLog.log("Extensions", "private browsing for $id: $allowed")
+            updated.toInstalled()
+        }
 
     override suspend fun uninstall(id: String) {
         withContext(Dispatchers.Main.immediate) {

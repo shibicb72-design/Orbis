@@ -57,6 +57,7 @@ import com.shibi.orbis.storage.AtomicTextFile
 import com.shibi.orbis.tabs.FileTabStore
 import com.shibi.orbis.tabs.TabManager
 import com.shibi.orbis.tabs.VisitSink
+import com.shibi.orbis.addons.AddonManager
 import com.shibi.orbis.ubo.SharedPreferencesUboPrefs
 import com.shibi.orbis.ubo.UboOnboardingController
 import java.io.File
@@ -177,6 +178,7 @@ class OrbisApp : Application() {
                 log = { debugLog.log("Ubo", it) },
                 now = System::currentTimeMillis,
             )
+        val addons = AddonManager(host = engine.extensions, scope = appScope, log = { debugLog.log("Addons", it) })
         val bookmarks =
             BookmarkManager(
                 store = FileBookmarkStore(AtomicTextFile(File(filesDir, "bookmarks/bookmarks.json"))),
@@ -387,6 +389,7 @@ class OrbisApp : Application() {
                 cast = cast,
                 engine = engine,
                 ubo = ubo,
+                addons = addons,
                 tabs = tabs,
                 downloads = downloads,
                 imports = imports,
@@ -477,6 +480,8 @@ class AppContainer(
     var torrentSettings: com.shibi.orbis.torrent.TorrentSettingsStore? = null,
     val engine: BrowserEngine,
     val ubo: UboOnboardingController,
+    /** The curated add-ons (Settings > Add-ons). Never touches uBlock Origin. */
+    val addons: AddonManager,
     /** Owns every tab and session; outlives screens, so Settings never destroys a page. */
     val tabs: TabManager,
     val downloads: DownloadManager,
