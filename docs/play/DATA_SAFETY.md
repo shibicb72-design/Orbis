@@ -26,8 +26,29 @@ the app. Data a user sends to websites they visit, through a browser, is not col
     when finished" off in Settings > Torrents; by default nothing is uploaded once a download is finished. DHT and
     peer exchange can each be turned off there, and local peer discovery turned on. Speed limits and "Wi-Fi only" are local
     settings: they stay on the phone and change nothing that is sent. None of this changes the answers above.
+  - Secure DNS is off by default. When the user turns it on, the names of the sites they open are sent, encrypted
+    (HTTPS), to the provider they pick: Quad9 (`dns.quad9.net`), Cloudflare (`cloudflare-dns.com`), Mullvad
+    (`dns.mullvad.net`) or an address they type. If it cannot be reached, Orbis uses the phone's DNS. This is the user
+    choosing the service that resolves site names, as with a search engine; nothing goes to the developers. If a
+    reviewer disagrees, declare: "App activity > Web browsing history: shared, optional, for app functionality".
+  - Add-ons: five optional add-ons (SponsorBlock, Consent-O-Matic, ClearURLs, Dark Reader, Violentmonkey), each
+    downloaded from Mozilla's add-on store (`addons.mozilla.org`) when the user adds it, and updated from there. They
+    are made by third parties and can see the pages they have access to (the list shows that access). SponsorBlock
+    contacts `sponsor.ajay.app`; ClearURLs fetches its rule list from its own project site. The user starts each of
+    these by adding the add-on; none is installed at first. Nothing goes to the developers.
+  - Custom search engines: an engine the user adds receives what they search for from the address bar. Orbis does not
+    request suggestions from it. Same basis as the built-in engines.
+  - Backup: a file the user saves where they choose (Settings > Backup and restore). It holds bookmarks with folders,
+    saved passwords, a fixed list of settings, site permission answers, which add-ons are installed, open tabs
+    (optional, on) and browsing history (optional, off). It is encrypted with the user's password (AES-256-GCM). It
+    does not hold cookies or sign-ins, site data, downloads, private tabs, add-on data or the sites where tracking
+    protection was turned off. Orbis never sends the file anywhere and has no copy of it or of the password. The optional
+    fingerprint unlock keeps the password on the phone only (Android Keystore). Where the file goes after that is the
+    user's choice, so no data type is declared.
+  - Clear on exit (wipes at the next start), the private-tab lock, tab groups, the menu and toolbar choices and Material
+    You are local: they stay on the phone and send nothing.
 - **Is all data encrypted in transit?** Yes for Orbis's own requests (search suggestions and add-on
-  install use HTTPS). Websites the user opens may use HTTP unless HTTPS-only mode is on. Torrent traffic with peers
+  install use HTTPS, and so does secure DNS). Websites the user opens may use HTTP unless HTTPS-only mode is on. Torrent traffic with peers
   and trackers uses the BitTorrent protocols; peers may or may not support encryption.
 - **Can users request that data be deleted?** Yes: all data is local; Settings > Clear browsing data, or uninstall.
 - **Independent security review**: No.
