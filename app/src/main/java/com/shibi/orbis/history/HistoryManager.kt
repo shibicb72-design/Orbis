@@ -39,7 +39,9 @@ class HistoryManager(
     private var items = ArrayList<HistoryEntry>()
 
     private var loadStarted = false
-    private var loaded = false
+    /** True once the stored list has been read (also when it was missing or unreadable) and queued changes replayed. */
+    var loaded = false
+        private set
     private val queued = ArrayList<Change>()
 
     private var persistJob: Job? = null

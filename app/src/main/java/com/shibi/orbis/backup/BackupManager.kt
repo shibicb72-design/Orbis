@@ -31,6 +31,8 @@ import com.shibi.orbis.settings.ReaderTheme
 import com.shibi.orbis.settings.ToolbarButton
 import com.shibi.orbis.settings.ToolbarSettings
 import com.shibi.orbis.tabs.TabManager
+import com.shibi.orbis.torrent.TorrentSettings
+import com.shibi.orbis.torrent.TorrentSettingsStore
 import java.time.LocalDate
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -56,6 +58,7 @@ class BackupSources(
     val sitePermissions: SitePermissionDecisions,
     val tabs: TabManager,
     val history: HistoryManager,
+    val torrentSettings: TorrentSettingsStore,
     /** AddonManager.states. */
     val addonStates: () -> Map<String, AddonState>,
     /** uBlock Origin is installed. */
@@ -117,7 +120,7 @@ class BackupManager(
 ) {
     /**
      * A complete backup file. Zeroes [password]. Throws [BackupRefusedException] (password too short, too much data) and
-     * [BackupNotReadyException] (saved passwords or tabs not loaded yet).
+     * [BackupNotReadyException] (bookmarks, saved passwords, tabs, or history when asked for, not loaded yet).
      */
     suspend fun create(password: CharArray, options: BackupOptions = BackupOptions()): ByteArray {
         val plain =
@@ -139,7 +142,8 @@ class BackupManager(
     }
 
     /**
-     * Opens [file] with [password] (zeroed), reads every section, and only then applies them. A section that fails to
+     * Opens [file] with [password] (zeroed), reads every section, and only then applies them. Throws
+     * [BackupNotReadyException], changing nothing, when the bookmarks have not loaded yet. A section that fails to
      * apply is listed in [RestoreResult.Restored.failedSections]; the others still apply.
      */
     suspend fun restore(file: ByteArray, password: CharArray): RestoreResult {
@@ -157,7 +161,11 @@ class BackupManager(
             } finally {
                 opened.payload.fill(0)
             }
-        return withContext(main) { apply(read) }
+        return withContext(main) {
+            // Bookmarks restored before the stored list is read would be replaced by that read: change nothing.
+            if (!sources.bookmarks.loaded) throw BackupNotReadyException(BackupSection.BOOKMARKS)
+            apply(read)
+        }
     }
 
     private fun readSection(name: String, s: JSONObject): SectionRead<Any> =
@@ -179,6 +187,7 @@ class BackupManager(
 
     private fun collect(options: BackupOptions): BackupPayload {
         val s = sources
+        if (!s.bookmarks.loaded) throw BackupNotReadyException(BackupSection.BOOKMARKS)
         if (!s.logins.loaded) throw BackupNotReadyException(BackupSection.PASSWORDS)
         val sections = LinkedHashMap<String, JSONObject>()
         sections[BackupSection.SETTINGS] = SettingsSection.encode(settings().mapValues { (_, keys) -> keys.mapNotNull { (k, v) -> v.read()?.let { k to it } }.toMap() })
@@ -194,7 +203,10 @@ class BackupManager(
             val used = tabs.mapNotNull { it.groupId }.toSet()
             sections[BackupSection.TABS] = TabsSection.encode(TabsBackup(tabs, snap.groups.filter { it.id in used }))
         }
-        if (options.includeHistory) sections[BackupSection.HISTORY] = HistorySection.encode(s.history.entries.value)
+        if (options.includeHistory) {
+            if (!s.history.loaded) throw BackupNotReadyException(BackupSection.HISTORY)
+            sections[BackupSection.HISTORY] = HistorySection.encode(s.history.entries.value)
+        }
         val addons = s.addonStates().mapNotNull { (id, st) -> (st as? AddonState.Installed)?.let { BackupAddon(id, it.enabled) } }
         sections[BackupSection.ADDONS] = AddonsSection.encode(AddonsBackup(addons, s.ublockInstalled()))
         return BackupPayload(sections)
@@ -371,6 +383,11 @@ class BackupManager(
 
     private fun int(read: () -> Int, write: (Int) -> Unit) = Setting(read) { write(it as Int); true }
 
+    private fun torrent(read: (TorrentSettings) -> Any, write: (TorrentSettings, Any) -> TorrentSettings): Setting {
+        val store = sources.torrentSettings
+        return Setting({ read(store.settings.value) }) { v -> store.update { write(it, v) }; true }
+    }
+
     private inline fun <reified E : Enum<E>> enum(crossinline read: () -> E, crossinline write: (E) -> Unit) =
         Setting({ read().name }) { v -> enumValues<E>().firstOrNull { it.name == v }?.let { write(it); true } ?: false }
 
@@ -489,6 +506,18 @@ class BackupManager(
                         clear.exceptions = cleanExceptions(v as Set<String>)
                         true
                     },
+                ),
+            com.shibi.orbis.torrent.SharedPreferencesTorrentPrefs.FILE_NAME to
+                mapOf(
+                    // Through the store's update(), so the running torrent session follows the same flow the screen uses.
+                    TorrentSettingsStore.KEY_WIFI_ONLY to torrent({ it.wifiOnly }) { t, v -> t.copy(wifiOnly = v as Boolean) },
+                    TorrentSettingsStore.KEY_STOP_SEEDING to torrent({ it.stopSeeding }) { t, v -> t.copy(stopSeeding = v as Boolean) },
+                    TorrentSettingsStore.KEY_SEED_RATIO to torrent({ it.seedRatioLimit ?: NoValue }) { t, v -> t.copy(seedRatioLimit = v as? Float) },
+                    TorrentSettingsStore.KEY_DHT to torrent({ it.dht }) { t, v -> t.copy(dht = v as Boolean) },
+                    TorrentSettingsStore.KEY_PEX to torrent({ it.pex }) { t, v -> t.copy(pex = v as Boolean) },
+                    TorrentSettingsStore.KEY_LSD to torrent({ it.lsd }) { t, v -> t.copy(lsd = v as Boolean) },
+                    TorrentSettingsStore.KEY_DOWN_BPS to torrent({ it.downBps }) { t, v -> t.copy(downBps = v as Int) },
+                    TorrentSettingsStore.KEY_UP_BPS to torrent({ it.upBps }) { t, v -> t.copy(upBps = v as Int) },
                 ),
         )
     }
