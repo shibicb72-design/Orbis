@@ -73,6 +73,7 @@ class DohScreenTest {
     fun customAddressIsValidatedOnSave() {
         tap("Use secure DNS")
         tap("Custom address")
+        rule.onNodeWithText("Secure DNS is off until you save an address.").assertExists()
         rule.onNode(hasSetTextAction()).performTextReplacement("http://x/dns-query")
         tap("Save")
         rule.onNodeWithText("Enter an address that starts with https://").assertExists()
@@ -81,6 +82,7 @@ class DohScreenTest {
         tap("Save")
         rule.onAllNodesWithText("Enter an address that starts with https://").assertCountEquals(0)
         assertEquals("https://dns.example/dns-query", settings.config.value.resolverUrl)
+        rule.onAllNodesWithText("Secure DNS is off until you save an address.").assertCountEquals(0)
         assertEquals(DohProvider.CUSTOM, settings.config.value.provider)
         assertTrue(settings.config.value.enabled)
         tap("Use secure DNS")

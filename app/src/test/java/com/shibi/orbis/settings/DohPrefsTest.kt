@@ -48,8 +48,8 @@ class DohPrefsTest {
     fun badCustomAddressesAreRefusedAndNotSaved() {
         val prefs = FakePrefs()
         val settings = DohSettings(prefs)
-        val bad = listOf("http://x/dns-query", "dns.quad9.net", "", "https://" + "a".repeat(293))
-        assertEquals(301, bad.last().length)
+        val bad = listOf("http://x/dns-query", "dns.quad9.net", "", "https://" + "a".repeat(293), "https://user:pass@dns.example/dns-query", "https://user@dns.example/dns-query")
+        assertEquals(301, bad[3].length)
         for (text in bad) {
             assertFalse(text, settings.setCustomUrl(text))
         }

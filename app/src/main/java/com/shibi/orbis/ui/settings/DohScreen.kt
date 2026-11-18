@@ -119,6 +119,13 @@ fun DohScreen(settings: DohSettings, onBack: () -> Unit, modifier: Modifier = Mo
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     )
+                    if (config.resolverUrl == null) {
+                        Text(
+                            text = stringResource(R.string.doh_custom_pending),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                    }
                     TextButton(
                         onClick = { addressError = !settings.setCustomUrl(address) },
                         modifier = Modifier.padding(horizontal = 8.dp),

@@ -10,5 +10,6 @@
     <string name="doh_custom_label" translatable="false">Address</string>
     <string name="doh_custom_save" translatable="false">Save</string>
     <string name="doh_custom_error" translatable="false">Enter an address that starts with https://</string>
+    <string name="doh_custom_pending" translatable="false">Secure DNS is off until you save an address.</string>
     <string name="doh_note" translatable="false">Off: Orbis uses your phone\'s DNS, including its Private DNS setting. On: Orbis sends the names of the sites you open to the provider you choose, encrypted, instead of to your network. If the provider cannot be reached, Orbis uses your phone\'s DNS.</string>
 </resources>
