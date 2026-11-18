@@ -59,6 +59,7 @@ import com.shibi.orbis.ui.OrbisTopAppBar
 import com.shibi.orbis.ui.theme.AppTheme
 import com.shibi.orbis.ui.theme.AppThemes
 import com.shibi.orbis.ui.theme.isDark
+import com.shibi.orbis.ui.theme.rememberScheme
 
 internal fun themeCardTag(id: String) = "theme_card_$id"
 
@@ -220,7 +221,7 @@ private fun ThemeCard(theme: AppTheme, selected: Boolean, previewDark: Boolean, 
  */
 @Composable
 private fun ThemePreview(theme: AppTheme, dark: Boolean) {
-    val c = theme.mode(dark).scheme
+    val c = theme.rememberScheme(dark)
     Column(
         Modifier
             .fillMaxWidth()

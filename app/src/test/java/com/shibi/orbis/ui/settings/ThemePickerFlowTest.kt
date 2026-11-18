@@ -139,14 +139,14 @@ class ThemePickerFlowTest {
     @Config(sdk = [35], application = android.app.Application::class, qualifiers = "w412dp-h915dp")
     fun previewsAreDrawnInEachThemesOwnColoursAndFollowDarkMode() {
         show()
-        for (t in AppThemes.all) assertPreview(t.id, t.light.scheme)
+        for (t in AppThemes.fixed) assertPreview(t.id, t.light.scheme)
         rule.onNodeWithContentDescription("Appearance: Dark").performScrollTo().performClick()
         rule.waitForIdle()
         assertEquals(DarkMode.DARK, settings.darkMode.value)
-        for (t in AppThemes.all) assertPreview(t.id, t.dark.scheme)
+        for (t in AppThemes.fixed) assertPreview(t.id, t.dark.scheme)
         rule.onNodeWithContentDescription("Appearance: Light").performScrollTo().performClick()
         rule.waitForIdle()
-        for (t in AppThemes.all) assertPreview(t.id, t.light.scheme)
+        for (t in AppThemes.fixed) assertPreview(t.id, t.light.scheme)
     }
 
     private fun assertPreview(id: String, scheme: ColorScheme) {

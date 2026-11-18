@@ -55,7 +55,7 @@ class ThemeTabStripPrivateTest {
                 TabStrip(tabs = tabs, onSelect = {}, onClose = {}, onNewTab = {}, onDropOpen = {})
             }
         }
-        for (t in AppThemes.all) {
+        for (t in AppThemes.fixed) {
             for (m in listOf(DarkMode.LIGHT, DarkMode.DARK)) {
                 theme = t
                 mode = m

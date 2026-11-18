@@ -104,6 +104,8 @@ class AppTheme(
     @StringRes val descriptionRes: Int,
     val light: ThemeMode,
     val dark: ThemeMode,
+    /** True when the colours come from the phone's wallpaper (Material You); [light] and [dark] are then only the fallback. */
+    val dynamic: Boolean = false,
 ) {
     fun mode(dark: Boolean): ThemeMode = if (dark) this.dark else light
 }
@@ -114,7 +116,10 @@ object AppThemes {
     val Default: AppTheme get() = TealTheme
 
     /** In picker order. Ids are stored, so never change one. */
-    val all: List<AppTheme> by lazy { listOf(TealTheme, GraphiteTheme, HarborTheme, FernTheme, EmberTheme, PaperTheme) }
+    val all: List<AppTheme> by lazy { listOf(TealTheme, GraphiteTheme, HarborTheme, FernTheme, EmberTheme, PaperTheme, MaterialYouTheme) }
+
+    /** The themes whose colours are fixed in code: the ones tests can check for contrast. Excludes the wallpaper theme. */
+    val fixed: List<AppTheme> by lazy { all.filter { !it.dynamic } }
 
     /** An unknown or missing id (a downgrade, a removed theme) reads as Orbis Teal; the stored id is left alone. */
     fun byId(id: String?): AppTheme = all.firstOrNull { it.id == id } ?: Default
@@ -149,7 +154,7 @@ fun OrbisTheme(
     }
     CompositionLocalProvider(LocalAppTheme provides theme) {
         MaterialTheme(
-            colorScheme = theme.mode(dark).scheme,
+            colorScheme = theme.rememberScheme(dark),
             content = content,
         )
     }

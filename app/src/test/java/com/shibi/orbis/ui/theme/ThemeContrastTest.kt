@@ -10,7 +10,7 @@ import org.junit.Test
 class ThemeContrastTest {
     private fun forEveryMode(check: (String, ColorScheme, MutableList<String>) -> Unit): List<String> {
         val failures = mutableListOf<String>()
-        for (theme in AppThemes.all) {
+        for (theme in AppThemes.fixed) {
             for (dark in listOf(false, true)) {
                 check("${theme.id}/${if (dark) "dark" else "light"}", theme.mode(dark).scheme, failures)
             }
@@ -75,7 +75,7 @@ class ThemeContrastTest {
     @Test
     fun backgroundsKeepTheirPolarity() {
         val failures = mutableListOf<String>()
-        for (theme in AppThemes.all) {
+        for (theme in AppThemes.fixed) {
             if (!polarityOk(theme.light.scheme.background, dark = false)) failures.add("${theme.id} light")
             if (!polarityOk(theme.dark.scheme.background, dark = true)) failures.add("${theme.id} dark")
         }
@@ -85,7 +85,7 @@ class ThemeContrastTest {
     /** Tertiary is reserved for private tabs: the exact plum in every theme. */
     @Test
     fun privateColoursAreThePlumInEveryTheme() {
-        for (theme in AppThemes.all) {
+        for (theme in AppThemes.fixed) {
             val l = theme.light.scheme
             assertEquals(theme.id, PrivateColors.Light.first, l.tertiary)
             assertEquals(theme.id, PrivateColors.Light.second, l.tertiaryContainer)
@@ -110,7 +110,7 @@ class ThemeContrastTest {
         val darkFloors = floors(teal.dark.scheme)
         val failures = mutableListOf<String>()
         var minLight = 1.0
-        for (theme in AppThemes.all) {
+        for (theme in AppThemes.fixed) {
             for (dark in listOf(false, true)) {
                 val c = theme.mode(dark).scheme
                 val floors = if (dark) darkFloors else lightFloors
@@ -151,7 +151,7 @@ class ThemeContrastTest {
     fun idsAreUniqueAndTheCountIsDeliberate() {
         val ids = AppThemes.all.map { it.id }
         assertEquals(ids.distinct(), ids)
-        assertEquals(listOf("orbis_teal", "graphite", "harbor", "fern", "ember", "paper"), ids)
+        assertEquals(listOf("orbis_teal", "graphite", "harbor", "fern", "ember", "paper", "material_you"), ids)
     }
 
     /**
@@ -163,7 +163,7 @@ class ThemeContrastTest {
     fun lightSurfacesClearThePlum() {
         val plum = PrivateColors.Light.second
         val failures = mutableListOf<String>()
-        for (theme in AppThemes.all) {
+        for (theme in AppThemes.fixed) {
             if (theme.id == AppThemes.DEFAULT_ID) continue
             val c = theme.light.scheme
             val low = okLabDistance(plum, c.surfaceContainerLow)
