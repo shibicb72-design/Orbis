@@ -111,6 +111,9 @@ fun SettingsScreen(
     onOpenSearchEngines: () -> Unit = {},
     /** Privacy > Add-ons: the curated add-on list. The row is hidden when null (screen tests). */
     onOpenAddons: (() -> Unit)? = null,
+    /** Privacy > Clear when Orbis is closed. The row is hidden when null (screen tests). */
+    clearOnExitEnabled: Boolean? = null,
+    onOpenClearOnExit: () -> Unit = {},
 ) {
     var httpsDialogOpen by remember { mutableStateOf(false) }
     if (site != null) {
@@ -387,6 +390,22 @@ fun SettingsScreen(
                         .fillMaxWidth()
                         .clickable(onClick = onOpenClearData),
                 )
+                if (clearOnExitEnabled != null) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.clear_exit_title)) },
+                        supportingContent = {
+                            Text(
+                                stringResource(
+                                    if (clearOnExitEnabled) R.string.clear_exit_summary_on else R.string.clear_exit_summary_off,
+                                ),
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onOpenClearOnExit),
+                    )
+                }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.perm_settings_title)) },
