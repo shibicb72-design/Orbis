@@ -108,10 +108,12 @@ class BackupScreenTest {
     private var heldCallback: ((Uri?) -> Unit)? = null
     private lateinit var lifecycle: LifecycleRegistry
 
+    // Held in a field: the registry keeps only a weak reference to its owner.
+    private val owner = object : LifecycleOwner { override val lifecycle get() = this@BackupScreenTest.lifecycle }
+
     private fun show() {
-        lifecycle = LifecycleRegistry.createUnsafe(object : LifecycleOwner { override val lifecycle get() = this@BackupScreenTest.lifecycle })
+        lifecycle = LifecycleRegistry.createUnsafe(owner)
         lifecycle.currentState = Lifecycle.State.RESUMED
-        val owner = object : LifecycleOwner { override val lifecycle get() = this@BackupScreenTest.lifecycle }
         rule.setContent {
             CompositionLocalProvider(LocalLifecycleOwner provides owner) {
             MaterialTheme {
