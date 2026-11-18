@@ -65,6 +65,7 @@ enum class MenuAction(val group: MenuGroup) {
     // Tabs
     NEW_TAB(MenuGroup.TABS),
     NEW_PRIVATE_TAB(MenuGroup.TABS),
+    DUPLICATE_TAB(MenuGroup.TABS),
     SCAN_QR(MenuGroup.TABS),
 
     // Library
@@ -148,6 +149,7 @@ fun menuItemState(action: MenuAction, page: MenuPageState, window: MenuWindow): 
         MenuAction.DESKTOP_SITE -> MenuItemState(true, page.hasSession, R.string.menu_desktop_site, checked = page.desktopMode)
         MenuAction.NEW_TAB -> MenuItemState(true, true, R.string.menu_new_tab)
         MenuAction.NEW_PRIVATE_TAB -> MenuItemState(true, true, R.string.menu_new_private_tab)
+        MenuAction.DUPLICATE_TAB -> MenuItemState(true, page.hasSession && web, R.string.menu_duplicate_tab)
         MenuAction.SCAN_QR -> MenuItemState(true, true, R.string.menu_scan_qr)
         MenuAction.BOOKMARKS -> MenuItemState(true, true, R.string.menu_bookmarks)
         MenuAction.HISTORY -> MenuItemState(true, true, R.string.menu_history)

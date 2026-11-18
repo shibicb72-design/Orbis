@@ -8,7 +8,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performSemanticsAction
 import com.shibi.orbis.engine.TranslationInfo
@@ -97,6 +97,7 @@ class BrowserMenuTest {
     private val restEntries = listOf(
         "New tab",
         "New private tab",
+        "Duplicate tab",
         "Scan QR code",
         "Bookmarks",
         "History",
@@ -119,6 +120,16 @@ class BrowserMenuTest {
         rule.onNodeWithText("Site settings").assertIsNotEnabled()
         rule.onNodeWithText("Reader view").assertIsNotEnabled()
         rule.onNodeWithText("Find in page").assertIsEnabled()
+        rule.onNodeWithText("Duplicate tab").assertIsNotEnabled()
+    }
+
+    @Test
+    fun duplicateTabIsEnabledOnlyForAWebPageWithASession() {
+        show(web)
+        rule.onNodeWithText("Duplicate tab").assertIsEnabled()
+        assertFalse(menuItemState(MenuAction.DUPLICATE_TAB, web.copy(hasSession = false), narrow).enabled)
+        assertFalse(menuItemState(MenuAction.DUPLICATE_TAB, web.copy(url = "file:///x.pdf"), narrow).enabled)
+        assertTrue(menuItemState(MenuAction.DUPLICATE_TAB, privateTab, narrow).enabled)
     }
 
     @Test
