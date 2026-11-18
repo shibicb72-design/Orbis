@@ -372,8 +372,8 @@ class TabManager(
             try {
                 factory(
                     if (tab.isPrivate) {
-                        // Never restored from disk: a private tab is not stored, so there is nothing to restore.
-                        SessionInit(desktopMode = tab.desktopMode, isPrivate = true)
+                        // Never restored from disk: a private tab is not stored. Only a duplicate carries a state, in memory.
+                        SessionInit(tab.desktopMode, tab.savedState, tab.url.takeIf { isWebUrl(it) }, isPrivate = true)
                     } else {
                         SessionInit(tab.desktopMode, tab.savedState, tab.url.takeIf { isWebUrl(it) })
                     },
@@ -697,6 +697,35 @@ class TabManager(
         ensureSession(id)?.session?.setActive(foreground)
         changed()
         return id
+    }
+
+    /**
+     * Opens a copy of tab [id] right after it: same address, title, desktop mode, back/forward history, mode (private or
+     * normal) and group. The copy is selected. Null, with nothing opened, when the tab is gone, blank, or not on a web
+     * address; null with [TabEvent.TAB_LIMIT] at the tab cap.
+     */
+    fun duplicate(id: Long): Long? {
+        val index = indexOf(id)
+        if (index < 0) return null
+        val original = list[index]
+        if (!isWebUrl(original.url)) return null
+        if (list.size >= maxTabs) {
+            notifyLimit()
+            return null
+        }
+        val saved = runCatching { original.session?.savedState() }.getOrNull() ?: original.savedState
+        val newId = nextId++
+        list.firstOrNull { it.id == selectedId }?.session?.setActive(false)
+        val copy =
+            Tab(
+                newId, null, original.title, original.url, original.desktopMode, saved, null, original.isPrivate,
+                groupId = original.groupId.takeIf { !original.isPrivate },
+            )
+        list.add(index + 1, copy)
+        selectedId = newId
+        ensureSession(newId)?.session?.setActive(foreground)
+        changed()
+        return newId
     }
 
     /** Forgets the recently closed tabs (their addresses and history). */

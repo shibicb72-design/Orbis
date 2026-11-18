@@ -1060,6 +1060,87 @@ class TabManagerTest {
     }
 
     @Test
+    fun duplicateSitsRightAfterTheOriginalIsSelectedAndCopiesItsPage() {
+        val m = manager()
+        m.openSelected()
+        val a = m.selected.value.id
+        created[0].navigate("https://a.example/page", "A page")
+        created[0].saved = "STATE-A"
+        created[0].setDesktopMode(true)
+        scheduler.runCurrent()
+        val b = m.newTab()!!
+        val c = m.newTab()!!
+        val d = m.duplicate(a)!!
+        assertEquals(listOf(a, d, b, c), m.ids())
+        assertEquals(d, m.selected.value.id)
+        assertEquals("https://a.example/page", m.selected.value.url)
+        assertEquals("A page", m.selected.value.title)
+        assertTrue(m.selected.value.desktopMode)
+        val session = created.last()
+        assertEquals("STATE-A", session.init.restoredState)
+        assertEquals("https://a.example/page", session.init.fallbackUrl)
+        assertTrue(session.init.desktopMode)
+        assertFalse(session.init.isPrivate)
+    }
+
+    @Test
+    fun duplicateOfABlankOrNonWebTabOpensNothing() {
+        val m = manager()
+        m.openSelected()
+        val a = m.selected.value.id
+        assertNull(m.duplicate(a))
+        assertNull(m.duplicate(999L))
+        created[0].navigate("file:///data/imported.pdf")
+        assertNull(m.duplicate(a))
+        assertEquals(listOf(a), m.ids())
+    }
+
+    @Test
+    fun duplicateOfAGroupedTabJoinsTheSameGroupAndTheGroupStaysContiguous() {
+        val m = manager()
+        m.openSelected()
+        val a = m.selected.value.id
+        created[0].navigate("https://a.example/")
+        val b = m.newTab()!!
+        val c = m.newTab()!!
+        val g = m.createGroup(listOf(a, b), "G", TabGroupColor.RED)!!
+        val d = m.duplicate(a)!!
+        assertEquals(listOf(a, d, b, c), m.ids())
+        assertEquals(g, m.groupOf(d))
+        assertGroupRules(m)
+    }
+
+    @Test
+    fun duplicateOfAPrivateTabIsPrivateKeepsItsHistoryAndIsNeverPersisted() {
+        val store = MemoryStore()
+        val m = manager(store)
+        m.openSelected()
+        val p = m.newPrivateTab()!!
+        created.last().navigate("https://secret.example/", "Secret")
+        created.last().saved = "STATE-P"
+        val d = m.duplicate(p)!!
+        assertTrue(m.selected.value.isPrivate)
+        assertEquals(listOf(m.ids().first(), p, d), m.ids())
+        assertEquals("STATE-P", created.last().init.restoredState)
+        assertTrue(created.last().init.isPrivate)
+        m.flush()
+        scheduler.runCurrent()
+        assertTrue(store.snapshot!!.tabs.none { it.id == p || it.id == d })
+    }
+
+    @Test
+    fun duplicateAtTheTabLimitReturnsNullAndSendsOneLimitEvent() = runTest(scheduler) {
+        val m = manager(max = 2)
+        m.openSelected()
+        val a = m.selected.value.id
+        created[0].navigate("https://a.example/")
+        m.newTab()
+        assertNull(m.duplicate(a))
+        assertEquals(2, m.ids().size)
+        assertEquals(TabEvent.TAB_LIMIT, m.events.first())
+    }
+
+    @Test
     fun eachGroupStaysContiguousAfterAnySequenceOfChanges() {
         for (seed in 1..40) {
             val random = kotlin.random.Random(seed)

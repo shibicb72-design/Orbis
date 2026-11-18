@@ -702,6 +702,7 @@ private fun BrowserContent(
                                     }
                                     MenuAction.NEW_TAB -> focusAddressFor = tabs.newTab()
                                     MenuAction.NEW_PRIVATE_TAB -> focusAddressFor = tabs.newPrivateTab()
+                                    MenuAction.DUPLICATE_TAB -> tabs.duplicate(selectedTab.id)
                                     MenuAction.SCAN_QR -> onOpenQrScanner()
                                     MenuAction.BOOKMARKS -> onOpenBookmarks()
                                     MenuAction.HISTORY -> onOpenHistory()
