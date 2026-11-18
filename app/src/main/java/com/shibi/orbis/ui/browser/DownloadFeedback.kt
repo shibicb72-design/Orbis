@@ -14,9 +14,10 @@ import com.shibi.orbis.downloads.DownloadStatus
 import com.shibi.orbis.downloads.SavedTo
 import com.shibi.orbis.tabs.PendingDownload
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** Which message the download feedback shows. Only [SAVED], [FINISHED] and [SAVED_PRIVATE] carry the "Open" button. */
 enum class DownloadFeedbackKind(val hasOpen: Boolean) {
@@ -59,11 +60,32 @@ object DownloadFeedbackState {
                     entry.savedTo == SavedTo.DOWNLOADS -> DownloadFeedbackKind.SAVED
                     // The copy to Downloads happens a moment after COMPLETED: wait before calling it "not copied".
                     finishedAt == null || now - finishedAt >= COPY_GRACE_MS -> DownloadFeedbackKind.FINISHED
+                    // During the wait "Downloading..." stays up (until the 10 s limit) instead of a gap with no message.
+                    elapsed < MAX_DOWNLOADING_MS -> DownloadFeedbackKind.DOWNLOADING
                     else -> null
                 }
             }
         }
     }
+
+    /**
+     * Milliseconds until the next change that only the clock causes (the 700 ms minimum, the 10 s limit, the end of the
+     * copy wait), or null when none is due: then only a change of the entry itself can change the message.
+     */
+    fun nextTimedChangeIn(entry: DownloadEntry?, startedAt: Long, now: Long): Long? {
+        if (entry == null) return null
+        val due =
+            listOfNotNull(
+                startedAt + MIN_DOWNLOADING_MS,
+                startedAt + MAX_DOWNLOADING_MS,
+                entry.finishedAt?.let { it + COPY_GRACE_MS },
+            )
+        return due.filter { it > now }.minOrNull()?.let { it - now }
+    }
+
+    /** True when [a] and [b] agree in everything that can change the message (the byte counts do not count). */
+    fun sameMessageState(a: DownloadEntry?, b: DownloadEntry?): Boolean =
+        a?.status == b?.status && a?.savedTo == b?.savedTo && a?.isPrivate == b?.isPrivate && a?.finishedAt == b?.finishedAt
 
     /** True once nothing more will change: the final message is up, or the download is gone, cancelled or paused. */
     fun isFinal(kind: DownloadFeedbackKind?, entry: DownloadEntry?): Boolean =
@@ -129,7 +151,13 @@ fun DownloadFeedback(
                 }
             }
             if (DownloadFeedbackState.isFinal(kind, entry)) break
-            delay(50)
+            // Sleep until the next clock-driven change, or until the entry changes, whichever comes first.
+            // With no change due (a download that runs on) only the entry can change anything, so just wait for it.
+            val wait = DownloadFeedbackState.nextTimedChangeIn(entry, startedAt, clock())
+            val changed: suspend () -> Unit = {
+                entries.first { list -> !DownloadFeedbackState.sameMessageState(entry, list.firstOrNull { it.id == downloadId }) }
+            }
+            if (wait == null) changed() else withTimeoutOrNull(wait) { changed() }
         }
     }
 }

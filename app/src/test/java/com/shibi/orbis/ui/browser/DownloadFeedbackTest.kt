@@ -4,7 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.shibi.orbis.downloads.DownloadEntry
@@ -16,6 +16,7 @@ import java.io.InputStream
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -107,9 +108,55 @@ class DownloadFeedbackTest {
         advance(1_000)
         entries.value = listOf(entry(DownloadStatus.COMPLETED, SavedTo.ORBIS, finishedAt = t0 + 1_000))
         advance(1_900)
-        assertNoMessage()
+        assertMessage("Downloading…", null)
         advance(200)
         assertMessage("Download finished", "Open")
+    }
+
+    @Test
+    fun a_file_kept_in_orbis_keeps_downloading_up_through_the_copy_wait() {
+        show()
+        advance(800)
+        entries.value = listOf(entry(DownloadStatus.COMPLETED, SavedTo.ORBIS, finishedAt = t0 + 800))
+        advance(200)
+        assertMessage("Downloading…", null)
+        advance(1_700)
+        assertMessage("Downloading…", null)
+        advance(200)
+        assertMessage("Download finished", "Open")
+    }
+
+    @Test
+    fun a_copy_marked_during_the_wait_replaces_downloading_with_saved_to_downloads() {
+        show()
+        advance(800)
+        entries.value = listOf(entry(DownloadStatus.COMPLETED, SavedTo.ORBIS, finishedAt = t0 + 800))
+        advance(100)
+        entries.value = listOf(entry(DownloadStatus.COMPLETED, SavedTo.DOWNLOADS, finishedAt = t0 + 800))
+        advance(100)
+        assertMessage("Saved to Downloads", "Open")
+    }
+
+    @Test
+    fun a_download_that_runs_on_shows_nothing_and_waits_instead_of_polling() {
+        var reads = 0
+        rule.mainClock.autoAdvance = false
+        rule.setContent {
+            Box {
+                SnackbarHost(host)
+                DownloadFeedback(host, entries, id, onOpen = { opened += it }, now = { reads++; t0 + rule.mainClock.currentTime })
+            }
+        }
+        advance(11_000)
+        assertNoMessage()
+        val before = reads
+        advance(19_000)
+        assertNoMessage()
+        // Polling every 50 ms would read the clock about 380 times in these 19 seconds.
+        assertTrue("clock read ${reads - before} times", reads - before < 5)
+        entries.value = listOf(entry(DownloadStatus.COMPLETED, SavedTo.DOWNLOADS, finishedAt = t0 + 30_000))
+        advance(100)
+        assertMessage("Saved to Downloads", "Open")
     }
 
     @Test
