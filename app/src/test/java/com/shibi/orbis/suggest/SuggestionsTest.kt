@@ -81,4 +81,12 @@ class SuggestionsTest {
         )
         assertTrue(mergeSuggestions(" ", local, listOf("x")).isEmpty())
     }
+
+    @Test
+    fun customSearchResultPagesAreNotSuggested() {
+        val h = listOf(HistoryEntry("https://s.example/?q=weather", "weather results", 1, visits = 9), HistoryEntry("https://s.example/weather", "weather page", 1, visits = 1))
+        val templates = listOf("https://s.example/?q=%s")
+        assertEquals(listOf("https://s.example/weather"), localSuggestions("weather", h, emptyList(), customTemplates = templates).map { it.url })
+        assertEquals(2, localSuggestions("weather", h, emptyList()).size)
+    }
 }

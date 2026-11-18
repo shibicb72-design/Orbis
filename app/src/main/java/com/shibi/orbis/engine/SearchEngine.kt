@@ -106,7 +106,7 @@ fun validateCustomEngine(name: String, template: String, existing: List<SearchPr
 }
 
 private fun hasHost(url: String): Boolean =
-    runCatching { URI(url) }.getOrNull()?.let { it.scheme.equals("https", ignoreCase = true) && !it.host.isNullOrEmpty() } ?: false
+    runCatching { URI(url) }.getOrNull()?.let { it.scheme.equals("https", ignoreCase = true) && !it.host.isNullOrEmpty() && it.userInfo == null } ?: false
 
 /** Where the choice and the added engines are kept. [selectedId] is the raw stored id; null when nothing is stored. */
 interface SearchEnginePrefs {

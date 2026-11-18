@@ -2,6 +2,7 @@ package com.shibi.orbis.home
 
 import com.shibi.orbis.history.HistoryEntry
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -55,5 +56,32 @@ class TopSitesTest {
         assertEquals("E", tileLetter("www.example.com"))
         assertEquals("1", tileLetter("127.0.0.1"))
         assertEquals("?", tileLetter("---"))
+    }
+
+    private val query = listOf("https://s.example/?q=%s")
+
+    @Test
+    fun customSearchResultPagesAreLeftOutButTheEnginesOtherPagesStay() {
+        val history = listOf(e("https://s.example/?q=cats", 50), e("https://s.example/about", 1))
+        assertEquals(listOf("https://s.example/about"), topSites(history, customTemplates = query).map { it.url })
+        assertTrue(isSearchResultPage("https://s.example/?q=cats", query))
+        assertFalse(isSearchResultPage("https://s.example/about", query))
+        // Without the template the page is an ordinary site, as before.
+        assertFalse(isSearchResultPage("https://s.example/?q=cats"))
+    }
+
+    @Test
+    fun aPathTemplateMatchesItsPrefixOnly() {
+        val t = listOf("https://s.example/search/%s")
+        assertTrue(isSearchResultPage("https://s.example/search/cats", t))
+        assertFalse(isSearchResultPage("https://s.example/other", t))
+    }
+
+    @Test
+    fun aBareHostTemplateMatchesNothing() {
+        val t = listOf("https://s.example/%s")
+        assertFalse(isSearchResultPage("https://s.example/cats", t))
+        assertFalse(isSearchResultPage("https://s.example/", t))
+        assertEquals(listOf("https://s.example/cats"), topSites(listOf(e("https://s.example/cats", 3)), customTemplates = t).map { it.url })
     }
 }

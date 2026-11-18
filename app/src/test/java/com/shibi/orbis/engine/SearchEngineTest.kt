@@ -210,4 +210,17 @@ class SearchEngineTest {
             SharedPreferencesSearchEnginePrefs.decodeCustomEngines(damaged),
         )
     }
+
+    @Test
+    fun anAddressWithAUserNameOrPasswordIsRefusedAndDroppedOnLoad() {
+        assertEquals(CustomEngineError.BAD_ADDRESS, validateCustomEngine("Mine", "https://user:pass@s.example/?q=%s", emptyList()))
+        assertEquals(CustomEngineError.BAD_ADDRESS, validateCustomEngine("Mine", "https://user@s.example/?q=%s", emptyList()))
+        val stored =
+            """[{"id":"custom:1","name":"Cred","template":"https://user:pass@s.example/?q=%s"},""" +
+                """{"id":"custom:2","name":"Ok","template":"https://ok.example/?q=%s"}]"""
+        assertEquals(
+            listOf(SearchProvider.Custom("custom:2", "Ok", "https://ok.example/?q=%s")),
+            SharedPreferencesSearchEnginePrefs.decodeCustomEngines(stored),
+        )
+    }
 }

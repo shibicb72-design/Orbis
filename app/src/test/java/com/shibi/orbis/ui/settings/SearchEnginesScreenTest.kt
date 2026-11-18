@@ -8,6 +8,7 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -142,5 +143,12 @@ class SearchEnginesScreenTest {
         show()
         rule.onNodeWithText("Add search engine").performScrollTo().assertIsNotEnabled()
         rule.onNodeWithText("You can add up to 10 search engines").performScrollTo().assertExists()
+    }
+
+    @Test
+    fun theRemoveButtonNamesItsEngineForAScreenReader() {
+        assertTrue(settings.addCustom("Example", "https://s.example/?q=%s") is AddResult.Added)
+        show()
+        rule.onNodeWithContentDescription("Remove Example").performScrollTo().assertExists()
     }
 }

@@ -35,6 +35,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -157,7 +159,12 @@ private fun EngineRow(provider: SearchProvider, selected: Boolean, onSelect: () 
         headlineContent = { Text(searchProviderName(provider)) },
         supportingContent = (provider as? SearchProvider.Custom)?.let { c -> { Text(c.template, maxLines = 2) } },
         trailingContent = onRemove?.let { remove ->
-            { TextButton(onClick = remove) { Text(stringResource(R.string.search_engines_remove)) } }
+            {
+                val description = stringResource(R.string.search_engines_remove_named, searchProviderName(provider))
+                TextButton(onClick = remove, modifier = Modifier.semantics { contentDescription = description }) {
+                    Text(stringResource(R.string.search_engines_remove))
+                }
+            }
         },
         colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
         modifier =

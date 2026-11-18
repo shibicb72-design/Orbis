@@ -2,6 +2,7 @@
 <resources>
     <string name="search_engines_add" translatable="false">Add search engine</string>
     <string name="search_engines_remove" translatable="false">Remove</string>
+    <string name="search_engines_remove_named" translatable="false">Remove %1$s</string>
     <string name="search_engines_name" translatable="false">Name</string>
     <string name="search_engines_address" formatted="false" translatable="false">Address with %s in place of the search words</string>
     <string name="search_engines_add_confirm" translatable="false">Add</string>
