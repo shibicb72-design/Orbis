@@ -1,6 +1,7 @@
 package com.shibi.orbis.ui.settings
 
 import android.content.ContentResolver
+import android.content.Context
 import android.content.res.Resources
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -189,7 +190,7 @@ private fun sectionName(resources: Resources, section: String): String =
 /**
  * Settings > Backup and restore. A sensitive screen (the caller blocks screenshots while it is up). With a screen lock
  * set, nothing shows until the prompt is passed. Passwords live only in this screen's state: they are cleared when the
- * app goes to the background (except while the system file picker is open, which also stops this activity) and when
+ * app goes to the background, which also locks the screen again (except while the system file picker is open, which also stops this activity) and when
  * the screen closes. Key derivation and the file transfer run off the main thread.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -203,12 +204,19 @@ fun BackupScreen(
     /** Test hook: replaces the system file picker. */
     pickers: BackupPickers? = null,
     today: () -> LocalDate = LocalDate::now,
+    /** Test hook: whether the phone has a screen lock. */
+    screenLockSet: (Context) -> Boolean = ::isScreenLockSet,
+    /** Test hook: start unlocked (Robolectric cannot pass the system prompt). */
+    startUnlocked: Boolean = false,
+    /** Test hook: the screen-lock prompt. */
+    authenticator: (Context, String, String, () -> Unit) -> Unit = ::authenticate,
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val scope = rememberCoroutineScope()
 
-    var unlocked by remember { mutableStateOf(!isScreenLockSet(context)) }
+    var lockSet by remember { mutableStateOf(screenLockSet(context)) }
+    var unlocked by remember { mutableStateOf(startUnlocked) }
     var includeTabs by remember { mutableStateOf(true) }
     var includeHistory by remember { mutableStateOf(false) }
     var password by remember { mutableStateOf("") }
@@ -225,7 +233,9 @@ fun BackupScreen(
     DisposableEffect(lifecycleOwner) {
         val observer =
             LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) lockSet = screenLockSet(context)
                 if (event == Lifecycle.Event.ON_STOP && !pickerOpen) {
+                    unlocked = false
                     password = ""
                     repeat = ""
                     restorePassword = ""
@@ -239,9 +249,9 @@ fun BackupScreen(
     }
 
     val unlock = {
-        authenticate(context, resources.getString(R.string.backup_auth_title), resources.getString(R.string.backup_auth_subtitle)) { unlocked = true }
+        authenticator(context, resources.getString(R.string.backup_auth_title), resources.getString(R.string.backup_auth_subtitle)) { unlocked = true }
     }
-    LaunchedEffect(Unit) { if (!unlocked) unlock() }
+    LaunchedEffect(Unit) { if (lockSet && !unlocked) unlock() }
 
     fun startCreate(uri: Uri) {
         val pw = password
@@ -302,6 +312,8 @@ fun BackupScreen(
                 }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: BackupNotReadyException) {
+                outcome = BackupOutcome(listOf(resources.getString(R.string.backup_not_ready)))
             } catch (e: Exception) {
                 outcome = BackupOutcome(listOf(resources.getString(R.string.backup_file_unreadable)))
             } finally {
@@ -325,7 +337,11 @@ fun BackupScreen(
     fun pickCreate() {
         val name = BackupFormat.suggestedFileName(today())
         if (pickers != null) {
-            pickers.create(name) { uri -> if (uri != null) startCreate(uri) }
+            pickerOpen = true
+            pickers.create(name) { uri ->
+                pickerOpen = false
+                if (uri != null) startCreate(uri)
+            }
         } else {
             pickerOpen = true
             if (runCatching { createLauncher.launch(name) }.isFailure) pickerOpen = false
@@ -334,7 +350,11 @@ fun BackupScreen(
 
     fun pickOpen() {
         if (pickers != null) {
-            pickers.open { uri -> if (uri != null) startRead(uri) }
+            pickerOpen = true
+            pickers.open { uri ->
+                pickerOpen = false
+                if (uri != null) startRead(uri)
+            }
         } else {
             pickerOpen = true
             if (runCatching { openLauncher.launch(arrayOf("*/*")) }.isFailure) pickerOpen = false
@@ -355,6 +375,11 @@ fun BackupScreen(
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize().secondaryReadingWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
+            if (!lockSet) {
+                // Without a screen lock anyone holding the phone could write every saved password to a file.
+                Text(stringResource(R.string.backup_no_lock))
+                return@Column
+            }
             if (!unlocked) {
                 Text(stringResource(R.string.backup_locked))
                 Button(onClick = { unlock() }, modifier = Modifier.padding(top = 12.dp)) { Text(stringResource(R.string.backup_unlock)) }

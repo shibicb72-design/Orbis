@@ -6,6 +6,7 @@
     <string name="backup_auth_title" translatable="false">Orbis backup</string>
     <string name="backup_auth_subtitle" translatable="false">Confirm it\'s you</string>
     <string name="backup_locked" translatable="false">Unlock to make or restore a backup.</string>
+    <string name="backup_no_lock" translatable="false">Set a screen lock (PIN, pattern or password) on this phone to make or restore a backup.</string>
     <string name="backup_unlock" translatable="false">Unlock</string>
 
     <string name="backup_create_heading" translatable="false">Create backup</string>

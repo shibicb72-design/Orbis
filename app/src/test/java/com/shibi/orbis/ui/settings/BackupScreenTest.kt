@@ -2,6 +2,11 @@ package com.shibi.orbis.ui.settings
 
 import android.net.Uri
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -58,6 +63,7 @@ class BackupScreenTest {
     private var writeOk = true
     private var restoreResult: RestoreResult = RestoreResult.Failed(BackupError.NOT_A_BACKUP)
     private var restoreCalls = 0
+    private var restoreError: Exception? = null
     private var fileRead: BackupFileRead = BackupFileRead.Bytes(byteArrayOf(1, 2, 3))
     private var addonsOpened = 0
 
@@ -72,6 +78,7 @@ class BackupScreenTest {
             restore = { _, password ->
                 password.fill('\u0000')
                 restoreCalls++
+                restoreError?.let { throw it }
                 restoreResult
             },
         )
@@ -90,14 +97,23 @@ class BackupScreenTest {
         object : BackupPickers {
             override fun create(fileName: String, onResult: (Uri?) -> Unit) {
                 createdName = fileName
-                onResult(uri)
+                if (holdPicker) heldCallback = onResult else onResult(uri)
             }
 
             override fun open(onResult: (Uri?) -> Unit) = onResult(uri)
         }
 
+    private var lockSet = true
+    private var holdPicker = false
+    private var heldCallback: ((Uri?) -> Unit)? = null
+    private lateinit var lifecycle: LifecycleRegistry
+
     private fun show() {
+        lifecycle = LifecycleRegistry.createUnsafe(object : LifecycleOwner { override val lifecycle get() = this@BackupScreenTest.lifecycle })
+        lifecycle.currentState = Lifecycle.State.RESUMED
+        val owner = object : LifecycleOwner { override val lifecycle get() = this@BackupScreenTest.lifecycle }
         rule.setContent {
+            CompositionLocalProvider(LocalLifecycleOwner provides owner) {
             MaterialTheme {
                 BackupScreen(
                     actions = actions,
@@ -106,10 +122,23 @@ class BackupScreenTest {
                     files = files,
                     pickers = pickers,
                     today = { LocalDate.of(2026, 11, 18) },
+                    screenLockSet = { lockSet },
+                    startUnlocked = true,
+                    authenticator = { _, _, _, ok -> ok() },
                 )
+            }
             }
         }
     }
+
+    private fun lifecycleTo(vararg events: Lifecycle.Event) {
+        rule.runOnUiThread { for (e in events) lifecycle.handleLifecycleEvent(e) }
+        rule.waitForIdle()
+    }
+
+    private fun leaveApp() = lifecycleTo(Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP)
+
+    private fun returnToApp() = lifecycleTo(Lifecycle.Event.ON_START, Lifecycle.Event.ON_RESUME)
 
     private fun fields() = rule.onAllNodes(hasSetTextAction())
 
@@ -301,5 +330,64 @@ class BackupScreenTest {
         show()
         assertEquals(0, rule.onAllNodesWithText("Restore").fetchSemanticsNodes().size)
         assertNull(written)
+    }
+
+    private val noLockText = "Set a screen lock (PIN, pattern or password) on this phone to make or restore a backup."
+
+    @Test(timeout = 60_000)
+    fun withoutAScreenLockOnlyTheMessageShows() {
+        lockSet = false
+        show()
+        rule.onNodeWithText(noLockText).assertExists()
+        assertEquals(0, rule.onAllNodesWithText("Save backup file").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("Choose backup file").fetchSemanticsNodes().size)
+        assertEquals(0, fields().fetchSemanticsNodes().size)
+    }
+
+    @Test(timeout = 60_000)
+    fun aLockSetWhileAwayIsNoticedOnResume() {
+        lockSet = false
+        show()
+        rule.onNodeWithText(noLockText).assertExists()
+        lockSet = true
+        leaveApp()
+        returnToApp()
+        // Leaving relocked the screen, so the Unlock state shows rather than the message.
+        assertEquals(0, rule.onAllNodesWithText(noLockText).fetchSemanticsNodes().size)
+        rule.onNodeWithText("Unlock").assertExists()
+    }
+
+    @Test(timeout = 60_000)
+    fun leavingWithNoPickerOpenLocksAndClears() {
+        show()
+        type("1234567890", "1234567890")
+        save().assertIsEnabled()
+        leaveApp()
+        rule.onNodeWithText("Unlock").assertExists()
+        assertEquals(0, rule.onAllNodesWithText("Save backup file").fetchSemanticsNodes().size)
+        // Unlocking again shows the screen with empty fields.
+        returnToApp()
+        rule.onNodeWithText("Unlock").performClick()
+        save().assertIsNotEnabled()
+        assertEquals("", fields()[0].fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text)
+        assertEquals("", fields()[1].fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text)
+    }
+
+    @Test(timeout = 60_000)
+    fun leavingWithThePickerOpenKeepsFieldsAndUnlockedState() {
+        holdPicker = true
+        show()
+        type("1234567890", "1234567890")
+        save().performScrollTo().performClick()
+        assertTrue(heldCallback != null)
+        leaveApp()
+        assertEquals(0, rule.onAllNodesWithText("Unlock").fetchSemanticsNodes().size)
+        save().assertIsEnabled()
+    }
+
+    @Test(timeout = 60_000)
+    fun restoreNotReadyMessage() {
+        restoreError = BackupNotReadyException("tabs")
+        restoreAndExpect(RestoreResult.Failed(BackupError.NOT_A_BACKUP), "Orbis is still starting. Try again in a moment.")
     }
 }
