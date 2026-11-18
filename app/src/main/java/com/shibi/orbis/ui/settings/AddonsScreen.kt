@@ -168,10 +168,15 @@ fun AddonsScreen(
         )
     }
 
+    val colors = MaterialTheme.colorScheme
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        containerColor = colors.background,
+        contentColor = colors.onBackground,
         topBar = {
             OrbisTopAppBar(
+                containerColor = colors.background,
+                contentColor = colors.onBackground,
                 title = { Text(stringResource(R.string.addons_title)) },
                 navigationIcon = {
                     IconButton(
@@ -276,10 +281,26 @@ private fun AddonRow(
                 }
             }
             is AddonState.Installed -> {
-                SwitchRow(R.string.addons_on, state.enabled) { manager.setEnabled(addon.id, it) }
-                SwitchRow(R.string.addons_allow_private, state.allowedInPrivate) { manager.setAllowedInPrivate(addon.id, it) }
+                if (state.disabledByBrowser) {
+                    // The engine turned it off (blocklist or signature): nothing here can switch it back on.
+                    Text(
+                        stringResource(R.string.addons_turned_off),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                } else {
+                    SwitchRow(R.string.addons_on, state.enabled) { manager.setEnabled(addon.id, it) }
+                    SwitchRow(R.string.addons_allow_private, state.allowedInPrivate) { manager.setAllowedInPrivate(addon.id, it) }
+                }
+                if (state.updateBlocked) {
+                    Text(
+                        stringResource(R.string.addons_update_blocked),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 val options = state.optionsPageUrl
-                if (options != null) {
+                if (options != null && !state.disabledByBrowser) {
                     OutlinedButton(onClick = { onOpenExtensionPage(options) }, modifier = Modifier.fillMaxWidth()) {
                         Text(stringResource(R.string.addons_open_settings))
                     }

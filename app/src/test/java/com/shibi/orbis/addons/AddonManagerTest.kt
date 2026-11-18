@@ -40,6 +40,9 @@ private class FakeHost : ExtensionHost {
     var nextError: ExtensionInstallError? = null
     var engineDelayMillis = 0L
     var hang = false
+    val updateCalls = mutableListOf<String>()
+    var updateResult: InstalledExtension? = null
+    var updateError: Exception? = null
 
     override suspend fun find(id: String): InstalledExtension? = installed[id]
 
@@ -84,8 +87,37 @@ private class FakeHost : ExtensionHost {
         installed.remove(id)
     }
 
-    override suspend fun checkForUpdate(id: String): InstalledExtension? = null
+    override suspend fun checkForUpdate(id: String): InstalledExtension? {
+        updateCalls += id
+        updateError?.let { throw it }
+        return updateResult
+    }
 }
+
+private class FakePrefs : AddonPrefs {
+    val checks = mutableMapOf<String, Long>()
+    val blocked = mutableSetOf<String>()
+
+    override fun lastUpdateCheckMillis(id: String) = checks[id] ?: 0L
+
+    override fun setLastUpdateCheckMillis(id: String, millis: Long) {
+        checks[id] = millis
+    }
+
+    override fun updateBlocked(id: String) = id in blocked
+
+    override fun setUpdateBlocked(id: String, blocked: Boolean) {
+        if (blocked) this.blocked += id else this.blocked -= id
+    }
+
+    override fun clear(id: String) {
+        checks.remove(id)
+        blocked.remove(id)
+    }
+}
+
+private const val HOUR = 60L * 60 * 1000
+private val CLEARURLS = AddonCatalog.entries.first { it.name == "ClearURLs" }
 
 private fun ext(id: String, allowedInPrivate: Boolean = false, version: String = "4.9.135") =
     InstalledExtension(id, version, enabled = true, disabledByUser = false, allowedInPrivate = allowedInPrivate)
@@ -94,12 +126,21 @@ private fun ext(id: String, allowedInPrivate: Boolean = false, version: String =
 class AddonManagerTest {
     private val logs = mutableListOf<String>()
     private val scopeJobs = mutableListOf<Job>()
+    private val prefs = FakePrefs()
+    private var clock = 1_000_000_000_000L
 
     // A real scope on the test scheduler: advanceUntilIdle() does not run backgroundScope work.
-    private fun TestScope.manager(host: FakeHost, timeoutMillis: Long = 180_000): AddonManager {
+    private fun TestScope.manager(host: FakeHost, timeoutMillis: Long = 180_000, addonPrefs: AddonPrefs = prefs): AddonManager {
         val job = SupervisorJob()
         scopeJobs += job
-        return AddonManager(host, CoroutineScope(StandardTestDispatcher(testScheduler) + job), { logs += it }, timeoutMillis)
+        return AddonManager(
+            host = host,
+            scope = CoroutineScope(StandardTestDispatcher(testScheduler) + job),
+            log = { logs += it },
+            prefs = addonPrefs,
+            now = { clock },
+            installTimeoutMillis = timeoutMillis,
+        )
     }
 
     @After
@@ -267,7 +308,7 @@ class AddonManagerTest {
     fun `refresh reports installed catalogue add-ons with their switches`() =
         runTest {
             val host = FakeHost()
-            host.installed[DARK_READER.id] = ext(DARK_READER.id, allowedInPrivate = true).copy(enabled = false)
+            host.installed[DARK_READER.id] = ext(DARK_READER.id, allowedInPrivate = true).copy(enabled = false, disabledByUser = true)
             val m = manager(host)
 
             m.refresh()
@@ -275,5 +316,173 @@ class AddonManagerTest {
 
             assertEquals(AddonState.Installed("4.9.135", false, true, null), m.states.value[DARK_READER.id])
             assertFalse(m.install(DARK_READER.id) { true })
+        }
+
+    @Test
+    fun `a second check inside 24 hours makes no host call`() =
+        runTest {
+            val host = FakeHost().apply { installed[DARK_READER.id] = ext(DARK_READER.id) }
+            val m = manager(host)
+
+            m.checkForUpdatesIfDue()
+            advanceUntilIdle()
+            assertEquals(listOf(DARK_READER.id), host.updateCalls)
+
+            clock += 23 * HOUR
+            m.checkForUpdatesIfDue()
+            advanceUntilIdle()
+            assertEquals(listOf(DARK_READER.id), host.updateCalls)
+
+            clock += 2 * HOUR
+            m.checkForUpdatesIfDue()
+            advanceUntilIdle()
+            assertEquals(listOf(DARK_READER.id, DARK_READER.id), host.updateCalls)
+        }
+
+    @Test
+    fun `no check is made for an add-on that is not installed`() =
+        runTest {
+            val host = FakeHost().apply { installed[UBO_ID] = ext(UBO_ID) }
+            val m = manager(host)
+
+            m.checkForUpdatesIfDue()
+            advanceUntilIdle()
+
+            assertTrue(host.updateCalls.isEmpty())
+        }
+
+    @Test
+    fun `no check is made while an install is running`() =
+        runTest {
+            val host = FakeHost().apply {
+                installed[CLEARURLS.id] = ext(CLEARURLS.id)
+                engineDelayMillis = 5_000
+            }
+            val m = manager(host)
+            m.refresh()
+            advanceUntilIdle()
+
+            m.install(DARK_READER.id) { true }
+            m.checkForUpdatesIfDue()
+            advanceTimeBy(2_500)
+            runCurrent()
+            assertTrue(host.updateCalls.isEmpty())
+            assertEquals(AddonState.Installing, m.states.value[DARK_READER.id])
+
+            // The check goes on after the install; the add-on just installed counts as checked.
+            advanceUntilIdle()
+            assertEquals(listOf(CLEARURLS.id), host.updateCalls)
+        }
+
+    @Test
+    fun `a host failure leaves the Installed state as it was and is tried again next time`() =
+        runTest {
+            val host = FakeHost().apply {
+                installed[DARK_READER.id] = ext(DARK_READER.id)
+                updateError = IllegalStateException("boom")
+            }
+            val m = manager(host)
+            m.refresh()
+            advanceUntilIdle()
+            val before = m.states.value[DARK_READER.id]
+
+            m.checkForUpdatesIfDue()
+            advanceUntilIdle()
+
+            assertEquals(before, m.states.value[DARK_READER.id])
+            assertEquals(0L, prefs.lastUpdateCheckMillis(DARK_READER.id))
+            assertFalse(prefs.updateBlocked(DARK_READER.id))
+        }
+
+    @Test
+    fun `an update with no new access shows the new version`() =
+        runTest {
+            val host = FakeHost().apply {
+                installed[DARK_READER.id] = ext(DARK_READER.id)
+                updateResult = ext(DARK_READER.id, version = "5.0.0")
+            }
+            val m = manager(host)
+
+            m.checkForUpdatesIfDue()
+            advanceUntilIdle()
+
+            assertEquals(AddonState.Installed("5.0.0", true, false, null), m.states.value[DARK_READER.id])
+            assertEquals(clock, prefs.lastUpdateCheckMillis(DARK_READER.id))
+        }
+
+    @Test
+    fun `an update the engine refused for more access is marked blocked and stays marked after a restart`() =
+        runTest {
+            val host = FakeHost().apply {
+                installed[DARK_READER.id] = ext(DARK_READER.id)
+                updateError = ExtensionInstallException(ExtensionInstallError.CANCELLED)
+            }
+            val m = manager(host)
+
+            m.checkForUpdatesIfDue()
+            advanceUntilIdle()
+            assertEquals(
+                AddonState.Installed("4.9.135", true, false, null, updateBlocked = true),
+                m.states.value[DARK_READER.id],
+            )
+
+            val restarted = manager(host)
+            restarted.refresh()
+            advanceUntilIdle()
+            assertTrue((restarted.states.value[DARK_READER.id] as AddonState.Installed).updateBlocked)
+
+            restarted.remove(DARK_READER.id)
+            advanceUntilIdle()
+            assertFalse(prefs.updateBlocked(DARK_READER.id))
+        }
+
+    @Test
+    fun `an add-on the engine turned off, not the user, is reported as disabled by the browser`() =
+        runTest {
+            val host = FakeHost().apply {
+                installed[DARK_READER.id] = ext(DARK_READER.id).copy(enabled = false, disabledByUser = false)
+            }
+            val m = manager(host)
+
+            m.refresh()
+            advanceUntilIdle()
+
+            assertTrue((m.states.value[DARK_READER.id] as AddonState.Installed).disabledByBrowser)
+        }
+
+    @Test
+    fun `a confirm that never answers ends NotInstalled after 5 minutes and another add-on can then be installed`() =
+        runTest {
+            val host = FakeHost()
+            val m = manager(host)
+
+            m.install(DARK_READER.id) { awaitCancellation() }
+            advanceTimeBy(4 * 60_000 + 59_000)
+            runCurrent()
+            assertEquals(AddonState.Installing, m.states.value[DARK_READER.id])
+
+            advanceTimeBy(2_000)
+            runCurrent()
+            assertEquals(AddonState.NotInstalled, m.states.value[DARK_READER.id])
+
+            assertTrue(m.install(CLEARURLS.id) { true })
+            advanceUntilIdle()
+            assertTrue(m.states.value[CLEARURLS.id] is AddonState.Installed)
+        }
+
+    @Test
+    fun `try again works after an install failed because another install was already running`() =
+        runTest {
+            val host = FakeHost().apply { nextError = ExtensionInstallError.UNKNOWN }
+            val m = manager(host)
+
+            m.install(DARK_READER.id) { true }
+            advanceUntilIdle()
+            assertEquals(AddonState.Failed(AddonFailure.UNKNOWN), m.states.value[DARK_READER.id])
+
+            host.nextError = null
+            assertTrue(m.install(DARK_READER.id) { true })
+            advanceUntilIdle()
+            assertTrue(m.states.value[DARK_READER.id] is AddonState.Installed)
         }
 }

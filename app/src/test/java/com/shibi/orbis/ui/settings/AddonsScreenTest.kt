@@ -1,4 +1,4 @@
-﻿package com.shibi.orbis.ui.settings
+package com.shibi.orbis.ui.settings
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
@@ -13,7 +13,7 @@ import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -21,6 +21,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import com.shibi.orbis.addons.AddonCatalog
 import com.shibi.orbis.addons.AddonManager
+import com.shibi.orbis.addons.AddonPrefs
 import com.shibi.orbis.engine.AddonAccess
 import com.shibi.orbis.engine.ExtensionHost
 import com.shibi.orbis.engine.ExtensionInstallError
@@ -55,6 +56,7 @@ private class FakeHost : ExtensionHost {
     /** What `confirm` returned for each install the screen started. */
     val confirmAnswers = mutableListOf<Boolean>()
     var hangAfterConfirm = false
+    var failWith: ExtensionInstallError? = null
 
     override suspend fun find(id: String): InstalledExtension? = installed[id]
 
@@ -68,6 +70,7 @@ private class FakeHost : ExtensionHost {
         expectedId: String,
         confirm: suspend (AddonAccess) -> Boolean,
     ): InstalledExtension {
+        failWith?.let { throw ExtensionInstallException(it) }
         val answer = confirm(ACCESS)
         confirmAnswers += answer
         if (!answer) throw ExtensionInstallException(ExtensionInstallError.CANCELLED)
@@ -91,6 +94,24 @@ private class FakeHost : ExtensionHost {
     override suspend fun checkForUpdate(id: String): InstalledExtension? = null
 }
 
+private class ScreenPrefs : AddonPrefs {
+    val blocked = mutableSetOf<String>()
+
+    override fun lastUpdateCheckMillis(id: String) = 0L
+
+    override fun setLastUpdateCheckMillis(id: String, millis: Long) = Unit
+
+    override fun updateBlocked(id: String) = id in blocked
+
+    override fun setUpdateBlocked(id: String, blocked: Boolean) {
+        if (blocked) this.blocked += id else this.blocked -= id
+    }
+
+    override fun clear(id: String) {
+        blocked -= id
+    }
+}
+
 private fun ext(id: String, optionsPageUrl: String? = null, allowedInPrivate: Boolean = false) =
     InstalledExtension(
         id,
@@ -112,7 +133,8 @@ class AddonsScreenTest {
 
     private val host = FakeHost()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-    private val manager = AddonManager(host, scope, {})
+    private val prefs = ScreenPrefs()
+    private val manager = AddonManager(host, scope, {}, prefs, System::currentTimeMillis)
     private val opened = mutableListOf<String>()
 
     @After
@@ -261,6 +283,45 @@ class AddonsScreenTest {
             com.shibi.orbis.addons.AddonState.NotInstalled,
             manager.states.value.getValue("sponsorBlocker@ajay.app"),
         )
+    }
+
+    @Test
+    fun an_add_on_with_a_blocked_update_shows_the_remove_and_add_again_line() {
+        host.installed[DARK_READER.id] = ext(DARK_READER.id)
+        prefs.blocked += DARK_READER.id
+        show()
+        rule.onNodeWithText("An update needs more access. Remove and add it again to review the new access.")
+            .performScrollTo()
+            .assertExists()
+        rule.onNodeWithText("On").assertIsOn()
+        rule.onNodeWithText("Remove").assertExists()
+    }
+
+    @Test
+    fun an_add_on_the_browser_turned_off_has_the_safety_line_and_no_on_switch() {
+        host.installed[DARK_READER.id] = ext(DARK_READER.id).copy(enabled = false, disabledByUser = false)
+        show()
+        rule.onNodeWithText("Turned off by the browser for your safety.").performScrollTo().assertExists()
+        rule.onAllNodesWithText("On").assertCountEquals(0)
+        rule.onAllNodesWithText("Allow in private tabs").assertCountEquals(0)
+        rule.onNodeWithText("Remove").assertExists()
+    }
+
+    @Test
+    fun try_again_installs_after_a_failed_install() {
+        host.failWith = ExtensionInstallError.UNKNOWN
+        show()
+        tapAddOnFirstRow()
+        rule.onNodeWithText("This add-on could not be installed.").assertExists()
+
+        host.failWith = null
+        rule.onNodeWithText("Try again").performScrollTo().assertIsEnabled().performClick()
+        rule.waitForIdle()
+        rule.onNode(hasText("Add") and hasAnyAncestor(isDialog())).performClick()
+        rule.waitForIdle()
+
+        assertEquals(setOf("sponsorBlocker@ajay.app"), host.installed.keys)
+        rule.onAllNodesWithText("Try again").assertCountEquals(0)
     }
 
     @Test
