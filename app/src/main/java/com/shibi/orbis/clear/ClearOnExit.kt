@@ -71,8 +71,9 @@ class ClearOnExit(
         if (!prefs.enabled) restore()
     }
 
-    fun onActivityCreated(hasSavedState: Boolean) {
-        val fresh = tracker.onActivityCreated(hasSavedState)
+    /** See [UiSessionTracker.onActivityCreated] for [browserTaskInRecents]. */
+    fun onActivityCreated(hasSavedState: Boolean, browserTaskInRecents: Boolean = false) {
+        val fresh = tracker.onActivityCreated(hasSavedState, browserTaskInRecents)
         val wipe = fresh && prefs.enabled
         when {
             // A wipe is already running (a link router that finished before the browser came up): it covers this start.

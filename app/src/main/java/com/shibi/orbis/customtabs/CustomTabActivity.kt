@@ -56,6 +56,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shibi.orbis.MainActivity
 import com.shibi.orbis.OrbisApp
 import com.shibi.orbis.R
+import com.shibi.orbis.browserTaskInRecents
 import com.shibi.orbis.engine.BrowserSession
 import com.shibi.orbis.engine.IncomingDownload
 import com.shibi.orbis.engine.SessionHost
@@ -94,8 +95,12 @@ class CustomTabActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // First: a fresh start with Clear on exit on wipes before this page's session exists.
-        app.container.clearOnExit.onActivityCreated(hasSavedState = savedInstanceState != null)
+        // First: a fresh start with Clear on exit on wipes before this page's session exists. Not when the browser's
+        // task is still in Recents (Android killed Orbis in the background): this tab has its own task.
+        app.container.clearOnExit.onActivityCreated(
+            hasSavedState = savedInstanceState != null,
+            browserTaskInRecents = browserTaskInRecents(),
+        )
         enableEdgeToEdge()
         val url = intent?.dataString?.takeIf { isWebUrl(it) }
         if (url == null) {
