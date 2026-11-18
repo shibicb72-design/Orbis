@@ -11,8 +11,9 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -43,6 +44,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -52,6 +56,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
@@ -60,6 +66,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.first
 import com.shibi.orbis.R
 import com.shibi.orbis.engine.hostOfUrl
+import com.shibi.orbis.tabs.TabGroup
+import com.shibi.orbis.tabs.TabGroupColor
 import com.shibi.orbis.tabs.TabUi
 import com.shibi.orbis.ui.theme.TAB_ENTER_MS
 import com.shibi.orbis.ui.theme.TAB_EXIT_MS
@@ -102,6 +110,38 @@ internal fun tabSheetReturnFocus(outcome: TabSheetOutcome): ReturnFocus =
         TabSheetOutcome.NEW_TAB -> ReturnFocus.NEW_TAB_ADDRESS
     }
 
+/** One cell of the switcher grid: a group's header row, or a tab card (with its group, when it has one). */
+internal sealed interface SwitcherEntry {
+    val key: Any
+
+    data class Header(val group: TabGroup, val tabCount: Int) : SwitcherEntry {
+        override val key: Any get() = "group_${group.id}"
+    }
+
+    data class Card(val tab: TabUi, val group: TabGroup?) : SwitcherEntry {
+        override val key: Any get() = tab.id
+    }
+}
+
+/**
+ * The grid cells for [tabs] in order: a header before the first tab of each group in [groups], then its tabs unless the
+ * group is collapsed. A tab whose group is not in [groups] is a plain card.
+ */
+internal fun switcherEntries(tabs: List<TabUi>, groups: List<TabGroup>): List<SwitcherEntry> {
+    if (groups.isEmpty()) return tabs.map { SwitcherEntry.Card(it, null) }
+    val byId = groups.associateBy { it.id }
+    val out = ArrayList<SwitcherEntry>(tabs.size + groups.size)
+    val opened = HashSet<Long>()
+    for (tab in tabs) {
+        val group = tab.groupId?.let { byId[it] }
+        if (group != null && opened.add(group.id)) {
+            out += SwitcherEntry.Header(group, tabs.count { it.groupId == group.id })
+        }
+        if (group == null || !group.collapsed) out += SwitcherEntry.Card(tab, group)
+    }
+    return out
+}
+
 /**
  * Bottom sheet listing every tab: title and host, the selected one marked with a check and a visible "Current tab"
  * label (not color alone), a close button per row that names its tab. Private tabs carry a mark and a tint; the second
@@ -125,6 +165,10 @@ internal fun TabSwitcher(
     onRecentlyClosed: (() -> Unit)? = null,
     /** The "Tab closed / Undo" bar, shown inside the sheet (the screen's own one is behind it). */
     snackbars: SnackbarHostState? = null,
+    /** The groups in tab order; empty with [groupActions] null shows the flat grid. */
+    groups: List<TabGroup> = emptyList(),
+    /** Group edits; null turns every group control (long-press menu, headers) off. */
+    groupActions: TabGroupActions? = null,
 ) {
     val motionEnabled = rememberMotionEnabled()
     val gate = remember { TabSheetGate() }
@@ -136,6 +180,8 @@ internal fun TabSwitcher(
     }
     // Fully expanded: half-open, the lower part of a long list (often the current tab) sits below the screen edge.
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val entries = remember(tabs, groups, groupActions != null) { switcherEntries(tabs, if (groupActions != null) groups else emptyList()) }
+    var dialog by remember { mutableStateOf<GroupDialogState?>(null) }
     ModalBottomSheet(
         onDismissRequest = { end(TabSheetOutcome.DISMISSED, onDismiss) },
         sheetState = sheetState,
@@ -178,7 +224,12 @@ internal fun TabSwitcher(
             }
         }
         // Opens scrolled to the current tab: with many tabs it would otherwise sit below the fold.
-        val selectedIndex = tabs.indexOfFirst { it.selected }.coerceAtLeast(0)
+        // A selected tab inside a collapsed group is not a cell; its group's header stands in for it.
+        val selectedIndex = entries.indexOfFirst { it is SwitcherEntry.Card && it.tab.selected }.takeIf { it >= 0 }
+            ?: tabs.firstOrNull { it.selected }?.groupId
+                ?.let { gid -> entries.indexOfFirst { it is SwitcherEntry.Header && it.group.id == gid } }
+                ?.takeIf { it >= 0 }
+            ?: 0
         val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = selectedIndex)
         // The first placement happens before the sheet has its final height; once it is open, bring the current tab fully
         // into view if it is not (never moves a grid the user can already see the current tab in).
@@ -206,7 +257,33 @@ internal fun TabSwitcher(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            items(tabs, key = { it.id }) { tab ->
+            items(
+                entries,
+                key = { it.key },
+                span = { if (it is SwitcherEntry.Header) GridItemSpan(maxLineSpan) else GridItemSpan(1) },
+            ) { entry ->
+                if (entry is SwitcherEntry.Header) {
+                    if (groupActions != null) {
+                        TabGroupHeader(
+                            group = entry.group,
+                            tabCount = entry.tabCount,
+                            actions = groupActions,
+                            onDialog = { dialog = it },
+                            modifier = Modifier.animateItem(
+                                fadeInSpec = motionTweenOrNull(motionEnabled, TAB_ENTER_MS),
+                                placementSpec = motionTweenOrNull(motionEnabled, TAB_PLACEMENT_MS),
+                                fadeOutSpec = motionTweenOrNull(motionEnabled, TAB_EXIT_MS),
+                            ),
+                        )
+                    }
+                    return@items
+                }
+                entry as SwitcherEntry.Card
+                val tab = entry.tab
+                val group = entry.group
+                var menuOpen by remember { mutableStateOf(false) }
+                val groupColor = group?.color?.themedColor()
+                val groupDescription = group?.let { stringResource(R.string.tab_group_in_group, it.name, tabGroupColorName(it.color)) }
                 val container =
                     when {
                         tab.selected -> MaterialTheme.colorScheme.secondaryContainer
@@ -227,7 +304,12 @@ internal fun TabSwitcher(
                     contentColor = content,
                     shape = MaterialTheme.shapes.medium,
                     // The current tab has a visible frame as well as its label (not color alone).
-                    border = if (tab.selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+                    // A grouped tab has a 3 dp frame in its group's colour (the group is also named for a screen reader).
+                    border = when {
+                        groupColor != null -> BorderStroke(3.dp, groupColor)
+                        tab.selected -> BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                        else -> null
+                    },
                     modifier = Modifier
                         .animateItem(
                             fadeInSpec = motionTweenOrNull(motionEnabled, TAB_ENTER_MS),
@@ -236,7 +318,15 @@ internal fun TabSwitcher(
                         )
                         .fillMaxWidth()
                         .testTag(tabRowTag(tab.id))
-                        .selectable(selected = tab.selected, role = Role.Tab) {
+                        .semantics {
+                            selected = tab.selected
+                            if (groupDescription != null) stateDescription = groupDescription
+                        }
+                        .combinedClickable(
+                            role = Role.Tab,
+                            onLongClickLabel = if (groupActions != null && !tab.isPrivate) stringResource(R.string.tab_group_long_press) else null,
+                            onLongClick = if (groupActions != null && !tab.isPrivate) ({ menuOpen = true }) else null,
+                        ) {
                             end(TabSheetOutcome.SELECTED) { onSelect(tab.id) }
                         },
                 ) {
@@ -280,10 +370,70 @@ internal fun TabSwitcher(
                             letter = (host?.removePrefix("www.")?.firstOrNull()?.uppercaseChar() ?: '+').toString(),
                             host = host,
                         )
+                        if (menuOpen && groupActions != null && !tab.isPrivate) {
+                            TabGroupMenu(
+                                tab = tab,
+                                groups = groups,
+                                actions = groupActions,
+                                onNewGroup = { dialog = GroupDialogState.NewGroup(tab.id) },
+                                onDismiss = { menuOpen = false },
+                            )
+                        }
                     }
                 }
             }
         }
+    }
+    val actions = groupActions
+    when (val shown = dialog) {
+        null -> Unit
+        is GroupDialogState.NewGroup -> TabGroupEditDialog(
+            title = stringResource(R.string.tab_group_new),
+            confirmLabel = stringResource(R.string.tab_group_create),
+            initialName = "",
+            initialColor = TabGroupColor.BLUE,
+            askName = true,
+            askColor = true,
+            onConfirm = { name, color ->
+                dialog = null
+                actions?.onCreate?.invoke(shown.tabId, name, color)
+            },
+            onDismiss = { dialog = null },
+        )
+        is GroupDialogState.Rename -> TabGroupEditDialog(
+            title = stringResource(R.string.tab_group_rename_title),
+            confirmLabel = stringResource(R.string.tab_group_save),
+            initialName = shown.group.name,
+            initialColor = shown.group.color,
+            askName = true,
+            askColor = false,
+            onConfirm = { name, _ ->
+                dialog = null
+                actions?.onRename?.invoke(shown.group.id, name)
+            },
+            onDismiss = { dialog = null },
+        )
+        is GroupDialogState.Recolour -> TabGroupEditDialog(
+            title = stringResource(R.string.tab_group_colour_title),
+            confirmLabel = stringResource(R.string.tab_group_save),
+            initialName = shown.group.name,
+            initialColor = shown.group.color,
+            askName = false,
+            askColor = true,
+            onConfirm = { _, color ->
+                dialog = null
+                actions?.onColor?.invoke(shown.group.id, color)
+            },
+            onDismiss = { dialog = null },
+        )
+        is GroupDialogState.CloseGroup -> CloseGroupDialog(
+            tabCount = shown.tabCount,
+            onConfirm = {
+                dialog = null
+                actions?.onCloseGroup?.invoke(shown.group.id)
+            },
+            onDismiss = { dialog = null },
+        )
     }
 }
 

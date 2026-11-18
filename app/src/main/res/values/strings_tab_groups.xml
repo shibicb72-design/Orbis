@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="tab_group_count" translatable="false">
+        <item quantity="one">%d tab</item>
+        <item quantity="other">%d tabs</item>
+    </plurals>
+    <string name="tab_group_collapse" translatable="false">Collapse group %1$s</string>
+    <string name="tab_group_expand" translatable="false">Expand group %1$s</string>
+    <string name="tab_group_options" translatable="false">Group options</string>
+    <string name="tab_group_rename" translatable="false">Rename</string>
+    <string name="tab_group_change_colour" translatable="false">Change colour</string>
+    <string name="tab_group_ungroup" translatable="false">Ungroup</string>
+    <string name="tab_group_close" translatable="false">Close group</string>
+    <string name="tab_group_add" translatable="false">Add to group</string>
+    <string name="tab_group_new" translatable="false">New group</string>
+    <string name="tab_group_remove" translatable="false">Remove from group</string>
+    <string name="tab_group_long_press" translatable="false">Tab options</string>
+    <string name="tab_group_name_hint" translatable="false">Group name</string>
+    <string name="tab_group_colour_label" translatable="false">Colour</string>
+    <string name="tab_group_create" translatable="false">Create</string>
+    <string name="tab_group_save" translatable="false">Save</string>
+    <string name="tab_group_cancel" translatable="false">Cancel</string>
+    <string name="tab_group_rename_title" translatable="false">Rename group</string>
+    <string name="tab_group_colour_title" translatable="false">Change group colour</string>
+    <string name="tab_group_close_confirm" translatable="false">Close</string>
+    <string name="tab_group_in_group" translatable="false">In group %1$s, %2$s</string>
+    <string name="tab_group_colour_grey" translatable="false">Grey</string>
+    <string name="tab_group_colour_blue" translatable="false">Blue</string>
+    <string name="tab_group_colour_red" translatable="false">Red</string>
+    <string name="tab_group_colour_yellow" translatable="false">Yellow</string>
+    <string name="tab_group_colour_green" translatable="false">Green</string>
+    <string name="tab_group_colour_pink" translatable="false">Pink</string>
+    <string name="tab_group_colour_purple" translatable="false">Purple</string>
+    <string name="tab_group_colour_cyan" translatable="false">Cyan</string>
+    <plurals name="tab_group_close_title" translatable="false">
+        <item quantity="one">Close %d tab?</item>
+        <item quantity="other">Close %d tabs?</item>
+    </plurals>
+</resources>
