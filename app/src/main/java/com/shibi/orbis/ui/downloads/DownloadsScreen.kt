@@ -611,7 +611,7 @@ internal fun DownloadRow(
                             whenAndWhere,
                             style = MaterialTheme.typography.bodySmall,
                             color = secondary,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
