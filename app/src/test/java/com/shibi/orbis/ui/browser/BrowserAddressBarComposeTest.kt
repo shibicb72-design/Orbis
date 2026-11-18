@@ -24,7 +24,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.unit.dp
-import com.shibi.orbis.engine.SearchEngine
+import com.shibi.orbis.engine.SearchProvider
 import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.engine.afterLoadError
 import com.shibi.orbis.engine.afterPageStart
@@ -83,7 +83,7 @@ class BrowserAddressBarComposeTest {
                         downloadOffer = null,
                         isLoading = state.isLoading,
                         canReload = true,
-                        searchEngine = { SearchEngine.DEFAULT },
+                        searchEngine = { SearchProvider.DEFAULT },
                         focusOnStart = focusOnStart,
                         onFocusOnStartConsumed = {
                             consumed++

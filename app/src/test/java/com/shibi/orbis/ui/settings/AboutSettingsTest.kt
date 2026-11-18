@@ -7,7 +7,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import com.shibi.orbis.engine.SearchEngine
+import com.shibi.orbis.engine.SearchProvider
 import com.shibi.orbis.ubo.UboState
 import com.shibi.orbis.ui.browser.ComposeActivityRegistration
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,8 +35,7 @@ class AboutSettingsTest {
             MaterialTheme {
                 SettingsScreen(
                     uboStateFlow = MutableStateFlow(UboState.NotInstalled),
-                    searchEngineFlow = MutableStateFlow(SearchEngine.DEFAULT),
-                    onSelectSearchEngine = {},
+                    searchEngineFlow = MutableStateFlow(SearchProvider.DEFAULT),
                     homepageFlow = MutableStateFlow(null),
                     onSetHomepage = {},
                     searchSuggestionsFlow = MutableStateFlow(true),

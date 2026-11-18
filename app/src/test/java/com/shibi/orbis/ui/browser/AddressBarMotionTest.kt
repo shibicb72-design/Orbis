@@ -25,7 +25,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
-import com.shibi.orbis.engine.SearchEngine
+import com.shibi.orbis.engine.SearchProvider
 import com.shibi.orbis.engine.SessionState
 import com.shibi.orbis.ui.theme.ADDRESS_FOCUS_MS
 import com.shibi.orbis.ui.theme.frames
@@ -91,7 +91,7 @@ class AddressBarMotionTest {
                         downloadOffer = null,
                         isLoading = false,
                         canReload = true,
-                        searchEngine = { SearchEngine.DEFAULT },
+                        searchEngine = { SearchProvider.DEFAULT },
                         focusOnStart = false,
                         onFocusOnStartConsumed = {},
                         loadUrl = {},

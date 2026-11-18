@@ -2,6 +2,7 @@ package com.shibi.orbis.suggest
 
 import com.shibi.orbis.bookmarks.Bookmark
 import com.shibi.orbis.engine.SearchEngine
+import com.shibi.orbis.engine.SearchProvider
 import com.shibi.orbis.history.HistoryEntry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -46,6 +47,14 @@ class SuggestionsTest {
         assertEquals("https://api.bing.com/osjson.aspx?query=x", suggestUrl(SearchEngine.BING, "x"))
         assertEquals("https://www.startpage.com/osuggestions?q=x", suggestUrl(SearchEngine.STARTPAGE, "x"))
         assertNull(suggestUrl(SearchEngine.BRAVE, "x"))
+    }
+
+    @Test
+    fun aBuiltInProviderUsesItsEngineEndpointAndACustomEngineHasNone() {
+        SearchEngine.entries.forEach { assertEquals(suggestUrl(it, "a b"), suggestUrl(SearchProvider.BuiltIn(it), "a b")) }
+        // Ruling 9: what is typed is never sent to the address of an engine the user added.
+        assertNull(suggestUrl(SearchProvider.Custom("custom:1", "S", "https://s.example/?q=%s"), "a b"))
+        assertNull(suggestUrl(SearchProvider.Custom("custom:2", "D", "https://duckduckgo.com/?q=%s&kl=de-de"), "x"))
     }
 
     @Test

@@ -241,7 +241,7 @@ class OrbisApp : Application() {
             )
         // Selection menu > Search: a new tab (private for a private page) with the user's search engine.
         engine.onSelectionSearch = { text, isPrivate ->
-            val url = searchEngine.selected.value.searchPrefix + java.net.URLEncoder.encode(text, "UTF-8")
+            val url = searchEngine.selected.value.searchUrl(text)
             if (isPrivate) tabs.newPrivateTab(url) else tabs.newTab(url)
         }
         val downloads =
