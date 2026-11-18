@@ -69,4 +69,11 @@
     <string name="backup_name_addons" translatable="false">add-ons</string>
     <string name="backup_addons_note" translatable="false">Add-ons are not restored automatically. Open Add-ons to add them again.</string>
     <string name="backup_open_addons" translatable="false">Open Add-ons</string>
+
+    <string name="backup_fingerprint_switch" translatable="false">Use fingerprint for backups on this phone</string>
+    <string name="backup_use_fingerprint" translatable="false">Use fingerprint</string>
+    <string name="backup_forget_password" translatable="false">Forget the saved password</string>
+    <string name="backup_fingerprint_note" translatable="false">Your password is kept on this phone only and needs your fingerprint. On another phone you type the password.</string>
+    <string name="backup_fingerprint_invalidated" translatable="false">Fingerprint unlock was turned off because the fingerprints on this phone changed. Type your password.</string>
+    <string name="backup_fingerprint_unavailable" translatable="false">The fingerprint prompt could not be opened.</string>
 </resources>
