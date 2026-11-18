@@ -346,6 +346,8 @@ class GeckoEngineImpl(
             // Without a prompt delegate, WebExtensionController.install() hangs forever.
             created.webExtensionController.setPromptDelegate(extensionHost.promptDelegate)
             runtime = created
+            // The add-ons' toolbar buttons (the menu's "Add-ons" list).
+            extensionHost.refreshActions()
             debugLog.log(
                 "GeckoEngine",
                 "runtime created; ETP level=STRICT category=STRICT antiTracking=STRICT cookies=isolate-others",
@@ -2978,6 +2980,199 @@ private class GeckoExtensionHost(
 
     private fun controller(): WebExtensionController = runtimeProvider().webExtensionController
 
+    // ---- Add-on buttons and panels (main thread) ----
+
+    private val actionScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /** Installed add-ons by id, from the last [refreshActions], Orbis's built-in extensions left out. */
+    private var addonExtensions: Map<String, WebExtension> = emptyMap()
+    private var addonInstalled: List<InstalledExtension> = emptyList()
+
+    /** Each add-on's default button. */
+    private val defaultActions = HashMap<String, WebExtension.Action>()
+
+    /** A tab's own button values (an add-on may set a badge per tab), by session. */
+    private val tabActions = java.util.WeakHashMap<GeckoSession, HashMap<String, WebExtension.Action>>()
+
+    /** The add-ons whose per-tab values each session already reports to us. */
+    private val watchedSessions = java.util.WeakHashMap<GeckoSession, MutableSet<String>>()
+
+    private var selectedSession: GeckoSession? = null
+    private var selectedPrivate = false
+
+    /** The add-on whose button the user just tapped, and when: only that tap may open its panel. */
+    private var pendingClick: Pair<String, Long>? = null
+
+    private val _actions = MutableStateFlow<List<AddonAction>>(emptyList())
+    override val actions: StateFlow<List<AddonAction>> = _actions.asStateFlow()
+
+    private val _popup = MutableStateFlow<AddonPopup?>(null)
+    override val popup: StateFlow<AddonPopup?> = _popup.asStateFlow()
+
+    private val actionDelegate =
+        object : WebExtension.ActionDelegate {
+            override fun onBrowserAction(extension: WebExtension, session: GeckoSession?, action: WebExtension.Action) =
+                onAction(extension, session, action)
+
+            override fun onPageAction(extension: WebExtension, session: GeckoSession?, action: WebExtension.Action) =
+                onAction(extension, session, action)
+
+            // Called after a click (Action.click) on a button that has a panel.
+            override fun onTogglePopup(extension: WebExtension, action: WebExtension.Action): GeckoResult<GeckoSession>? =
+                togglePopup(extension)
+
+            // browserAction.openPopup(): the add-on asks on its own, without a tap. Refused.
+            override fun onOpenPopup(extension: WebExtension, action: WebExtension.Action): GeckoResult<GeckoSession>? {
+                debugLog.log("Extensions", "panel open without a tap refused for ${extension.id}")
+                return null
+            }
+        }
+
+    private fun onAction(extension: WebExtension, session: GeckoSession?, action: WebExtension.Action) {
+        if (isBuiltInExtension(extension.id)) return
+        if (session == null) {
+            defaultActions[extension.id] = action
+        } else {
+            tabActions.getOrPut(session) { HashMap() }[extension.id] = action
+        }
+        publishActions()
+    }
+
+    /** The button of [id] for the selected tab: its own values over the default. */
+    private fun currentAction(id: String): WebExtension.Action? {
+        val default = defaultActions[id]
+        val own = selectedSession?.let { tabActions[it]?.get(id) }
+        return when {
+            own != null && default != null -> own.withDefault(default)
+            else -> own ?: default
+        }
+    }
+
+    private fun publishActions() {
+        if (selectedSession == null) {
+            _actions.value = emptyList()
+            return
+        }
+        val ids = defaultActions.keys + selectedSession?.let { tabActions[it]?.keys }.orEmpty()
+        val all =
+            ids.mapNotNull { id ->
+                val action = currentAction(id) ?: return@mapNotNull null
+                AddonAction(
+                    extensionId = id,
+                    title = addonInstalled.firstOrNull { it.id == id }?.name?.takeIf { it.isNotBlank() }
+                        ?: action.title?.takeIf { it.isNotBlank() }
+                        ?: id,
+                    enabled = action.enabled != false,
+                    badgeText = action.badgeText?.takeIf { it.isNotEmpty() },
+                )
+            }
+        _actions.value = shownAddonActions(all, addonInstalled, selectedPrivate)
+    }
+
+    /** Reads the installed add-ons again and listens to each one's button. Call after anything that changes the list. */
+    fun refreshActions() {
+        actionScope.launch {
+            val list =
+                try {
+                    controller().list().awaitResult().orEmpty()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    debugLog.log("Extensions", "add-on list for buttons failed: ${e.javaClass.simpleName}")
+                    return@launch
+                }
+            val addons = list.filterNot { isBuiltInExtension(it.id) }
+            addonExtensions = addons.associateBy { it.id }
+            addonInstalled = addons.map { it.toInstalled() }
+            defaultActions.keys.retainAll(addonExtensions.keys)
+            tabActions.values.forEach { it.keys.retainAll(addonExtensions.keys) }
+            // A new WebExtension object after an install or a switch: listen again; the engine then sends the button.
+            addons.forEach { ext ->
+                runCatching { ext.setActionDelegate(actionDelegate) }
+                    .onFailure { debugLog.log("Extensions", "button delegate failed for ${ext.id}: ${it.javaClass.simpleName}") }
+            }
+            watchedSessions.clear()
+            selectedSession?.let(::watchSession)
+            _popup.value?.let { open -> if (open.extensionId !in addonExtensions.keys) closePopup() }
+            publishActions()
+        }
+    }
+
+    private fun watchSession(session: GeckoSession) {
+        val watched = watchedSessions.getOrPut(session) { HashSet() }
+        for ((id, ext) in addonExtensions) {
+            if (!watched.add(id)) continue
+            runCatching { session.webExtensionController.setActionDelegate(ext, actionDelegate) }
+                .onFailure { debugLog.log("Extensions", "tab button delegate failed for $id: ${it.javaClass.simpleName}") }
+        }
+    }
+
+    override fun selectSession(session: BrowserSession?) {
+        val gecko = (session as? GeckoBrowserSession)?.geckoSession
+        if (gecko !== selectedSession) {
+            closePopup()
+            pendingClick = null
+            // The add-ons' "active tab" (a button tap acts on it; tabs.query sees it). Without one the engine drops
+            // every tap ("nativeTab is null" in ext-android.js). A hidden page (null) leaves no tab active.
+            runCatching {
+                selectedSession?.let { controller().setTabActive(it, false) }
+                gecko?.let { controller().setTabActive(it, true) }
+            }.onFailure { debugLog.log("Extensions", "active tab update failed: ${it.javaClass.simpleName}") }
+        }
+        selectedSession = gecko
+        selectedPrivate = session?.isPrivate == true
+        gecko?.let(::watchSession)
+        publishActions()
+    }
+
+    override fun clickAction(extensionId: String) {
+        if (selectedSession == null) return
+        if (_actions.value.none { it.extensionId == extensionId && it.enabled }) return
+        val action = currentAction(extensionId) ?: return
+        pendingClick = extensionId to SystemClock.elapsedRealtime()
+        runCatching { action.click() }
+            .onFailure {
+                pendingClick = null
+                debugLog.log("Extensions", "button click failed for $extensionId: ${it.javaClass.simpleName}")
+            }
+    }
+
+    private fun togglePopup(extension: WebExtension): GeckoResult<GeckoSession>? {
+        val click = pendingClick
+        pendingClick = null
+        val tapped =
+            click != null && click.first == extension.id &&
+                SystemClock.elapsedRealtime() - click.second <= POPUP_AFTER_TAP_MILLIS
+        if (!tapped || selectedSession == null) {
+            debugLog.log("Extensions", "panel without a tap refused for ${extension.id}")
+            return null
+        }
+        val open = _popup.value
+        closePopup()
+        // A second tap on the same button closes its panel, as on desktop.
+        if (open?.extensionId == extension.id) return null
+        val name = actions.value.firstOrNull { it.extensionId == extension.id }?.title ?: extension.metaData.name ?: extension.id
+        val popupSession =
+            GeckoSession(
+                GeckoSessionSettings.Builder()
+                    .usePrivateMode(selectedPrivate)
+                    .useTrackingProtection(true)
+                    .build(),
+            )
+        val panel = GeckoAddonPopup(extension.id, name, popupSession, runtimeProvider, debugLog) { closed ->
+            if (_popup.value === closed) _popup.value = null
+        }
+        _popup.value = panel
+        debugLog.log("Extensions", "panel opened for ${extension.id}")
+        // The engine loads the panel's page into this session; it is opened when it is first shown (attachTo).
+        return GeckoResult.fromValue(popupSession)
+    }
+
+    private fun closePopup() {
+        _popup.value?.close()
+        _popup.value = null
+    }
+
     /** Bridges a GeckoResult; cancelling the coroutine cancels the GeckoResult (on the main thread). */
     private suspend fun <T> GeckoResult<T>.awaitResult(): T? =
         suspendCancellableCoroutine { cont ->
@@ -3095,6 +3290,7 @@ private class GeckoExtensionHost(
                     )
                 }
                 debugLog.log("Extensions", "installed $expectedId ${installed.metaData.version}")
+                refreshActions()
                 installed.toInstalled()
             } finally {
                 pending = null
@@ -3134,6 +3330,7 @@ private class GeckoExtensionHost(
                     controller().disable(extension, WebExtensionController.EnableSource.USER)
                 }
             val updated = pending.awaitResult() ?: error("enable/disable returned nothing")
+            refreshActions()
             updated.toInstalled()
         }
 
@@ -3144,6 +3341,7 @@ private class GeckoExtensionHost(
             // Gecko stores the permission and restarts the extension only if it is active; a disabled one stays disabled.
             controller().setAllowedInPrivateBrowsing(extension, true).awaitResult()
             debugLog.log("Extensions", "allowed in private browsing: $id")
+            refreshActions()
         }
     }
 
@@ -3155,6 +3353,7 @@ private class GeckoExtensionHost(
                 controller().setAllowedInPrivateBrowsing(extension, allowed).awaitResult()
                     ?: error("setAllowedInPrivateBrowsing returned nothing")
             debugLog.log("Extensions", "private browsing for $id: $allowed")
+            refreshActions()
             updated.toInstalled()
         }
 
@@ -3163,6 +3362,7 @@ private class GeckoExtensionHost(
             val extension = findGecko(id) ?: return@withContext
             controller().uninstall(extension).awaitResult()
             debugLog.log("Extensions", "uninstalled $id")
+            refreshActions()
         }
     }
 
@@ -3170,7 +3370,7 @@ private class GeckoExtensionHost(
         withContext(Dispatchers.Main.immediate) {
             val extension = findGecko(id) ?: return@withContext null
             try {
-                controller().update(extension).awaitResult()?.toInstalled()
+                controller().update(extension).awaitResult()?.toInstalled()?.also { refreshActions() }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: WebExtension.InstallException) {
@@ -3180,6 +3380,90 @@ private class GeckoExtensionHost(
                 throw ExtensionInstallException(error, "update failed, code ${e.code}")
             }
         }
+}
+
+/** How long after a tap on an add-on's button its panel may still open. */
+private const val POPUP_AFTER_TAP_MILLIS = 10_000L
+
+/**
+ * One add-on panel: the session the engine loads the panel's page into. It only shows the add-on's own pages: any other
+ * load and any new window or tab the panel asks for are refused, and the page's window.close() closes the panel.
+ * Main thread.
+ */
+private class GeckoAddonPopup(
+    override val extensionId: String,
+    override val title: String,
+    private val session: GeckoSession,
+    private val runtime: () -> GeckoRuntime,
+    private val debugLog: DebugLog,
+    private val onClosed: (GeckoAddonPopup) -> Unit,
+) : AddonPopup {
+    private var closed = false
+    private var attachedTo: GeckoView? = null
+
+    init {
+        session.navigationDelegate =
+            object : GeckoSession.NavigationDelegate {
+                override fun onLoadRequest(
+                    session: GeckoSession,
+                    request: GeckoSession.NavigationDelegate.LoadRequest,
+                ): GeckoResult<AllowOrDeny> {
+                    val uri = request.uri
+                    val own = uri.startsWith("moz-extension://") || uri == "about:blank"
+                    if (!own) debugLog.log("Extensions", "panel of $extensionId: load outside the add-on refused")
+                    return if (own) GeckoResult.allow() else GeckoResult.deny()
+                }
+
+                override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? {
+                    debugLog.log("Extensions", "panel of $extensionId: new window refused")
+                    return null
+                }
+            }
+        session.contentDelegate =
+            object : GeckoSession.ContentDelegate {
+                override fun onCloseRequest(session: GeckoSession) = close()
+
+                override fun onCrash(session: GeckoSession) = close()
+
+                override fun onKill(session: GeckoSession) = close()
+            }
+    }
+
+    override fun attachTo(view: View) {
+        if (closed) return
+        val geckoView = view as? GeckoView ?: error("view must be created by BrowserEngine.createContentView")
+        if (geckoView.session === session) return
+        try {
+            if (geckoView.session != null) geckoView.releaseSession()
+            // Not opened by the engine: it waits for a runtime. Opened here with Orbis's own.
+            if (!session.isOpen) session.open(runtime())
+            geckoView.setSession(session)
+            attachedTo = geckoView
+        } catch (e: Exception) {
+            debugLog.log("Extensions", "panel of $extensionId could not be shown: ${e.javaClass.simpleName}")
+            close()
+        }
+    }
+
+    override fun detachFrom(view: View) {
+        val geckoView = view as? GeckoView ?: return
+        if (geckoView.session === session) runCatching { geckoView.releaseSession() }
+        if (attachedTo === geckoView) attachedTo = null
+        if (closed) endSession()
+    }
+
+    override fun close() {
+        if (closed) return
+        closed = true
+        onClosed(this)
+        // While a view still shows it, the session ends once the view lets go of it (detachFrom).
+        if (attachedTo == null) endSession()
+    }
+
+    private fun endSession() {
+        if (session.isOpen) runCatching { session.close() }
+        debugLog.log("Extensions", "panel closed for $extensionId")
+    }
 }
 
 /** Maps the engine's install error code. [WebExtension.InstallException.ErrorCodes.ERROR_USER_CANCELED] is also what a denied update gives. */

@@ -366,6 +366,13 @@ private fun BrowserContent(
     // in the toolbar or menu may act on it.
     val privateLocked by container.privateLock.locked.collectAsStateWithLifecycle()
     val pageHidden = pageHiddenByLock(privateLocked, selectedTab.isPrivate)
+    // The add-ons' toolbar buttons (menu > Add-ons) and an open add-on panel. A hidden page is given to no add-on, so a
+    // button cannot act on it and an open panel closes.
+    val addonHost = container.engine.extensions
+    val addonActions by addonHost.actions.collectAsStateWithLifecycle()
+    val addonPopup by addonHost.popup.collectAsStateWithLifecycle()
+    var addonsOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(session, pageHidden) { addonHost.selectSession(if (pageHidden) null else session) }
     val state by (session?.state ?: IDLE_STATE).collectAsStateWithLifecycle()
     // The menu entry follows the committed address, never a pending one.
     val bookmarkList by container.bookmarks.entries.collectAsStateWithLifecycle()
@@ -458,6 +465,7 @@ private fun BrowserContent(
         readerArticle = null
         castOpen = false
         menuOpen = false
+        addonsOpen = false
         tabs.dismissLinkMenu()
         session?.pausePageMedia()
     }
@@ -626,6 +634,7 @@ private fun BrowserContent(
                         desktopMode = state.desktopMode,
                         bookmarked = bookmarked,
                         casting = casting != null,
+                        hasAddonActions = addonActions.isNotEmpty(),
                     ).whileHidden(pageHidden)
                     // The menu entry and the extra toolbar button run this same handler.
                     val runMenuAction: (MenuAction) -> Unit = { action ->
@@ -685,6 +694,7 @@ private fun BrowserContent(
                                     s.setDesktopMode(!state.desktopMode)
                                 }
                             }
+                            MenuAction.ADDONS -> if (!pageHidden) addonsOpen = true
                             MenuAction.NEW_TAB -> focusAddressFor = tabs.newTab()
                             MenuAction.NEW_PRIVATE_TAB -> focusAddressFor = tabs.newPrivateTab()
                             MenuAction.DUPLICATE_TAB -> tabs.duplicate(selectedTab.id)
@@ -750,6 +760,12 @@ private fun BrowserContent(
                             hidden = menuHidden,
                             stateOf = { action, window -> menuItemState(action, menuPage, window) },
                             onAction = runMenuAction,
+                        )
+                        AddonActionsMenu(
+                            expanded = addonsOpen && !pageHidden,
+                            actions = addonActions,
+                            onDismiss = { addonsOpen = false },
+                            onAction = { id -> if (!pageHidden) addonHost.clickAction(id) },
                         )
                     }
                 }
@@ -1340,6 +1356,10 @@ private fun BrowserContent(
             session = session,
             onDismiss = { castOpen = false },
         )
+    }
+
+    addonPopup?.let { open ->
+        if (!pageHidden) key(open) { AddonPopupSheet(open, createView = { context -> container.engine.createContentView(context) }) }
     }
 
     linkMenu?.let { request ->

@@ -37,4 +37,8 @@
     <string name="addons_turned_off_other" translatable="false">Turned off by the browser.</string>
 
     <string name="addons_failed_other" translatable="false">This add-on could not be installed.</string>
+
+    <!-- The page menu's "Add-ons" entry and the add-on panel (feat08-2c). -->
+    <string name="menu_addons" translatable="false">Add-ons</string>
+    <string name="addon_popup_close" translatable="false">Close</string>
 </resources>
