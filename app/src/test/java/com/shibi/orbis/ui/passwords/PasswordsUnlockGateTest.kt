@@ -21,6 +21,7 @@ import com.shibi.orbis.passwords.LoginStore
 import com.shibi.orbis.passwords.NeverSavePrefs
 import com.shibi.orbis.passwords.SavedLogin
 import com.shibi.orbis.settings.DarkMode
+import com.shibi.orbis.ui.allowedAuthenticators
 import com.shibi.orbis.ui.browser.ComposeActivityRegistration
 import com.shibi.orbis.ui.theme.OrbisTheme
 import kotlinx.coroutines.CoroutineScope

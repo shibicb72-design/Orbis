@@ -169,6 +169,10 @@ internal fun TabSwitcher(
     groups: List<TabGroup> = emptyList(),
     /** Group edits; null turns every group control (long-press menu, headers) off. */
     groupActions: TabGroupActions? = null,
+    /** The private tabs are locked: their cards show no title, address or preview and ask to unlock when tapped. */
+    privateLocked: Boolean = false,
+    /** A locked private tab was tapped: the caller asks the user to unlock, then selects it. */
+    onUnlockRequest: (Long) -> Unit = {},
 ) {
     val motionEnabled = rememberMotionEnabled()
     val gate = remember { TabSheetGate() }
@@ -297,8 +301,15 @@ internal fun TabSwitcher(
                         else -> MaterialTheme.colorScheme.onSurface
                     }
                 val privateDescription = stringResource(R.string.tabs_private_mark)
-                val host = hostOfUrl(tab.url)
-                val title = tab.title.ifBlank { host ?: stringResource(R.string.tabs_blank_title) }
+                // Locked: a private card says only "Private tab" (no title, address or preview).
+                val masked = privateLocked && tab.isPrivate
+                val host = if (masked) null else hostOfUrl(tab.url)
+                val title =
+                    if (masked) {
+                        stringResource(R.string.private_lock_card_title)
+                    } else {
+                        tab.title.ifBlank { host ?: stringResource(R.string.tabs_blank_title) }
+                    }
                 Surface(
                     color = container,
                     contentColor = content,
@@ -327,7 +338,8 @@ internal fun TabSwitcher(
                             onLongClickLabel = if (groupActions != null && !tab.isPrivate) stringResource(R.string.tab_group_long_press) else null,
                             onLongClick = if (groupActions != null && !tab.isPrivate) ({ menuOpen = true }) else null,
                         ) {
-                            end(TabSheetOutcome.SELECTED) { onSelect(tab.id) }
+                            // A locked private tab asks to unlock first; the sheet stays open until that succeeds.
+                            if (masked) onUnlockRequest(tab.id) else end(TabSheetOutcome.SELECTED) { onSelect(tab.id) }
                         },
                 ) {
                     Column {
@@ -367,7 +379,7 @@ internal fun TabSwitcher(
                         }
                         TabPreview(
                             image = thumbnails[tab.id]?.takeIf { host != null },
-                            letter = (host?.removePrefix("www.")?.firstOrNull()?.uppercaseChar() ?: '+').toString(),
+                            letter = if (masked) "" else (host?.removePrefix("www.")?.firstOrNull()?.uppercaseChar() ?: '+').toString(),
                             host = host,
                         )
                         if (menuOpen && groupActions != null && !tab.isPrivate) {

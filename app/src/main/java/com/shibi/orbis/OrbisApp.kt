@@ -45,6 +45,9 @@ import com.shibi.orbis.passwords.FileLoginStore
 import com.shibi.orbis.passwords.KeystoreLoginCrypto
 import com.shibi.orbis.passwords.LoginBridgeImpl
 import com.shibi.orbis.passwords.LoginManager
+import com.shibi.orbis.privacy.PrivacyPrefs
+import com.shibi.orbis.privacy.PrivateTabsLock
+import com.shibi.orbis.privacy.SharedPreferencesPrivacyPrefs
 import com.shibi.orbis.settings.BrowserSettings
 import com.shibi.orbis.settings.DohSettings
 import com.shibi.orbis.settings.SharedPreferencesDohPrefs
@@ -456,6 +459,7 @@ class OrbisApp : Application() {
                 logins = logins,
                 doh = doh,
                 toolbar = toolbar,
+                privacyPrefs = SharedPreferencesPrivacyPrefs(getSharedPreferences(SharedPreferencesPrivacyPrefs.FILE_NAME, MODE_PRIVATE)),
             )
         // A tab that starts playing brings up the media notification (and keeps playback alive in the background).
         appScope.launch {
@@ -565,6 +569,8 @@ class AppContainer(
     val doh: DohSettings,
     /** Settings > Menu and toolbar: the page menu's order and hidden entries, and the extra toolbar button. */
     val toolbar: ToolbarSettings,
+    /** Settings > Lock private tabs (off by default). */
+    val privacyPrefs: PrivacyPrefs,
     val logins: LoginManager,
     /** Page media across tabs (notification, background playback, picture-in-picture). */
     val media: MediaCenter = MediaCenter(tabs, kotlinx.coroutines.MainScope()),
@@ -604,6 +610,9 @@ class AppContainer(
      * window (FLAG_SECURE, no Recents snapshot) as it does for private tabs.
      */
     val sensitiveScreens = MutableStateFlow(0)
+
+    /** Whether the private tabs are hidden behind the unlock prompt (see Settings > Lock private tabs). */
+    val privateLock = PrivateTabsLock()
 
     /** A password Orbis copied, cleared from the clipboard after a minute (memory only). */
     val sensitiveClip = com.shibi.orbis.passwords.SensitiveClip()

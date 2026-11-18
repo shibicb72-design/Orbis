@@ -53,7 +53,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.shibi.orbis.OrbisApp
 import com.shibi.orbis.R
+import com.shibi.orbis.privacy.PrivacyPrefs
+import com.shibi.orbis.ui.isScreenLockSet
 import com.shibi.orbis.about.installedVersionName
 import com.shibi.orbis.about.openPlayListing
 import com.shibi.orbis.engine.SearchProvider
@@ -63,6 +66,41 @@ import com.shibi.orbis.ubo.UboState
 import com.shibi.orbis.ui.OrbisTopAppBar
 import com.shibi.orbis.ui.theme.AppThemes
 import kotlinx.coroutines.flow.StateFlow
+
+/**
+ * "Lock private tabs": a switch row that toggles anywhere on the row. With no screen lock on the phone there is nothing
+ * to unlock with, so the switch is off and disabled and the summary says what to do; it is checked again on every return
+ * to this screen (the user may have set a lock in the system settings).
+ */
+@Composable
+internal fun LockPrivateTabsRow(prefs: PrivacyPrefs) {
+    val context = LocalContext.current
+    var screenLockSet by remember { mutableStateOf(isScreenLockSet(context)) }
+    LifecycleResumeEffect(Unit) {
+        screenLockSet = isScreenLockSet(context)
+        onPauseOrDispose {}
+    }
+    var on by remember { mutableStateOf(prefs.lockPrivateTabs) }
+    val checked = on && screenLockSet
+    SettingsItem(
+        headlineContent = { Text(stringResource(R.string.private_lock_title)) },
+        supportingContent = {
+            Text(stringResource(if (screenLockSet) R.string.private_lock_summary else R.string.private_lock_needs_screen_lock))
+        },
+        trailingContent = { Switch(checked = checked, onCheckedChange = null, enabled = screenLockSet) },
+        modifier =
+            Modifier.fillMaxWidth()
+                .toggleable(
+                    value = checked,
+                    enabled = screenLockSet,
+                    role = Role.Switch,
+                    onValueChange = {
+                        on = it
+                        prefs.lockPrivateTabs = it
+                    },
+                ),
+    )
+}
 
 @StringRes
 private fun defaultBrowserSummary(status: BrowserRoleStatus): Int =
@@ -116,6 +154,8 @@ fun SettingsScreen(
     /** Privacy > Clear when Orbis is closed. The row is hidden when null (screen tests). */
     clearOnExitEnabled: Boolean? = null,
     onOpenClearOnExit: () -> Unit = {},
+    /** Privacy > Lock private tabs. Hidden when null (screen tests); the app's own prefs by default. */
+    privacyPrefs: PrivacyPrefs? = (LocalContext.current.applicationContext as? OrbisApp)?.container?.privacyPrefs,
 ) {
     var httpsDialogOpen by remember { mutableStateOf(false) }
     if (site != null) {
@@ -415,6 +455,10 @@ fun SettingsScreen(
                             .fillMaxWidth()
                             .clickable(onClick = onOpenClearOnExit),
                     )
+                }
+                if (privacyPrefs != null) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    LockPrivateTabsRow(privacyPrefs)
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsItem(
