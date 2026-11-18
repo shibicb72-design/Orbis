@@ -19,6 +19,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 
 enum class AddonFailure {
     NETWORK,
@@ -40,6 +41,10 @@ sealed interface AddonState {
         val allowedInPrivate: Boolean,
         /** The add-on's own settings page (moz-extension://...), or null when it has none. */
         val optionsPageUrl: String?,
+        /** An update is waiting that asks for more access than the user agreed to; it is not installed. */
+        val updateBlocked: Boolean = false,
+        /** The engine turned it off (blocklist or signature), not the user. It has no switch. */
+        val disabledByBrowser: Boolean = false,
     ) : AddonState
     data class Failed(val reason: AddonFailure) : AddonState
 }
@@ -54,7 +59,10 @@ class AddonManager(
     private val host: ExtensionHost,
     private val scope: CoroutineScope,
     private val log: (String) -> Unit,
+    private val prefs: AddonPrefs,
+    private val now: () -> Long,
     private val installTimeoutMillis: Long = DEFAULT_INSTALL_TIMEOUT_MILLIS,
+    private val confirmLimitMillis: Long = DEFAULT_CONFIRM_LIMIT_MILLIS,
 ) {
     private val _states = MutableStateFlow<Map<String, AddonState>>(emptyMap())
 
@@ -71,7 +79,8 @@ class AddonManager(
     /**
      * Installs catalogue add-on [id]. [confirm] receives the access the engine reports and must return true for the
      * install to go ahead (the "Add" tap); false ends in [AddonState.NotInstalled]. The time the user takes to answer
-     * does not count against the install timeout. Returns false, and asks the engine nothing, when [id] is not in the
+     * does not count against the install timeout, but an answer that takes longer than [confirmLimitMillis] counts as
+     * false. Returns false, and asks the engine nothing, when [id] is not in the
      * catalogue or the add-on is already installing or installed.
      */
     fun install(id: String, confirm: suspend (AddonAccess) -> Boolean): Boolean {
@@ -83,6 +92,18 @@ class AddonManager(
         set(id, AddonState.Installing)
         scope.launch { opLock.withLock { runInstall(addon, confirm) } }
         return true
+    }
+
+    /**
+     * Checks every installed catalogue add-on for an update, one after another, at most once per 24 hours each. Call it
+     * well after launch: an update restarts the add-on. Nothing is asked of the engine while an install is queued or
+     * running, and an add-on that is not installed is never asked about.
+     */
+    fun checkForUpdatesIfDue() {
+        scope.launch {
+            opLock.withLock { reload() }
+            for (addon in AddonCatalog.entries) opLock.withLock { checkForUpdate(addon) }
+        }
     }
 
     /** Returns false when [id] is not an installed catalogue add-on. */
@@ -97,6 +118,7 @@ class AddonManager(
     fun remove(id: String): Boolean =
         mutate(id, "remove") {
             host.uninstall(id)
+            prefs.clear(id)
             AddonState.NotInstalled
         }
 
@@ -123,6 +145,42 @@ class AddonManager(
         return true
     }
 
+    private suspend fun checkForUpdate(addon: CatalogAddon) {
+        if (_states.value.values.any { it == AddonState.Installing }) return
+        val current = _states.value[addon.id] as? AddonState.Installed ?: return
+        if (now() - prefs.lastUpdateCheckMillis(addon.id) < UPDATE_INTERVAL_MILLIS) return
+        try {
+            // A list of one, so that "no update" (null) can be told from "no answer in time" (the whole result null).
+            val answer = withTimeoutOrNull(UPDATE_TIMEOUT_MILLIS) { listOf(host.checkForUpdate(addon.id)) }
+            if (answer == null) {
+                log("${addon.name} update check timed out")
+                return
+            }
+            val updated = answer.single()
+            prefs.setLastUpdateCheckMillis(addon.id, now())
+            if (updated != null) {
+                prefs.setUpdateBlocked(addon.id, false)
+                set(addon.id, updated.toState())
+                log("${addon.name} updated to ${updated.version}")
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ExtensionInstallException) {
+            if (e.error == ExtensionInstallError.CANCELLED) {
+                // The engine denied an update that asks for more access. Never granted here, never dropped silently.
+                log("${addon.name} update needs more access")
+                prefs.setLastUpdateCheckMillis(addon.id, now())
+                prefs.setUpdateBlocked(addon.id, true)
+                set(addon.id, current.copy(updateBlocked = true))
+            } else {
+                log("${addon.name} update check failed: ${e.error}")
+            }
+        } catch (e: Exception) {
+            // The Installed state stays as it was, and the time is not recorded: the next launch tries again.
+            log("${addon.name} update check failed: ${e.javaClass.simpleName}")
+        }
+    }
+
     private suspend fun runInstall(addon: CatalogAddon, confirm: suspend (AddonAccess) -> Boolean) {
         log("${addon.name} install started")
         val next =
@@ -139,6 +197,8 @@ class AddonManager(
                     }
                     else -> {
                         log("${addon.name} installed ${installed.version}")
+                        prefs.setUpdateBlocked(addon.id, false)
+                        prefs.setLastUpdateCheckMillis(addon.id, now())
                         installed.toState()
                     }
                 }
@@ -168,7 +228,9 @@ class AddonManager(
                     host.install(addon.xpiUrl, addon.id) { access ->
                         waitingForUser.set(true)
                         try {
-                            confirm(access)
+                            // A confirm that never answers must not hold the one-at-a-time lock for ever.
+                            withTimeoutOrNull(confirmLimitMillis) { confirm(access) }
+                                ?: false.also { log("${addon.name} install answer timed out") }
                         } finally {
                             waitingForUser.set(false)
                         }
@@ -218,17 +280,29 @@ class AddonManager(
         }
     }
 
+    private fun InstalledExtension.toState() =
+        AddonState.Installed(
+            version = version,
+            enabled = enabled,
+            allowedInPrivate = allowedInPrivate,
+            optionsPageUrl = optionsPageUrl,
+            updateBlocked = prefs.updateBlocked(id),
+            disabledByBrowser = !enabled && !disabledByUser,
+        )
+
     private fun set(id: String, state: AddonState) {
         _states.update { it + (id to state) }
     }
 
     companion object {
         const val DEFAULT_INSTALL_TIMEOUT_MILLIS = 180_000L
+        const val DEFAULT_CONFIRM_LIMIT_MILLIS = 5 * 60_000L
+        const val UPDATE_INTERVAL_MILLIS = 24L * 60 * 60 * 1000
+        private const val UPDATE_TIMEOUT_MILLIS = 3 * 60_000L
         private const val TICK_MILLIS = 1_000L
     }
 }
 
-private fun InstalledExtension.toState() = AddonState.Installed(version, enabled, allowedInPrivate, optionsPageUrl)
 
 private fun ExtensionInstallError.toFailure(): AddonFailure =
     when (this) {

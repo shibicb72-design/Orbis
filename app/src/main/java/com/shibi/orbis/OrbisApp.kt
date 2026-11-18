@@ -61,6 +61,7 @@ import com.shibi.orbis.tabs.FileTabStore
 import com.shibi.orbis.tabs.TabManager
 import com.shibi.orbis.tabs.VisitSink
 import com.shibi.orbis.addons.AddonManager
+import com.shibi.orbis.addons.SharedPreferencesAddonPrefs
 import com.shibi.orbis.ubo.SharedPreferencesUboPrefs
 import com.shibi.orbis.ubo.UboOnboardingController
 import java.io.File
@@ -76,6 +77,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
+
+/** The add-on update check starts this long after launch (180 s). */
+private const val ADDON_UPDATE_DELAY_MILLIS = 180_000L
 
 class OrbisApp : Application() {
     lateinit var container: AppContainer
@@ -181,7 +185,17 @@ class OrbisApp : Application() {
                 log = { debugLog.log("Ubo", it) },
                 now = System::currentTimeMillis,
             )
-        val addons = AddonManager(host = engine.extensions, scope = appScope, log = { debugLog.log("Addons", it) })
+        val addons =
+            AddonManager(
+                host = engine.extensions,
+                scope = appScope,
+                log = { debugLog.log("Addons", it) },
+                prefs =
+                    SharedPreferencesAddonPrefs(
+                        getSharedPreferences(SharedPreferencesAddonPrefs.FILE_NAME, Context.MODE_PRIVATE),
+                    ),
+                now = System::currentTimeMillis,
+            )
         val bookmarks =
             BookmarkManager(
                 store = FileBookmarkStore(AtomicTextFile(File(filesDir, "bookmarks/bookmarks.json"))),
@@ -491,6 +505,11 @@ class OrbisApp : Application() {
                 log = torrentLog,
             ).also { it.start() }
         ubo.start()
+        // An update restarts the add-on, so the daily check waits until the first pages have loaded.
+        appScope.launch {
+            kotlinx.coroutines.delay(ADDON_UPDATE_DELAY_MILLIS)
+            addons.checkForUpdatesIfDue()
+        }
     }
 
     override fun onTerminate() {
