@@ -15,6 +15,10 @@ Privacy
 - HTTPS-only mode
 - Private tabs that leave no history, cookies or downloads list behind
 - Site settings: camera, microphone, location, JavaScript and data, per site
+- Optional secure DNS: pick a provider, or type your own address
+- Clear browsing data when Orbis is closed, with a list of sites whose cookies are kept
+- Lock private tabs with your fingerprint or screen lock
+- Optional add-ons from Mozilla's add-on store, added one at a time, each with its access shown (made by other people)
 
 Everyday browsing
 - Tabs with page previews, undo close and recently closed tabs
@@ -26,6 +30,10 @@ Everyday browsing
 - Dark theme and dark websites, text size, zoom on any page
 - QR code scanner, home screen shortcuts and search widget
 - Opens links from other apps in a quick in-app panel
+- Tab groups, and duplicate tab
+- Your own search engines
+- Choose what the menu and the toolbar button show; Material You colours
+- Save your bookmarks, passwords and settings to a file encrypted with your password, and restore them later
 
 Made for big screens too: a tab strip, split screen and drag and drop on foldables and tablets.
 

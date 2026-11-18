@@ -13,10 +13,10 @@ Orbis Path B ships **Mozilla GeckoView** (`org.mozilla.geckoview:geckoview-omni`
 
 Pinned versions live in `gradle/libs.versions.toml` (stable matching pair from maven.mozilla.org).
 
-## uBlock Origin (v1 plan)
+## uBlock Origin
 
-Default-on **AMO onboarding install** of **unmodified Mozilla-signed uBlock Origin**.  
-**Not bundled in the APK for v1** — there is no XPI under `assets/` / `res/`. The Settings screen has a UI stub + TODO for the network install path.
+Optional install of **unmodified Mozilla-signed uBlock Origin** from Mozilla's add-on store (`addons.mozilla.org`), offered on first run.  
+**Not bundled in the APK** — there is no XPI under `assets/` / `res/`. Orbis downloads it when you agree and checks Mozilla's store for updates.
 
 Baseline defense in depth: GeckoView **ETP Strict** / ContentBlocking is enabled in the engine impl.
 
@@ -75,13 +75,51 @@ by `.github/workflows/torrent-natives.yml`, not taken from upstream's jars. To u
 the workflow, commit the artifacts and `CHECKSUMS.sha256` (`native/libtorrent4j/README.md`). Every build checks the
 committed files against `native/libtorrent4j/CHECKSUMS.sha256` first (`verifyTorrentNatives`).
 
+## Add-ons
+
+Settings > Add-ons offers a fixed list of five add-ons: SponsorBlock, Consent-O-Matic, ClearURLs, Dark Reader and
+Violentmonkey (listed last, under "Advanced"). Each is downloaded from `addons.mozilla.org` when you add it, after a
+dialog that shows the access it asks for, and updated from there. They are made by other people. An update that asks
+for more access is not applied until you remove the add-on and add it again. An add-on's button and popup show in
+Orbis; a control inside a popup can open one of that add-on's own pages in a new tab, and nothing else.
+
+## Secure DNS
+
+Settings > Secure DNS is off by default (Orbis then uses the phone's DNS, including its Private DNS setting). When on,
+Orbis sends the names of the sites you open, encrypted, to Quad9, Cloudflare, Mullvad or an `https://` address you
+type. If the provider cannot be reached, Orbis uses the phone's DNS.
+
+## Backup and restore
+
+Settings > Backup and restore saves one file, where you choose, encrypted with a password you type (at least 10
+characters). It holds bookmarks with folders, saved passwords, a fixed list of settings, site permissions, which add-ons
+are installed, open tabs (optional, on) and browsing history (optional, off). It does not hold cookies and sign-ins, site
+data, downloads, private tabs, add-on data or the sites where tracking protection was turned off. Orbis keeps no copy of the file or the password.
+Restoring adds bookmarks and passwords to the ones on the phone, replaces the settings in the file, and never installs
+add-ons. The optional fingerprint unlock keeps the password on the phone only (Android Keystore).
+
+## Privacy and lock settings
+
+- Clear when Orbis is closed: clears open tabs, history, cookies, site data and cache at the next start, with a list
+  of sites whose cookies are kept.
+- Lock private tabs: asks for your fingerprint or screen lock when you come back to Orbis.
+- Both are local; nothing is sent anywhere.
+
+## Tabs, search and looks
+
+- Tab groups in the tab switcher and the tab strip, and Duplicate tab.
+- Custom search engines: an engine you add receives what you search for from the address bar. It gets no suggestions
+  requests, and its result pages stay out of Top sites and suggestions.
+- Menu order and the toolbar button are your choice. Material You takes the colours from the wallpaper. These are stored on the phone only.
+- Orbis is English only.
+
 ## Architecture sketch
 
 - Thin `BrowserEngine` / `BrowserSession` interfaces; UI must not import GeckoView types.
 - `GeckoEngineImpl` is the only GeckoView-touching package under `engine/`.
 - `torrent/`: the engine behind `TorrentEngine` (`Libtorrent4jEngine` is the only file that imports libtorrent4j);
   `TorrentManager` owns the torrent list; settings through `TorrentSettingsStore`.
-- Compose shell: address bar + `AndroidView` content host, Settings with error log (Settings-only) and uBO onboarding stub.
+- Compose shell: address bar + `AndroidView` content host, Settings with error log (Settings-only) and the uBlock Origin onboarding.
 
 ## Agent / harness notes
 

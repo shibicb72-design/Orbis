@@ -1,6 +1,6 @@
 # Orbis privacy policy (draft)
 
-Last updated: November 11, 2026.
+Last updated: November 18, 2026.
 
 Orbis is a web browser. It has no account and shows no ads. The people who make Orbis receive no data about you
 or your browsing, and there is no crash reporting. Cast talks only to a device on your local network.
@@ -16,14 +16,32 @@ downloads and torrents) stay inside Orbis and are deleted when private browsing 
 "Save to Downloads" first stays; a private file download has no such action (Share it first to keep a copy). You can delete everything in Settings > Clear
 browsing data; the estimate is cleared with browsing history.
 
+Tab groups, the order of the menu and the toolbar button you chose, the theme (including Material You, which takes
+its colours from your wallpaper), search engines you add, and the secure DNS, clear on exit and private-tab lock
+settings are also stored only on your phone. Clear on exit and the private-tab lock are local: nothing is sent
+anywhere. Clear on exit wipes your open tabs, history, cookies, site data and cache the next time Orbis starts,
+not when it closes. The private-tab lock asks for your fingerprint or screen lock when you come back to Orbis;
+your fingerprint or face data stays with Android. Orbis is available in English only.
+
 ## What leaves your phone, and when
 - **Websites you visit** receive what any browser sends them (your IP address, the page request, cookies they set).
   Tracking protection and, if you install it, uBlock Origin block many third-party trackers.
 - **Search suggestions** (optional, on by default, never in private tabs): what you type in the address bar is sent to
   the search engine you chose, as you type.
-- **Search** goes to the search engine you chose.
+- **Search** goes to the search engine you chose. If you add a search engine of your own, it receives what you search
+  for from the address bar. Orbis does not ask an engine you added for suggestions.
+- **Secure DNS** (optional, off by default): when you turn it on, Orbis sends the names of the sites you open, encrypted,
+  to the provider you pick: Quad9 (dns.quad9.net), Cloudflare (cloudflare-dns.com), Mullvad (dns.mullvad.net) or an address
+  you type. That provider's privacy policy applies. If the provider cannot be reached, Orbis uses your phone's DNS.
+  Orbis sends nothing to its developers. When it is off, Orbis uses your phone's DNS.
 - **uBlock Origin** (optional): installed and updated from addons.mozilla.org (Mozilla); its filter lists are downloaded
   from their publishers.
+- **Add-ons** (optional, none installed at first): Orbis offers five add-ons: SponsorBlock, Consent-O-Matic, ClearURLs,
+  Dark Reader and Violentmonkey. Each is downloaded from Mozilla's add-on store (addons.mozilla.org) when you add it,
+  and updated from there. They are made by other people, not by Orbis. An add-on can see the pages it has access to;
+  the Add-ons list shows that access before you add it. SponsorBlock contacts sponsor.ajay.app to look up videos.
+  Other add-ons may also contact their own services. Each add-on's own privacy policy applies. An add-on's
+  button or panel can open one of that add-on's own pages in a new tab; it cannot open other addresses that way.
 - **Page translation**: done on your phone; the language models are downloaded from Mozilla the first time.
 - **Safe Browsing**: Gecko's built-in protection checks pages against lists from Google's Safe Browsing service.
 - **Voice search** uses your phone's speech recognizer (for example Google's); its privacy terms apply.
@@ -44,9 +62,20 @@ browsing data; the estimate is cleared with browsing history.
   exchange can each be turned off there too, and local peer discovery turned on. Speed limits and "Wi-Fi only" are settings on your
   phone and send nothing.
 
+## Backup
+Backup is optional and only runs when you use Settings > Backup and restore. Orbis saves one file where you choose.
+It holds your bookmarks (with folders), saved passwords, a fixed list of settings (including the torrent settings), site
+permission answers you saved, and which add-ons are installed (not their data). Open tabs (addresses and titles) are
+included if you leave "Include open tabs" ticked, and browsing history only if you tick it. The file is encrypted with a
+password you type. It does not hold cookies or sign-ins, site data, downloads, private tabs, add-on data or the sites
+where you turned tracking protection off. Orbis sends the file nowhere and keeps no copy of it or of the password;
+if you forget the password, the file cannot be opened. If you turn on fingerprint unlock for backups, the password is
+kept on your phone only, sealed with a key in the Android Keystore that needs your fingerprint. Restoring adds
+bookmarks and passwords to what is on the phone, replaces the settings in the file, and never installs add-ons.
+
 ## Permissions
 Camera, microphone and location are only used when a website asks and you allow it (and the camera for the QR
-scanner). Notifications show download and media controls.
+scanner). Notifications show download and media controls. Biometrics unlock saved passwords, backups and the private-tab lock.
 
 ## Children
 Orbis is a general-purpose browser and is not directed at children.
