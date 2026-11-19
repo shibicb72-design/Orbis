@@ -37,7 +37,7 @@ android {
         applicationId = "com.shibi.orbis"
         minSdk = 31
         targetSdk = 36
-        versionCode = 26
+        versionCode = 27
         versionName = "0.8.0"
     }
 
