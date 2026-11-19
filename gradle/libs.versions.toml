@@ -13,10 +13,10 @@ orgJson = "20240303"
 # Real Compose on the JVM (test only): Robolectric runs the Compose UI test rule without a device.
 robolectric = "4.17"
 appcompat = "1.8.0"
-# Matching stable pair from maven.mozilla.org (2026-11-11):
-# browser-engine-gecko 160.0 -> geckoview-omni 160.0.20261104181552
-mozillaAc = "160.0"
-geckoview = "160.0.20261104181552"
+# Matching stable pair from maven.mozilla.org (2026-11-18):
+# browser-engine-gecko 160.0.1 -> geckoview-omni 160.0.20261116130455
+mozillaAc = "160.0.1"
+geckoview = "160.0.20261116130455"
 # QR scanner: CameraX (Google Maven) and ZXing core (Maven Central), latest stable on 2026-11-08.
 camerax = "1.6.2"
 # Custom Tabs service and intent helpers (Google Maven), latest stable on 2026-11-09.
