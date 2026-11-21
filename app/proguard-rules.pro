@@ -13,3 +13,12 @@
 
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+# Release builds write no page address to the system log (brief priv11-1-engine-log-addresses.md).
+# GeckoView's GeckoSession logs "handleMessage ... uri=<address>" with a plain android.util.Log.d (not behind its DEBUG flag),
+# which put every page address, private tabs included, into logcat. R8 removes Log.v and Log.d calls from the release build;
+# Log.i, Log.w and Log.e are untouched.
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
+}
