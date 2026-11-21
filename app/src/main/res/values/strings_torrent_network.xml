@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Torrent confirm sheet: shown when the phone's current connection is not Wi-Fi or Ethernet. -->
+    <string name="torrents_sheet_mobile_data" translatable="false">You are on mobile data. This download will use it.</string>
+</resources>

@@ -30,7 +30,7 @@ class TorrentSettingsStoreTest {
     fun absentKeysReadAsTheOwnersDefaults() {
         val s = TorrentSettingsStore(MapPrefs()).settings.value
         assertEquals(TorrentSettings(), s)
-        assertEquals(true, s.wifiOnly)
+        assertEquals(false, s.wifiOnly)
         assertEquals(true, s.stopSeeding)
         assertEquals(true, s.dht && s.pex)
         // OD-2: local peers off by default.
@@ -66,7 +66,7 @@ class TorrentSettingsStoreTest {
                 "lsd" to false,
                 "down_bps" to 512_000,
                 "up_bps" to 64_000,
-                "schema" to 2,
+                "schema" to 3,
             ),
             prefs.map,
         )
@@ -107,13 +107,13 @@ class TorrentSettingsStoreTest {
         val store = TorrentSettingsStore(prefs)
         val seen = ArrayList<TorrentSettings>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { store.settings.collect { seen += it } }
-        store.update { it.copy(wifiOnly = false) }
+        store.update { it.copy(wifiOnly = true) }
         // The same value again, or one that clamps to the current one: no write, no new value.
-        store.update { it.copy(wifiOnly = false) }
+        store.update { it.copy(wifiOnly = true) }
         store.update { it.copy(downBps = -1) }
         store.update { it.copy(dht = false) }
         assertEquals(2, prefs.writes)
-        assertEquals(listOf(TorrentSettings(), TorrentSettings(wifiOnly = false), TorrentSettings(wifiOnly = false, dht = false)), seen)
+        assertEquals(listOf(TorrentSettings(), TorrentSettings(wifiOnly = true), TorrentSettings(wifiOnly = true, dht = false)), seen)
     }
 
     @Test
@@ -124,7 +124,7 @@ class TorrentSettingsStoreTest {
         assertFalse(s.lsd)
         assertFalse(s.wifiOnly)
         assertFalse(old.map.containsKey("lsd"))
-        assertEquals(2, old.map["schema"])
+        assertEquals(3, old.map["schema"])
         // Migrated once: turned on again by the user, it stays on.
         TorrentSettingsStore(old).update { it.copy(lsd = true) }
         assertTrue(TorrentSettingsStore(old).settings.value.lsd)
@@ -146,6 +146,54 @@ class TorrentSettingsStoreTest {
     }
 
     @Test
+    fun aSchema2FilesWifiOnlyOnIsTheOldDefaultAndTurnsOff() {
+        val old = MapPrefs(hashMapOf("wifi_only" to true, "dht" to true, "schema" to 2))
+        assertFalse(TorrentSettingsStore(old).settings.value.wifiOnly)
+        assertFalse(old.map.containsKey("wifi_only"))
+        assertEquals(3, old.map["schema"])
+    }
+
+    @Test
+    fun aSchema2FilesWifiOnlyOffStaysOffAndWritesNothing() {
+        val old = MapPrefs(hashMapOf("wifi_only" to false, "schema" to 2))
+        assertFalse(TorrentSettingsStore(old).settings.value.wifiOnly)
+        assertEquals(0, old.writes)
+        assertEquals(false, old.map["wifi_only"])
+    }
+
+    @Test
+    fun aSchema3FilesWifiOnlyOnWasAChoiceAndStays() {
+        val file = MapPrefs(hashMapOf("wifi_only" to true, "schema" to 3))
+        assertTrue(TorrentSettingsStore(file).settings.value.wifiOnly)
+        assertEquals(0, file.writes)
+        assertEquals(true, file.map["wifi_only"])
+    }
+
+    @Test
+    fun anOlderFileWithoutASchemaHasBothOldDefaultsDropped() {
+        val old = MapPrefs(hashMapOf("wifi_only" to true, "lsd" to true))
+        val s = TorrentSettingsStore(old).settings.value
+        assertFalse(s.wifiOnly)
+        assertFalse(s.lsd)
+        assertEquals(3, old.map["schema"])
+    }
+
+    @Test
+    fun aSchema2FilesLocalPeersOnWasAChoiceAndStays() {
+        val file = MapPrefs(hashMapOf("wifi_only" to true, "lsd" to true, "schema" to 2))
+        val s = TorrentSettingsStore(file).settings.value
+        assertTrue(s.lsd)
+        assertFalse(s.wifiOnly)
+    }
+
+    @Test
+    fun aWifiOnlyTurnedOnAfterTheMigrationSurvivesTheNextStart() {
+        val file = MapPrefs(hashMapOf("wifi_only" to true, "schema" to 2))
+        TorrentSettingsStore(file).update { it.copy(wifiOnly = true) }
+        assertTrue(TorrentSettingsStore(file).settings.value.wifiOnly)
+    }
+
+    @Test
     fun theListenPortIsPickedOnceInTheDynamicRangeAndKept() {
         val prefs = MapPrefs()
         val store = TorrentSettingsStore(prefs)
@@ -157,7 +205,7 @@ class TorrentSettingsStoreTest {
         assertEquals(port, TorrentSettingsStore(prefs).listenPort())
         assertEquals(1, prefs.writes)
         // Settings changes leave it alone.
-        store.update { it.copy(wifiOnly = false) }
+        store.update { it.copy(wifiOnly = true) }
         assertEquals(port, TorrentSettingsStore(prefs).listenPort())
         // The ends of the range are reachable and nothing outside it is picked.
         assertEquals(49152, TorrentSettingsStore(MapPrefs(), FixedRandom(0)).listenPort())

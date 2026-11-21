@@ -47,7 +47,7 @@ downloads, with pause, resume and progress in a notification. When a torrent is 
 `Download/Orbis/<name>` and the private working copy is deleted (a private tab's torrent is kept inside Orbis
 instead; see Privacy below).
 
-Defaults: download over Wi-Fi only, stop seeding when finished (nothing is uploaded once the download is done),
+Defaults: download on any connection (Wi-Fi only can be turned on in Settings > Torrents), stop seeding when finished (nothing is uploaded once the download is done),
 DHT and peer exchange on, local peer discovery off, UPnP and NAT-PMP off, no
 speed limits, no seeding ratio. The engine listens on a random port picked once per install and sends libtorrent's
 own client name, not "Orbis".

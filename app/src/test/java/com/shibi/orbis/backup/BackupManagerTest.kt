@@ -409,7 +409,7 @@ class BackupManagerTest {
             val bad = world()
             val torrent =
                 JSONObject()
-                    .put("wifi_only", false)
+                    .put("wifi_only", true)
                     .put("down_bps", -5)
                     .put("up_bps", 2_000_000_000)
                     .put("seed_ratio", 500)
@@ -418,7 +418,7 @@ class BackupManagerTest {
             val files = JSONObject().put("torrent_settings", torrent)
             val r = bad.manager.restore(seal(mapOf(BackupSection.SETTINGS to JSONObject().put("v", 1).put("files", files))), pw()) as RestoreResult.Restored
             val t = bad.torrentSettings.settings.value
-            assertEquals(false, t.wifiOnly)
+            assertEquals(true, t.wifiOnly)
             assertEquals(0, t.downBps)
             assertEquals(0, t.upBps)
             assertEquals(null, t.seedRatioLimit)

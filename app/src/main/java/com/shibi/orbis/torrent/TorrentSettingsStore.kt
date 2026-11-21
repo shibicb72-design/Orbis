@@ -78,13 +78,18 @@ class TorrentSettingsStore(private val prefs: TorrentPrefs, private val random: 
     }
 
     /**
-     * Files from before [SCHEMA] stored "Local peers" on (the old default) as soon as any torrent setting changed, so
-     * a stored "on" there is the old default, not a choice: it is dropped and the new default (off) applies. A stored
-     * "off" was a choice and stays.
+     * [update] writes every key whenever one changes, so in a file from before a schema a stored default says nothing
+     * about a choice. Files from before schema 2 stored "Local peers" on, and files from before schema 3 stored "Wi-Fi
+     * only" on (both were the defaults then): a stored "on" there is dropped and the new default (off) applies. A stored
+     * "off" was a choice and stays. Nothing is written when there is nothing to drop.
      */
     private fun migrate() {
-        if ((prefs.int(KEY_SCHEMA) ?: 0) >= SCHEMA) return
-        if (prefs.boolean(KEY_LSD) == true) prefs.write(mapOf(KEY_LSD to null, KEY_SCHEMA to SCHEMA))
+        val schema = prefs.int(KEY_SCHEMA) ?: 0
+        if (schema >= SCHEMA) return
+        val drop = HashMap<String, Any?>()
+        if (schema < 2 && prefs.boolean(KEY_LSD) == true) drop[KEY_LSD] = null
+        if (prefs.boolean(KEY_WIFI_ONLY) == true) drop[KEY_WIFI_ONLY] = null
+        if (drop.isNotEmpty()) prefs.write(drop + (KEY_SCHEMA to SCHEMA))
     }
 
     /** Applies [block] to the current settings, writes the clamped result and emits it (nothing when unchanged). */
@@ -134,9 +139,9 @@ class TorrentSettingsStore(private val prefs: TorrentPrefs, private val random: 
         const val KEY_UP_BPS = "up_bps"
         const val KEY_LISTEN_PORT = "listen_port"
 
-        /** 2: "Local peers" defaults to off (see [migrate]). Absent: written by an older version. */
+        /** 2: "Local peers" defaults to off. 3: "Wi-Fi only" defaults to off (see [migrate]). Absent: written by an older version. */
         const val KEY_SCHEMA = "schema"
-        const val SCHEMA = 2
+        const val SCHEMA = 3
 
         /** The dynamic (private) port range: no well-known BitTorrent port, nothing that marks the client. */
         const val LISTEN_PORT_MIN = 49152
