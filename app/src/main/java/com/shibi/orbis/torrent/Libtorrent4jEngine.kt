@@ -22,6 +22,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.libtorrent4j.AlertListener
 import org.libtorrent4j.AddTorrentParams
 import org.libtorrent4j.FileStorage
+import org.libtorrent4j.Operation
 import org.libtorrent4j.Priority
 import org.libtorrent4j.SessionManager
 import org.libtorrent4j.SessionParams
@@ -33,15 +34,25 @@ import org.libtorrent4j.TorrentStatus
 import org.libtorrent4j.Vectors
 import org.libtorrent4j.alerts.Alert
 import org.libtorrent4j.alerts.AlertType
+import org.libtorrent4j.alerts.DhtReplyAlert
+import org.libtorrent4j.alerts.DhtStatsAlert
+import org.libtorrent4j.alerts.ExternalIpAlert
 import org.libtorrent4j.alerts.FileErrorAlert
+import org.libtorrent4j.alerts.ListenFailedAlert
+import org.libtorrent4j.alerts.ListenSucceededAlert
+import org.libtorrent4j.alerts.PeerConnectAlert
+import org.libtorrent4j.alerts.PeerDisconnectedAlert
 import org.libtorrent4j.alerts.SaveResumeDataAlert
 import org.libtorrent4j.alerts.StateUpdateAlert
 import org.libtorrent4j.alerts.TorrentAlert
 import org.libtorrent4j.alerts.TorrentErrorAlert
+import org.libtorrent4j.alerts.TrackerErrorAlert
+import org.libtorrent4j.alerts.TrackerReplyAlert
 import org.libtorrent4j.swig.add_torrent_params
 import org.libtorrent4j.swig.error_code
 import org.libtorrent4j.swig.int_vector
 import org.libtorrent4j.swig.libtorrent
+import org.libtorrent4j.swig.peer_info
 import org.libtorrent4j.swig.session_handle
 import org.libtorrent4j.swig.settings_pack
 import org.libtorrent4j.swig.string_vector
@@ -93,6 +104,9 @@ class Libtorrent4jEngine(
     private val pendingResume = HashMap<Long, CompletableDeferred<ByteArray?>>()
     private val latest = HashMap<EngineId, TorrentSnapshot>()
 
+    /** The connection timeline in the error log: counts and times only (keyed by engine id). */
+    private val timeline = TorrentTimeline(log)
+
     // Lazy: nothing of libtorrent4j is touched before the first start (its classes load the native library).
     private val listener by lazy {
         object : AlertListener {
@@ -105,6 +119,20 @@ class Libtorrent4jEngine(
                     AlertType.SAVE_RESUME_DATA_FAILED.swig(),
                     AlertType.TORRENT_ERROR.swig(),
                     AlertType.FILE_ERROR.swig(),
+                    // The timeline (TorrentTimeline). SessionManager's mask (every category but the logs) already
+                    // carries all of them: no setting changes.
+                    AlertType.DHT_BOOTSTRAP.swig(),
+                    AlertType.DHT_STATS.swig(),
+                    AlertType.DHT_REPLY.swig(),
+                    AlertType.TRACKER_ANNOUNCE.swig(),
+                    AlertType.TRACKER_REPLY.swig(),
+                    AlertType.TRACKER_ERROR.swig(),
+                    AlertType.LSD_PEER.swig(),
+                    AlertType.PEER_CONNECT.swig(),
+                    AlertType.PEER_DISCONNECTED.swig(),
+                    AlertType.LISTEN_SUCCEEDED.swig(),
+                    AlertType.LISTEN_FAILED.swig(),
+                    AlertType.EXTERNAL_IP.swig(),
                 )
 
             // libtorrent's alert thread: copy out, then post.
@@ -145,6 +173,7 @@ class Libtorrent4jEngine(
             scope.launch {
                 while (isActive) {
                     runCatching { session?.postTorrentUpdates() }
+                    runCatching { timelineTick() }
                     delay(1000)
                 }
             }
@@ -180,6 +209,7 @@ class Libtorrent4jEngine(
             pendingResume.values.forEach { it.complete(null) }
             pendingResume.clear()
             latest.clear()
+            timeline.sessionEnded()
             _snapshots.value = emptyMap()
             log("engine stopped")
         }
@@ -196,11 +226,13 @@ class Libtorrent4jEngine(
 
     override fun add(source: TorrentSource, saveDir: File, resumeData: ByteArray?, isPrivate: Boolean): EngineId {
         val id = EngineId(nextId.incrementAndGet())
-        post { doAdd(id, source, saveDir, resumeData, isPrivate) }
+        val addedAt = clock()
+        post { doAdd(id, source, saveDir, resumeData, isPrivate, addedAt) }
         return id
     }
 
-    private suspend fun doAdd(id: EngineId, source: TorrentSource, saveDir: File, resumeData: ByteArray?, isPrivate: Boolean) {
+    private suspend fun doAdd(id: EngineId, source: TorrentSource, saveDir: File, resumeData: ByteArray?, isPrivate: Boolean, addedAt: Long) {
+        val opens = session == null
         // UnsatisfiedLinkError (no native library for this ABI) is an Error: caught here so the torrent fails visibly.
         val s =
             session
@@ -215,6 +247,7 @@ class Libtorrent4jEngine(
             emit(TorrentEvent.Error(id, TorrentErrorKind.ENGINE_ERROR))
             return
         }
+        val sessionStartedAt = if (opens) clock() else null
         val ec = error_code()
         var p: add_torrent_params? = null
         if (resumeData != null) {
@@ -294,6 +327,7 @@ class Libtorrent4jEngine(
         if (bep27) bep27Ids += id.value
         applySessionDiscovery()
         log("added ${id.value} metadata=$withMetadata bep27=$bep27")
+        timeline.added(id.value, addedAt, sessionStartedAt)
         if (withMetadata) announceMetadata(id, handle)
     }
 
@@ -432,6 +466,8 @@ class Libtorrent4jEngine(
             val h = handles[id.value] ?: return@post
             h.unsetFlags(TorrentFlags.AUTO_MANAGED)
             h.resume()
+            // The first resume is the one after the file check.
+            timeline.milestone(id.value, TorrentTimeline.Step.RESUMED, clock())
         }
     }
 
@@ -444,6 +480,8 @@ class Libtorrent4jEngine(
             pendingResume.remove(h.swig().id())?.complete(null)
             latest.remove(id)
             _snapshots.value = latest.toMap()
+            sampleTimeline(id.value, h, clock())
+            timeline.removed(id.value, clock())
             val s = session ?: return@post
             if (deleteFiles) s.remove(h, session_handle.delete_files) else s.remove(h)
             // Local peers come back only once the last private-tab torrent is out of the session.
@@ -462,6 +500,7 @@ class Libtorrent4jEngine(
             // get the alert, so it is reported here.
             if (isComplete(h)) {
                 log("complete at approval ${id.value}")
+                timeline.finished(id.value, clock())
                 emit(TorrentEvent.Finished(id))
             }
         }
@@ -549,10 +588,12 @@ class Libtorrent4jEngine(
     private fun onAlert(alert: Alert<*>) {
         when (alert.type()) {
             AlertType.STATE_UPDATE -> {
-                val updates = (alert as StateUpdateAlert).status().map { st -> st.swig().getHandle().id() to snapshotOf(st) }
+                val at = clock()
+                val updates = (alert as StateUpdateAlert).status().map { st -> Triple(st.swig().getHandle().id(), snapshotOf(st), st.totalPayloadDownload() > 0) }
                 post {
-                    for ((key, snap) in updates) {
+                    for ((key, snap, gotPayload) in updates) {
                         val id = byHandle[key] ?: continue
+                        if (gotPayload) timeline.milestone(id.value, TorrentTimeline.Step.FIRST_BYTE, at)
                         val before = latest[id]
                         // Status only: the engine id, the state and counts.
                         if (before == null || before.state != snap.state || before.hasMetadata != snap.hasMetadata) {
@@ -569,8 +610,10 @@ class Libtorrent4jEngine(
                 // Pause right here, before the post: torrent_handle calls are thread-safe and the alert's handle is
                 // valid during this callback. The fewer pieces requested under unchecked names, the better.
                 alertHandle.pause()
+                val at = clock()
                 post {
                     val id = byHandle[key] ?: return@post
+                    timeline.milestone(id.value, TorrentTimeline.Step.DETAILS, at)
                     // The alert's handle dies with the alert: use the one add_torrent returned.
                     val h = handles[id.value] ?: return@post
                     // Nothing may be written under the torrent's own names: stop until the manager checked the list.
@@ -589,6 +632,8 @@ class Libtorrent4jEngine(
                     // byte on disk is really done.
                     val allWanted = h.filePriorities().none { it == Priority.IGNORE }
                     if (allWanted && isComplete(h)) {
+                        sampleTimeline(id.value, h, clock())
+                        timeline.finished(id.value, clock())
                         emit(TorrentEvent.Finished(id))
                     } else {
                         log("finished alert ignored ${id.value}")
@@ -619,9 +664,124 @@ class Libtorrent4jEngine(
                 log("file error ${kind.name} ${a.error().value} ${a.operation().name}")
                 post { byHandle[key]?.let { emit(TorrentEvent.Error(it, kind)) } }
             }
+            else -> onTimelineAlert(alert)
+        }
+    }
+
+    /**
+     * The timeline's alerts (libtorrent's alert thread): only numbers, enum names and yes/no leave the alert; a
+     * tracker URL, peer or listen address is never read into a string. Peer alerts can come by the hundred: each one
+     * only counts.
+     */
+    private fun onTimelineAlert(alert: Alert<*>) {
+        val at = clock()
+        when (alert.type()) {
+            AlertType.DHT_BOOTSTRAP -> post { timeline.dhtBootstrapped(at) }
+            AlertType.DHT_STATS -> {
+                // One alert per DHT node (one per listen socket): only its family is read, never its address.
+                val a = alert as DhtStatsAlert
+                val nodes = a.routingTable().sumOf { it.numNodes() }
+                val v6 = runCatching { a.localEndpoint().address().isV6 }.getOrDefault(false)
+                post { timeline.dhtNodes(v6, nodes) }
+            }
+            AlertType.DHT_REPLY -> {
+                val a = alert as DhtReplyAlert
+                val key = a.handle().swig().id()
+                val peers = a.numPeers()
+                post { byHandle[key]?.let { timeline.peersFound(it.value, TorrentTimeline.PeerSource.DHT, peers, at) } }
+            }
+            AlertType.LSD_PEER -> {
+                val key = (alert as TorrentAlert<*>).handle().swig().id()
+                post { byHandle[key]?.let { timeline.peersFound(it.value, TorrentTimeline.PeerSource.LOCAL, 1, at) } }
+            }
+            AlertType.TRACKER_ANNOUNCE -> {
+                val key = (alert as TorrentAlert<*>).handle().swig().id()
+                post { byHandle[key]?.let { timeline.trackerAsked(it.value) } }
+            }
+            AlertType.TRACKER_REPLY -> {
+                val a = alert as TrackerReplyAlert
+                val key = a.handle().swig().id()
+                val peers = a.numPeers()
+                post { byHandle[key]?.let { timeline.trackerAnswered(it.value, peers, at) } }
+            }
+            AlertType.TRACKER_ERROR -> {
+                val a = alert as TrackerErrorAlert
+                val key = a.handle().swig().id()
+                val kind = TorrentTimeline.trackerFailure(a.error().message)
+                post { byHandle[key]?.let { timeline.trackerFailed(it.value, kind) } }
+            }
+            AlertType.PEER_CONNECT -> {
+                val a = alert as PeerConnectAlert
+                val key = a.handle().swig().id()
+                val incoming = a.direction() == PeerConnectAlert.Direction.IN
+                post {
+                    val id = byHandle[key] ?: return@post
+                    if (incoming) timeline.incomingConnection(id.value, at) else timeline.connectAttempt(id.value, at)
+                }
+            }
+            AlertType.PEER_DISCONNECTED -> {
+                val a = alert as PeerDisconnectedAlert
+                val key = a.handle().swig().id()
+                val failedConnect = a.operation() == Operation.CONNECT
+                val kind = if (failedConnect) TorrentTimeline.connectFailure(a.error().message) else null
+                post {
+                    val id = byHandle[key] ?: return@post
+                    if (kind != null) timeline.connectFailed(id.value, kind) else timeline.disconnected(id.value)
+                }
+            }
+            AlertType.LISTEN_SUCCEEDED -> {
+                val a = alert as ListenSucceededAlert
+                val socket = a.socketType().name
+                val v6 = a.address().isV6
+                post { timeline.listen(ok = true, socket = socket, v6 = v6) }
+            }
+            AlertType.LISTEN_FAILED -> {
+                val a = alert as ListenFailedAlert
+                val socket = a.socketType().name
+                val v6 = runCatching { a.address().isV6 }.getOrDefault(false)
+                post { timeline.listen(ok = false, socket = socket, v6 = v6) }
+            }
+            AlertType.EXTERNAL_IP -> {
+                val v6 = (alert as ExternalIpAlert).externalAddress().isV6
+                post { timeline.externalAddress(v6) }
+            }
             else -> Unit
         }
     }
+
+    /** Once a second (engine thread): peer-list samples and DHT node counts the timeline asks for, then its tick. */
+    private fun timelineTick() {
+        val now = clock()
+        for ((key, h) in handles) if (timeline.wantsSample(key, now)) sampleTimeline(key, h, now)
+        if (timeline.wantsDhtNodes(now)) session?.postDhtStats()
+        timeline.tick(now)
+    }
+
+    /** Counts from the peer list of [h]; no address leaves this function. */
+    private fun sampleTimeline(key: Long, h: TorrentHandle, at: Long) {
+        val peers = runCatching { h.peerInfo() }.getOrNull() ?: return
+        val connecting = peer_info.connecting.to_int()
+        val notYet = connecting or peer_info.handshake.to_int()
+        val pex = peer_info.pex.to_int()
+        var connected = 0
+        var connectingNow = 0
+        var fromPex = 0
+        for (p in peers) {
+            val f = p.flags()
+            when {
+                f and connecting != 0 -> connectingNow++
+                f and notYet != 0 -> Unit
+                else -> {
+                    connected++
+                    if (p.source().toInt() and pex != 0) fromPex++
+                }
+            }
+        }
+        val known = runCatching { h.status().listPeers() }.getOrDefault(-1)
+        timeline.sample(key, at, connected, connectingNow, fromPex, known)
+    }
+
+    private fun clock(): Long = System.nanoTime() / 1_000_000
 
     private fun errorKind(code: Int, isFile: Boolean): TorrentErrorKind =
         when {
