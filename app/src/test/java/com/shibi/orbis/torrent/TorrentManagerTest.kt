@@ -840,7 +840,7 @@ class TorrentManagerTest {
 
     // ---- seeding and settings (PR 4) ----
 
-    private val keepSeeding = TorrentSettings(stopSeeding = false)
+    private val keepSeeding = TorrentSettings(wifiOnly = true, stopSeeding = false)
 
     /** Added, metadata checked, payload written and finished with stop seeding off: SEEDING. */
     private fun TestScope.seedingTorrent(s: TorrentTestSetup, isPrivate: Boolean = false): String {

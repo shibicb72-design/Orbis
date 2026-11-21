@@ -73,7 +73,7 @@ class TorrentSettingsScreenTest {
         show()
         assertEquals(TorrentSettings(), store.settings.value)
         tap("Download over Wi-Fi only")
-        assertFalse(store.settings.value.wifiOnly)
+        assertTrue(store.settings.value.wifiOnly)
         tap("Stop seeding when finished")
         assertFalse(store.settings.value.stopSeeding)
         tap("DHT")
@@ -83,7 +83,7 @@ class TorrentSettingsScreenTest {
         // Local peers starts off (OD-2): the tap turns it on.
         tap("Local peers")
         assertTrue(store.settings.value.lsd)
-        assertEquals(TorrentSettings(wifiOnly = false, stopSeeding = false, dht = false, pex = false, lsd = true), stored())
+        assertEquals(TorrentSettings(wifiOnly = true, stopSeeding = false, dht = false, pex = false, lsd = true), stored())
         // And back on.
         tap("DHT")
         assertTrue(stored().dht)

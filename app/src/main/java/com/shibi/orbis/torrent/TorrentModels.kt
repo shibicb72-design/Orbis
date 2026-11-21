@@ -81,7 +81,8 @@ data class TorrentEntry(
 
 /** User choices for torrents (Settings > Torrents, stored by [TorrentSettingsStore]). The defaults are the owner's. */
 data class TorrentSettings(
-    val wifiOnly: Boolean = true,
+    /** Off by default: torrents download on whatever connection the phone has. */
+    val wifiOnly: Boolean = false,
     val stopSeeding: Boolean = true,
     val dht: Boolean = true,
     val pex: Boolean = true,

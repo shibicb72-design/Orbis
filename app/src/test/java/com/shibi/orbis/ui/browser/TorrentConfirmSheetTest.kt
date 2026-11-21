@@ -12,6 +12,7 @@ import com.shibi.orbis.engine.IncomingDownload
 import com.shibi.orbis.tabs.PendingTorrentIntake
 import com.shibi.orbis.torrent.IntakeRefusal
 import com.shibi.orbis.torrent.IntakeRequest
+import com.shibi.orbis.torrent.NetworkKind
 import com.shibi.orbis.torrent.TorrentIntakeReader
 import com.shibi.orbis.torrent.TorrentSource
 import com.shibi.orbis.torrent.bencode
@@ -42,6 +43,7 @@ class TorrentConfirmSheetTest {
     private val magnet = "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel"
     private val note = "Torrent downloads connect directly to other people. They, and the trackers, can see your IP address. Orbis sends nothing else."
     private val reminder = "Peers can see your IP address"
+    private val mobileLine = "You are on mobile data. This download will use it."
     private val privateLine = "From a private tab: uses the torrent's trackers only. The files stay inside Orbis, not in your Downloads, and are deleted when private browsing ends unless you save them."
 
     private class Added(val source: TorrentSource, val isPrivate: Boolean, val noteShown: Boolean)
@@ -73,13 +75,14 @@ class TorrentConfirmSheetTest {
     private val logs = CopyOnWriteArrayList<String>()
     private var cancels = 0
 
-    private fun show(request: IntakeRequest, ipNoteSeen: Boolean = false) {
+    private fun show(request: IntakeRequest, ipNoteSeen: Boolean = false, network: NetworkKind = NetworkKind.WIFI_OR_ETHERNET) {
         val pending = PendingTorrentIntake(request, sourceTabId = 1L)
         rule.setContent {
             MaterialTheme {
                 TorrentIntakeSheet(
                     pending = pending,
                     ipNoteSeen = ipNoteSeen,
+                    networkKind = network,
                     reader = TorrentIntakeReader(Dispatchers.IO),
                     readUri = { TorrentIntakeReader.Result.Failed(IntakeRefusal.READ_FAILED) },
                     onDownload = { source, isPrivate, noteShown -> added += Added(source, isPrivate, noteShown) },
@@ -107,6 +110,22 @@ class TorrentConfirmSheetTest {
         assertEquals(magnet, (a.source as TorrentSource.Magnet).uri)
         assertEquals(false, a.isPrivate)
         assertEquals(true, a.noteShown)
+    }
+
+    @Test
+    fun onMobileDataTheSheetSaysSoAndStillDownloadsWithOneTap() {
+        show(IntakeRequest.Magnet(magnet, isPrivate = false), network = NetworkKind.OTHER)
+        rule.onNodeWithText(mobileLine).assertExists()
+        rule.passTapGuard()
+        rule.onNodeWithText("Download").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(1, added.size)
+    }
+
+    @Test
+    fun onWifiOrEthernetOrOfflineTheMobileDataLineIsNotShown() {
+        show(IntakeRequest.Magnet(magnet, isPrivate = false), network = NetworkKind.WIFI_OR_ETHERNET)
+        rule.onAllNodesWithText(mobileLine).assertCountEquals(0)
     }
 
     @Test

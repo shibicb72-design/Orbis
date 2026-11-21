@@ -86,6 +86,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -1322,9 +1323,11 @@ private fun BrowserContent(
         val addedMessage = stringResource(R.string.torrents_added)
         val viewLabel = stringResource(R.string.torrents_added_view)
         val fullMessage = stringResource(R.string.torrents_list_full, TorrentLimits.MAX_ENTRIES)
+        val networkKind by ConfirmSheetNetwork.of(androidContext).kind.collectAsState()
         TorrentIntakeSheet(
             pending = pending,
             ipNoteSeen = torrentIpNoteSeen,
+            networkKind = networkKind,
             reader = reader,
             readUri = { uri -> reader.readUri(resolver, Uri.parse(uri)) },
             onDownload = { source, isPrivate, noteShown ->

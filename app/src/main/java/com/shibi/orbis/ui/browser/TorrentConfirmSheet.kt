@@ -1,5 +1,6 @@
 package com.shibi.orbis.ui.browser
 
+import android.content.Context
 import android.text.format.Formatter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -44,12 +45,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.shibi.orbis.R
 import com.shibi.orbis.tabs.PendingTorrentIntake
+import com.shibi.orbis.torrent.AndroidTorrentNetwork
 import com.shibi.orbis.torrent.IntakeLog
 import com.shibi.orbis.torrent.IntakeRefusal
 import com.shibi.orbis.torrent.IntakeRequest
 import com.shibi.orbis.torrent.MagnetLink
+import com.shibi.orbis.torrent.NetworkKind
 import com.shibi.orbis.torrent.TorrentErrorKind
 import com.shibi.orbis.torrent.TorrentIntakeReader
+import com.shibi.orbis.torrent.TorrentNetwork
 import com.shibi.orbis.torrent.TorrentPaths
 import com.shibi.orbis.torrent.TorrentPreview
 import com.shibi.orbis.torrent.TorrentSource
@@ -57,6 +61,17 @@ import com.shibi.orbis.ui.ObscuredTouchFilter
 import com.shibi.orbis.ui.rememberTapGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+/**
+ * The connection kind for the confirm sheet: one default-network callback per process, made the first time a sheet
+ * needs it (the torrent manager keeps its own and does not expose it).
+ */
+object ConfirmSheetNetwork {
+    private var network: TorrentNetwork? = null
+
+    @Synchronized
+    fun of(context: Context): TorrentNetwork = network ?: AndroidTorrentNetwork(context.applicationContext).also { network = it }
+}
 
 /** Where a .torrent's bytes are: still coming, in hand (with what the preview reader made of them), or lost. */
 sealed interface TorrentBody {
@@ -87,12 +102,14 @@ data class TorrentConfirmModel(
     val reading: Boolean,
     val downloadEnabled: Boolean,
     val error: IntakeRefusal?,
+    /** The phone is on a connection that is not Wi-Fi or Ethernet: a one-line note, nothing else changes. */
+    val onMobileData: Boolean = false,
 ) {
     // A torrent name must not end up in a log line.
     override fun toString(): String = "TorrentConfirmModel(enabled=$downloadEnabled, error=$error)"
 
     companion object {
-        fun of(request: IntakeRequest, body: TorrentBody, ipNoteSeen: Boolean): TorrentConfirmModel {
+        fun of(request: IntakeRequest, body: TorrentBody, ipNoteSeen: Boolean, network: NetworkKind = NetworkKind.WIFI_OR_ETHERNET): TorrentConfirmModel {
             val base =
                 TorrentConfirmModel(
                     nameText = null,
@@ -104,6 +121,7 @@ data class TorrentConfirmModel(
                     reading = false,
                     downloadEnabled = false,
                     error = null,
+                    onMobileData = network == NetworkKind.OTHER,
                 )
             if (request is IntakeRequest.Magnet) {
                 val link = MagnetLink.parse(request.uri) ?: return base.copy(unnamed = TorrentUnnamed.MAGNET_LINK, error = IntakeRefusal.BAD_MAGNET)
@@ -142,6 +160,7 @@ suspend fun torrentBodyOf(bytes: ByteArray): TorrentBody.Ready =
 fun TorrentIntakeSheet(
     pending: PendingTorrentIntake,
     ipNoteSeen: Boolean,
+    networkKind: NetworkKind,
     reader: TorrentIntakeReader,
     readUri: suspend (String) -> TorrentIntakeReader.Result,
     onDownload: (source: TorrentSource, isPrivate: Boolean, noteShown: Boolean) -> Unit,
@@ -171,7 +190,7 @@ fun TorrentIntakeSheet(
                 }
             }
     }
-    val model = TorrentConfirmModel.of(request, body, ipNoteSeen)
+    val model = TorrentConfirmModel.of(request, body, ipNoteSeen, networkKind)
     TorrentConfirmSheet(
         model = model,
         onDownload = download@{
@@ -268,6 +287,9 @@ fun TorrentConfirmSheet(model: TorrentConfirmModel, onDownload: () -> Unit, onCa
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
                 )
+            }
+            if (model.onMobileData) {
+                Text(stringResource(R.string.torrents_sheet_mobile_data), style = MaterialTheme.typography.bodyMedium, color = secondary)
             }
             if (model.isPrivate) {
                 Text(stringResource(R.string.torrents_sheet_private_kept), style = MaterialTheme.typography.bodyMedium, color = secondary)

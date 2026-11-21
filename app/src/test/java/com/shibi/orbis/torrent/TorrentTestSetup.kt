@@ -30,7 +30,8 @@ class TorrentTestSetup(root: File, scheduler: TestCoroutineScheduler, freeBytes:
     val engine = FakeTorrentEngine(sessionFile = store.sessionFile)
     val logs = CopyOnWriteArrayList<String>()
     val network = FakeTorrentNetwork()
-    val settings = MutableStateFlow(TorrentSettings())
+    // The gate tests need Wi-Fi only on; it is off by default now.
+    val settings = MutableStateFlow(TorrentSettings(wifiOnly = true))
     val published = CopyOnWriteArrayList<Published>()
     val unpublished = CopyOnWriteArrayList<String>()
     var publishOk = true
