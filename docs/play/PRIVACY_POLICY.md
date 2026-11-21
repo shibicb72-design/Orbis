@@ -1,6 +1,6 @@
 # Orbis privacy policy (draft)
 
-Last updated: November 18, 2026.
+Last updated: November 21, 2026.
 
 Orbis is a web browser. It has no account and shows no ads. The people who make Orbis receive no data about you
 or your browsing, and there is no crash reporting. Cast talks only to a device on your local network.
