@@ -53,8 +53,10 @@ your fingerprint or face data stays with Android. Orbis is available in English 
   people sharing that torrent, to its trackers, to DHT bootstrap nodes and, only if you turn local peer discovery on
   (it is off by default), to devices on your network. All of them can see your IP address, and pieces of the file are exchanged with the other people.
   Nothing else is sent: there is no account and no analytics. Only http, https and udp trackers are contacted (never WebSocket/WebTorrent ones).
-  A torrent from a private tab uses its trackers only (no DHT, no peer exchange, no local peer discovery), is never
-  written to the torrent list on disk, and leaves the list when private browsing ends. Its finished files are kept
+  A torrent from a private tab finds peers like any other torrent (its trackers, the DHT and peer exchange, if those
+  are on in Settings > Torrents), so the same parties can see your IP address. Local peer discovery is never used for
+  it. It is never written to the torrent list on disk, and its files are deleted when private browsing ends unless you
+  save them. Its finished files are kept
   inside Orbis, not in your Downloads; "Save to Downloads" copies them there. Whatever was not saved is deleted when
   private browsing ends.
   Seeding (uploading pieces of a finished torrent to other people) happens only if you turn off "Stop seeding when

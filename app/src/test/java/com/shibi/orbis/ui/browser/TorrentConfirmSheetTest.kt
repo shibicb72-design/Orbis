@@ -44,7 +44,7 @@ class TorrentConfirmSheetTest {
     private val note = "Torrent downloads connect directly to other people. They, and the trackers, can see your IP address. Orbis sends nothing else."
     private val reminder = "Peers can see your IP address"
     private val mobileLine = "You are on mobile data. This download will use it."
-    private val privateLine = "From a private tab: uses the torrent's trackers only. The files stay inside Orbis, not in your Downloads, and are deleted when private browsing ends unless you save them."
+    private val privateLine = "From a private tab: the files stay inside Orbis, not in your Downloads, and are deleted when private browsing ends unless you save them. Peers, trackers and the DHT can see your IP address, as for any torrent."
 
     private class Added(val source: TorrentSource, val isPrivate: Boolean, val noteShown: Boolean)
 

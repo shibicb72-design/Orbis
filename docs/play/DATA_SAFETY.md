@@ -15,9 +15,11 @@ the app. Data a user sends to websites they visit, through a browser, is not col
   - Torrent downloads (a magnet link or .torrent file the user confirms) connect directly to other people sharing
     that torrent (peers), to the torrent's trackers, to DHT bootstrap nodes and, only if the user turns local peer
     discovery on (off by default), to devices on the same network. All of them can see the phone's IP address, as
-    for any peer-to-peer download; the pieces of the file are exchanged with peers. A private tab's torrents use
-    their trackers only (no DHT, peer exchange or local peer discovery), and only http, https and udp trackers are
-    contacted (never WebSocket/WebTorrent ones). Nothing else leaves the device: no account, no analytics, nothing to
+    for any peer-to-peer download; the pieces of the file are exchanged with peers. A torrent from a private tab
+    finds peers like any other torrent (its trackers, the DHT and peer exchange, if those are on in Settings >
+    Torrents), so the same parties can see your IP address. Local peer discovery is never used for it. It is never
+    written to the torrent list on disk, and its files are deleted when private browsing ends unless you save them.
+    Only http, https and udp trackers are contacted (never WebSocket/WebTorrent ones). Nothing else leaves the device: no account, no analytics, nothing to
     the developers. The torrent list stays on the phone (a private tab's torrents are never written to the list on
     disk; their files stay inside the app and are deleted when private browsing ends unless the user saved them with
     "Save to Downloads"; a private tab's file downloads are deleted then too, with no such action). This is the user exchanging a file with peers they chose, as when visiting a website, so no data type is

@@ -54,9 +54,11 @@ own client name, not "Orbis".
 
 Privacy: peers, trackers, DHT bootstrap nodes and (if you turn local peer discovery on) devices on the same network
 can see the phone's IP address, as for any peer-to-peer download. Nothing is sent to the developers. Only http, https
-and udp trackers are used; WebSocket (WebTorrent) and every other kind are dropped from every torrent. A private tab's torrents use their trackers only (no DHT, peer
-exchange or local peer discovery; while one runs, local peer discovery is off for the whole session), are never
-written to the torrent list on disk, and leave the list when private browsing ends. A finished one is kept inside
+and udp trackers are used; WebSocket (WebTorrent) and every other kind are dropped from every torrent. A torrent from
+a private tab finds peers like any other torrent (its trackers, the DHT and peer exchange, if those are on in
+Settings > Torrents), so the same parties can see your IP address. Local peer discovery is never used for it. It is
+never written to the torrent list on disk, and its files are deleted when private browsing ends unless you save them.
+A finished one is kept inside
 Orbis (`<app files>/Download/.s/<name>`), not published; its row offers "Save to Downloads", which copies it to
 `Download/Orbis/<name>`. When private browsing ends, or at the next start after the process died, every private file
 that was not saved is deleted: partial payloads, finished torrents and private file downloads alike (private file
