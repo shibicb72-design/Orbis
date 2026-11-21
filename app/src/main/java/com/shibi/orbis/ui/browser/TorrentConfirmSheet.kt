@@ -90,12 +90,15 @@ data class TorrentConfirmModel(
     val error: IntakeRefusal?,
     /** The phone is on a connection that is not Wi-Fi or Ethernet: a one-line note, nothing else changes. */
     val onMobileData: Boolean = false,
+    /** Wi-Fi only is on and the phone is on mobile data: the download will wait, so this note replaces the mobile-data one. */
+    val waitsForWifi: Boolean = false,
 ) {
     // A torrent name must not end up in a log line.
     override fun toString(): String = "TorrentConfirmModel(enabled=$downloadEnabled, error=$error)"
 
     companion object {
-        fun of(request: IntakeRequest, body: TorrentBody, ipNoteSeen: Boolean, network: NetworkKind = NetworkKind.WIFI_OR_ETHERNET): TorrentConfirmModel {
+        fun of(request: IntakeRequest, body: TorrentBody, ipNoteSeen: Boolean, network: NetworkKind = NetworkKind.WIFI_OR_ETHERNET, wifiOnly: Boolean = false): TorrentConfirmModel {
+            val offWifi = network == NetworkKind.OTHER
             val base =
                 TorrentConfirmModel(
                     nameText = null,
@@ -107,7 +110,8 @@ data class TorrentConfirmModel(
                     reading = false,
                     downloadEnabled = false,
                     error = null,
-                    onMobileData = network == NetworkKind.OTHER,
+                    onMobileData = offWifi && !wifiOnly,
+                    waitsForWifi = offWifi && wifiOnly,
                 )
             if (request is IntakeRequest.Magnet) {
                 val link = MagnetLink.parse(request.uri) ?: return base.copy(unnamed = TorrentUnnamed.MAGNET_LINK, error = IntakeRefusal.BAD_MAGNET)
@@ -147,6 +151,7 @@ fun TorrentIntakeSheet(
     pending: PendingTorrentIntake,
     ipNoteSeen: Boolean,
     networkKind: NetworkKind,
+    wifiOnly: Boolean = false,
     reader: TorrentIntakeReader,
     readUri: suspend (String) -> TorrentIntakeReader.Result,
     onDownload: (source: TorrentSource, isPrivate: Boolean, noteShown: Boolean) -> Unit,
@@ -176,7 +181,7 @@ fun TorrentIntakeSheet(
                 }
             }
     }
-    val model = TorrentConfirmModel.of(request, body, ipNoteSeen, networkKind)
+    val model = TorrentConfirmModel.of(request, body, ipNoteSeen, networkKind, wifiOnly)
     TorrentConfirmSheet(
         model = model,
         onDownload = download@{
@@ -276,6 +281,9 @@ fun TorrentConfirmSheet(model: TorrentConfirmModel, onDownload: () -> Unit, onCa
             }
             if (model.onMobileData) {
                 Text(stringResource(R.string.torrents_sheet_mobile_data), style = MaterialTheme.typography.bodyMedium, color = secondary)
+            }
+            if (model.waitsForWifi) {
+                Text(stringResource(R.string.torrents_sheet_waits_for_wifi), style = MaterialTheme.typography.bodyMedium, color = secondary)
             }
             if (model.isPrivate) {
                 Text(stringResource(R.string.torrents_sheet_private_kept), style = MaterialTheme.typography.bodyMedium, color = secondary)

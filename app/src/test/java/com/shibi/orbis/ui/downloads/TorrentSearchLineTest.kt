@@ -50,6 +50,18 @@ class TorrentSearchLineTest {
     }
 
     @Test(timeout = 20_000)
+    fun foundButNoneConnectedAfterSixtySecondsSaysItCouldNotConnect() {
+        assertEquals("Found 2 peers, connecting…", text(entry(found = 2, seconds = 59)))
+        assertEquals("Found 2 peers, but could not connect to any yet.", text(entry(found = 2, seconds = 60)))
+        assertEquals("Found 1 peer, but could not connect to it yet.", text(entry(found = 1, seconds = 60)))
+        assertEquals("Found 2 peers, but could not connect to any yet.", text(entry(status = TorrentStatus.FETCHING_METADATA, found = 2, seconds = 60)))
+        // A connected peer wins: the clock is 0 then.
+        assertEquals("Connected to 1 of 2 peers", text(entry(found = 2, connected = 1, seconds = 0)))
+        // No trackers sentence is added to it.
+        assertEquals("Found 2 peers, but could not connect to any yet.", text(entry(found = 2, seconds = 60, dht = false, trackers = 2, failed = 2)))
+    }
+
+    @Test(timeout = 20_000)
     fun connectedSaysHowManyOfHowMany() {
         assertEquals("Connected to 2 of 9 peers", text(entry(found = 9, connected = 2)))
         assertEquals("Connected to 1 peer", text(entry(found = 1, connected = 1)))

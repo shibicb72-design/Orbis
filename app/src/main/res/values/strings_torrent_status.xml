@@ -6,6 +6,11 @@
         <item quantity="one">Found 1 peer, connecting…</item>
         <item quantity="other">Found %1$d peers, connecting…</item>
     </plurals>
+    <!-- Found peers, none connected after 60 seconds. The quantity is the number found. -->
+    <plurals name="torrent_search_found_none_connected" translatable="false">
+        <item quantity="one">Found 1 peer, but could not connect to it yet.</item>
+        <item quantity="other">Found %1$d peers, but could not connect to any yet.</item>
+    </plurals>
     <!-- The quantity is the number found. -->
     <plurals name="torrent_search_connected" translatable="false">
         <item quantity="one">Connected to 1 peer</item>

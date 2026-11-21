@@ -198,7 +198,7 @@ data class TorrentSnapshot(
     val trackersTotal: Int = 0,
     /** The torrent may ask the DHT (false: trackers only, a BEP 27 torrent or the DHT switched off). */
     val dhtInUse: Boolean = true,
-    /** Seconds the torrent has run without knowing a peer, counted up to 60; 0 once a peer is known or while paused. */
+    /** Seconds the torrent has run (not paused, not checking) without a connected peer, counted up to 60; 0 while a peer is connected or while paused. */
     val searchSeconds: Int = 0,
 )
 
