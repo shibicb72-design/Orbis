@@ -41,16 +41,16 @@ data class SearchFacts(
     val trackersFailed: Int = 0,
     val trackersTotal: Int = 0,
     val dhtInUse: Boolean = true,
-    /** Seconds without a known peer, counted up to [SEARCH_GIVE_UP_SECONDS]. */
+    /** Seconds run without a connected peer, counted up to [SEARCH_GIVE_UP_SECONDS]. */
     val seconds: Int = 0,
 )
 
 /** The second line of a row while it looks for peers, or the note under "Waiting for Wi-Fi". Words live in strings_torrent_status.xml. */
 data class SearchLine(val kind: Kind, val found: Int = 0, val connected: Int = 0, val trackersAllFailed: Int = 0) {
-    enum class Kind { LOOKING, FOUND_CONNECTING, CONNECTED, NO_PEERS, NO_PEERS_TRACKERS_ONLY, WIFI_ONLY_NOTE }
+    enum class Kind { LOOKING, FOUND_CONNECTING, FOUND_NONE_CONNECTED, CONNECTED, NO_PEERS, NO_PEERS_TRACKERS_ONLY, WIFI_ONLY_NOTE }
 }
 
-/** After this many seconds with no peer known the row says so. */
+/** After this many seconds with no peer known (or none connected) the row says so. */
 const val SEARCH_GIVE_UP_SECONDS = 60
 
 /**
@@ -67,6 +67,7 @@ fun searchLine(model: TorrentRowModel): SearchLine? {
     val found = maxOf(f.found, connected)
     return when {
         connected > 0 -> SearchLine(SearchLine.Kind.CONNECTED, found = found, connected = connected)
+        found > 0 && f.seconds >= SEARCH_GIVE_UP_SECONDS -> SearchLine(SearchLine.Kind.FOUND_NONE_CONNECTED, found = found)
         found > 0 -> SearchLine(SearchLine.Kind.FOUND_CONNECTING, found = found)
         else -> {
             val kind =

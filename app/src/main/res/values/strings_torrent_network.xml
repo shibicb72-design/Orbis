@@ -2,4 +2,6 @@
 <resources>
     <!-- Torrent confirm sheet: shown when the phone's current connection is not Wi-Fi or Ethernet. -->
     <string name="torrents_sheet_mobile_data" translatable="false">You are on mobile data. This download will use it.</string>
+    <!-- Same sheet: Wi-Fi only is on while the phone is on mobile data. -->
+    <string name="torrents_sheet_waits_for_wifi" translatable="false">You turned on Wi-Fi only. This download will wait for Wi-Fi.</string>
 </resources>

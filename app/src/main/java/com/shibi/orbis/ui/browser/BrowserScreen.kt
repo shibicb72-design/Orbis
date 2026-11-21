@@ -1327,10 +1327,12 @@ private fun BrowserContent(
         val fullMessage = stringResource(R.string.torrents_list_full, TorrentLimits.MAX_ENTRIES)
         // The torrent manager's own connection watcher; without a manager (never in the UI process) nothing is known.
         val networkKind by (container.torrents?.network?.kind ?: NO_NETWORK_KIND).collectAsState()
+        val wifiOnly = container.torrents?.settings?.collectAsState()?.value?.wifiOnly ?: false
         TorrentIntakeSheet(
             pending = pending,
             ipNoteSeen = torrentIpNoteSeen,
             networkKind = networkKind,
+            wifiOnly = wifiOnly,
             reader = reader,
             readUri = { uri -> reader.readUri(resolver, Uri.parse(uri)) },
             onDownload = { source, isPrivate, noteShown ->

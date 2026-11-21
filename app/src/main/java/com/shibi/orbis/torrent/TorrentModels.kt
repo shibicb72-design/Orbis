@@ -64,6 +64,7 @@ data class TorrentEntry(
     val trackersFailed: Int = 0,
     val trackersTotal: Int = 0,
     val dhtInUse: Boolean = true,
+    /** Seconds run without a connected peer, up to 60; 0 while one is connected or paused. */
     val searchSeconds: Int = 0,
 ) {
     /** Every byte is on disk (both fields are persisted, so this holds after a restart too). */

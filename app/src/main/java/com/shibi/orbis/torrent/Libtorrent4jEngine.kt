@@ -820,10 +820,11 @@ class Libtorrent4jEngine(
             val snap = latest[eid] ?: continue
             val st = runCatching { h.status() }.getOrNull() ?: continue
             val running = !st.flags().and_(TorrentFlags.PAUSED).non_zero()
-            // Checking files is no search: like a pause, it holds the clock at 0.
+            // Checking files is no search: like a pause, it holds the clock at 0. The clock counts the seconds without a CONNECTED peer.
             val searching = running && snap.state != EngineState.CHECKING
             if (searching) searchStart.getOrPut(key) { now } else searchStart.remove(key)
-            val found = maxOf(snap.peersFound, st.listPeers().coerceAtLeast(0) + st.numPeers().coerceAtLeast(0))
+            val connected = st.numPeers().coerceAtLeast(0)
+            val found = maxOf(snap.peersFound, st.listPeers().coerceAtLeast(0) + connected)
             // Trackers only matter while no peer is known (the row names them then): skip the read otherwise.
             var total = snap.trackersTotal
             var answered = snap.trackersAnswered
@@ -847,7 +848,7 @@ class Libtorrent4jEngine(
                     trackersFailed = failed,
                     trackersTotal = total,
                     dhtInUse = discoveryOf(kindOf(key)).dht,
-                    searchSeconds = if (searching && found == 0) ((now - (searchStart[key] ?: now)) / 1000).toInt().coerceIn(0, SEARCH_SECONDS_CAP) else 0,
+                    searchSeconds = if (searching && connected == 0) ((now - (searchStart[key] ?: now)) / 1000).toInt().coerceIn(0, SEARCH_SECONDS_CAP) else 0,
                 )
             if (next != snap) {
                 latest[eid] = next

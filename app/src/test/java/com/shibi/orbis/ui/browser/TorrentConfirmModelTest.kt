@@ -3,6 +3,7 @@ package com.shibi.orbis.ui.browser
 import com.shibi.orbis.engine.IncomingDownload
 import com.shibi.orbis.torrent.IntakeRefusal
 import com.shibi.orbis.torrent.IntakeRequest
+import com.shibi.orbis.torrent.NetworkKind
 import com.shibi.orbis.torrent.TorrentPreview
 import java.io.InputStream
 import org.junit.Assert.assertEquals
@@ -33,6 +34,21 @@ class TorrentConfirmModelTest {
         assertTrue(m.showFirstUseNote)
         assertFalse(m.isPrivate)
         assertNull(m.error)
+    }
+
+    @Test(timeout = 20_000)
+    fun wifiOnlyOnMobileDataWaitsForWifiAndIsNoMobileDataNote() {
+        val req = IntakeRequest.Magnet(magnet, isPrivate = false)
+        val waits = TorrentConfirmModel.of(req, TorrentBody.Reading, ipNoteSeen = true, network = NetworkKind.OTHER, wifiOnly = true)
+        assertTrue(waits.waitsForWifi)
+        assertFalse(waits.onMobileData)
+        assertTrue(waits.downloadEnabled)
+        val mobile = TorrentConfirmModel.of(req, TorrentBody.Reading, ipNoteSeen = true, network = NetworkKind.OTHER, wifiOnly = false)
+        assertFalse(mobile.waitsForWifi)
+        assertTrue(mobile.onMobileData)
+        val wifi = TorrentConfirmModel.of(req, TorrentBody.Reading, ipNoteSeen = true, network = NetworkKind.WIFI_OR_ETHERNET, wifiOnly = true)
+        assertFalse(wifi.waitsForWifi)
+        assertFalse(wifi.onMobileData)
     }
 
     @Test
