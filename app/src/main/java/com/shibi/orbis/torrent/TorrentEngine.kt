@@ -188,6 +188,18 @@ data class TorrentSnapshot(
     val etaSeconds: Long?,
     val ratio: Float,
     val hasMetadata: Boolean,
+    // Search for peers (tor10-4): what the row says while no byte has come. Counts only, in memory, never stored.
+    /** The most peers the torrent has known at once (connected or not): it never goes down while the torrent runs. */
+    val peersFound: Int = 0,
+    /** Trackers that have answered, ever. */
+    val trackersAnswered: Int = 0,
+    /** Trackers whose every try failed. */
+    val trackersFailed: Int = 0,
+    val trackersTotal: Int = 0,
+    /** The torrent may ask the DHT (false: trackers only, a BEP 27 torrent or the DHT switched off). */
+    val dhtInUse: Boolean = true,
+    /** Seconds the torrent has run without knowing a peer, counted up to 60; 0 once a peer is known or while paused. */
+    val searchSeconds: Int = 0,
 )
 
 enum class TorrentErrorKind {

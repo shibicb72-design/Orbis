@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- What a torrent row says while it looks for peers (tor10-4). English only: not translatable. -->
+    <string name="torrent_search_looking" translatable="false">Looking for peers…</string>
+    <plurals name="torrent_search_found" translatable="false">
+        <item quantity="one">Found 1 peer, connecting…</item>
+        <item quantity="other">Found %1$d peers, connecting…</item>
+    </plurals>
+    <!-- The quantity is the number found. -->
+    <plurals name="torrent_search_connected" translatable="false">
+        <item quantity="one">Connected to 1 peer</item>
+        <item quantity="other">Connected to %1$d of %2$d peers</item>
+    </plurals>
+    <string name="torrent_search_none" translatable="false">No peers found yet. This torrent may have few or no seeders.</string>
+    <string name="torrent_search_none_trackers_only" translatable="false">No peers found yet. This torrent can only ask its own trackers.</string>
+    <!-- Added after one of the two lines above or "Looking for peers…", with a space in front. -->
+    <plurals name="torrent_search_trackers_failed" translatable="false">
+        <item quantity="one">This torrent\'s tracker did not answer.</item>
+        <item quantity="other">None of this torrent\'s %1$d trackers answered.</item>
+    </plurals>
+    <!-- Under "Waiting for Wi-Fi", which shows only for people who turned Wi-Fi only on. -->
+    <string name="torrent_search_wifi_only_note" translatable="false">You turned on Wi-Fi only. Change it in Settings &gt; Torrents.</string>
+</resources>

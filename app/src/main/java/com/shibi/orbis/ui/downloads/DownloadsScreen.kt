@@ -373,10 +373,10 @@ internal fun TorrentRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                stateText(model),
+                rowStateText(context, model),
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (failed) colors.error else secondary,
-                maxLines = 2,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
             val percent = model.percent
@@ -432,6 +432,32 @@ internal fun TorrentRow(
             }
         }
     }
+}
+
+/**
+ * The row's second line: the search line while it looks for peers (it replaces "Getting torrent details" and
+ * "Downloading" so the line is always one line and the row keeps its height), under "Waiting for Wi-Fi" its note.
+ */
+@Composable
+private fun rowStateText(context: android.content.Context, model: TorrentRowModel): String {
+    val state = stateText(model)
+    val line = searchLine(model) ?: return state
+    val text = searchText(context, line)
+    return if (line.kind == SearchLine.Kind.WIFI_ONLY_NOTE) "$state\n$text" else text
+}
+
+/** The words of [line], from strings_torrent_status.xml. */
+internal fun searchText(context: android.content.Context, line: SearchLine): String {
+    val base =
+        when (line.kind) {
+            SearchLine.Kind.LOOKING -> context.getString(R.string.torrent_search_looking)
+            SearchLine.Kind.FOUND_CONNECTING -> context.resources.getQuantityString(R.plurals.torrent_search_found, line.found, line.found)
+            SearchLine.Kind.CONNECTED -> context.resources.getQuantityString(R.plurals.torrent_search_connected, line.found, line.connected, line.found)
+            SearchLine.Kind.NO_PEERS -> context.getString(R.string.torrent_search_none)
+            SearchLine.Kind.NO_PEERS_TRACKERS_ONLY -> context.getString(R.string.torrent_search_none_trackers_only)
+            SearchLine.Kind.WIFI_ONLY_NOTE -> context.getString(R.string.torrent_search_wifi_only_note)
+        }
+    return if (line.trackersAllFailed > 0) base + " " + context.resources.getQuantityString(R.plurals.torrent_search_trackers_failed, line.trackersAllFailed, line.trackersAllFailed) else base
 }
 
 @Composable
