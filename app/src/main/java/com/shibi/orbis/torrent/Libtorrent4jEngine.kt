@@ -820,13 +820,15 @@ class Libtorrent4jEngine(
             val snap = latest[eid] ?: continue
             val st = runCatching { h.status() }.getOrNull() ?: continue
             val running = !st.flags().and_(TorrentFlags.PAUSED).non_zero()
-            if (running) searchStart.getOrPut(key) { now } else searchStart.remove(key)
+            // Checking files is no search: like a pause, it holds the clock at 0.
+            val searching = running && snap.state != EngineState.CHECKING
+            if (searching) searchStart.getOrPut(key) { now } else searchStart.remove(key)
             val found = maxOf(snap.peersFound, st.listPeers().coerceAtLeast(0) + st.numPeers().coerceAtLeast(0))
             // Trackers only matter while no peer is known (the row names them then): skip the read otherwise.
             var total = snap.trackersTotal
             var answered = snap.trackersAnswered
             var failed = snap.trackersFailed
-            if (running && found == 0) {
+            if (searching && found == 0) {
                 runCatching {
                     val list = h.trackers()
                     total = list.size
@@ -834,7 +836,7 @@ class Libtorrent4jEngine(
                     // Asked, never answered, and every address it has failed.
                     failed = list.count { t ->
                         val ends = t.endpoints()
-                        !t.isVerified && ends.isNotEmpty() && ends.all { e -> e.infohashV1().let { it.fails() > 0 && !it.updating() } }
+                        !t.isVerified && ends.isNotEmpty() && ends.all { e -> e.infohashV1().fails() > 0 }
                     }
                 }
             }
@@ -845,7 +847,7 @@ class Libtorrent4jEngine(
                     trackersFailed = failed,
                     trackersTotal = total,
                     dhtInUse = discoveryOf(kindOf(key)).dht,
-                    searchSeconds = if (running && found == 0) ((now - (searchStart[key] ?: now)) / 1000).toInt().coerceIn(0, SEARCH_SECONDS_CAP) else 0,
+                    searchSeconds = if (searching && found == 0) ((now - (searchStart[key] ?: now)) / 1000).toInt().coerceIn(0, SEARCH_SECONDS_CAP) else 0,
                 )
             if (next != snap) {
                 latest[eid] = next

@@ -451,13 +451,13 @@ internal fun searchText(context: android.content.Context, line: SearchLine): Str
     val base =
         when (line.kind) {
             SearchLine.Kind.LOOKING -> context.getString(R.string.torrent_search_looking)
-            SearchLine.Kind.FOUND_CONNECTING -> context.getString(R.string.torrent_search_found, line.found)
-            SearchLine.Kind.CONNECTED -> context.getString(R.string.torrent_search_connected, line.connected, line.found)
+            SearchLine.Kind.FOUND_CONNECTING -> context.resources.getQuantityString(R.plurals.torrent_search_found, line.found, line.found)
+            SearchLine.Kind.CONNECTED -> context.resources.getQuantityString(R.plurals.torrent_search_connected, line.found, line.connected, line.found)
             SearchLine.Kind.NO_PEERS -> context.getString(R.string.torrent_search_none)
             SearchLine.Kind.NO_PEERS_TRACKERS_ONLY -> context.getString(R.string.torrent_search_none_trackers_only)
             SearchLine.Kind.WIFI_ONLY_NOTE -> context.getString(R.string.torrent_search_wifi_only_note)
         }
-    return if (line.trackersAllFailed > 0) base + " " + context.getString(R.string.torrent_search_trackers_failed, line.trackersAllFailed) else base
+    return if (line.trackersAllFailed > 0) base + " " + context.resources.getQuantityString(R.plurals.torrent_search_trackers_failed, line.trackersAllFailed, line.trackersAllFailed) else base
 }
 
 @Composable

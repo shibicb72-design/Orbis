@@ -46,11 +46,14 @@ class TorrentSearchLineTest {
     @Test(timeout = 20_000)
     fun foundButNoneConnectedSaysConnecting() {
         assertEquals("Found 4 peers, connecting…", text(entry(found = 4)))
+        assertEquals("Found 1 peer, connecting…", text(entry(found = 1)))
     }
 
     @Test(timeout = 20_000)
     fun connectedSaysHowManyOfHowMany() {
         assertEquals("Connected to 2 of 9 peers", text(entry(found = 9, connected = 2)))
+        assertEquals("Connected to 1 peer", text(entry(found = 1, connected = 1)))
+        assertEquals("Connected to 1 of 3 peers", text(entry(found = 3, connected = 1)))
         // Connected more than found (peer exchange): never "of" a smaller number.
         assertEquals("Connected to 3 of 3 peers", text(entry(found = 1, connected = 3)))
     }
@@ -81,12 +84,13 @@ class TorrentSearchLineTest {
             text(entry(seconds = 60, dht = false, trackers = 3, failed = 3)),
         )
         assertEquals("Looking for peers… None of this torrent's 2 trackers answered.", text(entry(seconds = 8, dht = false, trackers = 2, failed = 2)))
+        assertEquals("Looking for peers… This torrent's tracker did not answer.", text(entry(seconds = 8, dht = false, trackers = 1, failed = 1)))
         // One tracker still may answer, none are known, or the DHT is in use: nothing is added.
         assertEquals("Looking for peers…", text(entry(seconds = 8, dht = false, trackers = 3, failed = 2)))
         assertEquals("Looking for peers…", text(entry(seconds = 8, dht = false, trackers = 0, failed = 0)))
         assertEquals("No peers found yet. This torrent may have few or no seeders.", text(entry(seconds = 60, dht = true, trackers = 3, failed = 3)))
         // Peers are known: the trackers do not matter.
-        assertEquals("Found 1 peers, connecting…", text(entry(found = 1, dht = false, trackers = 3, failed = 3)))
+        assertEquals("Found 1 peer, connecting…", text(entry(found = 1, dht = false, trackers = 3, failed = 3)))
     }
 
     @Test(timeout = 20_000)

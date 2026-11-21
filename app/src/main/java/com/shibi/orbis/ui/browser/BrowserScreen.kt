@@ -123,6 +123,7 @@ import com.shibi.orbis.R
 import com.shibi.orbis.settings.MagnetHandler
 import com.shibi.orbis.privacy.pageHiddenByLock
 import com.shibi.orbis.torrent.IntakeLog
+import com.shibi.orbis.torrent.NetworkKind
 import com.shibi.orbis.torrent.TorrentIntakeReader
 import com.shibi.orbis.torrent.TorrentLimits
 import com.shibi.orbis.torrent.TorrentLog
@@ -147,7 +148,7 @@ import kotlinx.coroutines.flow.StateFlow
 /** Stand-ins used while the selected tab has no session yet. */
 private val IDLE_STATE: StateFlow<SessionState> = MutableStateFlow(SessionState())
 private val NO_PROMPT: StateFlow<SitePrompt?> = MutableStateFlow(null)
-private val NO_NETWORK_KIND: StateFlow<com.shibi.orbis.torrent.NetworkKind> = MutableStateFlow(com.shibi.orbis.torrent.NetworkKind.NONE)
+private val NO_NETWORK_KIND: StateFlow<NetworkKind> = MutableStateFlow(NetworkKind.NONE)
 
 /** Remembers which session the single content view currently shows, so the view update is idempotent. */
 private class AttachedSession {
