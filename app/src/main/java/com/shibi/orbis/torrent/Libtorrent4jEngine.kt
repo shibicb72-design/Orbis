@@ -678,8 +678,11 @@ class Libtorrent4jEngine(
         when (alert.type()) {
             AlertType.DHT_BOOTSTRAP -> post { timeline.dhtBootstrapped(at) }
             AlertType.DHT_STATS -> {
-                val nodes = (alert as DhtStatsAlert).routingTable().sumOf { it.numNodes() }
-                post { timeline.dhtNodes(nodes) }
+                // One alert per DHT node (one per listen socket): only its family is read, never its address.
+                val a = alert as DhtStatsAlert
+                val nodes = a.routingTable().sumOf { it.numNodes() }
+                val v6 = runCatching { a.localEndpoint().address().isV6 }.getOrDefault(false)
+                post { timeline.dhtNodes(v6, nodes) }
             }
             AlertType.DHT_REPLY -> {
                 val a = alert as DhtReplyAlert

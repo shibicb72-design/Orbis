@@ -60,7 +60,8 @@ class TorrentTimeline(private val log: (String) -> Unit) {
 
     // Session-wide; reset by [sessionEnded].
     private var dhtReadyAt = NOT_YET
-    private var latestDhtNodes = -1
+    private val dhtNodesByFamily = intArrayOf(-1, -1) // v4, v6
+    private val latestDhtNodes get() = if (dhtNodesByFamily.all { it < 0 }) -1 else dhtNodesByFamily.sumOf { it.coerceAtLeast(0) }
     private val listenSeen = HashSet<String>()
     private var externalV4 = false
     private var externalV6 = false
@@ -158,9 +159,12 @@ class TorrentTimeline(private val log: (String) -> Unit) {
             (t >= LONG_SUMMARY_MS && !r.at300)
     }
 
-    /** The session's DHT node count, as last read. */
-    fun dhtNodes(nodes: Int) {
-        latestDhtNodes = nodes
+    /**
+     * The node count of the session's DHT node on one address family, as last read. libtorrent runs one DHT node per
+     * listen socket and reports each separately; the checkpoints take the sum over both families.
+     */
+    fun dhtNodes(v6: Boolean, nodes: Int) {
+        dhtNodesByFamily[if (v6) 1 else 0] = nodes
     }
 
     /** True while some torrent still has a DHT checkpoint to take: the engine then reads the node count. */
@@ -215,7 +219,7 @@ class TorrentTimeline(private val log: (String) -> Unit) {
     fun sessionEnded() {
         records.clear()
         dhtReadyAt = NOT_YET
-        latestDhtNodes = -1
+        dhtNodesByFamily.fill(-1)
         listenSeen.clear()
         externalV4 = false
         externalV6 = false
