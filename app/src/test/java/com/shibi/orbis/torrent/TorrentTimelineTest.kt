@@ -93,7 +93,8 @@ class TorrentTimelineTest {
                 "timeline 3 t=60000 at_60s new_session=1 session_started=20 dht_ready=2000 tracker_answer=3000 peer_found=3000 " +
                     "peer_connected=4500 tracker_asks=3 tracker_answers=1 tracker_timeout=1 tracker_refused=1 tracker_other=0 " +
                     "found_tracker=50 found_dht=7 found_local=1 attempts=10 connected=4 fail_timeout=2 fail_refused=1 " +
-                    "fail_no_route=1 fail_other=1 dropped=1 incoming=1 peers_now=4 connecting_now=1 pex_now=2 known=61 " +
+                    "fail_no_route=1 fail_other=1 dropped=1 incoming=1 forced_dht=0 forced_trackers=0 " +
+                    "peers_now=4 connecting_now=1 pex_now=2 known=61 " +
                     "dht_nodes_5s=8 dht_nodes_15s=40 dht_nodes_30s=120 dht_nodes_60s=120",
             ),
             lines,
@@ -118,16 +119,16 @@ class TorrentTimelineTest {
                 "timeline 4 t=0 session_started",
                 "timeline 4 t=2000 finished new_session=0 session_started=0 tracker_asks=0 tracker_answers=0 tracker_timeout=0 " +
                     "tracker_refused=0 tracker_other=0 found_tracker=0 found_dht=0 found_local=0 attempts=0 fail_timeout=0 " +
-                    "fail_refused=0 fail_no_route=0 fail_other=0 dropped=0 incoming=0",
+                    "fail_refused=0 fail_no_route=0 fail_other=0 dropped=0 incoming=0 forced_dht=0 forced_trackers=0",
                 "timeline 4 t=300000 at_60s new_session=0 session_started=0 tracker_asks=0 tracker_answers=0 tracker_timeout=0 " +
                     "tracker_refused=0 tracker_other=0 found_tracker=0 found_dht=0 found_local=0 attempts=0 fail_timeout=0 " +
-                    "fail_refused=0 fail_no_route=0 fail_other=0 dropped=0 incoming=0",
+                    "fail_refused=0 fail_no_route=0 fail_other=0 dropped=0 incoming=0 forced_dht=0 forced_trackers=0",
                 "timeline 4 t=300000 at_300s new_session=0 session_started=0 tracker_asks=0 tracker_answers=0 tracker_timeout=0 " +
                     "tracker_refused=0 tracker_other=0 found_tracker=0 found_dht=0 found_local=0 attempts=0 fail_timeout=0 " +
-                    "fail_refused=0 fail_no_route=0 fail_other=0 dropped=0 incoming=0",
+                    "fail_refused=0 fail_no_route=0 fail_other=0 dropped=0 incoming=0 forced_dht=0 forced_trackers=0",
                 "timeline 4 t=301000 removed new_session=0 session_started=0 tracker_asks=0 tracker_answers=0 tracker_timeout=0 " +
                     "tracker_refused=0 tracker_other=0 found_tracker=0 found_dht=0 found_local=0 attempts=0 fail_timeout=0 " +
-                    "fail_refused=0 fail_no_route=0 fail_other=0 dropped=0 incoming=0",
+                    "fail_refused=0 fail_no_route=0 fail_other=0 dropped=0 incoming=0 forced_dht=0 forced_trackers=0",
             ),
             lines,
         )
@@ -162,7 +163,7 @@ class TorrentTimelineTest {
         timeline.sessionEnded()
         timeline.listen(ok = true, socket = "TCP", v6 = false)
         assertEquals(
-            listOf("listen ok tcp v4", "listen failed utp v6", "external v4=yes v6=no", "external v4=yes v6=yes", "listen ok tcp v4"),
+            listOf("listen ok tcp v4", "listen failed utp v6 error=0 op=unknown", "external v4=yes v6=no", "external v4=yes v6=yes", "listen ok tcp v4"),
             lines,
         )
     }
@@ -215,6 +216,43 @@ class TorrentTimelineTest {
         for (kind in listOf(" at_60s ", " at_300s ", " finished ", " removed ", " peer_connected", "listen ", "external ")) {
             assertTrue("no line with '$kind'", lines.any { kind in it })
         }
+        lines.forEach { assertTrue("bad line: $it", allowed.matches(it)) }
+    }
+
+    @Test
+    fun forcedSearchesCountPerTorrentAndShowInTheSummary() {
+        timeline.added(8, at = 0, sessionStartedAt = 10)
+        timeline.forced(8, dht = true, trackers = false, at = 1_000)
+        timeline.forced(8, dht = true, trackers = true, at = 3_000)
+        timeline.forced(8, dht = false, trackers = false, at = 4_000) // nothing asked: no line, no count
+        timeline.forced(99, dht = true, trackers = true, at = 4_000)
+        timeline.removed(8, at = 5_000)
+        assertEquals(
+            listOf(
+                "timeline 8 t=10 session_started",
+                "timeline 8 t=1000 forced dht=1 trackers=0",
+                "timeline 8 t=3000 forced dht=2 trackers=1",
+                "timeline 8 t=5000 removed new_session=1 session_started=10 tracker_asks=0 tracker_answers=0 tracker_timeout=0 " +
+                    "tracker_refused=0 tracker_other=0 found_tracker=0 found_dht=0 found_local=0 attempts=0 fail_timeout=0 " +
+                    "fail_refused=0 fail_no_route=0 fail_other=0 dropped=0 incoming=0 forced_dht=2 forced_trackers=1",
+            ),
+            lines,
+        )
+    }
+
+    @Test
+    fun aListenFailureCarriesItsErrorNumberAndOperationNameOnly() {
+        timeline.listen(ok = false, socket = "TCP", v6 = false, error = 98, operation = "SOCK_BIND")
+        timeline.listen(ok = false, socket = "TCP", v6 = false, error = 98, operation = "SOCK_BIND")
+        timeline.listen(ok = false, socket = "TCP", v6 = false, error = -3, operation = "Not An Enum!")
+        timeline.listen(ok = true, socket = "TCP", v6 = false, error = 98, operation = "SOCK_BIND")
+        assertEquals(
+            listOf("listen failed tcp v4 error=98 op=sock_bind", "listen failed tcp v4 error=-3 op=notanenum", "listen ok tcp v4"),
+            lines,
+        )
+        val allowed = Regex("[a-z0-9 =_<>.\\-]*")
+        val rnd = Random(98)
+        repeat(2_000) { timeline.listen(rnd.nextBoolean(), randomText(rnd), rnd.nextBoolean(), rnd.nextInt(), randomText(rnd)) }
         lines.forEach { assertTrue("bad line: $it", allowed.matches(it)) }
     }
 

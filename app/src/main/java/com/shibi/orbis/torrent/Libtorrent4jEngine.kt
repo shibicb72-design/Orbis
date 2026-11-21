@@ -3,6 +3,7 @@ package com.shibi.orbis.torrent
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.reflect.KClass
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -107,6 +108,9 @@ class Libtorrent4jEngine(
     /** The connection timeline in the error log: counts and times only (keyed by engine id). */
     private val timeline = TorrentTimeline(log)
 
+    /** Asks the DHT and the trackers again while a torrent knows no peer (keyed by engine id). */
+    private val peerSearch = PeerSearchRetry()
+
     // Lazy: nothing of libtorrent4j is touched before the first start (its classes load the native library).
     private val listener by lazy {
         object : AlertListener {
@@ -174,6 +178,7 @@ class Libtorrent4jEngine(
                 while (isActive) {
                     runCatching { session?.postTorrentUpdates() }
                     runCatching { timelineTick() }
+                    runCatching { peerSearchTick() }
                     delay(1000)
                 }
             }
@@ -210,6 +215,7 @@ class Libtorrent4jEngine(
             pendingResume.clear()
             latest.clear()
             timeline.sessionEnded()
+            peerSearch.clear()
             _snapshots.value = emptyMap()
             log("engine stopped")
         }
@@ -479,6 +485,7 @@ class Libtorrent4jEngine(
             runCatching { byHandle.remove(h.swig().id()) }
             pendingResume.remove(h.swig().id())?.complete(null)
             latest.remove(id)
+            peerSearch.forget(id.value)
             _snapshots.value = latest.toMap()
             sampleTimeline(id.value, h, clock())
             timeline.removed(id.value, clock())
@@ -560,26 +567,33 @@ class Libtorrent4jEngine(
         }
     }
 
-    /** Every setting Orbis makes. [d]: session-wide DHT and local peers, recorded as applied (the pack is applied at once). */
+    /**
+     * Every setting Orbis makes ([sessionSettings]) as a pack. [d]: session-wide DHT and local peers, recorded as applied
+     * (the pack is applied at once).
+     */
     private fun pack(s: EngineSettings, d: SessionDiscovery = sessionDiscovery()): SettingsPack {
         appliedSession = d
         val p = SettingsPack()
-        // No user_agent, peer_fingerprint or handshake_client_version: libtorrent's own defaults go out, so Orbis
-        // looks like any libtorrent client.
-        p.listenInterfaces("0.0.0.0:${s.listenPort},[::]:${s.listenPort}")
-        p.setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), false)
-        p.setBoolean(settings_pack.bool_types.enable_natpmp.swigValue(), false)
-        // libtorrent's default, stated so it cannot drift: a torrent may not point tracker or web seed requests at
-        // this phone's own loopback services (only /announce paths there, no web seed query strings).
-        p.setBoolean(settings_pack.bool_types.ssrf_mitigation.swigValue(), true)
-        p.setEnableDht(d.dht)
-        p.setEnableLsd(d.lsd)
-        p.setMaxMetadataSize(TorrentLimits.MAX_METADATA_BYTES)
-        p.downloadRateLimit(s.downBps.coerceAtLeast(0))
-        p.uploadRateLimit(s.upBps.coerceAtLeast(0))
-        p.activeDownloads(s.maxActive)
-        if (s.stopSeeding) p.activeSeeds(0)
-        p.stopTrackerTimeout(STOP_TRACKER_TIMEOUT_S)
+        for ((key, value) in sessionSettings(s, d)) {
+            when (key) {
+                SessionSetting.LISTEN_INTERFACES -> p.listenInterfaces(value as String)
+                SessionSetting.ENABLE_UPNP -> p.setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), value as Boolean)
+                SessionSetting.ENABLE_NATPMP -> p.setBoolean(settings_pack.bool_types.enable_natpmp.swigValue(), value as Boolean)
+                SessionSetting.SSRF_MITIGATION -> p.setBoolean(settings_pack.bool_types.ssrf_mitigation.swigValue(), value as Boolean)
+                SessionSetting.ENABLE_DHT -> p.setEnableDht(value as Boolean)
+                SessionSetting.ENABLE_LSD -> p.setEnableLsd(value as Boolean)
+                SessionSetting.MAX_METADATA_SIZE -> p.setMaxMetadataSize(value as Int)
+                SessionSetting.DOWNLOAD_RATE_LIMIT -> p.downloadRateLimit(value as Int)
+                SessionSetting.UPLOAD_RATE_LIMIT -> p.uploadRateLimit(value as Int)
+                SessionSetting.ACTIVE_DOWNLOADS -> p.activeDownloads(value as Int)
+                SessionSetting.ACTIVE_SEEDS -> p.activeSeeds(value as Int)
+                SessionSetting.STOP_TRACKER_TIMEOUT -> p.stopTrackerTimeout(value as Int)
+                SessionSetting.ANNOUNCE_TO_ALL_TRACKERS ->
+                    p.setBoolean(settings_pack.bool_types.announce_to_all_trackers.swigValue(), value as Boolean)
+                SessionSetting.ANNOUNCE_TO_ALL_TIERS ->
+                    p.setBoolean(settings_pack.bool_types.announce_to_all_tiers.swigValue(), value as Boolean)
+            }
+        }
         return p
     }
 
@@ -676,7 +690,11 @@ class Libtorrent4jEngine(
     private fun onTimelineAlert(alert: Alert<*>) {
         val at = clock()
         when (alert.type()) {
-            AlertType.DHT_BOOTSTRAP -> post { timeline.dhtBootstrapped(at) }
+            AlertType.DHT_BOOTSTRAP ->
+                post {
+                    timeline.dhtBootstrapped(at)
+                    askDhtNow(at)
+                }
             AlertType.DHT_STATS -> {
                 // One alert per DHT node (one per listen socket): only its family is read, never its address.
                 val a = alert as DhtStatsAlert
@@ -739,7 +757,10 @@ class Libtorrent4jEngine(
                 val a = alert as ListenFailedAlert
                 val socket = a.socketType().name
                 val v6 = runCatching { a.address().isV6 }.getOrDefault(false)
-                post { timeline.listen(ok = false, socket = socket, v6 = v6) }
+                // The error number and the operation's enum name only, never the message.
+                val error = runCatching { a.error().value }.getOrDefault(-1)
+                val operation = runCatching { a.operation().name }.getOrDefault("")
+                post { timeline.listen(ok = false, socket = socket, v6 = v6, error = error, operation = operation) }
             }
             AlertType.EXTERNAL_IP -> {
                 val v6 = (alert as ExternalIpAlert).externalAddress().isV6
@@ -755,6 +776,57 @@ class Libtorrent4jEngine(
         for ((key, h) in handles) if (timeline.wantsSample(key, now)) sampleTimeline(key, h, now)
         if (timeline.wantsDhtNodes(now)) session?.postDhtStats()
         timeline.tick(now)
+    }
+
+    /**
+     * Once a second (engine thread): every running torrent that knows no peer asks the DHT and its trackers again on
+     * [PeerSearchRetry]'s schedule, and the DHT at once when the session's DHT node starts running.
+     */
+    private fun peerSearchTick() {
+        val s = session ?: return
+        val now = clock()
+        val dhtRunning = s.isDhtRunning
+        val cameUp = peerSearch.dhtCameUp(dhtRunning)
+        for ((key, h) in handles) {
+            val t = peerSearchTorrent(key, h, dhtRunning) ?: continue
+            var calls = peerSearch.poll(key, now, t)
+            if (cameUp && PeerSearchRetry.askDhtNow(t)) calls = calls + PeerSearchRetry.Call.DHT
+            forcePeerSearch(key, h, calls, now)
+        }
+    }
+
+    /** The DHT finished its bootstrap: every running torrent that may use it and knows no peer asks it now. */
+    private fun askDhtNow(at: Long) {
+        val dhtRunning = session?.isDhtRunning ?: return
+        for ((key, h) in handles) {
+            val t = peerSearchTorrent(key, h, dhtRunning) ?: continue
+            if (PeerSearchRetry.askDhtNow(t)) forcePeerSearch(key, h, setOf(PeerSearchRetry.Call.DHT), at)
+        }
+    }
+
+    /** What [PeerSearchRetry] needs to know about [h]; its trackers are read only for a running torrent with no peer. */
+    private fun peerSearchTorrent(key: Long, h: TorrentHandle, dhtRunning: Boolean): PeerSearchRetry.Torrent? {
+        val st = runCatching { h.status() }.getOrNull() ?: return null
+        val running = !st.flags().and_(TorrentFlags.PAUSED).non_zero()
+        val peersKnown = st.listPeers().coerceAtLeast(0) + st.numPeers().coerceAtLeast(0)
+        val hasTrackers = running && peersKnown == 0 && runCatching { h.trackers().isNotEmpty() }.getOrDefault(false)
+        return PeerSearchRetry.Torrent(
+            running = running,
+            peersKnown = peersKnown,
+            discovery = TorrentDiscovery.of(settings.dht, settings.pex, settings.lsd, trackersOnly = trackersOnly(key)),
+            dhtRunning = dhtRunning,
+            hasTrackers = hasTrackers,
+        )
+    }
+
+    private fun forcePeerSearch(key: Long, h: TorrentHandle, calls: Set<PeerSearchRetry.Call>, at: Long) {
+        if (calls.isEmpty()) return
+        val dht = PeerSearchRetry.Call.DHT in calls
+        val trackers = PeerSearchRetry.Call.TRACKERS in calls
+        if (dht) h.forceDHTAnnounce()
+        // Every tracker; libtorrent still keeps to each tracker's minimum announce interval.
+        if (trackers) h.forceReannounce()
+        timeline.forced(key, dht = dht, trackers = trackers, at = at)
     }
 
     /** Counts from the peer list of [h]; no address leaves this function. */
@@ -841,7 +913,54 @@ class Libtorrent4jEngine(
 
     private companion object {
         const val RESUME_TIMEOUT_MS = 15_000L
-        const val STOP_TRACKER_TIMEOUT_S = 2
         const val ENOSPC = 28
     }
 }
+
+/** A libtorrent setting Orbis makes, named as in libtorrent's settings_pack; [type]: the type of its value. */
+internal enum class SessionSetting(val type: KClass<*>) {
+    LISTEN_INTERFACES(String::class),
+    ENABLE_UPNP(Boolean::class),
+    ENABLE_NATPMP(Boolean::class),
+    SSRF_MITIGATION(Boolean::class),
+    ENABLE_DHT(Boolean::class),
+    ENABLE_LSD(Boolean::class),
+    MAX_METADATA_SIZE(Int::class),
+    DOWNLOAD_RATE_LIMIT(Int::class),
+    UPLOAD_RATE_LIMIT(Int::class),
+    ACTIVE_DOWNLOADS(Int::class),
+    ACTIVE_SEEDS(Int::class),
+    STOP_TRACKER_TIMEOUT(Int::class),
+    ANNOUNCE_TO_ALL_TRACKERS(Boolean::class),
+    ANNOUNCE_TO_ALL_TIERS(Boolean::class),
+}
+
+private const val STOP_TRACKER_TIMEOUT_S = 2
+
+/**
+ * Every session setting Orbis makes, in the order it is set; libtorrent's defaults hold for the rest. [d]: the
+ * session-wide DHT and local peers. Pure (no libtorrent class), so a test can read it.
+ */
+internal fun sessionSettings(s: EngineSettings, d: SessionDiscovery): List<Pair<SessionSetting, Any>> =
+    buildList {
+        // No user_agent, peer_fingerprint or handshake_client_version: libtorrent's own defaults go out, so Orbis
+        // looks like any libtorrent client.
+        add(SessionSetting.LISTEN_INTERFACES to "0.0.0.0:${s.listenPort},[::]:${s.listenPort}")
+        add(SessionSetting.ENABLE_UPNP to false)
+        add(SessionSetting.ENABLE_NATPMP to false)
+        // libtorrent's default, stated so it cannot drift: a torrent may not point tracker or web seed requests at
+        // this phone's own loopback services (only /announce paths there, no web seed query strings).
+        add(SessionSetting.SSRF_MITIGATION to true)
+        add(SessionSetting.ENABLE_DHT to d.dht)
+        add(SessionSetting.ENABLE_LSD to d.lsd)
+        add(SessionSetting.MAX_METADATA_SIZE to TorrentLimits.MAX_METADATA_BYTES)
+        add(SessionSetting.DOWNLOAD_RATE_LIMIT to s.downBps.coerceAtLeast(0))
+        add(SessionSetting.UPLOAD_RATE_LIMIT to s.upBps.coerceAtLeast(0))
+        add(SessionSetting.ACTIVE_DOWNLOADS to s.maxActive)
+        if (s.stopSeeding) add(SessionSetting.ACTIVE_SEEDS to 0)
+        add(SessionSetting.STOP_TRACKER_TIMEOUT to STOP_TRACKER_TIMEOUT_S)
+        // Every tracker and every tier at once (tor10-2): a torrent that relies on its trackers is not held up while
+        // dead ones ahead of the good one time out one after another.
+        add(SessionSetting.ANNOUNCE_TO_ALL_TRACKERS to true)
+        add(SessionSetting.ANNOUNCE_TO_ALL_TIERS to true)
+    }
