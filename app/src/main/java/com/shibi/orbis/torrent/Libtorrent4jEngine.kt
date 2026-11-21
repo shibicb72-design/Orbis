@@ -89,11 +89,14 @@ class Libtorrent4jEngine(
     private var ticker: Job? = null
     private val handles = HashMap<Long, TorrentHandle>()
 
-    /** Engine ids of torrents from a private tab: trackers only, whatever the settings say. */
+    /**
+     * Engine ids of torrents from a private tab: never local peer discovery, theirs or the session's, whatever the
+     * settings say (their DHT and peer exchange follow the settings).
+     */
     private val privateIds = HashSet<Long>()
 
     /**
-     * Engine ids of BEP 27 private torrents (private=1 in the info dictionary): trackers only as well. libtorrent
+     * Engine ids of BEP 27 private torrents (private=1 in the info dictionary): trackers only, in any tab. libtorrent
      * already keeps them off the DHT and local peers and gives them no peer exchange plugin, but that plugin is made
      * when a torrent is added, so a magnet that turns out private would keep peer exchange; the flags close that.
      */
@@ -148,8 +151,8 @@ class Libtorrent4jEngine(
 
     /**
      * Takes the settings. The session itself is built by the first [add] (the manager adds right after starting),
-     * so it starts knowing whether that torrent is from a private tab: a session built for a private-tab torrent
-     * alone never starts the DHT node or local peer discovery, not even for a moment.
+     * so it starts knowing what that torrent is: a session built for a private-tab torrent never starts local peer
+     * discovery, and one built for a BEP 27 torrent never starts the DHT node, not even for a moment.
      */
     override fun start(settings: EngineSettings) {
         post {
@@ -158,8 +161,8 @@ class Libtorrent4jEngine(
         }
     }
 
-    /** Builds the session for its first torrent ([firstIsPrivate]). Throws when the native library cannot load. */
-    private fun open(firstIsPrivate: Boolean): SessionManager {
+    /** Builds the session for its first torrent ([first]). Throws when the native library cannot load. */
+    private fun open(first: Kind): SessionManager {
         val started = SessionManager(false)
         val params =
             runCatching { if (sessionFile.isFile) SessionParams(sessionFile.readBytes()) else null }.getOrNull()
@@ -167,7 +170,7 @@ class Libtorrent4jEngine(
         // Our settings go in before the session exists: libtorrent's defaults would start UPnP and NAT-PMP and
         // listen on 6881 the moment the session is built. This replaces any settings in session.dat (an older
         // one may still carry the "Orbis/<version>" user agent; it is not set any more, libtorrent's own goes out).
-        params.setSettings(pack(settings, SessionDiscovery.of(settings.dht, settings.lsd, privateTorrents = if (firstIsPrivate) 1 else 0, torrents = 1)))
+        params.setSettings(pack(settings, sessionDiscovery(adding = first)))
         // Files go through plain read/write: mmap on Android's external storage is not worth the risk.
         params.setPosixDiskIO()
         started.addListener(listener)
@@ -238,23 +241,18 @@ class Libtorrent4jEngine(
     }
 
     private suspend fun doAdd(id: EngineId, source: TorrentSource, saveDir: File, resumeData: ByteArray?, isPrivate: Boolean, addedAt: Long) {
-        val opens = session == null
-        // UnsatisfiedLinkError (no native library for this ABI) is an Error: caught here so the torrent fails visibly.
-        val s =
-            session
-                ?: try {
-                    open(firstIsPrivate = isPrivate)
-                } catch (e: Throwable) {
-                    if (e is VirtualMachineError && e !is OutOfMemoryError) throw e
-                    log("engine start failed: ${e.javaClass.simpleName}")
-                    null
-                }
-        if (s == null) {
-            emit(TorrentEvent.Error(id, TorrentErrorKind.ENGINE_ERROR))
-            return
-        }
-        val sessionStartedAt = if (opens) clock() else null
-        val ec = error_code()
+        // The torrent is read before the session is built, so the session starts knowing whether it is BEP 27. The
+        // first libtorrent4j object loads the native library: UnsatisfiedLinkError (no native library for this ABI) is
+        // an Error, caught here and at open so the torrent fails visibly.
+        val ec =
+            try {
+                error_code()
+            } catch (e: Throwable) {
+                if (e is VirtualMachineError && e !is OutOfMemoryError) throw e
+                log("engine start failed: ${e.javaClass.simpleName}")
+                emit(TorrentEvent.Error(id, TorrentErrorKind.ENGINE_ERROR))
+                return
+            }
         var p: add_torrent_params? = null
         if (resumeData != null) {
             p = libtorrent.read_resume_data_ex(Vectors.bytes2byte_vector(resumeData), ec).takeIf { !ec.failed() }
@@ -290,10 +288,26 @@ class Libtorrent4jEngine(
         }
         refusedTrackers += dropRefusedTrackers(p)
         if (refusedTrackers > 0) log("announce urls dropped $refusedTrackers")
-        saveDir.mkdirs()
-        p.setSave_path(saveDir.absolutePath)
         val withMetadata = hasInfo(p)
         val bep27 = withMetadata && runCatching { TorrentInfo(p.ti_ptr()).isPrivate }.getOrDefault(false)
+        val kind = Kind(privateTab = isPrivate, bep27 = bep27)
+        val opens = session == null
+        val s =
+            session
+                ?: try {
+                    open(first = kind)
+                } catch (e: Throwable) {
+                    if (e is VirtualMachineError && e !is OutOfMemoryError) throw e
+                    log("engine start failed: ${e.javaClass.simpleName}")
+                    null
+                }
+        if (s == null) {
+            emit(TorrentEvent.Error(id, TorrentErrorKind.ENGINE_ERROR))
+            return
+        }
+        val sessionStartedAt = if (opens) clock() else null
+        saveDir.mkdirs()
+        p.setSave_path(saveDir.absolutePath)
         // Never auto-managed: the manager decides what runs. With metadata it waits paused for the file check; a
         // magnet runs to fetch metadata and is paused the moment it arrives (see METADATA_RECEIVED). Not
         // stop_when_ready: libtorrent counts downloading_metadata as a transferring state, so a magnet with that flag
@@ -307,7 +321,7 @@ class Libtorrent4jEngine(
                 // accept) are not wanted either, so nothing at all is created before the list is rejected.
                 flags.and_(TorrentFlags.PAUSED.inv()).and_(TorrentFlags.STOP_WHEN_READY.inv()).or_(TorrentFlags.DEFAULT_DONT_DOWNLOAD)
             }
-        flags = discoveryFlags(flags, trackersOnly = isPrivate || bep27)
+        flags = discoveryFlags(flags, kind)
         p.setFlags(flags)
         // No file is wanted until the manager approved the list: libtorrent then creates no empty file, folder or
         // symlink under the torrent's own names. For a magnet the list is longer than any accepted torrent; libtorrent
@@ -316,8 +330,9 @@ class Libtorrent4jEngine(
             if (withMetadata) runCatching { TorrentInfo(p.ti_ptr()).numFiles() }.getOrDefault(TorrentLimits.MAX_FILES) else TorrentLimits.MAX_FILES
         AddTorrentParams(p).filePriorities(Priority.array(Priority.IGNORE, fileCount))
         // A private-tab torrent joins a session whose local peer discovery is already off: libtorrent answers an LSD
-        // announce for any torrent that is not BEP 27 private, whatever its own DISABLE_LSD flag.
-        applySessionDiscovery(addingPrivate = isPrivate)
+        // announce for any torrent that is not BEP 27 private, whatever its own DISABLE_LSD flag. One that may use the
+        // DHT joins a session whose DHT node already runs (when the setting is on).
+        applySessionDiscovery(adding = kind)
         ec.clear()
         val h = s.swig().add_torrent(p, ec)
         if (ec.failed() || h == null || !h.is_valid()) {
@@ -378,25 +393,29 @@ class Libtorrent4jEngine(
         return dropped
     }
 
-    private fun sessionDiscovery(addingPrivate: Boolean? = null): SessionDiscovery {
-        val adding = if (addingPrivate == null) 0 else 1
-        val addingPriv = if (addingPrivate == true) 1 else 0
-        return SessionDiscovery.of(
+    /** What a torrent is, for [TorrentDiscovery.of] and [SessionDiscovery.of]. */
+    private data class Kind(val privateTab: Boolean, val bep27: Boolean)
+
+    private fun kindOf(key: Long): Kind = Kind(privateTab = key in privateIds, bep27 = key in bep27Ids)
+
+    /** [adding]: one torrent about to be added, counted as if it already were. */
+    private fun sessionDiscovery(adding: Kind? = null): SessionDiscovery =
+        SessionDiscovery.of(
             settings.dht,
             settings.lsd,
-            privateTorrents = privateIds.size + addingPriv,
-            torrents = handles.size + adding,
+            privateTabTorrents = privateIds.size + if (adding?.privateTab == true) 1 else 0,
+            bep27Torrents = bep27Ids.size + if (adding?.bep27 == true) 1 else 0,
+            torrents = handles.size + if (adding != null) 1 else 0,
             previous = appliedSession,
         )
-    }
 
     /**
      * Session-wide DHT and local peer discovery follow the torrents in the session ([SessionDiscovery.of]).
-     * [addingPrivate]: counts one torrent about to be added. Only a change is applied.
+     * [adding]: counts one torrent about to be added. Only a change is applied.
      */
-    private fun applySessionDiscovery(addingPrivate: Boolean? = null) {
+    private fun applySessionDiscovery(adding: Kind? = null) {
         val s = session ?: return
-        val d = sessionDiscovery(addingPrivate)
+        val d = sessionDiscovery(adding)
         if (d == appliedSession) return
         val p = SettingsPack()
         p.setEnableDht(d.dht)
@@ -406,10 +425,11 @@ class Libtorrent4jEngine(
         log("session discovery dht=${d.dht} lsd=${d.lsd}")
     }
 
-    private fun trackersOnly(key: Long): Boolean = key in privateIds || key in bep27Ids
+    private fun discoveryOf(kind: Kind, dht: Boolean = settings.dht, pex: Boolean = settings.pex, lsd: Boolean = settings.lsd): TorrentDiscovery =
+        TorrentDiscovery.of(dht, pex, lsd, privateTab = kind.privateTab, bep27 = kind.bep27)
 
-    private fun discoveryFlags(f: torrent_flags_t, trackersOnly: Boolean): torrent_flags_t {
-        val d = TorrentDiscovery.of(settings.dht, settings.pex, settings.lsd, trackersOnly)
+    private fun discoveryFlags(f: torrent_flags_t, kind: Kind): torrent_flags_t {
+        val d = discoveryOf(kind)
         var flags = f
         flags = if (d.dht) flags.and_(TorrentFlags.DISABLE_DHT.inv()) else flags.or_(TorrentFlags.DISABLE_DHT)
         flags = if (d.pex) flags.and_(TorrentFlags.DISABLE_PEX.inv()) else flags.or_(TorrentFlags.DISABLE_PEX)
@@ -424,6 +444,8 @@ class Libtorrent4jEngine(
             bep27Ids += id.value
             h.setFlags(TorrentFlags.DISABLE_DHT.or_(TorrentFlags.DISABLE_PEX).or_(TorrentFlags.DISABLE_LSD))
             log("torrent ${id.value} bep27=true")
+            // The DHT node stops if no torrent left in the session may use it.
+            applySessionDiscovery()
         }
     }
 
@@ -491,7 +513,8 @@ class Libtorrent4jEngine(
             timeline.removed(id.value, clock())
             val s = session ?: return@post
             if (deleteFiles) s.remove(h, session_handle.delete_files) else s.remove(h)
-            // Local peers come back only once the last private-tab torrent is out of the session.
+            // Local peers come back only once the last private-tab torrent is out of the session; the DHT node stops
+            // once only BEP 27 torrents are left.
             applySessionDiscovery()
         }
     }
@@ -549,7 +572,7 @@ class Libtorrent4jEngine(
             settings = settings.copy(dht = dht, pex = pex, lsd = lsd)
             session?.applySettings(pack(settings))
             handles.forEach { (key, h) ->
-                val d = TorrentDiscovery.of(dht, pex, lsd, trackersOnly = trackersOnly(key))
+                val d = discoveryOf(kindOf(key), dht, pex, lsd)
                 if (d.pex) h.unsetFlags(TorrentFlags.DISABLE_PEX) else h.setFlags(TorrentFlags.DISABLE_PEX)
                 if (d.dht) h.unsetFlags(TorrentFlags.DISABLE_DHT) else h.setFlags(TorrentFlags.DISABLE_DHT)
                 if (d.lsd) h.unsetFlags(TorrentFlags.DISABLE_LSD) else h.setFlags(TorrentFlags.DISABLE_LSD)
@@ -813,7 +836,7 @@ class Libtorrent4jEngine(
         return PeerSearchRetry.Torrent(
             running = running,
             peersKnown = peersKnown,
-            discovery = TorrentDiscovery.of(settings.dht, settings.pex, settings.lsd, trackersOnly = trackersOnly(key)),
+            discovery = discoveryOf(kindOf(key)),
             dhtRunning = dhtRunning,
             hasTrackers = hasTrackers,
         )

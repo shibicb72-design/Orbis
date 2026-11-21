@@ -1063,8 +1063,8 @@ class TorrentManagerTest {
         val normal = s.engine.added.single { !it.isPrivate }.id
         val priv = s.engine.added.single { it.isPrivate }.id
         assertEquals(TorrentDiscovery(dht = true, pex = true, lsd = true), s.engine.discovery[normal])
-        // Trackers only: no DHT, no peer exchange, no local peers.
-        assertEquals(TorrentDiscovery.TRACKERS_ONLY, s.engine.discovery[priv])
+        // The DHT and peer exchange as the settings say; no local peers.
+        assertEquals(TorrentDiscovery(dht = true, pex = true, lsd = false), s.engine.discovery[priv])
 
         // Off and on again, with other changes in between: every change reaches both torrents, none turns local
         // peers on for the private one.
@@ -1075,8 +1075,15 @@ class TorrentManagerTest {
         s.settings.value = s.settings.value.copy(dht = true, pex = false)
         advanceUntilIdle()
         val privateChanges = s.engine.discoveryLog.filter { it.first == priv }.map { it.second }
-        assertEquals(4, privateChanges.size)
-        assertTrue(privateChanges.all { it == TorrentDiscovery.TRACKERS_ONLY })
+        assertEquals(
+            listOf(
+                TorrentDiscovery(dht = true, pex = true, lsd = false),
+                TorrentDiscovery(dht = true, pex = true, lsd = false),
+                TorrentDiscovery(dht = false, pex = true, lsd = false),
+                TorrentDiscovery(dht = true, pex = false, lsd = false),
+            ),
+            privateChanges,
+        )
         assertEquals(TorrentDiscovery(dht = true, pex = false, lsd = true), s.engine.discovery[normal])
     }
 

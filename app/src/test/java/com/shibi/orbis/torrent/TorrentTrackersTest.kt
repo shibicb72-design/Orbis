@@ -140,38 +140,64 @@ class TorrentTrackersTest {
     // ---- discovery ----
 
     @Test
-    fun aPrivateTabTorrentUsesTrackersOnlyWhateverTheSettings() {
-        assertEquals(TorrentDiscovery.TRACKERS_ONLY, TorrentDiscovery.of(dht = true, pex = true, lsd = true, trackersOnly = true))
-        assertEquals(TorrentDiscovery(dht = true, pex = false, lsd = true), TorrentDiscovery.of(dht = true, pex = false, lsd = true, trackersOnly = false))
+    fun aPrivateTabTorrentFollowsTheDhtAndPeerExchangeSettingsButNeverUsesLocalPeers() {
+        // Local peers on as well: still off for the private-tab torrent.
+        assertEquals(TorrentDiscovery(dht = true, pex = true, lsd = false), TorrentDiscovery.of(dht = true, pex = true, lsd = true, privateTab = true, bep27 = false))
+        assertEquals(TorrentDiscovery(dht = true, pex = true, lsd = false), TorrentDiscovery.of(dht = true, pex = true, lsd = false, privateTab = true, bep27 = false))
+        // The settings switch both off for it, as for any torrent.
+        assertEquals(TorrentDiscovery.TRACKERS_ONLY, TorrentDiscovery.of(dht = false, pex = false, lsd = true, privateTab = true, bep27 = false))
+        assertEquals(TorrentDiscovery(dht = false, pex = true, lsd = false), TorrentDiscovery.of(dht = false, pex = true, lsd = true, privateTab = true, bep27 = false))
+        // A normal torrent: the settings as they are.
+        assertEquals(TorrentDiscovery(dht = true, pex = false, lsd = true), TorrentDiscovery.of(dht = true, pex = false, lsd = true, privateTab = false, bep27 = false))
     }
 
     @Test
-    fun sessionLocalPeersAreOffWhileAnyPrivateTorrentIsInTheSession() {
-        assertTrue(SessionDiscovery.of(dht = true, lsd = true, privateTorrents = 0, torrents = 3).lsd)
-        assertFalse(SessionDiscovery.of(dht = true, lsd = true, privateTorrents = 1, torrents = 3).lsd)
-        assertFalse(SessionDiscovery.of(dht = true, lsd = false, privateTorrents = 0, torrents = 1).lsd)
+    fun aBep27TorrentUsesTrackersOnlyInAnyTab() {
+        assertEquals(TorrentDiscovery.TRACKERS_ONLY, TorrentDiscovery.of(dht = true, pex = true, lsd = true, privateTab = false, bep27 = true))
+        assertEquals(TorrentDiscovery.TRACKERS_ONLY, TorrentDiscovery.of(dht = true, pex = true, lsd = true, privateTab = true, bep27 = true))
+    }
+
+    @Test
+    fun sessionLocalPeersAreOffWhileAnyPrivateTabTorrentIsInTheSession() {
+        assertTrue(SessionDiscovery.of(dht = true, lsd = true, privateTabTorrents = 0, bep27Torrents = 0, torrents = 3).lsd)
+        assertFalse(SessionDiscovery.of(dht = true, lsd = true, privateTabTorrents = 1, bep27Torrents = 0, torrents = 3).lsd)
+        assertFalse(SessionDiscovery.of(dht = true, lsd = true, privateTabTorrents = 1, bep27Torrents = 0, torrents = 1).lsd)
+        assertFalse(SessionDiscovery.of(dht = true, lsd = false, privateTabTorrents = 0, bep27Torrents = 0, torrents = 1).lsd)
+    }
+
+    @Test
+    fun aSessionWithOnlyAPrivateTabTorrentRunsTheDhtNodeWhenTheSettingIsOn() {
+        assertEquals(SessionDiscovery(dht = true, lsd = false), SessionDiscovery.of(dht = true, lsd = true, privateTabTorrents = 1, bep27Torrents = 0, torrents = 1))
+        assertEquals(SessionDiscovery(dht = true, lsd = false), SessionDiscovery.of(dht = true, lsd = false, privateTabTorrents = 2, bep27Torrents = 0, torrents = 2))
+        assertFalse(SessionDiscovery.of(dht = false, lsd = false, privateTabTorrents = 1, bep27Torrents = 0, torrents = 1).dht)
     }
 
     @Test
     fun theSessionDhtNodeRunsOnlyWhenSomeTorrentCanUseIt() {
-        assertTrue(SessionDiscovery.of(dht = true, lsd = false, privateTorrents = 1, torrents = 2).dht)
-        assertFalse(SessionDiscovery.of(dht = true, lsd = false, privateTorrents = 2, torrents = 2).dht)
-        assertFalse(SessionDiscovery.of(dht = false, lsd = false, privateTorrents = 0, torrents = 2).dht)
+        // Only BEP 27 torrents, from a private tab or not: no DHT node.
+        assertFalse(SessionDiscovery.of(dht = true, lsd = false, privateTabTorrents = 0, bep27Torrents = 1, torrents = 1).dht)
+        assertFalse(SessionDiscovery.of(dht = true, lsd = false, privateTabTorrents = 1, bep27Torrents = 2, torrents = 2).dht)
+        assertTrue(SessionDiscovery.of(dht = true, lsd = false, privateTabTorrents = 0, bep27Torrents = 1, torrents = 2).dht)
+        assertTrue(SessionDiscovery.of(dht = true, lsd = false, privateTabTorrents = 1, bep27Torrents = 0, torrents = 2).dht)
+        assertFalse(SessionDiscovery.of(dht = false, lsd = false, privateTabTorrents = 0, bep27Torrents = 0, torrents = 2).dht)
     }
 
     @Test
     fun anEmptySessionKeepsWhatItHad() {
-        // The last private-tab torrent left: the DHT node and local peers stay off until the session stops.
-        val privateOnly = SessionDiscovery(dht = false, lsd = false)
-        assertEquals(privateOnly, SessionDiscovery.of(dht = true, lsd = true, privateTorrents = 0, torrents = 0, previous = privateOnly))
+        // The last BEP 27 torrent left: the DHT node stays off until the session stops.
+        val bep27Only = SessionDiscovery(dht = false, lsd = true)
+        assertEquals(bep27Only, SessionDiscovery.of(dht = true, lsd = true, privateTabTorrents = 0, bep27Torrents = 0, torrents = 0, previous = bep27Only))
+        // The last private-tab torrent left: local peers stay off until the session stops.
+        val privateTab = SessionDiscovery(dht = true, lsd = false)
+        assertEquals(privateTab, SessionDiscovery.of(dht = true, lsd = true, privateTabTorrents = 0, bep27Torrents = 0, torrents = 0, previous = privateTab))
         // A normal session keeps its DHT node at zero torrents (session.dat keeps its DHT table).
         val normal = SessionDiscovery(dht = true, lsd = true)
-        assertEquals(normal, SessionDiscovery.of(dht = true, lsd = true, privateTorrents = 0, torrents = 0, previous = normal))
+        assertEquals(normal, SessionDiscovery.of(dht = true, lsd = true, privateTabTorrents = 0, bep27Torrents = 0, torrents = 0, previous = normal))
         // Never more than the settings allow.
-        assertEquals(SessionDiscovery(dht = false, lsd = true), SessionDiscovery.of(dht = false, lsd = true, privateTorrents = 0, torrents = 0, previous = normal))
+        assertEquals(SessionDiscovery(dht = false, lsd = true), SessionDiscovery.of(dht = false, lsd = true, privateTabTorrents = 0, bep27Torrents = 0, torrents = 0, previous = normal))
         // A torrent coming in is judged as usual.
-        assertEquals(normal, SessionDiscovery.of(dht = true, lsd = true, privateTorrents = 0, torrents = 1, previous = privateOnly))
+        assertEquals(normal, SessionDiscovery.of(dht = true, lsd = true, privateTabTorrents = 0, bep27Torrents = 0, torrents = 1, previous = bep27Only))
         // No session before: the settings.
-        assertEquals(normal, SessionDiscovery.of(dht = true, lsd = true, privateTorrents = 0, torrents = 0, previous = null))
+        assertEquals(normal, SessionDiscovery.of(dht = true, lsd = true, privateTabTorrents = 0, bep27Torrents = 0, torrents = 0, previous = null))
     }
 }

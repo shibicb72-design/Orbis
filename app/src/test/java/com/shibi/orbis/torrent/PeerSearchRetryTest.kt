@@ -12,13 +12,14 @@ class PeerSearchRetryTest {
     private fun torrent(
         running: Boolean = true,
         peersKnown: Int = 0,
-        trackersOnly: Boolean = false,
+        bep27: Boolean = false,
+        privateTab: Boolean = false,
         dhtRunning: Boolean = true,
         hasTrackers: Boolean = true,
     ) = PeerSearchRetry.Torrent(
         running = running,
         peersKnown = peersKnown,
-        discovery = TorrentDiscovery.of(dht = true, pex = true, lsd = false, trackersOnly = trackersOnly),
+        discovery = TorrentDiscovery.of(dht = true, pex = true, lsd = false, privateTab = privateTab, bep27 = bep27),
         dhtRunning = dhtRunning,
         hasTrackers = hasTrackers,
     )
@@ -78,13 +79,22 @@ class PeerSearchRetryTest {
 
     @Test
     fun aTrackersOnlyTorrentGetsTheTrackerCallAndNeverTheDhtCall() {
-        val t = torrent(trackersOnly = true)
+        val t = torrent(bep27 = true)
         assertEquals(setOf(Call.TRACKERS), PeerSearchRetry.calls(t))
         assertFalse(PeerSearchRetry.askDhtNow(t))
         retry.poll(3, 0, t)
         assertEquals(setOf(Call.TRACKERS), retry.poll(3, 3_000, t))
         // With no tracker either, a retry asks nothing.
-        assertEquals(emptySet<Call>(), PeerSearchRetry.calls(torrent(trackersOnly = true, hasTrackers = false)))
+        assertEquals(emptySet<Call>(), PeerSearchRetry.calls(torrent(bep27 = true, privateTab = true, hasTrackers = false)))
+    }
+
+    @Test
+    fun aPrivateTabTorrentWithNoTrackerGetsTheDhtCall() {
+        val t = torrent(privateTab = true, hasTrackers = false)
+        assertEquals(setOf(Call.DHT), PeerSearchRetry.calls(t))
+        assertTrue(PeerSearchRetry.askDhtNow(t))
+        retry.poll(5, 0, t)
+        assertEquals(setOf(Call.DHT), retry.poll(5, 3_000, t))
     }
 
     @Test
@@ -103,7 +113,7 @@ class PeerSearchRetryTest {
         assertEquals(setOf(Call.TRACKERS), PeerSearchRetry.calls(noDht))
         assertFalse(PeerSearchRetry.askDhtNow(noDht))
         assertEquals(setOf(Call.DHT), PeerSearchRetry.calls(torrent(hasTrackers = false)))
-        val dhtOff = PeerSearchRetry.Torrent(true, 0, TorrentDiscovery.of(dht = false, pex = true, lsd = false, trackersOnly = false), true, true)
+        val dhtOff = PeerSearchRetry.Torrent(true, 0, TorrentDiscovery.of(dht = false, pex = true, lsd = false, privateTab = false, bep27 = false), true, true)
         assertEquals(setOf(Call.TRACKERS), PeerSearchRetry.calls(dhtOff))
     }
 

@@ -141,7 +141,8 @@ class FakeTorrentEngine(
 
     private fun applyDiscovery(id: EngineId) {
         val s = sessionDiscovery
-        val d = TorrentDiscovery.of(s.dht, s.pex, s.lsd, trackersOnly = id in privateIds)
+        // The fake never sees a BEP 27 torrent (it parses no metadata).
+        val d = TorrentDiscovery.of(s.dht, s.pex, s.lsd, privateTab = id in privateIds, bep27 = false)
         discovery[id] = d
         discoveryLog += id to d
     }

@@ -240,10 +240,12 @@ class TorrentSettingsStoreTest {
     }
 
     @Test
-    fun aPrivateTorrentUsesTrackersOnly() {
-        assertEquals(TorrentDiscovery(dht = false, pex = false, lsd = false), TorrentDiscovery.of(dht = true, pex = true, lsd = true, trackersOnly = true))
-        assertEquals(TorrentDiscovery(dht = true, pex = true, lsd = true), TorrentDiscovery.of(dht = true, pex = true, lsd = true, trackersOnly = false))
-        assertEquals(TorrentDiscovery(dht = false, pex = false, lsd = false), TorrentDiscovery.of(dht = false, pex = false, lsd = false, trackersOnly = false))
+    fun theDiscoverySettingsReachEachKindOfTorrent() {
+        // BEP 27: trackers only. Private tab: the settings but local peers. Normal: the settings.
+        assertEquals(TorrentDiscovery(dht = false, pex = false, lsd = false), TorrentDiscovery.of(dht = true, pex = true, lsd = true, privateTab = false, bep27 = true))
+        assertEquals(TorrentDiscovery(dht = true, pex = true, lsd = false), TorrentDiscovery.of(dht = true, pex = true, lsd = true, privateTab = true, bep27 = false))
+        assertEquals(TorrentDiscovery(dht = true, pex = true, lsd = true), TorrentDiscovery.of(dht = true, pex = true, lsd = true, privateTab = false, bep27 = false))
+        assertEquals(TorrentDiscovery(dht = false, pex = false, lsd = false), TorrentDiscovery.of(dht = false, pex = false, lsd = false, privateTab = false, bep27 = false))
     }
 
     /** nextInt(bound) always gives [value]. */
