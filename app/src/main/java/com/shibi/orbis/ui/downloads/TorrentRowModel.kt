@@ -34,6 +34,54 @@ sealed interface RowState {
     data class Failed(val kind: TorrentErrorKind) : RowState
 }
 
+/** What the engine knows about the search for peers (tor10-4). Memory only; [connected] is the row's own peer count. */
+data class SearchFacts(
+    val found: Int = 0,
+    val connected: Int = 0,
+    val trackersFailed: Int = 0,
+    val trackersTotal: Int = 0,
+    val dhtInUse: Boolean = true,
+    /** Seconds without a known peer, counted up to [SEARCH_GIVE_UP_SECONDS]. */
+    val seconds: Int = 0,
+)
+
+/** The second line of a row while it looks for peers, or the note under "Waiting for Wi-Fi". Words live in strings_torrent_status.xml. */
+data class SearchLine(val kind: Kind, val found: Int = 0, val connected: Int = 0, val trackersAllFailed: Int = 0) {
+    enum class Kind { LOOKING, FOUND_CONNECTING, CONNECTED, NO_PEERS, NO_PEERS_TRACKERS_ONLY, WIFI_ONLY_NOTE }
+}
+
+/** After this many seconds with no peer known the row says so. */
+const val SEARCH_GIVE_UP_SECONDS = 60
+
+/**
+ * The search line for [model] (time comes in [SearchFacts.seconds], from the engine's own clock), or null when the row
+ * says something else (speed, checking, paused, finished). Always non-null while a torrent fetches its details or
+ * downloads without a speed yet, so the row does not change height.
+ */
+fun searchLine(model: TorrentRowModel): SearchLine? {
+    if (model.state == RowState.WaitingWifi) return SearchLine(SearchLine.Kind.WIFI_ONLY_NOTE)
+    val searching = model.state == RowState.Fetching || (model.state == RowState.Downloading && model.speedBps <= 0)
+    if (!searching) return null
+    val f = model.search
+    val connected = f.connected.coerceAtLeast(0)
+    val found = maxOf(f.found, connected)
+    return when {
+        connected > 0 -> SearchLine(SearchLine.Kind.CONNECTED, found = found, connected = connected)
+        found > 0 -> SearchLine(SearchLine.Kind.FOUND_CONNECTING, found = found)
+        else -> {
+            val kind =
+                when {
+                    f.seconds < SEARCH_GIVE_UP_SECONDS -> SearchLine.Kind.LOOKING
+                    f.dhtInUse -> SearchLine.Kind.NO_PEERS
+                    else -> SearchLine.Kind.NO_PEERS_TRACKERS_ONLY
+                }
+            // Every tracker failed and the DHT is no help: say it, so "stuck" is not a guess.
+            val allFailed = if (!f.dhtInUse && f.trackersTotal > 0 && f.trackersFailed >= f.trackersTotal) f.trackersTotal else 0
+            SearchLine(kind, trackersAllFailed = allFailed)
+        }
+    }
+}
+
 enum class RowAction { PAUSE, RESUME, RETRY, OPEN, STOP_SEEDING, SAVE_TO_DOWNLOADS, REMOVE }
 
 /**
@@ -57,6 +105,7 @@ class TorrentRowModel(
     val seeds: Int?,
     val etaSeconds: Long?,
     val state: RowState,
+    val search: SearchFacts = SearchFacts(),
     val actions: Set<RowAction>,
 ) {
     /** The progress bar is shown without a value: the work goes on but its share is unknown. */
@@ -94,6 +143,15 @@ class TorrentRowModel(
                 seeds = if (running && state != RowState.Checking) e.seeds.coerceAtLeast(0) else null,
                 etaSeconds = if (state == RowState.Downloading) e.etaSeconds?.takeIf { it >= 0 } else null,
                 state = state,
+                search =
+                    SearchFacts(
+                        found = e.peersFound.coerceAtLeast(0),
+                        connected = if (running && state != RowState.Checking) e.peers.coerceAtLeast(0) else 0,
+                        trackersFailed = e.trackersFailed,
+                        trackersTotal = e.trackersTotal,
+                        dhtInUse = e.dhtInUse,
+                        seconds = e.searchSeconds,
+                    ),
                 actions = actionsOf(state),
             )
         }

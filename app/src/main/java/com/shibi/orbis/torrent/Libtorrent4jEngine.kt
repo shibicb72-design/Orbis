@@ -108,6 +108,9 @@ class Libtorrent4jEngine(
     private val pendingResume = HashMap<Long, CompletableDeferred<ByteArray?>>()
     private val latest = HashMap<EngineId, TorrentSnapshot>()
 
+    /** When each running torrent started (or resumed) its search for peers, on [clock]; by engine id. */
+    private val searchStart = HashMap<Long, Long>()
+
     /** The connection timeline in the error log: counts and times only (keyed by engine id). */
     private val timeline = TorrentTimeline(log)
 
@@ -181,6 +184,7 @@ class Libtorrent4jEngine(
                 while (isActive) {
                     runCatching { session?.postTorrentUpdates() }
                     runCatching { timelineTick() }
+                    runCatching { searchTick() }
                     runCatching { peerSearchTick() }
                     delay(1000)
                 }
@@ -217,6 +221,7 @@ class Libtorrent4jEngine(
             pendingResume.values.forEach { it.complete(null) }
             pendingResume.clear()
             latest.clear()
+            searchStart.clear()
             timeline.sessionEnded()
             peerSearch.clear()
             _snapshots.value = emptyMap()
@@ -507,6 +512,7 @@ class Libtorrent4jEngine(
             runCatching { byHandle.remove(h.swig().id()) }
             pendingResume.remove(h.swig().id())?.complete(null)
             latest.remove(id)
+            searchStart.remove(id.value)
             peerSearch.forget(id.value)
             _snapshots.value = latest.toMap()
             sampleTimeline(id.value, h, clock())
@@ -636,7 +642,8 @@ class Libtorrent4jEngine(
                         if (before == null || before.state != snap.state || before.hasMetadata != snap.hasMetadata) {
                             log("torrent ${id.value} ${snap.state.name} metadata=${snap.hasMetadata} peers=${snap.peers}")
                         }
-                        latest[id] = snap
+                        // The search fields come from [searchTick] (engine thread): keep the last ones.
+                        latest[id] = if (before == null) snap else snap.withSearch(before)
                     }
                     _snapshots.value = latest.toMap()
                 }
@@ -802,6 +809,53 @@ class Libtorrent4jEngine(
     }
 
     /**
+     * Once a second (engine thread): the numbers the row shows while a torrent looks for peers (tor10-4). Counts only:
+     * no tracker URL, address or name is read into a string. Publishes a new snapshot only when one of them changed.
+     */
+    private fun searchTick() {
+        val now = clock()
+        var changed = false
+        for ((key, h) in handles) {
+            val eid = EngineId(key)
+            val snap = latest[eid] ?: continue
+            val st = runCatching { h.status() }.getOrNull() ?: continue
+            val running = !st.flags().and_(TorrentFlags.PAUSED).non_zero()
+            if (running) searchStart.getOrPut(key) { now } else searchStart.remove(key)
+            val found = maxOf(snap.peersFound, st.listPeers().coerceAtLeast(0) + st.numPeers().coerceAtLeast(0))
+            // Trackers only matter while no peer is known (the row names them then): skip the read otherwise.
+            var total = snap.trackersTotal
+            var answered = snap.trackersAnswered
+            var failed = snap.trackersFailed
+            if (running && found == 0) {
+                runCatching {
+                    val list = h.trackers()
+                    total = list.size
+                    answered = list.count { it.isVerified }
+                    // Asked, never answered, and every address it has failed.
+                    failed = list.count { t ->
+                        val ends = t.endpoints()
+                        !t.isVerified && ends.isNotEmpty() && ends.all { e -> e.infohashV1().let { it.fails() > 0 && !it.updating() } }
+                    }
+                }
+            }
+            val next =
+                snap.copy(
+                    peersFound = found,
+                    trackersAnswered = answered,
+                    trackersFailed = failed,
+                    trackersTotal = total,
+                    dhtInUse = discoveryOf(kindOf(key)).dht,
+                    searchSeconds = if (running && found == 0) ((now - (searchStart[key] ?: now)) / 1000).toInt().coerceIn(0, SEARCH_SECONDS_CAP) else 0,
+                )
+            if (next != snap) {
+                latest[eid] = next
+                changed = true
+            }
+        }
+        if (changed) _snapshots.value = latest.toMap()
+    }
+
+    /**
      * Once a second (engine thread): every running torrent that knows no peer asks the DHT and its trackers again on
      * [PeerSearchRetry]'s schedule, and the DHT at once when the session's DHT node starts running.
      */
@@ -885,6 +939,16 @@ class Libtorrent4jEngine(
             else -> TorrentErrorKind.ENGINE_ERROR
         }
 
+    private fun TorrentSnapshot.withSearch(o: TorrentSnapshot) =
+        copy(
+            peersFound = maxOf(peersFound, o.peersFound),
+            trackersAnswered = o.trackersAnswered,
+            trackersFailed = o.trackersFailed,
+            trackersTotal = o.trackersTotal,
+            dhtInUse = o.dhtInUse,
+            searchSeconds = o.searchSeconds,
+        )
+
     private fun snapshotOf(st: TorrentStatus): TorrentSnapshot {
         val paused = st.flags().and_(TorrentFlags.PAUSED).non_zero()
         val state =
@@ -935,6 +999,8 @@ class Libtorrent4jEngine(
     }
 
     private companion object {
+        /** The row tells "no peers found" at this many seconds; the count stops there. */
+        const val SEARCH_SECONDS_CAP = 60
         const val RESUME_TIMEOUT_MS = 15_000L
         const val ENOSPC = 28
     }

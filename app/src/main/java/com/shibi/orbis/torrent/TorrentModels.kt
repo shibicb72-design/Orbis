@@ -58,6 +58,13 @@ data class TorrentEntry(
     val etaSeconds: Long? = null,
     /** Uploaded divided by downloaded, over the torrent's whole life (libtorrent's all-time counters). */
     val ratio: Float = 0f,
+    /** Search for peers (tor10-4), as in [TorrentSnapshot]: shown on the row while no byte has come, never stored. */
+    val peersFound: Int = 0,
+    val trackersAnswered: Int = 0,
+    val trackersFailed: Int = 0,
+    val trackersTotal: Int = 0,
+    val dhtInUse: Boolean = true,
+    val searchSeconds: Int = 0,
 ) {
     /** Every byte is on disk (both fields are persisted, so this holds after a restart too). */
     val isFinished: Boolean get() = hasMetadata && totalBytes > 0 && doneBytes >= totalBytes

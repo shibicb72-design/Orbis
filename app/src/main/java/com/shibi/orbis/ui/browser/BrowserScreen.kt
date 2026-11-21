@@ -147,6 +147,7 @@ import kotlinx.coroutines.flow.StateFlow
 /** Stand-ins used while the selected tab has no session yet. */
 private val IDLE_STATE: StateFlow<SessionState> = MutableStateFlow(SessionState())
 private val NO_PROMPT: StateFlow<SitePrompt?> = MutableStateFlow(null)
+private val NO_NETWORK_KIND: StateFlow<com.shibi.orbis.torrent.NetworkKind> = MutableStateFlow(com.shibi.orbis.torrent.NetworkKind.NONE)
 
 /** Remembers which session the single content view currently shows, so the view update is idempotent. */
 private class AttachedSession {
@@ -1323,7 +1324,8 @@ private fun BrowserContent(
         val addedMessage = stringResource(R.string.torrents_added)
         val viewLabel = stringResource(R.string.torrents_added_view)
         val fullMessage = stringResource(R.string.torrents_list_full, TorrentLimits.MAX_ENTRIES)
-        val networkKind by ConfirmSheetNetwork.of(androidContext).kind.collectAsState()
+        // The torrent manager's own connection watcher; without a manager (never in the UI process) nothing is known.
+        val networkKind by (container.torrents?.network?.kind ?: NO_NETWORK_KIND).collectAsState()
         TorrentIntakeSheet(
             pending = pending,
             ipNoteSeen = torrentIpNoteSeen,

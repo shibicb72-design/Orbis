@@ -92,6 +92,40 @@ class TorrentManagerTest {
         assertEquals(TorrentStatus.COMPLETED, s.store.load().entries.single().status)
     }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test(timeout = 20_000)
+    fun theSearchNumbersReachTheRowButNeverTheStoredForm() = runTest {
+        val s = setup(this)
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
+        advanceUntilIdle()
+        val eid = s.lastId()
+        val storedBefore = s.store.load().entries.single()
+        s.engine.advance(
+            eid, done = 0, total = 0, state = EngineState.FETCHING_METADATA, downBps = 0, peers = 1,
+            peersFound = 6, trackersAnswered = 1, trackersFailed = 2, trackersTotal = 3, dhtInUse = false, searchSeconds = 42,
+        )
+        advanceUntilIdle()
+        val e = s.only()
+        assertEquals(6, e.peersFound)
+        assertEquals(1, e.trackersAnswered)
+        assertEquals(2, e.trackersFailed)
+        assertEquals(3, e.trackersTotal)
+        assertEquals(false, e.dhtInUse)
+        assertEquals(42, e.searchSeconds)
+        // Nothing of it is written: the stored entry is what it was, and its encoded form has no such field.
+        s.manager.entries.value.let { TorrentCodec.encode(it) }.let { text ->
+            assertFalse(text.contains("peersFound") || text.contains("trackers") || text.contains("searchSeconds") || text.contains("dht"))
+        }
+        assertEquals(storedBefore.copy(downBps = 0), s.store.load().entries.single().copy(downBps = 0))
+        assertEquals(id, e.id)
+    }
+
+    @Test(timeout = 20_000)
+    fun theManagerExposesItsOwnConnectionWatcher() = runTest {
+        val s = setup(this)
+        assertTrue(s.manager.network === s.network)
+    }
+
     @Test
     fun finishedBeforeTheFileListIsCheckedIsIgnored() = runTest {
         val s = setup(this)

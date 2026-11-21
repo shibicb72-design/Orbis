@@ -1,6 +1,5 @@
 package com.shibi.orbis.ui.browser
 
-import android.content.Context
 import android.text.format.Formatter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -45,7 +44,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.shibi.orbis.R
 import com.shibi.orbis.tabs.PendingTorrentIntake
-import com.shibi.orbis.torrent.AndroidTorrentNetwork
 import com.shibi.orbis.torrent.IntakeLog
 import com.shibi.orbis.torrent.IntakeRefusal
 import com.shibi.orbis.torrent.IntakeRequest
@@ -53,7 +51,6 @@ import com.shibi.orbis.torrent.MagnetLink
 import com.shibi.orbis.torrent.NetworkKind
 import com.shibi.orbis.torrent.TorrentErrorKind
 import com.shibi.orbis.torrent.TorrentIntakeReader
-import com.shibi.orbis.torrent.TorrentNetwork
 import com.shibi.orbis.torrent.TorrentPaths
 import com.shibi.orbis.torrent.TorrentPreview
 import com.shibi.orbis.torrent.TorrentSource
@@ -61,17 +58,6 @@ import com.shibi.orbis.ui.ObscuredTouchFilter
 import com.shibi.orbis.ui.rememberTapGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-
-/**
- * The connection kind for the confirm sheet: one default-network callback per process, made the first time a sheet
- * needs it (the torrent manager keeps its own and does not expose it).
- */
-object ConfirmSheetNetwork {
-    private var network: TorrentNetwork? = null
-
-    @Synchronized
-    fun of(context: Context): TorrentNetwork = network ?: AndroidTorrentNetwork(context.applicationContext).also { network = it }
-}
 
 /** Where a .torrent's bytes are: still coming, in hand (with what the preview reader made of them), or lost. */
 sealed interface TorrentBody {

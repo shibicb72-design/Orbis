@@ -173,9 +173,23 @@ class FakeTorrentEngine(
         etaSeconds: Long? = null,
         upBps: Long = 0,
         ratio: Float = 0f,
+        peersFound: Int = 0,
+        trackersAnswered: Int = 0,
+        trackersFailed: Int = 0,
+        trackersTotal: Int = 0,
+        dhtInUse: Boolean = true,
+        searchSeconds: Int = 0,
     ) {
         _snapshots.update {
-            it + (id to TorrentSnapshot(state, total, done, downBps, upBps, peers, 1, etaSeconds, ratio, hasMetadata = total > 0))
+            it +
+                (
+                    id to
+                        TorrentSnapshot(
+                            state, total, done, downBps, upBps, peers, 1, etaSeconds, ratio, hasMetadata = total > 0,
+                            peersFound = peersFound, trackersAnswered = trackersAnswered, trackersFailed = trackersFailed,
+                            trackersTotal = trackersTotal, dhtInUse = dhtInUse, searchSeconds = searchSeconds,
+                        )
+                )
         }
     }
 

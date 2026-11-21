@@ -87,7 +87,8 @@ class TorrentManager(
     val settings: StateFlow<TorrentSettings>,
     /** The per-install listen port ([TorrentSettingsStore.listenPort]), read at each engine start. */
     private val listenPort: () -> Int,
-    private val network: TorrentNetwork,
+    /** The default network as torrents see it; the confirm sheet reads the connection kind from here (read only). */
+    val network: TorrentNetwork,
     private val now: () -> Long,
     private val publisher: TorrentPublisher,
 ) {
@@ -623,6 +624,12 @@ class TorrentManager(
                     seeds = snap.seeds,
                     etaSeconds = snap.etaSeconds,
                     ratio = snap.ratio,
+                    peersFound = snap.peersFound,
+                    trackersAnswered = snap.trackersAnswered,
+                    trackersFailed = snap.trackersFailed,
+                    trackersTotal = snap.trackersTotal,
+                    dhtInUse = snap.dhtInUse,
+                    searchSeconds = snap.searchSeconds,
                 )
             }
         }
