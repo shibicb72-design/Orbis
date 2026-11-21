@@ -13,7 +13,10 @@ package com.shibi.orbis.torrent
  * - a summary at 60 s and 300 s after "added", and when the torrent finishes or is removed:
  *   `timeline <id> t=<ms> <at_60s|at_300s|finished|removed> <milestone>=<ms>... <counter>=<n>...`
  *   (a milestone not reached yet, and a DHT checkpoint not taken yet, is left out).
- * - per session: `listen ok tcp v4` (never the address), `external v4=yes v6=no` (never the address).
+ * - per forced search for peers (tor10-2, [PeerSearchRetry]): `timeline <id> t=<ms> forced dht=<n> trackers=<n>`, the
+ *   counts so far.
+ * - per session: `listen ok tcp v4` (never the address), `listen failed tcp v4 error=<n> op=<operation>` (the error
+ *   number and libtorrent's operation name), `external v4=yes v6=no` (never the address).
  */
 class TorrentTimeline(private val log: (String) -> Unit) {
     enum class Step(val word: String) {
@@ -44,6 +47,8 @@ class TorrentTimeline(private val log: (String) -> Unit) {
         val connectFailures = IntArray(ConnectFailure.entries.size)
         var dropped = 0
         var incoming = 0
+        var forcedDht = 0
+        var forcedTrackers = 0
         val dhtNodes = IntArray(DHT_CHECKPOINTS_S.size) { -1 }
 
         // The last sample (see [sample]); -1 = never sampled.
@@ -125,6 +130,15 @@ class TorrentTimeline(private val log: (String) -> Unit) {
         records[id]?.let { it.dropped++ }
     }
 
+    /** The engine asked the DHT ([dht]) and/or the trackers ([trackers]) again for peers of [id] (tor10-2). */
+    fun forced(id: Long, dht: Boolean, trackers: Boolean, at: Long) {
+        val r = records[id] ?: return
+        if (!dht && !trackers) return
+        if (dht) r.forcedDht++
+        if (trackers) r.forcedTrackers++
+        log("timeline $id t=${since(r, at)} forced dht=${r.forcedDht} trackers=${r.forcedTrackers}")
+    }
+
     fun milestone(id: Long, step: Step, at: Long) {
         val r = records[id] ?: return
         if (r.steps[step.ordinal] != NOT_YET) return
@@ -202,9 +216,13 @@ class TorrentTimeline(private val log: (String) -> Unit) {
         summary(id, r, since(r, at), "removed")
     }
 
-    /** One line per listen result, protocol and address family, once per session. [socket]: a fixed protocol word. */
-    fun listen(ok: Boolean, socket: String, v6: Boolean) {
-        val line = "listen ${if (ok) "ok" else "failed"} ${word(socket)} ${if (v6) "v6" else "v4"}"
+    /**
+     * One line per listen result, protocol and address family, once per session. [socket]: a fixed protocol word. A
+     * failure carries its error number [error] and libtorrent's operation name [operation] (an enum name).
+     */
+    fun listen(ok: Boolean, socket: String, v6: Boolean, error: Int = 0, operation: String = "") {
+        val base = "listen ${if (ok) "ok" else "failed"} ${word(socket)} ${if (v6) "v6" else "v4"}"
+        val line = if (ok) base else "$base error=$error op=${word(operation)}"
         if (listenSeen.add(line)) log(line)
     }
 
@@ -239,6 +257,8 @@ class TorrentTimeline(private val log: (String) -> Unit) {
         ConnectFailure.entries.forEach { k -> b.append(" fail_").append(k.name.lowercase()).append('=').append(r.connectFailures[k.ordinal]) }
         b.append(" dropped=").append(r.dropped)
         b.append(" incoming=").append(r.incoming)
+        b.append(" forced_dht=").append(r.forcedDht)
+        b.append(" forced_trackers=").append(r.forcedTrackers)
         if (r.connectedNow >= 0) {
             b.append(" peers_now=").append(r.connectedNow)
             b.append(" connecting_now=").append(r.connectingNow)
