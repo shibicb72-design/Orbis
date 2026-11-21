@@ -303,6 +303,8 @@ class GeckoEngineImpl(
             val settings =
                 GeckoRuntimeSettings.Builder()
                     .aboutConfigEnabled(false)
+                    // No page addresses in the system log (brief priv11-2): sets consoleservice.logcat and devtools.console.stdout.chrome to false and the engine log level to Fatal.
+                    .debugLogging(false)
                     .contentBlocking(contentBlocking)
                     .trustedRecursiveResolverMode(
                         if (dnsUrl == null) GeckoRuntimeSettings.TRR_MODE_OFF else GeckoRuntimeSettings.TRR_MODE_FIRST,
