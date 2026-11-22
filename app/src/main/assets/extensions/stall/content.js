@@ -5,7 +5,9 @@
 // Never touches a source a page's own player script feeds (a blob: address from Media Source): those players have
 // their own recovery. Never acts on a paused or ended element, on one that reports an error (a server that answers
 // with errors is not asked again), or while the device is offline. At most MAX_TRIES restarts per element per page
-// load, after 12, 24 and 48 seconds of unbroken stall. Sends nothing, stores nothing, logs nothing.
+// load, after 12, 24 and 48 seconds of unbroken stall. Time while bytes still arrive (a progress event, or the end of
+// the buffered data moving) does not count: a slow download that works is never restarted. Sends nothing, stores
+// nothing, logs nothing.
 //
 // The decision (OrbisStall.arm / step / restartPlan / afterMetadata) is pure, so it can be tested without a browser.
 
@@ -19,7 +21,7 @@ var OrbisStall = {
 
   /** Per-element state. tries counts restarts for the whole page load and never goes down. */
   newTrack: function () {
-    return { armed: false, since: null, time: null, tries: 0, pending: false, onMeta: null };
+    return { armed: false, since: null, time: null, bufEnd: null, tries: 0, pending: false, onMeta: null };
   },
 
   /** How long the stall must have lasted, unbroken, before restart number tries + 1. */
@@ -29,7 +31,7 @@ var OrbisStall = {
 
   /**
    * Whether the element is one this script may act on at all. s is a snapshot of the element:
-   * { src, paused, ended, online, error, readyState, currentTime, duration }.
+   * { src, paused, ended, online, error, readyState, currentTime, duration, bufferedEnd }.
    */
   eligible: function (s) {
     return (
@@ -50,8 +52,17 @@ var OrbisStall = {
       t.armed = true;
       t.since = now;
       t.time = s.currentTime;
+      t.bufEnd = s.bufferedEnd;
     }
     return true;
+  },
+
+  /**
+   * Bytes arrived (the element fired progress). A slow download that still moves is not a stall: the clock counts
+   * only time with no download progress, so restarting never throws away a download that is working.
+   */
+  downloaded: function (t, now) {
+    if (t.armed) t.since = now;
   },
 
   /**
@@ -65,14 +76,19 @@ var OrbisStall = {
       t.armed = false;
       t.since = null;
       t.time = null;
+      t.bufEnd = null;
       return "stop";
     }
-    // time is null right after this script's own load() or seek: take the new position as the reference.
+    // The end of the buffered data moved: the download is alive, so the clock starts again.
+    if (t.bufEnd !== null && s.bufferedEnd !== t.bufEnd) t.since = now;
+    // time and bufEnd are null right after this script's own load() or seek: take the new values as the reference.
     t.time = s.currentTime;
+    t.bufEnd = s.bufferedEnd;
     if (now - t.since < OrbisStall.stallNeededMs(t.tries)) return "wait";
     t.tries += 1;
     t.since = now;
     t.time = null;
+    t.bufEnd = null;
     return "act";
   },
 
@@ -120,7 +136,13 @@ var OrbisStall = {
       readyState: el.readyState,
       currentTime: el.currentTime,
       duration: el.duration,
+      bufferedEnd: bufferedEnd(el),
     };
+  }
+
+  function bufferedEnd(el) {
+    var b = el.buffered;
+    return b && b.length > 0 ? b.end(b.length - 1) : 0;
   }
 
   function watch(el) {
@@ -142,6 +164,7 @@ var OrbisStall = {
       if (next.seekTo !== null) {
         el.currentTime = next.seekTo;
         t.time = null;
+        t.bufEnd = null;
       }
       if (next.play) {
         var played = el.play();
@@ -184,6 +207,13 @@ var OrbisStall = {
   // ones added later.
   document.addEventListener("waiting", onStall, true);
   document.addEventListener("stalled", onStall, true);
+  document.addEventListener(
+    "progress",
+    function (e) {
+      if (isMedia(e.target) && tracks.has(e.target)) OrbisStall.downloaded(tracks.get(e.target), performance.now());
+    },
+    true,
+  );
   document.addEventListener(
     "play",
     function (e) {

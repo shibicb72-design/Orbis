@@ -27,7 +27,17 @@ const plain = o => JSON.parse(JSON.stringify(o));
 
 function media(over) {
   return Object.assign(
-    { src: "https://cdn.example/clip.mp4", paused: false, ended: false, online: true, error: false, readyState: 2, currentTime: 30, duration: 120 },
+    {
+      src: "https://cdn.example/clip.mp4",
+      paused: false,
+      ended: false,
+      online: true,
+      error: false,
+      readyState: 2,
+      currentTime: 30,
+      duration: 120,
+      bufferedEnd: 35,
+    },
     over,
   );
 }
@@ -148,6 +158,43 @@ test("after a restart the new position is the reference, not a sign of progress"
   assert.strictEqual(S.step(t, media({ currentTime: 0, readyState: 0 }), 36000), "act");
 });
 
+test("a slow download: buffered data growing for 60 s while playback is stuck is not restarted", () => {
+  const t = S.newTrack();
+  S.arm(t, media({ bufferedEnd: 35 }), 0);
+  for (let now = 1000; now <= 60000; now += 1000) {
+    assert.strictEqual(S.step(t, media({ bufferedEnd: 35 + now / 100000 }), now), "wait", "at " + now);
+  }
+  // Then the bytes stop: a true silence restarts 12 s after the last byte.
+  const last = 35 + 60000 / 100000;
+  assert.strictEqual(S.step(t, media({ bufferedEnd: last }), 71000), "wait");
+  assert.strictEqual(S.step(t, media({ bufferedEnd: last }), 72000), "act");
+});
+
+test("a slow download: progress events for 60 s while playback is stuck are not restarted", () => {
+  const t = S.newTrack();
+  S.arm(t, media(), 0);
+  for (let now = 1000; now <= 60000; now += 1000) {
+    S.downloaded(t, now - 500);
+    assert.strictEqual(S.step(t, media(), now), "wait", "at " + now);
+  }
+  assert.strictEqual(S.step(t, media(), 71000), "wait");
+  assert.strictEqual(S.step(t, media(), 71500), "act");
+});
+
+test("a true silence (no progress, buffered end still) restarts at 12 s", () => {
+  const t = S.newTrack();
+  S.arm(t, media({ bufferedEnd: 35 }), 0);
+  for (let now = 1000; now < 12000; now += 1000) assert.strictEqual(S.step(t, media({ bufferedEnd: 35 }), now), "wait");
+  assert.strictEqual(S.step(t, media({ bufferedEnd: 35 }), 12000), "act");
+});
+
+test("progress on an element that is not stalled starts no clock", () => {
+  const t = S.newTrack();
+  S.downloaded(t, 5000);
+  assert.strictEqual(t.armed, false);
+  assert.strictEqual(t.since, null);
+});
+
 test("a file is sought back to where it stalled; a live stream is not", () => {
   assert.deepStrictEqual(plain(S.restartPlan(media({ currentTime: 42.5, duration: 120 }))), { src: "https://cdn.example/clip.mp4", seekTo: 42.5 });
   const live = S.restartPlan(media({ src: "https://cdn.example/live.m3u8", currentTime: 42.5, duration: Infinity }));
@@ -207,6 +254,11 @@ function page({ online = true } = {}) {
         readyState: 2,
         currentTime: 30,
         duration: 120,
+        bufferedTo: 35,
+        get buffered() {
+          const end = this.bufferedTo;
+          return { length: 1, start: () => 0, end: () => end };
+        },
         isConnected: true,
         addEventListener: (type, fn) => (listeners[type] = listeners[type] || []).push(fn),
         removeEventListener: (type, fn) => {
@@ -288,6 +340,36 @@ test("in a page: while its own reload hangs the element still counts as playing,
   p.fire(el, "waiting");
   p.advance(200000);
   assert.deepStrictEqual(p.calls, ["load", "load", "load"]);
+});
+
+test("in a page: progress events for 60 s while stuck: no restart; then 12 s of silence: restart", () => {
+  const p = page();
+  p.start();
+  const el = p.element();
+  p.fire(el, "waiting");
+  for (let i = 0; i < 60; i++) {
+    p.advance(1000);
+    p.fire(el, "progress");
+  }
+  assert.deepStrictEqual(p.calls, []);
+  p.advance(11000);
+  assert.deepStrictEqual(p.calls, []);
+  p.advance(1000);
+  assert.deepStrictEqual(p.calls, ["load"]);
+});
+
+test("in a page: the buffered end moving for 60 s while stuck (no progress event seen): no restart", () => {
+  const p = page();
+  p.start();
+  const el = p.element();
+  p.fire(el, "stalled");
+  for (let i = 0; i < 60; i++) {
+    el.bufferedTo += 0.01;
+    p.advance(1000);
+  }
+  assert.deepStrictEqual(p.calls, []);
+  p.advance(12000);
+  assert.deepStrictEqual(p.calls, ["load"]);
 });
 
 test("in a page: a live stream is played again without a seek", () => {
