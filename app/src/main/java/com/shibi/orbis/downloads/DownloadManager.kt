@@ -62,6 +62,15 @@ class DownloadManager(
     private val reservedKeys = HashSet<String>()
     private val saveLock = Any()
 
+    private val _restoredIds: MutableSet<Long> = ConcurrentHashMap.newKeySet()
+
+    /**
+     * Ids of the entries that came from the stored index of an earlier run. [restore] fills it before it merges them
+     * into [entries], so whoever sees such an entry in the list finds its id here. A download started in this run is
+     * never in it.
+     */
+    val restoredIds: Set<Long> get() = _restoredIds
+
     /** Set by [clearIndex]; makes [restore] drop the stored entries instead of merging them back in. */
     private val indexCleared = AtomicBoolean(false)
 
@@ -144,6 +153,7 @@ class DownloadManager(
             // Merge rather than replace: a download may already have started while the index was loading. Everything
             // stored is settled by now, so a list cleared in the meantime must not get it back. The flag is read inside
             // the update: clearIndex sets it before it edits the list, so one of the two always sees the other.
+            fixed.forEach { _restoredIds += it.id }
             _entries.update { current ->
                 if (indexCleared.get()) current else sorted(current + fixed.filter { f -> current.none { it.id == f.id } })
             }

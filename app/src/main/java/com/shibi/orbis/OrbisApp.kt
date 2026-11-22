@@ -326,18 +326,11 @@ class OrbisApp : Application() {
             )
         torrentsRef = torrents
         // Finished downloads also go to the phone's Download folder (setting; never a private tab's). Only downloads
-        // that finish while Orbis runs: the ones already listed at start are taken as handled.
+        // that finish while Orbis runs: entries restored from the stored index, or already marked as copied, never are.
         appScope.launch {
-            val handled = HashSet<Long>()
-            var first = true
+            val copyOnFinish = com.shibi.orbis.downloads.CopyOnFinish()
             downloads.entries.collect { list ->
-                if (first) {
-                    first = false
-                    list.forEach { handled += it.id }
-                    return@collect
-                }
-                val fresh = com.shibi.orbis.downloads.newlyCompleted(list, handled)
-                fresh.forEach { handled += it.id }
+                val fresh = copyOnFinish.due(list, downloads.restoredIds)
                 if (fresh.isEmpty() || !browserSettings.copyToDownloadFolder.value) return@collect
                 launch(Dispatchers.IO) {
                     for (e in fresh) {
