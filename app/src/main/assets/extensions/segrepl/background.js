@@ -26,8 +26,10 @@ function applyConfig(c) {
     perMinute: Number.isFinite(c.perMinute) ? c.perMinute : 6,
     maxZombies: Number.isFinite(c.maxZombies) ? c.maxZombies : 2,
     errorBackoffMs: Number.isFinite(c.errorBackoffMs) ? c.errorBackoffMs : 60000,
+    shortFetch: c.shortFetch !== false,
   };
   C.cfg_enabled = cfg.enabled ? 1 : 0;
+  C.cfg_short_fetch = cfg.shortFetch ? 1 : 0;
   C.cfg_t_ms = cfg.tMs;
   dirty = true;
   if (!cfg.enabled) return;
@@ -107,6 +109,11 @@ function onHeadersReceived(d) {
     if (w.done) return;
     if (w.splice.closed) return finish(w, "orig");
     if (w.repl && w.repl.active) return; // the original ended short; the replacement may still complete it
+    // Fable's ruling (b): a body that ends short of its declared length is treated like a hang (same guards).
+    if (cfg.shortFetch && !w.fired && w.started) {
+      bump("short_seen");
+      if (fire(w, Date.now())) return;
+    }
     w.splice.closeShort();
     bump("short_stop");
     finish(w, "orig_short");
@@ -157,10 +164,10 @@ function fire(w, now) {
   const why = guard.check(host, now);
   if (why) {
     bump("blocked_" + why);
-    return;
+    return false;
   }
   guard.recordFire(host, now);
-  bump("fired");
+  bump(w.origStopped ? "fired_short" : "fired");
   const { from, headers } = SegCore.replacementRequest(w.plan, w.splice.written);
   const ac = new AbortController();
   const repl = { ac, active: true, firstByte: false, from, t0: now };
@@ -220,6 +227,7 @@ function fire(w, now) {
         finish(w, "orig_short");
       }
     });
+  return true;
 }
 
 function stopReplacement(w) {
