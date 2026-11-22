@@ -1,0 +1,10 @@
+{
+  "manifest_version": 2,
+  "name": "Orbis segment replacement (spike live12-4s)",
+  "version": "0.1",
+  "description": "SPIKE, never merged. When a media segment response goes silent, fetches the rest once with a range request and completes the same response. Logs counters only. Does not run in private tabs.",
+  "browser_specific_settings": { "gecko": { "id": "segrepl@orbis.shibi.com" } },
+  "incognito": "not_allowed",
+  "permissions": ["webRequest", "webRequestBlocking", "nativeMessaging", "geckoViewAddons", "<all_urls>"],
+  "background": { "scripts": ["core.js", "background.js"], "persistent": true }
+}

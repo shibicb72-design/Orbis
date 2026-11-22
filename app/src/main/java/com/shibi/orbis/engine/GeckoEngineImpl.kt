@@ -345,6 +345,7 @@ class GeckoEngineImpl(
             youtubeAdObserver.install(created)
             YoutubePipExtension.install(created) { debugLog.log("GeckoEngine", it) }
             clearExit.install(created)
+            SegmentReplacementSpike.install(created, appContext.filesDir) { debugLog.log("GeckoEngine", it) } // SPIKE live12-4s
             // Without a prompt delegate, WebExtensionController.install() hangs forever.
             created.webExtensionController.setPromptDelegate(extensionHost.promptDelegate)
             runtime = created
