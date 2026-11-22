@@ -215,7 +215,7 @@ test("a source the page replaced meanwhile is left alone", () => {
 const PLAYLIST = "https://cdn.example/live/index.m3u8?token=1";
 
 function live(over) {
-  return media(Object.assign({ src: PLAYLIST, duration: Infinity, live: true, readyState: 1, connected: true }, over));
+  return media(Object.assign({ src: PLAYLIST, duration: Infinity, live: true, readyState: 1, connected: true, visible: true }, over));
 }
 
 function died(over) {
@@ -380,8 +380,8 @@ test("window: after giving up, online or play opens one fresh window; back raise
   failEveryAttempt(t, 1000, 31000);
   assert.strictEqual(t.dropped, true);
   assert.strictEqual(S.onError(t, died(), 40000), "none", "a dead element's errors open nothing by themselves");
-  assert.strictEqual(S.reopen(t, died(), 50000), true);
-  assert.strictEqual(S.reopen(t, died(), 50000), false, "one window, not two");
+  assert.strictEqual(S.reopen(t, died(), 50000, "online"), true);
+  assert.strictEqual(S.reopen(t, died(), 50000, "online"), false, "one window, not two");
   assert.deepStrictEqual(drive(t, 51000, 53000), ["load@53000"]);
   assert.deepStrictEqual(playFor(t, 10, 53000), ["playing@64000"]);
   assert.strictEqual(t.lastSignal, "playing");
@@ -390,7 +390,49 @@ test("window: after giving up, online or play opens one fresh window; back raise
   drive(t, 71000, 73000);
   assert.deepStrictEqual(playFor(t, 10, 73000), ["back@84000"]);
   // reopen does nothing when nothing was given up.
-  assert.strictEqual(S.reopen(S.newTrack(), died(), 0), false);
+  assert.strictEqual(S.reopen(S.newTrack(), died(), 0, "play"), false);
+});
+
+/** A track that gave up: "dropped" was raised at 30 s. */
+function givenUp() {
+  const t = opened(0);
+  const { other } = failEveryAttempt(t, 1000, 31000);
+  assert.deepStrictEqual(other, ["dropped@30000"]);
+  assert.strictEqual(t.droppedAt, 30000);
+  return t;
+}
+
+test("new F6: online while visible within 5 min opens one window", () => {
+  const t = givenUp();
+  assert.strictEqual(S.reopen(t, died({ visible: true }), 30000 + 5 * 60 * 1000, "online"), true, "exactly 5 min");
+  assert.ok(t.win);
+  assert.strictEqual(S.reopen(t, died({ visible: true }), 30000 + 5 * 60 * 1000, "online"), false);
+});
+
+test("new F6: online while hidden opens none, and none when it becomes visible later", () => {
+  const t = givenUp();
+  assert.strictEqual(S.reopen(t, died({ visible: false }), 60000, "online"), false);
+  assert.strictEqual(t.win, null);
+  // Visible now, and another online event still within the 5 minutes: nothing.
+  assert.strictEqual(S.reopen(t, died({ visible: true }), 90000, "online"), false);
+  assert.strictEqual(t.win, null);
+  // The user pressing play still works.
+  assert.strictEqual(S.reopen(t, died({ visible: true }), 100000, "play"), true);
+});
+
+test("new F6: online after 5 min opens none, then or later", () => {
+  const t = givenUp();
+  assert.strictEqual(S.reopen(t, died({ visible: true }), 30000 + 5 * 60 * 1000 + 1, "online"), false);
+  assert.strictEqual(S.reopen(t, died({ visible: true }), 30000 + 5 * 60 * 1000 + 2, "online"), false);
+  assert.strictEqual(t.win, null);
+});
+
+test("new F6: play opens a window at any time, visible or not", () => {
+  for (const [after, visible] of [[1000, true], [60 * 60 * 1000, true], [24 * 60 * 60 * 1000, false]]) {
+    const t = givenUp();
+    assert.strictEqual(S.reopen(t, died({ visible }), 30000 + after, "play"), true, after + " " + visible);
+    assert.ok(t.win);
+  }
 });
 
 test("window: a plain file, a playlist that is not live, a blob: source never open one", () => {
@@ -440,6 +482,7 @@ function page({ online = true } = {}) {
         (docListeners[type] = docListeners[type] || []).push(fn);
       },
       querySelectorAll: () => elements.filter(e => e.isConnected),
+      visibilityState: "visible",
     },
     window: { addEventListener: (type, fn) => (winListeners[type] = winListeners[type] || []).push(fn) },
     navigator: { onLine: online },
@@ -541,6 +584,9 @@ function page({ online = true } = {}) {
     },
     goOffline: () => {
       context.navigator.onLine = false;
+    },
+    setVisible: visible => {
+      context.document.visibilityState = visible ? "visible" : "hidden";
     },
     /** The engine's HLS player gives up: the element reports MEDIA_ERR_NETWORK and fires error. */
     hlsError: el => {
@@ -786,6 +832,51 @@ test("in a page: after \"dropped\", the user pressing play opens one fresh windo
   p.advance(2000);
   assert.strictEqual(loads(), n);
   p.advance(1000);
+  assert.strictEqual(loads(), n + 1);
+});
+
+test("in a page (new F6): back online while the page is hidden: nothing, not even once it is visible again", () => {
+  const p = page();
+  p.start();
+  const el = livePlaylist(p);
+  dropIt(p, el);
+  const n = p.calls.length;
+  p.setVisible(false);
+  p.goOnline();
+  p.advance(60000);
+  p.setVisible(true);
+  p.goOnline();
+  p.advance(60000);
+  assert.strictEqual(p.calls.length, n, "no reload, no sound by itself");
+  assert.deepStrictEqual(p.signals, [["dropped"]]);
+  // Only the user's play opens a window now.
+  el.play();
+  p.advance(3000);
+  assert.strictEqual(p.calls.filter(c => c === "load").length, n + 1);
+});
+
+test("in a page (new F6): back online more than 5 minutes after \"dropped\": nothing", () => {
+  const p = page();
+  p.start();
+  const el = livePlaylist(p);
+  dropIt(p, el);
+  const n = p.calls.length;
+  p.advance(5 * 60 * 1000);
+  p.goOnline();
+  p.advance(60000);
+  assert.strictEqual(p.calls.length, n);
+});
+
+test("in a page (new F6): play pressed an hour after \"dropped\" opens a window", () => {
+  const p = page();
+  p.start();
+  const el = livePlaylist(p);
+  dropIt(p, el);
+  p.advance(60 * 60 * 1000);
+  const loads = () => p.calls.filter(c => c === "load").length;
+  const n = loads();
+  el.play();
+  p.advance(3000);
   assert.strictEqual(loads(), n + 1);
 });
 
