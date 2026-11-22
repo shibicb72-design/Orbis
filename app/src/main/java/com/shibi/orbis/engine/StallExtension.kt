@@ -72,9 +72,10 @@ internal fun parseStallMessage(senderExtensionId: String?, message: Any?): Strea
     if (senderExtensionId != StallExtension.ID) return null
     val obj = message as? JSONObject ?: return null
     if (obj.length() != 1) return null
-    return when (obj.opt("type")) {
-        "dropped" -> StreamSignal.DROPPED
-        "playing" -> StreamSignal.PLAYING
+    val type = obj.opt("type")
+    return when {
+        type == "dropped" -> StreamSignal.DROPPED
+        type == "playing" -> StreamSignal.PLAYING
         else -> null
     }
 }
