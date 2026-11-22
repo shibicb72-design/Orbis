@@ -23,8 +23,23 @@ internal object EngineStartupPrefs {
     /** The captive-portal service (`generate_204`). A static pref; set off as well so no later default can start it. */
     const val CAPTIVE_PORTAL_SERVICE = "network.captive-portal-service.enabled"
 
-    /** Every pref this file sets, all to false. No other pref. */
+    /** The prefs this file switches off, all to false. The numeric ones are in [NUMBERS]. */
     val OFF: List<String> = listOf(CONNECTIVITY_SERVICE, CAPTIVE_PORTAL_SERVICE)
+
+    /** A whole-number engine pref and the value this file gives it. Not an "off" switch: see [NUMBERS]. */
+    data class NumberPref(val name: String, val value: Int)
+
+    /**
+     * Media read-ahead for plain video files (a direct MP4 or WebM; not a site's own player, not a live stream), in
+     * seconds (MediaCache.cpp: `predictedNewDataUse.ToSeconds() > ReadaheadLimit()`). Engine defaults at 160.0.1: 60 on
+     * Wi-Fi, 30 on mobile data. Both become 300, written as numbers. The resume thresholds, the cache sizes and
+     * `media.throttle-cellular-regardless-of-download-rate` are left as the engine has them (brief live12-3).
+     */
+    val NUMBERS: List<NumberPref> =
+        listOf(
+            NumberPref("media.cache_readahead_limit", 300),
+            NumberPref("media.cache_readahead_limit.cellular", 300),
+        )
 
     /** In the app's own files directory. */
     const val FILE_NAME = "orbis-engine-prefs.yaml"
@@ -36,6 +51,7 @@ internal object EngineStartupPrefs {
         buildString {
             append("prefs:\n")
             for (name in OFF) append("  \"").append(name).append("\": false\n")
+            for (pref in NUMBERS) append("  \"").append(pref.name).append("\": ").append(pref.value).append('\n')
         }
 
     enum class FileState { UNCHANGED, WRITTEN, FAILED }

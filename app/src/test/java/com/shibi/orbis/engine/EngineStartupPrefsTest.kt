@@ -18,7 +18,9 @@ class EngineStartupPrefsTest {
         assertEquals(
             "prefs:\n" +
                 "  \"network.connectivity-service.enabled\": false\n" +
-                "  \"network.captive-portal-service.enabled\": false\n",
+                "  \"network.captive-portal-service.enabled\": false\n" +
+                "  \"media.cache_readahead_limit\": 300\n" +
+                "  \"media.cache_readahead_limit.cellular\": 300\n",
             EngineStartupPrefs.CONTENT,
         )
     }
@@ -32,12 +34,35 @@ class EngineStartupPrefsTest {
     }
 
     @Test(timeout = 10_000)
+    fun numbersAreExactlyTheTwoReadAheadLimitsOf300Seconds() {
+        assertEquals(
+            listOf(
+                EngineStartupPrefs.NumberPref("media.cache_readahead_limit", 300),
+                EngineStartupPrefs.NumberPref("media.cache_readahead_limit.cellular", 300),
+            ),
+            EngineStartupPrefs.NUMBERS,
+        )
+    }
+
+    @Test(timeout = 10_000)
+    fun numbersAreWrittenAsBareNumbersAndNeverInTheOffList() {
+        val lines = EngineStartupPrefs.CONTENT.lines()
+        for (pref in EngineStartupPrefs.NUMBERS) {
+            assertEquals(1, lines.count { it == "  \"${pref.name}\": ${pref.value}" })
+            assertFalse(pref.name in EngineStartupPrefs.OFF)
+        }
+        // A quoted number would be read as a string by the engine's reader.
+        assertFalse(EngineStartupPrefs.CONTENT.contains(": \""))
+        assertFalse(EngineStartupPrefs.CONTENT.contains(": '"))
+    }
+
+    @Test(timeout = 10_000)
     fun contentHoldsNoAddressAndNoOtherValue() {
         val c = EngineStartupPrefs.CONTENT
         for (word in listOf("http", "://", ".com", ".org", "portal-detection", "url", "domain", "true")) {
             assertFalse("content must not hold '$word'", c.contains(word, ignoreCase = true))
         }
-        assertEquals(EngineStartupPrefs.OFF.size + 1, c.lines().filter { it.isNotEmpty() }.size)
+        assertEquals(EngineStartupPrefs.OFF.size + EngineStartupPrefs.NUMBERS.size + 1, c.lines().filter { it.isNotEmpty() }.size)
     }
 
     @Test(timeout = 10_000)
