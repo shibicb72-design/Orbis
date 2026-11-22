@@ -1,5 +1,8 @@
 import java.security.MessageDigest
 import java.util.Properties
+import org.gradle.api.tasks.testing.TestDescriptor
+import org.gradle.api.tasks.testing.TestListener
+import org.gradle.api.tasks.testing.TestResult
 
 plugins {
     alias(libs.plugins.android.application)
@@ -195,7 +198,56 @@ kotlin {
     }
 }
 
+// Unit tests (test scope only): Robolectric's Android runtime jars come through Gradle, not from Robolectric's own
+// downloader. Gradle fetches exactly the jars below (cached, checked against gradle/verification-metadata.xml), the
+// copy task puts them in build/robolectric-android-all, and every Test task runs Robolectric in offline mode from that
+// folder (robolectric.offline and robolectric.dependency.dir, read by Robolectric 4.17 LegacyDependencyResolver), so
+// the test JVMs need no network. The SDK levels are the ones the tests ask for with @Config(sdk = ...): 31, 33, 35.
+// A test that asks for another level fails with the message from the listener below; to add a level, add its
+// org.robolectric:android-all-instrumented jar here, in gradle/libs.versions.toml and in gradle/verification-metadata.xml.
+// One configuration per level: all three are the same module in different versions, and one configuration would keep only the newest.
+val robolectricAndroidAll = listOf(
+    31 to libs.versions.robolectricAndroidAllSdk31,
+    33 to libs.versions.robolectricAndroidAllSdk33,
+    35 to libs.versions.robolectricAndroidAllSdk35,
+).map { (sdk, jar) ->
+    configurations.create("robolectricAndroidAllSdk$sdk") {
+        isCanBeConsumed = false
+        isCanBeResolved = true
+        isTransitive = false
+        dependencies.addLater(jar.map { project.dependencies.create("org.robolectric:android-all-instrumented:$it") })
+    }
+}
+val robolectricAndroidAllDir = layout.buildDirectory.dir("robolectric-android-all")
+val copyRobolectricAndroidAll = tasks.register<Sync>("copyRobolectricAndroidAll") {
+    from(robolectricAndroidAll)
+    into(robolectricAndroidAllDir)
+}
+tasks.withType<Test>().configureEach {
+    dependsOn(copyRobolectricAndroidAll)
+    systemProperty("robolectric.offline", "true")
+    systemProperty("robolectric.dependency.dir", robolectricAndroidAllDir.get().asFile.absolutePath)
+    addTestListener(object : TestListener {
+        override fun beforeSuite(suite: TestDescriptor) {}
+        override fun afterSuite(suite: TestDescriptor, result: TestResult) {}
+        override fun beforeTest(testDescriptor: TestDescriptor) {}
+        override fun afterTest(testDescriptor: TestDescriptor, result: TestResult) {
+            val missing = result.exceptions.any { error ->
+                generateSequence<Throwable>(error) { it.cause }.any { it.message.orEmpty().let { m -> m.contains("Path is not a file") && m.contains("robolectric-android-all") } }
+            }
+            if (missing) {
+                logger.error(
+                    "${testDescriptor.className}: Robolectric needs an Android jar that is not in app/build.gradle.kts " +
+                        "(configurations robolectricAndroidAllSdk<level>). Tests run offline and never download it. Add the SDK level " +
+                        "there, in gradle/libs.versions.toml and in gradle/verification-metadata.xml."
+                )
+            }
+        }
+    })
+}
+
 dependencies {
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.activity.compose)
