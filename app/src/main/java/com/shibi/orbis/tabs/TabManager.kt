@@ -164,6 +164,12 @@ class TabManager(
 
     private val observers = HashMap<Long, Job>()
     private val noticeObservers = HashMap<Long, Job>()
+
+    /**
+     * Normal tabs the user left while they were playing media: they stay active until they stop playing (see
+     * [putSelectedToSleep], [onSessionState]). Never holds a private tab: the private-tab lock only pauses the selected one.
+     */
+    private val keptAwake = HashSet<Long>()
     private var persistJob: Job? = null
 
     /** Import URLs a tab has shown. Removed when the tab closes or history can no longer reach them. */
@@ -412,6 +418,15 @@ class TabManager(
     private fun onSessionState(id: Long, st: SessionState) {
         val i = indexOf(id)
         if (i < 0) return
+        if (id in keptAwake) {
+            // Selected again: the selection code owns its activity. Otherwise it sleeps the moment it stops playing.
+            if (id == selectedId) {
+                keptAwake.remove(id)
+            } else if (st.media?.playing != true) {
+                keptAwake.remove(id)
+                list[i].session?.setActive(false)
+            }
+        }
         val tab = list[i]
         val mark = _autoDesktopNotices.value[id]
         if (mark != null && !noticeStillApplies(mark, st.url)) clearAutoDesktopNotice(id)
@@ -501,13 +516,29 @@ class TabManager(
         session?.setActive(value)
     }
 
+    /**
+     * Puts the tab the user is leaving to sleep, unless it is a normal tab that is playing media: that one stays active
+     * (like [setForeground] does for background playback) and sleeps when it stops. A private tab always sleeps.
+     */
+    private fun putSelectedToSleep() {
+        val tab = list.firstOrNull { it.id == selectedId } ?: return
+        keptAwake.remove(tab.id)
+        val session = tab.session ?: return
+        if (!tab.isPrivate && session.state.value.media?.playing == true) {
+            check(!tab.isPrivate)
+            keptAwake.add(tab.id)
+        } else {
+            session.setActive(false)
+        }
+    }
+
     /** The open session of tab [id], or null when it has none yet (restored, not visited). */
     fun sessionOf(id: Long): BrowserSession? = list.firstOrNull { it.id == id }?.session
 
     fun select(id: Long) {
         if (indexOf(id) < 0) return
         if (id != selectedId) {
-            list.firstOrNull { it.id == selectedId }?.session?.setActive(false)
+            putSelectedToSleep()
             selectedId = id
         }
         ensureSession(id)?.session?.setActive(foreground)
@@ -565,7 +596,7 @@ class TabManager(
             return false
         }
         val id = nextId++
-        list.firstOrNull { it.id == selectedId }?.session?.setActive(false)
+        putSelectedToSleep()
         list += Tab(id, null, "", "", false, null, null, isPrivate = false)
         selectedId = id
         val session = ensureSession(id)?.session
@@ -602,7 +633,7 @@ class TabManager(
             return null
         }
         val id = nextId++
-        list.firstOrNull { it.id == selectedId }?.session?.setActive(false)
+        putSelectedToSleep()
         val tab = Tab(id, null, "", "", false, null, openerId, isPrivate, groupId = groupId.takeIf { !isPrivate })
         val openerIndex = openerId?.let { indexOf(it) } ?: -1
         if (tab.groupId != null && openerIndex >= 0) list.add(openerIndex + 1, tab) else list += tab
@@ -620,6 +651,7 @@ class TabManager(
     private fun dispose(tab: Tab) {
         val privateId = tab.id.takeIf { tab.isPrivate }
         observers.remove(tab.id)?.cancel()
+        keptAwake.remove(tab.id)
         noticeObservers.remove(tab.id)?.cancel()
         _autoDesktopNotices.value = _autoDesktopNotices.value - tab.id
         tab.session?.let {
@@ -694,7 +726,7 @@ class TabManager(
         }
         _recentlyClosed.value = _recentlyClosed.value - entry
         val id = nextId++
-        list.firstOrNull { it.id == selectedId }?.session?.setActive(false)
+        putSelectedToSleep()
         list += Tab(id, null, entry.title, entry.url, entry.desktopMode, entry.savedState, null)
         selectedId = id
         ensureSession(id)?.session?.setActive(foreground)
@@ -718,7 +750,7 @@ class TabManager(
         }
         val saved = runCatching { original.session?.savedState() }.getOrNull() ?: original.savedState
         val newId = nextId++
-        list.firstOrNull { it.id == selectedId }?.session?.setActive(false)
+        putSelectedToSleep()
         val copy =
             Tab(
                 newId, null, original.title, original.url, original.desktopMode, saved, null, original.isPrivate,
@@ -1026,7 +1058,7 @@ class TabManager(
         // The tab holds the only strong reference to the child; Gecko opens it, we never do.
         child.host = this
         val id = nextId++
-        list.firstOrNull { it.id == selectedId }?.session?.setActive(false)
+        putSelectedToSleep()
         list += Tab(
             id = id,
             session = child,
@@ -1056,7 +1088,7 @@ class TabManager(
         }
         session.host = this
         val id = nextId++
-        list.firstOrNull { it.id == selectedId }?.session?.setActive(false)
+        putSelectedToSleep()
         val st = session.state.value
         list += Tab(
             id = id,
