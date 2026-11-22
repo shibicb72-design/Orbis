@@ -125,3 +125,19 @@ private const val DOWNLOAD_DIR = "Download"
  */
 internal fun newlyCompleted(entries: List<DownloadEntry>, handled: Set<Long>): List<DownloadEntry> =
     entries.filter { it.status == DownloadStatus.COMPLETED && !it.isPrivate && it.id !in handled && it.filePath != null }
+
+/**
+ * The decision of the app's watcher over the downloads list: which entries to copy to the Download folder now. Pure
+ * (no Android, no IO). An entry is returned once, when it is seen COMPLETED, and never when it came from the stored
+ * index of an earlier run ([restoredIds]) or is already marked as copied ([SavedTo.DOWNLOADS]). Every COMPLETED entry
+ * it has looked at counts as handled, returned or not. Call it from one coroutine only.
+ */
+internal class CopyOnFinish {
+    private val handled = HashSet<Long>()
+
+    fun due(entries: List<DownloadEntry>, restoredIds: Set<Long>): List<DownloadEntry> {
+        val fresh = newlyCompleted(entries, handled).filter { it.id !in restoredIds && it.savedTo != SavedTo.DOWNLOADS }
+        for (e in entries) if (e.status == DownloadStatus.COMPLETED) handled += e.id
+        return fresh
+    }
+}

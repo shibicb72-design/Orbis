@@ -1265,6 +1265,39 @@ class DownloadManagerTest {
         assertEquals(m.byId(id).finishedAt, reloaded.finishedAt)
     }
 
+    @Test(timeout = 30_000)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun restoredIdsHoldsTheStoredIdsBeforeTheyAreInTheList() = runTest {
+        val file = File(tmp.root, "done.txt").also { it.writeText("done") }
+        store.save(listOf(DownloadEntry(4, "done.txt", "text/plain", null, 4, 4, DownloadStatus.COMPLETED, file.absolutePath, 100)))
+        val m = manager()
+        assertTrue(m.restoredIds.isEmpty())
+        // What a collector sees at the moment the entry first shows up in the list.
+        val knownWhenListed = mutableListOf<Boolean>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            m.entries.collect { list -> if (list.any { it.id == 4L }) knownWhenListed += (4L in m.restoredIds) }
+        }
+        m.restore()
+        advanceUntilIdle()
+        assertEquals(setOf(4L), m.restoredIds)
+        assertEquals(listOf(4L), m.entries.value.map { it.id })
+        assertTrue(knownWhenListed.isNotEmpty())
+        assertTrue(knownWhenListed.all { it })
+    }
+
+    @Test(timeout = 30_000)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun aDownloadThatFinishesInThisRunIsNotInRestoredIds() = runTest {
+        store.save(listOf(DownloadEntry(4, "old.txt", "text/plain", null, 4, 4, DownloadStatus.FAILED, null, 100)))
+        val m = manager()
+        m.restore()
+        val id = m.start(FakeDownload(contentDisposition = cd("new.txt"), body = { ChunkStream(bytes("x")) }))
+        advanceUntilIdle()
+        assertEquals(DownloadStatus.COMPLETED, m.byId(id).status)
+        assertEquals(setOf(4L), m.restoredIds)
+        assertFalse(id in m.restoredIds)
+    }
+
     @Test
     @OptIn(ExperimentalCoroutinesApi::class)
     fun aPrivateDownloadIsNeverMarkedAsSavedInDownloads() = runTest {
