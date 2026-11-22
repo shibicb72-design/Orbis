@@ -209,6 +209,72 @@ test("a source the page replaced meanwhile is left alone", () => {
   assert.deepStrictEqual(plain(S.afterMetadata(plan, "https://cdn.example/clip.mp4")), { seekTo: 42.5, play: true });
 });
 
+// ---- Errors of the engine's HLS player on a live playlist --------------------------------------------------------
+
+const PLAYLIST = "https://cdn.example/live/index.m3u8?token=1";
+
+function hlsDied(over) {
+  return media(Object.assign({ src: PLAYLIST, duration: Infinity, live: true, error: true, errorCode: 2, readyState: 1 }, over));
+}
+
+test("a live playlist that dies with the HLS player's error while playing is restarted 3 s later", () => {
+  const t = S.newTrack();
+  assert.strictEqual(S.errorDelayMs(t, hlsDied()), 3000);
+  assert.strictEqual(S.errorDue(t, { src: PLAYLIST }, hlsDied()), "act");
+  assert.strictEqual(t.tries, 1);
+  // The next error restarts come 12 s and 24 s after their errors.
+  assert.strictEqual(S.errorDelayMs(t, hlsDied()), 12000);
+  S.errorDue(t, { src: PLAYLIST }, hlsDied());
+  assert.strictEqual(S.errorDelayMs(t, hlsDied()), 24000);
+});
+
+test("a plain file with the same error code is never restarted", () => {
+  const t = S.newTrack();
+  assert.strictEqual(S.errorDelayMs(t, hlsDied({ src: "https://cdn.example/clip.mp4", live: false, duration: 120 })), null);
+  // An endless http audio stream (internet radio) is live, but a plain file too.
+  assert.strictEqual(S.errorDelayMs(t, hlsDied({ src: "https://radio.example/stream.mp3" })), null);
+  // A playlist that is not live (a recording) is not restarted on an error either.
+  assert.strictEqual(S.errorDelayMs(t, hlsDied({ live: false, duration: 600 })), null);
+  // An address that only mentions m3u8 in its query is not a playlist path.
+  assert.strictEqual(S.errorDelayMs(t, hlsDied({ src: "https://cdn.example/play?f=a.m3u8" })), null);
+  assert.strictEqual(S.isLivePlaylist("https://cdn.example/a/INDEX.M3U8#t=1", true), true);
+});
+
+test("a blob: playlist, another error code, paused or ended before the error: never", () => {
+  const t = S.newTrack();
+  assert.strictEqual(S.errorDelayMs(t, hlsDied({ src: "blob:https://site.example/abc.m3u8" })), null);
+  assert.strictEqual(S.errorDelayMs(t, hlsDied({ errorCode: 3 })), null, "decode error");
+  assert.strictEqual(S.errorDelayMs(t, hlsDied({ errorCode: 4 })), null, "could not load at all");
+  assert.strictEqual(S.errorDelayMs(t, hlsDied({ paused: true })), null);
+  assert.strictEqual(S.errorDelayMs(t, hlsDied({ ended: true })), null);
+  assert.strictEqual(t.tries, 0);
+});
+
+test("offline when the restart is due: not until online", () => {
+  const t = S.newTrack();
+  assert.strictEqual(S.errorDue(t, { src: PLAYLIST }, hlsDied({ online: false })), "offline");
+  assert.strictEqual(t.tries, 0);
+  assert.strictEqual(S.errorDue(t, { src: PLAYLIST }, hlsDied()), "act");
+});
+
+test("the page replaced the source or cleared the error meanwhile, or the user paused: nothing", () => {
+  const t = S.newTrack();
+  assert.strictEqual(S.errorDue(t, { src: PLAYLIST }, hlsDied({ src: "https://cdn.example/other.m3u8" })), "drop");
+  assert.strictEqual(S.errorDue(t, { src: PLAYLIST }, hlsDied({ error: false, errorCode: 0 })), "drop");
+  assert.strictEqual(S.errorDue(t, { src: PLAYLIST }, hlsDied({ paused: true })), "drop");
+  assert.strictEqual(t.tries, 0);
+});
+
+test("the limit is shared: two stall restarts and one error restart, then nothing", () => {
+  const { t, acts } = run(media({ src: PLAYLIST, duration: Infinity }), 12000 + 24000);
+  assert.deepStrictEqual(acts, [12000, 36000]);
+  assert.strictEqual(S.errorDelayMs(t, hlsDied()), 24000);
+  assert.strictEqual(S.errorDue(t, { src: PLAYLIST }, hlsDied()), "act");
+  assert.strictEqual(S.errorDelayMs(t, hlsDied()), null);
+  assert.strictEqual(S.errorDue(t, { src: PLAYLIST }, hlsDied()), "drop");
+  assert.strictEqual(S.arm(t, media({ src: PLAYLIST }), 0), false);
+});
+
 // ---- The script in a page (fake DOM, fake clock) -----------------------------------------------------------------
 
 function page({ online = true } = {}) {
@@ -217,6 +283,7 @@ function page({ online = true } = {}) {
   const elements = [];
   let clock = 0;
   let intervals = [];
+  let timeouts = [];
   const context = {
     document: {
       addEventListener: (type, fn, capture) => {
@@ -236,8 +303,14 @@ function page({ online = true } = {}) {
     clearInterval: id => {
       intervals = intervals.filter(i => i !== id);
     },
+    setTimeout: (fn, ms) => {
+      const id = { fn, due: clock + ms };
+      timeouts.push(id);
+      return id;
+    },
     WeakMap,
     Set,
+    Map,
     Math,
     isFinite,
   };
@@ -269,6 +342,7 @@ function page({ online = true } = {}) {
           this.paused = true;
           this.currentTime = 0;
           this.readyState = 0;
+          this.error = null;
         },
         play() {
           calls.push("play");
@@ -291,6 +365,9 @@ function page({ online = true } = {}) {
   function advance(ms) {
     for (let i = 0; i < ms / 1000; i++) {
       clock += 1000;
+      const due = timeouts.filter(id => id.due <= clock);
+      timeouts = timeouts.filter(id => id.due > clock);
+      due.forEach(id => id.fn());
       intervals.slice().forEach(id => id.fn());
     }
   }
@@ -304,6 +381,14 @@ function page({ online = true } = {}) {
     goOnline: () => {
       context.navigator.onLine = true;
       (winListeners.online || []).forEach(fn => fn({}));
+    },
+    goOffline: () => {
+      context.navigator.onLine = false;
+    },
+    /** The engine's HLS player gives up: the element reports MEDIA_ERR_NETWORK and fires error. */
+    hlsError: el => {
+      el.error = { code: 2 };
+      fire(el, "error");
     },
   };
 }
@@ -419,6 +504,99 @@ test("in a page: an element stalled before the script ran is found at start; oth
   p.advance(12000);
   assert.deepStrictEqual(p.calls, ["load"]);
   assert.strictEqual(el.paused, true, "between load() and the metadata, paused is this script's own doing");
+});
+
+function livePlaylist(p) {
+  const el = p.element({ currentSrc: PLAYLIST, duration: Infinity, currentTime: 300 });
+  p.fire(el, "durationchange");
+  return el;
+}
+
+test("in a page: a live playlist killed by the HLS player is reloaded 3 s later and played at the live edge", () => {
+  const p = page();
+  p.start();
+  const el = livePlaylist(p);
+  p.hlsError(el);
+  p.advance(2000);
+  assert.deepStrictEqual(p.calls, []);
+  p.advance(1000);
+  assert.deepStrictEqual(p.calls, ["load"]);
+  el.currentTime = 0;
+  el.fireOwn("loadedmetadata");
+  assert.deepStrictEqual(p.calls, ["load", "play"]);
+  assert.strictEqual(el.currentTime, 0, "no seek back on a live stream");
+});
+
+test("in a page: the live flag survives the error even if the duration is gone", () => {
+  const p = page();
+  p.start();
+  const el = livePlaylist(p);
+  el.duration = NaN;
+  p.hlsError(el);
+  p.advance(3000);
+  assert.deepStrictEqual(p.calls, ["load"]);
+});
+
+test("in a page: a plain file with the same error is never restarted", () => {
+  const p = page();
+  p.start();
+  const el = p.element();
+  p.hlsError(el);
+  p.advance(120000);
+  assert.deepStrictEqual(p.calls, []);
+});
+
+test("in a page: offline when due, restarted 3 s after the device is online again", () => {
+  const p = page();
+  p.start();
+  const el = livePlaylist(p);
+  p.goOffline();
+  p.hlsError(el);
+  p.advance(60000);
+  assert.deepStrictEqual(p.calls, []);
+  p.goOnline();
+  p.advance(2000);
+  assert.deepStrictEqual(p.calls, []);
+  p.advance(1000);
+  assert.deepStrictEqual(p.calls, ["load"]);
+});
+
+test("in a page: the page replaced the source before the restart was due: nothing", () => {
+  const p = page();
+  p.start();
+  const el = livePlaylist(p);
+  p.hlsError(el);
+  p.advance(1000);
+  el.currentSrc = "https://cdn.example/other/index.m3u8";
+  p.advance(5000);
+  assert.deepStrictEqual(p.calls, []);
+});
+
+test("in a page: paused before the error: never", () => {
+  const p = page();
+  p.start();
+  const el = livePlaylist(p);
+  el.paused = true;
+  p.hlsError(el);
+  p.advance(60000);
+  assert.deepStrictEqual(p.calls, []);
+});
+
+test("in a page: two stall restarts, one error restart, then nothing more", () => {
+  const p = page();
+  p.start();
+  const el = livePlaylist(p);
+  p.fire(el, "waiting");
+  p.advance(12000 + 24000);
+  assert.deepStrictEqual(p.calls, ["load", "load"]);
+  // The second reload ends in the HLS player's error.
+  p.hlsError(el);
+  p.advance(24000);
+  assert.deepStrictEqual(p.calls, ["load", "load", "load"]);
+  p.hlsError(el);
+  p.fire(el, "waiting");
+  p.advance(300000);
+  assert.deepStrictEqual(p.calls, ["load", "load", "load"]);
 });
 
 // ---- The manifest ------------------------------------------------------------------------------------------------

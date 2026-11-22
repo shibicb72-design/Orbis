@@ -9,7 +9,12 @@
 // the buffered data moving) does not count: a slow download that works is never restarted. Sends nothing, stores
 // nothing, logs nothing.
 //
-// The decision (OrbisStall.arm / step / restartPlan / afterMetadata) is pure, so it can be tested without a browser.
+// One error is restarted: a LIVE playlist on the engine's own HLS player that dies with that player's error while it
+// was playing (the player gives up for good, for example when a stall made it fall out of the live window). It is
+// restarted 3, 12 or 24 seconds after the error, sharing the same limit of MAX_TRIES. Never a plain file on an error.
+//
+// The decision (OrbisStall.arm / step / errorDelayMs / errorDue / restartPlan / afterMetadata) is pure, so it can be
+// tested without a browser.
 
 "use strict";
 
@@ -18,10 +23,16 @@ var OrbisStall = {
   MAX_TRIES: 3,
   // HTMLMediaElement.HAVE_FUTURE_DATA: at or above it the element has data to play on.
   HAVE_FUTURE_DATA: 3,
+  // The engine's own HLS player reports any player error to the page as MEDIA_ERR_NETWORK (2), with no message, once
+  // data has arrived (HLSDecoder.cpp, HLSResourceCallbacksSupport::OnError -> HTMLMediaElement::NetworkError). Before
+  // any data it is 4 (MEDIA_ERR_SRC_NOT_SUPPORTED), as for any address that cannot be loaded; that one is not retried.
+  HLS_PLAYER_ERROR: 2,
+  // Wait after such an error before restart number tries + 1 (the count is shared with the stall restarts).
+  ERROR_DELAYS_MS: [3000, 12000, 24000],
 
-  /** Per-element state. tries counts restarts for the whole page load and never goes down. */
+  /** Per-element state. tries counts restarts of both kinds for the whole page load and never goes down. */
   newTrack: function () {
-    return { armed: false, since: null, time: null, bufEnd: null, tries: 0, pending: false, onMeta: null };
+    return { armed: false, since: null, time: null, bufEnd: null, tries: 0, pending: false, onMeta: null, live: false };
   },
 
   /** How long the stall must have lasted, unbroken, before restart number tries + 1. */
@@ -30,8 +41,8 @@ var OrbisStall = {
   },
 
   /**
-   * Whether the element is one this script may act on at all. s is a snapshot of the element:
-   * { src, paused, ended, online, error, readyState, currentTime, duration, bufferedEnd }.
+   * Whether the element is one this script may act on for a stall. s is a snapshot of the element:
+   * { src, paused, ended, online, error, errorCode, live, readyState, currentTime, duration, bufferedEnd }.
    */
   eligible: function (s) {
     return (
@@ -92,6 +103,44 @@ var OrbisStall = {
     return "act";
   },
 
+  /**
+   * Whether the element plays a live playlist on the engine's own HLS player, as far as a page can know: an http(s)
+   * address whose path ends in .m3u8 (the engine picks that player by the playlist's type, which a page cannot see),
+   * and live (duration Infinity). Both are needed: an endless http audio stream (internet radio) also has duration
+   * Infinity, but it is a plain file, and an error there is not retried.
+   */
+  isLivePlaylist: function (src, live) {
+    if (typeof src !== "string" || !/^https?:/i.test(src)) return false;
+    return /\.m3u8$/i.test(src.split(/[?#]/)[0]) && live === true;
+  },
+
+  /** On an error event: how long to wait before an error restart, or null for never. */
+  errorDelayMs: function (t, s) {
+    if (t.tries >= OrbisStall.MAX_TRIES) return null;
+    if (!OrbisStall.isLivePlaylist(s.src, s.live)) return null;
+    if (s.errorCode !== OrbisStall.HLS_PLAYER_ERROR) return null;
+    if (s.paused || s.ended) return null;
+    return OrbisStall.ERROR_DELAYS_MS[t.tries];
+  },
+
+  /**
+   * When the wait after an error is over. "act" (restart now; the try is counted), "offline" (wait until the device
+   * is online), or "drop": the page replaced the source or cleared the error itself, the user paused, or the tries
+   * are used up.
+   */
+  errorDue: function (t, plan, s) {
+    if (t.tries >= OrbisStall.MAX_TRIES) return "drop";
+    if (s.src !== plan.src || s.errorCode !== OrbisStall.HLS_PLAYER_ERROR) return "drop";
+    if (s.paused || s.ended) return "drop";
+    if (s.online !== true) return "offline";
+    t.tries += 1;
+    t.armed = false;
+    t.since = null;
+    t.time = null;
+    t.bufEnd = null;
+    return "act";
+  },
+
   /** What to restore after load(). A live stream (duration Infinity) is not sought back; nor is position 0. */
   restartPlan: function (s) {
     var seekTo = isFinite(s.duration) && s.currentTime > 0 ? s.currentTime : null;
@@ -111,6 +160,8 @@ var OrbisStall = {
   var tracks = new WeakMap();
   var active = new Set();
   var timer = null;
+  // Elements whose error restart came due while offline, with their plan.
+  var waitingOnline = new Map();
 
   function isMedia(el) {
     return !!el && (el.localName === "video" || el.localName === "audio") && typeof el.load === "function";
@@ -133,6 +184,8 @@ var OrbisStall = {
       ended: el.ended,
       online: navigator.onLine,
       error: !!el.error,
+      errorCode: el.error ? el.error.code : 0,
+      live: t.live || el.duration === Infinity,
       readyState: el.readyState,
       currentTime: el.currentTime,
       duration: el.duration,
@@ -152,8 +205,7 @@ var OrbisStall = {
     if (timer === null) timer = setInterval(tick, 1000);
   }
 
-  function restart(el, t) {
-    var plan = OrbisStall.restartPlan(snapshot(el, t));
+  function restart(el, t, plan) {
     if (t.onMeta) el.removeEventListener("loadedmetadata", t.onMeta);
     var onMeta = function () {
       el.removeEventListener("loadedmetadata", onMeta);
@@ -185,13 +237,48 @@ var OrbisStall = {
         t.armed = false;
         active.delete(el);
       } else if (verdict === "act") {
-        restart(el, t);
+        restart(el, t, OrbisStall.restartPlan(snapshot(el, t)));
       }
     });
     if (active.size === 0 && timer !== null) {
       clearInterval(timer);
       timer = null;
     }
+  }
+
+  function errorRestartDue(el, plan) {
+    var t = trackOf(el);
+    var verdict = OrbisStall.errorDue(t, plan, snapshot(el, t));
+    if (verdict === "offline") {
+      waitingOnline.set(el, plan);
+    } else if (verdict === "act") {
+      active.delete(el);
+      // A live playlist joins the live edge again: no seek back.
+      restart(el, t, { src: plan.src, seekTo: null });
+    }
+  }
+
+  function onError(e) {
+    var el = e.target;
+    if (!isMedia(el)) return;
+    var t = trackOf(el);
+    var s = snapshot(el, t);
+    var delay = OrbisStall.errorDelayMs(t, s);
+    if (delay === null) return;
+    var plan = { src: s.src };
+    setTimeout(function () {
+      errorRestartDue(el, plan);
+    }, delay);
+  }
+
+  function onOnline() {
+    scan();
+    waitingOnline.forEach(function (plan, el) {
+      waitingOnline.delete(el);
+      setTimeout(function () {
+        errorRestartDue(el, plan);
+      }, OrbisStall.ERROR_DELAYS_MS[0]);
+    });
   }
 
   function scan() {
@@ -207,6 +294,15 @@ var OrbisStall = {
   // ones added later.
   document.addEventListener("waiting", onStall, true);
   document.addEventListener("stalled", onStall, true);
+  document.addEventListener("error", onError, true);
+  document.addEventListener(
+    "durationchange",
+    function (e) {
+      // Remembered so that "live" is still known when an error comes.
+      if (isMedia(e.target)) trackOf(e.target).live = e.target.duration === Infinity;
+    },
+    true,
+  );
   document.addEventListener(
     "progress",
     function (e) {
@@ -222,6 +318,6 @@ var OrbisStall = {
     },
     true,
   );
-  window.addEventListener("online", scan);
+  window.addEventListener("online", onOnline);
   scan();
 })();
