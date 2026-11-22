@@ -418,10 +418,48 @@ test("window: error restarts are not held to the stall limit, and stalls stay qu
   assert.strictEqual(S.arm(t2, live({ error: false }), 0), false);
 });
 
-test("the stream signal hook takes one value and does nothing yet", () => {
-  assert.strictEqual(typeof S.streamSignal, "function");
-  assert.strictEqual(S.streamSignal.length, 1);
+/** A fake GeckoView native messaging: every port opened and every message posted, as plain copies. */
+function fakeBrowser() {
+  const sent = [];
+  return {
+    sent,
+    browser: {
+      runtime: {
+        connectNative: app => ({
+          postMessage: msg => sent.push({ app, msg: plain(msg) }),
+        }),
+      },
+    },
+  };
+}
+
+test("the stream signal: \"dropped\" and \"playing\" each send exactly one message with exactly the type, to the app", () => {
+  const fake = fakeBrowser();
+  const O = vm.runInNewContext(source + "\nOrbisStall;", { browser: fake.browser });
+  assert.strictEqual(O.streamSignal.length, 1);
+  O.streamSignal("dropped");
+  assert.deepStrictEqual(fake.sent, [{ app: "orbisStall", msg: { type: "dropped" } }]);
+  O.streamSignal("playing");
+  assert.deepStrictEqual(fake.sent, [
+    { app: "orbisStall", msg: { type: "dropped" } },
+    { app: "orbisStall", msg: { type: "playing" } },
+  ]);
+});
+
+test("the stream signal: any other value, or extra arguments, add nothing", () => {
+  const fake = fakeBrowser();
+  const O = vm.runInNewContext(source + "\nOrbisStall;", { browser: fake.browser });
+  for (const v of [undefined, null, "", "Dropped", "back", "stop", 1, { type: "dropped" }, ["dropped"]]) O.streamSignal(v);
+  assert.deepStrictEqual(fake.sent, []);
+  O.streamSignal("dropped", "https://cdn.example/live.m3u8", { title: "x" });
+  assert.deepStrictEqual(fake.sent, [{ app: "orbisStall", msg: { type: "dropped" } }]);
+});
+
+test("the stream signal: without messaging (outside Orbis) or a failing port it throws nothing", () => {
   assert.strictEqual(S.streamSignal("dropped"), undefined);
+  const broken = { runtime: { connectNative: () => { throw new Error("no app"); } } };
+  const O = vm.runInNewContext(source + "\nOrbisStall;", { browser: broken });
+  assert.strictEqual(O.streamSignal("dropped"), undefined);
 });
 
 // ---- The script in a page (fake DOM, fake clock) -----------------------------------------------------------------
@@ -464,7 +502,20 @@ function page({ online = true } = {}) {
     isFinite,
   };
   const calls = [];
+  // What the app receives (brief live12-8): one entry per message, [type]. A message that is not exactly { type } on
+  // the stall channel is recorded as it is, so it fails the test's comparison (an assert here would be swallowed by the
+  // script's own try/catch).
   const signals = [];
+  context.browser = {
+    runtime: {
+      connectNative: app => ({
+        postMessage: msg => {
+          const exact = app === "orbisStall" && JSON.stringify(Object.keys(msg)) === '["type"]';
+          signals.push(exact ? [msg.type] : ["not exactly a type", app, JSON.stringify(msg)]);
+        },
+      }),
+    },
+  };
   function element(over) {
     const listeners = {};
     const el = Object.assign(
@@ -529,10 +580,6 @@ function page({ online = true } = {}) {
     signals,
     start: () => {
       vm.runInNewContext(source, context);
-      // Watch the hook the app's message will use (brief live12-8): every call, with all its arguments.
-      context.OrbisStall.streamSignal = function () {
-        signals.push(Array.prototype.slice.call(arguments));
-      };
     },
     timers: () => intervals.length,
     goOnline: () => {
@@ -867,22 +914,28 @@ test("in a page: paused before the error: never", () => {
 
 // ---- The manifest ------------------------------------------------------------------------------------------------
 
-test("the manifest: one content script in every frame at document_idle, no permissions, no background", () => {
+test("the manifest: one content script in every frame at document_idle, only the messaging permissions, no background", () => {
   const m = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"));
-  assert.deepStrictEqual(Object.keys(m).sort(), ["browser_specific_settings", "content_scripts", "description", "manifest_version", "name", "version"]);
+  assert.deepStrictEqual(Object.keys(m).sort(), ["browser_specific_settings", "content_scripts", "description", "manifest_version", "name", "permissions", "version"]);
   assert.strictEqual(m.manifest_version, 2);
   assert.strictEqual(m.browser_specific_settings.gecko.id, "stall@orbis.shibi.com");
   assert.deepStrictEqual(m.content_scripts, [
     { matches: ["http://*/*", "https://*/*"], js: ["content.js"], run_at: "document_idle", all_frames: true },
   ]);
-  assert.strictEqual(m.permissions, undefined);
+  // Exactly what a content script needs to message the app (the cast and compat pattern), nothing else.
+  assert.deepStrictEqual(m.permissions, ["nativeMessaging", "nativeMessagingFromContent", "geckoViewAddons"]);
+  assert.strictEqual(m.optional_permissions, undefined);
   assert.strictEqual(m.background, undefined);
   assert.ok(!JSON.stringify(m).includes("webRequest"));
   assert.deepStrictEqual(fs.readdirSync(dir).sort(), ["content.js", "manifest.json"]);
 });
 
-test("the script sends, stores and logs nothing", () => {
-  for (const word of ["runtime", "sendMessage", "connectNative", "storage", "fetch(", "XMLHttpRequest", "console.", "localStorage", "chrome."]) {
+test("the script stores and logs nothing, and its only message channel is the one connectNative to the app", () => {
+  for (const word of ["sendMessage", "sendNativeMessage", "storage", "fetch(", "XMLHttpRequest", "console.", "localStorage", "chrome.", "postMessage(window", "window.postMessage"]) {
     assert.ok(!source.includes(word), word);
   }
+  assert.strictEqual(source.split("browser.runtime").length - 1, 1, "one use of the runtime API");
+  assert.strictEqual(source.split("connectNative(").length - 1, 1, "one connectNative");
+  assert.strictEqual(source.split(".postMessage(").length - 1, 1, "one postMessage");
+  assert.ok(source.includes("connectNative(OrbisStall.NATIVE_APP).postMessage({ type: value })"));
 });

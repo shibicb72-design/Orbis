@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Shown when Orbis tried for 30 seconds to bring a dead live stream back and could not (assets/extensions/stall). -->
+    <string name="live_stream_dropped" translatable="false">The live stream stopped and Orbis could not reconnect. Check your connection or reload the page.</string>
+    <string name="live_stream_dropped_reload" translatable="false">Reload</string>
+</resources>

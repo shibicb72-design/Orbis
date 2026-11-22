@@ -2,7 +2,7 @@
   "manifest_version": 2,
   "name": "Orbis stalled video restart",
   "version": "1.0",
-  "description": "Restarts a video or audio file that has stopped loading for a long time, a few times at most. Only where the browser plays the file itself, never a site's own player. Stores and sends nothing.",
+  "description": "Restarts a video or audio file that has stopped loading for a long time, a few times at most. Only where the browser plays the file itself, never a site's own player. Stores nothing. Sends nothing except, to the Orbis app only, whether a live stream could not be reconnected.",
   "browser_specific_settings": { "gecko": { "id": "stall@orbis.shibi.com" } },
   "content_scripts": [
     {
@@ -11,5 +11,6 @@
       "run_at": "document_idle",
       "all_frames": true
     }
-  ]
+  ],
+  "permissions": ["nativeMessaging", "nativeMessagingFromContent", "geckoViewAddons"]
 }

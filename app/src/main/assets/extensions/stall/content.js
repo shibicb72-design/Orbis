@@ -6,8 +6,8 @@
 // their own recovery. Never acts on a paused or ended element, on one that reports an error (a server that answers
 // with errors is not asked again), or while the device is offline. At most MAX_TRIES restarts per element per page
 // load, after 12, 24 and 48 seconds of unbroken stall. Time while bytes still arrive (a progress event, or the end of
-// the buffered data moving) does not count: a slow download that works is never restarted. Sends nothing, stores
-// nothing, logs nothing.
+// the buffered data moving) does not count: a slow download that works is never restarted. Stores nothing, logs
+// nothing, and sends nothing except the two-value signal below, to the Orbis app only.
 //
 // One error is handled: a LIVE playlist on the engine's own HLS player that dies with that player's error while it
 // was playing (the player gives up for good, for example when a stall made it fall out of the live window). That opens
@@ -57,11 +57,23 @@ var OrbisStall = {
     };
   },
 
+  /** The app's native-messaging name for this extension (StallExtension.NATIVE_APP). */
+  NATIVE_APP: "orbisStall",
+
   /**
-   * The hook for the app's "stream dropped" message (brief live12-8). value is "dropped" or "playing"; nothing else
-   * is passed, no address. It does nothing yet.
+   * Tells the Orbis app that this page's live stream could not be reconnected ("dropped") or plays again ("playing"),
+   * so it can show or clear its own message. The message is exactly { type: value }: no address, no title, nothing
+   * about the element. Any other value sends nothing. It goes to the Orbis app only, through GeckoView's native
+   * messaging (one short-lived port per signal, as the compat script does); never to the page or a server.
    */
-  streamSignal: function (value) {},
+  streamSignal: function (value) {
+    if (value !== "dropped" && value !== "playing") return;
+    try {
+      browser.runtime.connectNative(OrbisStall.NATIVE_APP).postMessage({ type: value });
+    } catch (e) {
+      // No messaging (outside Orbis): nothing to tell.
+    }
+  },
 
   /** How long the stall must have lasted, unbroken, before restart number tries + 1. */
   stallNeededMs: function (tries) {
