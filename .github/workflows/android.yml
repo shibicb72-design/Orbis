@@ -45,6 +45,9 @@ jobs:
       - name: YouTube picture-in-picture fix tests
         run: node app/src/test/js/yt-pip.test.js
 
+      - name: Stalled video restart tests
+        run: node app/src/test/js/stall.test.js
+
       - name: Engine currency script tests (offline)
         run: python3 -I scripts/test_check_engine_currency.py
 

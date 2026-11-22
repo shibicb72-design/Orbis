@@ -202,6 +202,13 @@ data class SessionState(
     /** A video went fullscreen and is wider than tall: the screen turns to landscape, like Chrome and Firefox. */
     val fullScreenVideoLandscape: Boolean = false,
     /**
+     * The page's live stream died and Orbis's stall script could not reconnect it within its 30-second window: the UI
+     * shows its "live stream stopped" message with Reload. Set by the script's "dropped"; cleared by its "playing", by
+     * any navigation or reload of the tab, when the page is lost, when the user dismisses the message, and when the
+     * tab closes (see [afterStreamSignal]). Memory only: never stored, never in a backup.
+     */
+    val liveStreamDropped: Boolean = false,
+    /**
      * Monotonic counters that make load boundaries observable even when the state flow conflates them (a collector only
      * ever sees the latest value, so "started, then failed" can look like "nothing happened"). Never reset.
      * [loadStarts]: top-level page loads started (onPageStart).
@@ -253,6 +260,7 @@ internal fun SessionState.afterPageStart(url: String? = null): SessionState =
             crashed = false,
             contentGone = false,
             findResult = null,
+            liveStreamDropped = false,
             loadStarts = loadStarts + 1,
         )
     }
@@ -278,8 +286,21 @@ internal fun SessionState.afterLocationChange(url: String): SessionState {
         secure = secure && origin != null && origin == siteOriginOf(this.url),
         secureBeforeLoad = false,
         contentGone = false,
+        // Any navigation, also within the page (a fragment or pushState): the message was about the page before.
+        liveStreamDropped = false,
     )
 }
+
+/**
+ * A signal from the stall script. [pageAtConnect] is [SessionState.loadStarts] when its message port connected: a
+ * message from a page that has since been left (a new load started) changes nothing.
+ */
+internal fun SessionState.afterStreamSignal(signal: StreamSignal, pageAtConnect: Int): SessionState =
+    when {
+        pageAtConnect != loadStarts || contentGone -> this
+        signal == StreamSignal.DROPPED -> copy(liveStreamDropped = true)
+        else -> copy(liveStreamDropped = false)
+    }
 
 /**
  * Gecko's security report for the committed page. Secure only for a secure connection that is not a certificate
@@ -325,6 +346,7 @@ internal fun SessionState.afterContentProcessGone(showBanner: Boolean = true): S
         fullScreen = false,
         fullScreenVideoLandscape = false,
         media = null,
+        liveStreamDropped = false,
         loadEnds = loadEnds + 1,
         navigationsCancelled = navigationsCancelled + 1,
     )
@@ -477,6 +499,11 @@ interface BrowserSession {
     fun pausePageMedia() {}
     /** Leaves page fullscreen (Back, a tab switch); the engine then reports fullScreen = false. Test doubles may no-op. */
     fun exitFullScreen() {}
+    /**
+     * The user dismissed the "live stream stopped" message (or tapped its Reload): [SessionState.liveStreamDropped] is
+     * cleared, so the message does not come back until the stall script reports a new drop. Test doubles may no-op.
+     */
+    fun dismissLiveStreamDropped() {}
     /**
      * Fetches [url] (http/https) in this session's mode (private stays private) and offers the response through the
      * normal download path (host.onDownload: the same dialog, file naming and private handling). "Save image".

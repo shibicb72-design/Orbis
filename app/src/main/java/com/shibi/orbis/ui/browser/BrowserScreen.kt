@@ -20,6 +20,16 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarData
+import androidx.compose.material3.SnackbarVisuals
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
+import com.shibi.orbis.tabs.TabManager
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.ContextWrapper
@@ -976,7 +986,8 @@ private fun BrowserContent(
                         onClose = { readerArticle = null },
                     )
                 }
-                SnackbarHost(snackbars, Modifier.align(Alignment.BottomCenter))
+                // Also drawn over page fullscreen: the live stream message shows on top of the dead video.
+                SnackbarHost(snackbars, Modifier.align(Alignment.BottomCenter)) { OrbisSnackbar(it) }
                 if (fullScreen && !inPip) {
                     val pipContext = LocalContext.current
                     val pipSupported = remember { pipContext.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE) }
@@ -1093,6 +1104,15 @@ private fun BrowserContent(
         snackbars = snackbars,
         onShown = { tabs.clearAutoDesktopNotice(selectedTab.id) },
         onUndo = { noticeUrl -> session?.let { undoAutoDesktop(container.browserSettings, it, noticeUrl, state.url) } },
+    )
+    // The selected tab's "live stream stopped" message. Orbis is in front while the activity is started (visible).
+    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    LiveStreamDroppedNotice(
+        tabs = tabs,
+        inFront = lifecycleState.isAtLeast(Lifecycle.State.STARTED),
+        pageHidden = pageHidden,
+        inPip = inPip,
+        snackbars = snackbars,
     )
 
     if (showSiteSettings && session != null && isWebUrl(state.url)) {
@@ -1386,6 +1406,94 @@ private fun BrowserContent(
             onSaveImage = { tabs.saveImage(request) },
             onDownloadTorrent = if (magnetHandler == MagnetHandler.ORBIS) ({ tabs.downloadTorrentLink(request) }) else null,
         )
+    }
+}
+
+/**
+ * Whether the "live stream stopped" message may be on screen for the selected tab: its flag is set, Orbis is in front,
+ * the page is not hidden by the private-tab lock, and Orbis is not a picture-in-picture window. Page fullscreen does
+ * not hold it back: the browser screen's snackbar host is drawn over the fullscreen page.
+ */
+internal fun showsLiveStreamDropped(dropped: Boolean, inFront: Boolean, pageHidden: Boolean, inPip: Boolean): Boolean =
+    dropped && inFront && !pageHidden && !inPip
+
+/** How long the live stream message, pushed aside, leaves the host to the snackbar that pushed it before it returns. */
+private const val LIVE_STREAM_PUSHED_ASIDE_MILLIS = 1_000L
+
+/** The live stream message's snackbar. [closedByUser] tells the user's close button from another snackbar's dismiss. */
+internal class LiveStreamDroppedVisuals(override val message: String, override val actionLabel: String) : SnackbarVisuals {
+    override val withDismissAction: Boolean get() = true
+    override val duration: SnackbarDuration get() = SnackbarDuration.Indefinite
+
+    @Volatile var closedByUser = false
+        private set
+
+    /** [data] with its close button marking [closedByUser]. Other code dismisses through the host's own data. */
+    fun tracking(data: SnackbarData): SnackbarData =
+        object : SnackbarData {
+            override val visuals: SnackbarVisuals get() = data.visuals
+
+            override fun performAction() = data.performAction()
+
+            override fun dismiss() {
+                closedByUser = true
+                data.dismiss()
+            }
+        }
+}
+
+/** The browser screen's snackbar: the standard one, with the live stream message's close button tracked. */
+@Composable
+internal fun OrbisSnackbar(data: SnackbarData) {
+    val visuals = data.visuals
+    Snackbar(if (visuals is LiveStreamDroppedVisuals) visuals.tracking(data) else data)
+}
+
+/**
+ * The message for a live stream the stall script could not reconnect (SessionState.liveStreamDropped), for the
+ * selected tab only. It stays until the user closes it or taps Reload (both clear the flag, so it comes back only after
+ * a new drop), or until the flag is cleared (the stream plays again, the tab navigates). While it may not show (another
+ * tab is selected, Orbis is not in front, the private page is locked, picture-in-picture) it waits; it shows when that
+ * ends and the flag is still set. Another snackbar that pushes it aside does not count as closing it.
+ */
+@Composable
+internal fun LiveStreamDroppedNotice(
+    tabs: TabManager,
+    inFront: Boolean,
+    pageHidden: Boolean,
+    inPip: Boolean,
+    snackbars: SnackbarHostState,
+) {
+    val message = stringResource(R.string.live_stream_dropped)
+    val reloadLabel = stringResource(R.string.live_stream_dropped_reload)
+    val selected by tabs.selected.collectAsState()
+    val session = selected.session
+    val state by (session?.state ?: IDLE_STATE).collectAsState()
+    // The session the message is about, while it may show; null otherwise.
+    val target = session?.takeIf { showsLiveStreamDropped(state.liveStreamDropped, inFront, pageHidden, inPip) }
+    LaunchedEffect(selected.id, target, snackbars) {
+        val tab = target ?: return@LaunchedEffect
+        while (true) {
+            val visuals = LiveStreamDroppedVisuals(message, reloadLabel)
+            when (snackbars.showSnackbar(visuals)) {
+                SnackbarResult.ActionPerformed -> {
+                    tab.dismissLiveStreamDropped()
+                    tab.reload()
+                    return@LaunchedEffect
+                }
+                SnackbarResult.Dismissed ->
+                    if (visuals.closedByUser) {
+                        tab.dismissLiveStreamDropped()
+                        return@LaunchedEffect
+                    }
+            }
+            // Pushed aside by another snackbar: that one goes first (its code dismisses this one, then shows itself),
+            // and this one comes back once the host is free again.
+            withTimeoutOrNull(LIVE_STREAM_PUSHED_ASIDE_MILLIS) {
+                snapshotFlow { snackbars.currentSnackbarData }.first { it != null }
+            }
+            snapshotFlow { snackbars.currentSnackbarData }.first { it == null }
+        }
     }
 }
 

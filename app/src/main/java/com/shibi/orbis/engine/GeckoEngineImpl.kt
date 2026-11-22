@@ -344,6 +344,7 @@ class GeckoEngineImpl(
             if (AUTO_DESKTOP_RETRY) compatExtension.install(created)
             youtubeAdObserver.install(created)
             YoutubePipExtension.install(created) { debugLog.log("GeckoEngine", it) }
+            StallExtension.install(created) { debugLog.log("GeckoEngine", it) }
             clearExit.install(created)
             // Without a prompt delegate, WebExtensionController.install() hangs forever.
             created.webExtensionController.setPromptDelegate(extensionHost.promptDelegate)
@@ -777,6 +778,7 @@ private class GeckoBrowserSession(
         attachReader()
         attachCast()
         attachCompat()
+        attachStall()
         restorePage(init.restoredState, init.fallbackUrl)
     }
 
@@ -958,6 +960,7 @@ private class GeckoBrowserSession(
                 runCatching { child.attachReader() }
                 runCatching { child.attachCast() }
                 runCatching { child.attachCompat() }
+                runCatching { child.attachStall() }
                 owner.onPopupSession(child, this@GeckoBrowserSession)
                 debugLog.log("GeckoSession", "popup session created")
                 return GeckoResult.fromValue(child.geckoSession)
@@ -1397,6 +1400,53 @@ private class GeckoBrowserSession(
             },
             CastExtensionHolder.NATIVE_APP,
         )
+    }
+
+    // ---- live stream dropped (stall extension) -----------------------------------------------------------------
+
+    fun attachStall() {
+        StallExtension.whenReady { ext ->
+            if (closed) return@whenReady
+            runCatching { attachStallTo(ext) }.onFailure { debugLog.log("GeckoSession", "stall attach failed") }
+        }
+    }
+
+    private fun attachStallTo(ext: WebExtension) {
+        session.webExtensionController.setMessageDelegate(
+            ext,
+            object : WebExtension.MessageDelegate {
+                override fun onConnect(port: WebExtension.Port) {
+                    // One port per signal. It belongs to the page shown when it connected; StateFlow.value is safe to
+                    // read off the main thread.
+                    val page = _state.value.loadStarts
+                    val sender = port.sender.webExtension.id
+                    port.setDelegate(
+                        object : WebExtension.PortDelegate {
+                            override fun onPortMessage(message: Any, port: WebExtension.Port) {
+                                val signal = parseStallMessage(sender, message) ?: return
+                                // Port callbacks may arrive off the main thread; the state changes on main, in order.
+                                scope.launch { onStreamSignal(signal, page) }
+                            }
+
+                            override fun onDisconnect(port: WebExtension.Port) {}
+                        },
+                    )
+                }
+            },
+            StallExtension.NATIVE_APP,
+        )
+    }
+
+    private fun onStreamSignal(signal: StreamSignal, page: Int) {
+        if (closed) return
+        val before = _state.value.liveStreamDropped
+        _state.update { it.afterStreamSignal(signal, page) }
+        val after = _state.value.liveStreamDropped
+        if (after != before) debugLog.log("GeckoSession", if (after) "live stream dropped" else "live stream back")
+    }
+
+    override fun dismissLiveStreamDropped() {
+        if (!closed) _state.update { it.copy(liveStreamDropped = false) }
     }
 
     // ---- auto desktop --------------------------------------------------------------------------------------
@@ -2833,6 +2883,7 @@ private class GeckoBrowserSession(
         // Cancels any file copy still running; dismissAll already answered its prompt.
         scope.cancel()
         closed = true
+        _state.update { it.copy(liveStreamDropped = false) }
         host = null
         runCatching { session.close() }
             .onFailure { debugLog.log("GeckoSession", "close failed: ${it.javaClass.simpleName}") }
