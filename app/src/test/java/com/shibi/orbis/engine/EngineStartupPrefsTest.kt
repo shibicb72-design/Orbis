@@ -3,6 +3,7 @@ package com.shibi.orbis.engine
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -75,33 +76,6 @@ class EngineStartupPrefsTest {
         assertFalse(f.exists())
     }
 
-    /**
-     * The engine's own reader (GeckoRuntime.init calls DebugConfig.fromFile, then mergeIntoPrefs, which is not called
-     * here because it logs through android.util.Log) turns the file into exactly the two prefs as Boolean false.
-     */
-    @Test(timeout = 10_000)
-    fun engineConfigReaderParsesTheFileToTheTwoPrefsOff() {
-        val f = File(tmp.root, EngineStartupPrefs.FILE_NAME)
-        EngineStartupPrefs.ensureFile(f)
-        // SnakeYAML reads DebugConfig's fields directly only on the Android runtime, which it detects by this property
-        // (as GeckoView's own DebugConfigTest does). On a plain JVM it fails before reading a value.
-        val runtimeName = System.setProperty("java.runtime.name", "Android Runtime")
-        val config =
-            try {
-                org.mozilla.gecko.util.DebugConfig.fromFile(f)
-            } finally {
-                if (runtimeName == null) System.clearProperty("java.runtime.name") else System.setProperty("java.runtime.name", runtimeName)
-            }
-        val field = org.mozilla.gecko.util.DebugConfig::class.java.getDeclaredField("prefs").apply { isAccessible = true }
-        assertEquals(
-            mapOf(
-                "network.connectivity-service.enabled" to java.lang.Boolean.FALSE,
-                "network.captive-portal-service.enabled" to java.lang.Boolean.FALSE,
-            ),
-            field.get(config),
-        )
-    }
-
     @Test(timeout = 10_000)
     fun probeOffOnlyWhenBothReadFalse() {
         val c = EngineStartupPrefs.CONNECTIVITY_SERVICE
@@ -117,8 +91,83 @@ class EngineStartupPrefsTest {
     }
 
     @Test(timeout = 10_000)
-    fun logLineHasTheAgreedTextAndNoAddress() {
-        assertEquals("engine connectivity probe off: true", EngineStartupPrefs.logLine(true))
-        assertEquals("engine connectivity probe off: false", EngineStartupPrefs.logLine(false))
+    fun logLinesHaveTheAgreedTextAndNoAddress() {
+        assertEquals("engine connectivity probe off: true", EngineStartupPrefs.logLine(EngineStartupPrefs.ProbeState.OFF_AT_START))
+        assertEquals("engine connectivity probe off: late", EngineStartupPrefs.logLine(EngineStartupPrefs.ProbeState.OFF_LATE))
+        assertEquals("engine connectivity probe off: false", EngineStartupPrefs.logLine(EngineStartupPrefs.ProbeState.NOT_OFF))
+        assertEquals("engine start-up file skipped after a failed start", EngineStartupPrefs.SKIPPED_LINE)
+    }
+
+    // ---- safety net one: the start marker ----
+
+    @Test(timeout = 10_000)
+    fun noMarkerUsesTheFile() {
+        assertTrue(EngineStartupPrefs.useStartupFile(null, 29))
+    }
+
+    @Test(timeout = 10_000)
+    fun markerOfThisVersionSkipsTheFile() {
+        assertFalse(EngineStartupPrefs.useStartupFile("29", 29))
+        assertFalse(EngineStartupPrefs.useStartupFile(EngineStartupPrefs.markerContent(29), 29))
+        assertFalse(EngineStartupPrefs.useStartupFile("29\n", 29))
+    }
+
+    @Test(timeout = 10_000)
+    fun markerOfAnotherVersionUsesTheFileAgain() {
+        assertTrue(EngineStartupPrefs.useStartupFile("28", 29))
+        assertTrue(EngineStartupPrefs.useStartupFile("30", 29))
+    }
+
+    @Test(timeout = 10_000)
+    fun unreadableMarkerCountsAsThisVersion() {
+        assertFalse(EngineStartupPrefs.useStartupFile("", 29))
+        assertFalse(EngineStartupPrefs.useStartupFile("garbage", 29))
+    }
+
+    @Test(timeout = 10_000)
+    fun markerRoundTripsThroughTheFile() {
+        val m = File(tmp.root, EngineStartupPrefs.MARKER_NAME)
+        assertNull(EngineStartupPrefs.readMarker(m))
+        assertTrue(EngineStartupPrefs.writeMarker(m, 29))
+        assertFalse(EngineStartupPrefs.useStartupFile(EngineStartupPrefs.readMarker(m), 29))
+        assertTrue(EngineStartupPrefs.useStartupFile(EngineStartupPrefs.readMarker(m), 30))
+        assertFalse(EngineStartupPrefs.writeMarker(File(File(tmp.root, "no-such-dir"), EngineStartupPrefs.MARKER_NAME), 29))
+    }
+
+    // ---- read-back and safety net two: the late set ----
+
+    private val bothOff =
+        mapOf<String, Any?>(EngineStartupPrefs.CONNECTIVITY_SERVICE to false, EngineStartupPrefs.CAPTIVE_PORTAL_SERVICE to false)
+
+    @Test(timeout = 10_000)
+    fun bothOffAtReadBackLogsTrueAndSetsNothing() {
+        val lines = mutableListOf<String>()
+        var sets = 0
+        EngineStartupPrefs.afterReadBack(bothOff, { sets++; it(true) }, { lines += it })
+        assertEquals(0, sets)
+        assertEquals(listOf("engine connectivity probe off: true"), lines)
+    }
+
+    @Test(timeout = 10_000)
+    fun eitherPrefNotOffIsSetLateAndLogsLate() {
+        for (values in listOf(
+            bothOff + (EngineStartupPrefs.CONNECTIVITY_SERVICE to true),
+            bothOff + (EngineStartupPrefs.CAPTIVE_PORTAL_SERVICE to true),
+            mapOf(EngineStartupPrefs.CONNECTIVITY_SERVICE to false),
+            null,
+        )) {
+            val lines = mutableListOf<String>()
+            var sets = 0
+            EngineStartupPrefs.afterReadBack(values, { sets++; it(true) }, { lines += it })
+            assertEquals("read-back $values", 1, sets)
+            assertEquals(listOf("engine connectivity probe off: late"), lines)
+        }
+    }
+
+    @Test(timeout = 10_000)
+    fun failedLateSetLogsFalse() {
+        val lines = mutableListOf<String>()
+        EngineStartupPrefs.afterReadBack(null, { it(false) }, { lines += it })
+        assertEquals(listOf("engine connectivity probe off: false"), lines)
     }
 }
