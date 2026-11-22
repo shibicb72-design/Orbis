@@ -344,6 +344,7 @@ class GeckoEngineImpl(
             if (AUTO_DESKTOP_RETRY) compatExtension.install(created)
             youtubeAdObserver.install(created)
             YoutubePipExtension.install(created) { debugLog.log("GeckoEngine", it) }
+            StallExtension.install(created) { debugLog.log("GeckoEngine", it) }
             clearExit.install(created)
             // Without a prompt delegate, WebExtensionController.install() hangs forever.
             created.webExtensionController.setPromptDelegate(extensionHost.promptDelegate)
