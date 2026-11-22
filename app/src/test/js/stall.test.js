@@ -209,70 +209,219 @@ test("a source the page replaced meanwhile is left alone", () => {
   assert.deepStrictEqual(plain(S.afterMetadata(plan, "https://cdn.example/clip.mp4")), { seekTo: 42.5, play: true });
 });
 
-// ---- Errors of the engine's HLS player on a live playlist --------------------------------------------------------
+
+// ---- The reconnect window: a live playlist killed by the engine's HLS player -------------------------------------
 
 const PLAYLIST = "https://cdn.example/live/index.m3u8?token=1";
 
-function hlsDied(over) {
-  return media(Object.assign({ src: PLAYLIST, duration: Infinity, live: true, error: true, errorCode: 2, readyState: 1 }, over));
+function live(over) {
+  return media(Object.assign({ src: PLAYLIST, duration: Infinity, live: true, readyState: 1, connected: true }, over));
 }
 
-test("a live playlist that dies with the HLS player's error while playing is restarted 3 s later", () => {
+function died(over) {
+  return live(Object.assign({ error: true, errorCode: 2 }, over));
+}
+
+function opened(now) {
   const t = S.newTrack();
-  assert.strictEqual(S.errorDelayMs(t, hlsDied()), 3000);
-  assert.strictEqual(S.errorDue(t, { src: PLAYLIST }, hlsDied()), "act");
-  assert.strictEqual(t.tries, 1);
-  // The next error restarts come 12 s and 24 s after their errors.
-  assert.strictEqual(S.errorDelayMs(t, hlsDied()), 12000);
-  S.errorDue(t, { src: PLAYLIST }, hlsDied());
-  assert.strictEqual(S.errorDelayMs(t, hlsDied()), 24000);
+  assert.strictEqual(S.onError(t, died(), now || 0), "open");
+  return t;
+}
+
+/**
+ * Looks once a second from `from` to `to` (ms). `each(now)` may return a snapshot override, or call S.onError /
+ * S.onDownload / S.onMetadata itself. Returns every verdict that is not "wait", with its time.
+ */
+function drive(t, from, to, each) {
+  const out = [];
+  for (let now = from; now <= to; now += 1000) {
+    const over = (each && each(now)) || {};
+    const v = S.winStep(t, live(over), now);
+    if (v !== "wait") out.push(v + "@" + now);
+    if (!t.win) break;
+  }
+  return out;
+}
+
+test("window: the first reload comes 3 s after the error", () => {
+  const t = opened(0);
+  assert.deepStrictEqual(drive(t, 1000, 3000), ["load@3000"]);
 });
 
-test("a plain file with the same error code is never restarted", () => {
+test("window: the next attempt comes 1 s after a failure, never while one is in flight", () => {
+  const t = opened(0);
+  // The attempt keeps getting data, so it is in flight (not hung) all the time: no second load.
+  const got = drive(t, 1000, 20000, now => {
+    if (now > 3000) S.onDownload(t, now - 500, true);
+  });
+  assert.deepStrictEqual(got, ["load@3000"]);
+  // Now it fails (any code; after load() the engine says 4 for the same dead stream).
+  assert.strictEqual(S.onError(t, died({ errorCode: 4 }), 20000), "failed");
+  assert.deepStrictEqual(drive(t, 20500, 20500), []);
+  assert.deepStrictEqual(drive(t, 21000, 21000), ["load@21000"]);
+});
+
+test("window: a hung attempt (6 s without metadata or progress) counts as failed", () => {
+  const t = opened(0);
+  assert.deepStrictEqual(drive(t, 1000, 10000), ["load@3000", "load@10000"]);
+});
+
+test("window: code 4 with no window open starts nothing; code 2 does", () => {
   const t = S.newTrack();
-  assert.strictEqual(S.errorDelayMs(t, hlsDied({ src: "https://cdn.example/clip.mp4", live: false, duration: 120 })), null);
-  // An endless http audio stream (internet radio) is live, but a plain file too.
-  assert.strictEqual(S.errorDelayMs(t, hlsDied({ src: "https://radio.example/stream.mp3" })), null);
-  // A playlist that is not live (a recording) is not restarted on an error either.
-  assert.strictEqual(S.errorDelayMs(t, hlsDied({ live: false, duration: 600 })), null);
-  // An address that only mentions m3u8 in its query is not a playlist path.
-  assert.strictEqual(S.errorDelayMs(t, hlsDied({ src: "https://cdn.example/play?f=a.m3u8" })), null);
+  assert.strictEqual(S.onError(t, died({ errorCode: 4 }), 0), "none");
+  assert.strictEqual(S.onError(t, died({ errorCode: 3 }), 0), "none");
+  assert.strictEqual(t.win, null);
+  assert.strictEqual(S.onError(t, died(), 0), "open");
+});
+
+function playFor(t, seconds, start) {
+  // Loaded at start + 500, then currentTime moves one second per second.
+  S.onMetadata(t, start + 500, true);
+  return drive(t, start + 1000, start + 1000 + seconds * 1000, now => ({ currentTime: 300 + (now - start - 1000) / 1000 }));
+}
+
+test("window: 10 s of playing closes the window, 9 s does not", () => {
+  let t = opened(0);
+  drive(t, 1000, 3000);
+  assert.deepStrictEqual(playFor(t, 9, 3000), []);
+  assert.ok(t.win, "9 s: still in the window");
+  t = opened(0);
+  drive(t, 1000, 3000);
+  assert.deepStrictEqual(playFor(t, 10, 3000), ["back@14000"]);
+  assert.strictEqual(t.win, null);
+  assert.strictEqual(t.lastSignal, null, "back without a drop: no signal");
+  // A later error opens a fresh window.
+  assert.strictEqual(S.onError(t, died(), 20000), "open");
+  assert.strictEqual(t.win.elapsed, 0);
+});
+
+test("window: playing less than 10 s and dying again stays in the same window", () => {
+  const t = opened(0);
+  drive(t, 1000, 3000);
+  playFor(t, 5, 3000);
+  assert.strictEqual(S.onError(t, died(), 9500), "failed");
+  assert.strictEqual(t.win.elapsed, 9500, "the 30 s keep running");
+  assert.deepStrictEqual(drive(t, 10000, 10500), []);
+  assert.deepStrictEqual(drive(t, 11000, 11000), ["load@11000"]);
+});
+
+/** Every attempt fails half a second after it starts. */
+function failEveryAttempt(t, from, to) {
+  const loads = [];
+  const other = [];
+  for (let now = from; now <= to; now += 1000) {
+    const v = S.winStep(t, live(), now);
+    if (v === "load") {
+      loads.push(now);
+      S.onError(t, died({ errorCode: 4 }), now + 500);
+    } else if (v !== "wait") other.push(v + "@" + now);
+    if (!t.win) break;
+  }
+  return { loads, other };
+}
+
+test("window: at 30 s no new attempt starts, and \"dropped\" comes exactly once", () => {
+  const t = opened(0);
+  const { loads, other } = failEveryAttempt(t, 1000, 90000);
+  assert.strictEqual(loads[0], 3000);
+  assert.ok(loads.length > 3, "the limit of 3 does not apply to error restarts");
+  assert.ok(loads.every(n => n < 30000), "no attempt at or after 30 s: " + loads);
+  for (let i = 1; i < loads.length; i++) assert.ok(loads[i] - loads[i - 1] >= 1500, "1 s after the failure, not faster");
+  assert.deepStrictEqual(other, ["dropped@30000"]);
+  // Nothing more after that: no second "dropped", no attempt.
+  for (let now = 31000; now <= 90000; now += 1000) assert.strictEqual(S.winStep(t, live(), now), "stop");
+  assert.strictEqual(t.dropped, true);
+  assert.strictEqual(t.lastSignal, "dropped");
+});
+
+test("window: an attempt in flight at 30 s may finish; \"dropped\" comes after it fails", () => {
+  const t = opened(0);
+  // Fails until 28 s; the attempt that starts at 29 s keeps getting data until 32.5 s.
+  const first = failEveryAttempt(t, 1000, 27000);
+  assert.ok(first.loads.length > 0);
+  assert.deepStrictEqual(drive(t, 28000, 29000), ["load@29000"]);
+  assert.deepStrictEqual(
+    drive(t, 30000, 32000, now => {
+      S.onDownload(t, now - 100, true);
+    }),
+    [],
+  );
+  S.onError(t, died({ errorCode: 4 }), 32500);
+  assert.deepStrictEqual(drive(t, 33000, 60000), ["dropped@33000"]);
+});
+
+test("window: the user pausing, the source replaced or the element removed stop it without a signal", () => {
+  for (const over of [{ paused: true }, { src: "https://cdn.example/other/index.m3u8" }, { connected: false }, { ended: true }]) {
+    const t = opened(0);
+    drive(t, 1000, 3000);
+    assert.strictEqual(S.winStep(t, live(over), 4000), "stop", JSON.stringify(over));
+    assert.strictEqual(t.win, null);
+    assert.strictEqual(t.dropped, false);
+    assert.strictEqual(t.lastSignal, null);
+  }
+  // No longer a live playlist: the reload came back with a finite duration.
+  const t = opened(0);
+  drive(t, 1000, 3000);
+  S.onMetadata(t, 3500, true);
+  assert.strictEqual(S.winStep(t, live({ duration: 600 }), 4000), "stop");
+  assert.strictEqual(t.lastSignal, null);
+});
+
+test("window: offline holds its clock and its attempts", () => {
+  const t = opened(0);
+  assert.deepStrictEqual(drive(t, 1000, 60000, () => ({ online: false })), []);
+  assert.strictEqual(t.win.elapsed, 0);
+  // Online again at 61 s: window time goes on from 0, so the first attempt comes at 63 s.
+  assert.deepStrictEqual(drive(t, 61000, 63000), ["load@63000"]);
+});
+
+test("window: after giving up, online or play opens one fresh window; back raises \"playing\" once", () => {
+  const t = opened(0);
+  failEveryAttempt(t, 1000, 31000);
+  assert.strictEqual(t.dropped, true);
+  assert.strictEqual(S.onError(t, died(), 40000), "none", "a dead element's errors open nothing by themselves");
+  assert.strictEqual(S.reopen(t, died(), 50000), true);
+  assert.strictEqual(S.reopen(t, died(), 50000), false, "one window, not two");
+  assert.deepStrictEqual(drive(t, 51000, 53000), ["load@53000"]);
+  assert.deepStrictEqual(playFor(t, 10, 53000), ["playing@64000"]);
+  assert.strictEqual(t.lastSignal, "playing");
+  // The next death and recovery raise no second "playing".
+  assert.strictEqual(S.onError(t, died(), 70000), "open");
+  drive(t, 71000, 73000);
+  assert.deepStrictEqual(playFor(t, 10, 73000), ["back@84000"]);
+  // reopen does nothing when nothing was given up.
+  assert.strictEqual(S.reopen(S.newTrack(), died(), 0), false);
+});
+
+test("window: a plain file, a playlist that is not live, a blob: source never open one", () => {
+  for (const over of [
+    { src: "https://cdn.example/clip.mp4", live: false, duration: 120 },
+    { src: "https://radio.example/stream.mp3" },
+    { live: false, duration: 600 },
+    { src: "https://cdn.example/play?f=a.m3u8" },
+    { src: "blob:https://site.example/abc.m3u8" },
+    { paused: true },
+    { ended: true },
+  ]) {
+    const t = S.newTrack();
+    assert.strictEqual(S.onError(t, died(over), 0), "none", JSON.stringify(over));
+    assert.strictEqual(t.win, null);
+  }
   assert.strictEqual(S.isLivePlaylist("https://cdn.example/a/INDEX.M3U8#t=1", true), true);
 });
 
-test("a blob: playlist, another error code, paused or ended before the error: never", () => {
-  const t = S.newTrack();
-  assert.strictEqual(S.errorDelayMs(t, hlsDied({ src: "blob:https://site.example/abc.m3u8" })), null);
-  assert.strictEqual(S.errorDelayMs(t, hlsDied({ errorCode: 3 })), null, "decode error");
-  assert.strictEqual(S.errorDelayMs(t, hlsDied({ errorCode: 4 })), null, "could not load at all");
-  assert.strictEqual(S.errorDelayMs(t, hlsDied({ paused: true })), null);
-  assert.strictEqual(S.errorDelayMs(t, hlsDied({ ended: true })), null);
-  assert.strictEqual(t.tries, 0);
+test("window: error restarts are not held to the stall limit, and stalls stay quiet while a window is open", () => {
+  const { t } = run(media({ src: PLAYLIST, duration: Infinity }), 12000 + 24000 + 48000);
+  assert.strictEqual(t.tries, 3);
+  assert.strictEqual(S.onError(t, died(), 0), "open");
+  const t2 = opened(0);
+  assert.strictEqual(S.arm(t2, live({ error: false }), 0), false);
 });
 
-test("offline when the restart is due: not until online", () => {
-  const t = S.newTrack();
-  assert.strictEqual(S.errorDue(t, { src: PLAYLIST }, hlsDied({ online: false })), "offline");
-  assert.strictEqual(t.tries, 0);
-  assert.strictEqual(S.errorDue(t, { src: PLAYLIST }, hlsDied()), "act");
-});
-
-test("the page replaced the source or cleared the error meanwhile, or the user paused: nothing", () => {
-  const t = S.newTrack();
-  assert.strictEqual(S.errorDue(t, { src: PLAYLIST }, hlsDied({ src: "https://cdn.example/other.m3u8" })), "drop");
-  assert.strictEqual(S.errorDue(t, { src: PLAYLIST }, hlsDied({ error: false, errorCode: 0 })), "drop");
-  assert.strictEqual(S.errorDue(t, { src: PLAYLIST }, hlsDied({ paused: true })), "drop");
-  assert.strictEqual(t.tries, 0);
-});
-
-test("the limit is shared: two stall restarts and one error restart, then nothing", () => {
-  const { t, acts } = run(media({ src: PLAYLIST, duration: Infinity }), 12000 + 24000);
-  assert.deepStrictEqual(acts, [12000, 36000]);
-  assert.strictEqual(S.errorDelayMs(t, hlsDied()), 24000);
-  assert.strictEqual(S.errorDue(t, { src: PLAYLIST }, hlsDied()), "act");
-  assert.strictEqual(S.errorDelayMs(t, hlsDied()), null);
-  assert.strictEqual(S.errorDue(t, { src: PLAYLIST }, hlsDied()), "drop");
-  assert.strictEqual(S.arm(t, media({ src: PLAYLIST }), 0), false);
+test("the stream signal hook takes one value and does nothing yet", () => {
+  assert.strictEqual(typeof S.streamSignal, "function");
+  assert.strictEqual(S.streamSignal.length, 1);
+  assert.strictEqual(S.streamSignal("dropped"), undefined);
 });
 
 // ---- The script in a page (fake DOM, fake clock) -----------------------------------------------------------------
@@ -315,6 +464,7 @@ function page({ online = true } = {}) {
     isFinite,
   };
   const calls = [];
+  const signals = [];
   function element(over) {
     const listeners = {};
     const el = Object.assign(
@@ -376,7 +526,14 @@ function page({ online = true } = {}) {
     fire,
     advance,
     calls,
-    start: () => vm.runInNewContext(source, context),
+    signals,
+    start: () => {
+      vm.runInNewContext(source, context);
+      // Watch the hook the app's message will use (brief live12-8): every call, with all its arguments.
+      context.OrbisStall.streamSignal = function () {
+        signals.push(Array.prototype.slice.call(arguments));
+      };
+    },
     timers: () => intervals.length,
     goOnline: () => {
       context.navigator.onLine = true;
@@ -506,13 +663,26 @@ test("in a page: an element stalled before the script ran is found at start; oth
   assert.strictEqual(el.paused, true, "between load() and the metadata, paused is this script's own doing");
 });
 
+
 function livePlaylist(p) {
   const el = p.element({ currentSrc: PLAYLIST, duration: Infinity, currentTime: 300 });
   p.fire(el, "durationchange");
   return el;
 }
 
-test("in a page: a live playlist killed by the HLS player is reloaded 3 s later and played at the live edge", () => {
+/** The reload worked: metadata, then playing at the live edge for `seconds`. */
+function comesBack(p, el, seconds) {
+  el.duration = Infinity;
+  el.readyState = 4;
+  el.currentTime = 500;
+  el.fireOwn("loadedmetadata");
+  for (let i = 0; i < seconds; i++) {
+    el.currentTime += 1;
+    p.advance(1000);
+  }
+}
+
+test("in a page: a live playlist killed by the HLS player is reloaded 3 s later, at the live edge; 10 s of play closes it", () => {
   const p = page();
   p.start();
   const el = livePlaylist(p);
@@ -521,32 +691,146 @@ test("in a page: a live playlist killed by the HLS player is reloaded 3 s later 
   assert.deepStrictEqual(p.calls, []);
   p.advance(1000);
   assert.deepStrictEqual(p.calls, ["load"]);
-  el.currentTime = 0;
-  el.fireOwn("loadedmetadata");
+  comesBack(p, el, 11);
   assert.deepStrictEqual(p.calls, ["load", "play"]);
-  assert.strictEqual(el.currentTime, 0, "no seek back on a live stream");
+  assert.ok(el.currentTime > 500, "no seek back");
+  assert.strictEqual(p.timers(), 0, "window closed");
+  assert.deepStrictEqual(p.signals, []);
 });
 
-test("in a page: the live flag survives the error even if the duration is gone", () => {
+test("in a page: every reload fails: attempts one after another, never two at once, none after 30 s, then \"dropped\" once", () => {
   const p = page();
   p.start();
   const el = livePlaylist(p);
-  el.duration = NaN;
   p.hlsError(el);
-  p.advance(3000);
-  assert.deepStrictEqual(p.calls, ["load"]);
+  const loadTimes = [];
+  for (let s = 1; s <= 120; s++) {
+    const before = p.calls.length;
+    p.advance(1000);
+    if (p.calls.length > before) {
+      loadTimes.push(s);
+      // The reload of the dead stream errors with code 4 half way to the next look.
+      el.error = { code: 4 };
+      p.fire(el, "error");
+    }
+  }
+  assert.strictEqual(loadTimes[0], 3);
+  assert.ok(loadTimes.length > 3);
+  assert.ok(loadTimes.every(s => s < 30), String(loadTimes));
+  assert.deepStrictEqual(p.signals, [["dropped"]]);
+  assert.strictEqual(p.timers(), 0);
 });
 
-test("in a page: a plain file with the same error is never restarted", () => {
+test("in a page: an attempt that hangs is given up after 6 s and the next follows 1 s later", () => {
   const p = page();
   p.start();
-  const el = p.element();
+  const el = livePlaylist(p);
   p.hlsError(el);
+  p.advance(3000);
+  assert.strictEqual(p.calls.length, 1);
+  p.advance(5000);
+  assert.strictEqual(p.calls.length, 1, "in flight: no second load");
+  p.advance(2000);
+  assert.strictEqual(p.calls.length, 2);
+});
+
+test("in a page: progress keeps an attempt in flight", () => {
+  const p = page();
+  p.start();
+  const el = livePlaylist(p);
+  p.hlsError(el);
+  p.advance(3000);
+  for (let i = 0; i < 20; i++) {
+    p.advance(1000);
+    p.fire(el, "progress");
+  }
+  assert.strictEqual(p.calls.length, 1);
+});
+
+function dropIt(p, el) {
+  p.hlsError(el);
+  for (let s = 1; s <= 40; s++) {
+    const before = p.calls.length;
+    p.advance(1000);
+    if (p.calls.length > before) {
+      el.error = { code: 4 };
+      p.fire(el, "error");
+    }
+  }
+  assert.deepStrictEqual(p.signals, [["dropped"]]);
+}
+
+test("in a page: after \"dropped\", coming back online opens one fresh window; back raises \"playing\"", () => {
+  const p = page();
+  p.start();
+  const el = livePlaylist(p);
+  dropIt(p, el);
+  const n = p.calls.length;
+  p.advance(60000);
+  assert.strictEqual(p.calls.length, n, "nothing while given up");
+  p.goOnline();
+  p.advance(3000);
+  assert.strictEqual(p.calls.length, n + 1);
+  comesBack(p, el, 11);
+  assert.deepStrictEqual(p.signals, [["dropped"], ["playing"]]);
+});
+
+test("in a page: after \"dropped\", the user pressing play opens one fresh window", () => {
+  const p = page();
+  p.start();
+  const el = livePlaylist(p);
+  dropIt(p, el);
+  const loads = () => p.calls.filter(c => c === "load").length;
+  const n = loads();
+  el.play();
+  p.advance(2000);
+  assert.strictEqual(loads(), n);
+  p.advance(1000);
+  assert.strictEqual(loads(), n + 1);
+});
+
+test("in a page: the user pausing or the element being removed ends the window without a signal", () => {
+  for (const end of ["pause", "remove"]) {
+    const p = page();
+    p.start();
+    const el = livePlaylist(p);
+    p.hlsError(el);
+    p.advance(3000);
+    el.fireOwn("loadedmetadata");
+    if (end === "pause") el.paused = true;
+    else el.isConnected = false;
+    p.advance(60000);
+    assert.deepStrictEqual(p.calls, ["load", "play"], end);
+    assert.deepStrictEqual(p.signals, [], end);
+    assert.strictEqual(p.timers(), 0, end);
+  }
+});
+
+test("in a page: the page replaced the source: the window ends, nothing more", () => {
+  const p = page();
+  p.start();
+  const el = livePlaylist(p);
+  p.hlsError(el);
+  p.advance(1000);
+  el.currentSrc = "https://cdn.example/other/index.m3u8";
+  p.advance(60000);
+  assert.deepStrictEqual(p.calls, []);
+  assert.deepStrictEqual(p.signals, []);
+});
+
+test("in a page: a plain file with the same error, or code 4 alone, opens nothing", () => {
+  const p = page();
+  p.start();
+  const file = p.element();
+  p.hlsError(file);
+  const pl = livePlaylist(p);
+  pl.error = { code: 4 };
+  p.fire(pl, "error");
   p.advance(120000);
   assert.deepStrictEqual(p.calls, []);
 });
 
-test("in a page: offline when due, restarted 3 s after the device is online again", () => {
+test("in a page: offline holds the window; attempts go on once online", () => {
   const p = page();
   p.start();
   const el = livePlaylist(p);
@@ -554,22 +838,21 @@ test("in a page: offline when due, restarted 3 s after the device is online agai
   p.hlsError(el);
   p.advance(60000);
   assert.deepStrictEqual(p.calls, []);
+  assert.deepStrictEqual(p.signals, []);
   p.goOnline();
-  p.advance(2000);
-  assert.deepStrictEqual(p.calls, []);
-  p.advance(1000);
+  p.advance(3000);
   assert.deepStrictEqual(p.calls, ["load"]);
 });
 
-test("in a page: the page replaced the source before the restart was due: nothing", () => {
+test("in a page: live is remembered through a reload (duration NaN while loading)", () => {
   const p = page();
   p.start();
   const el = livePlaylist(p);
+  el.duration = NaN;
+  p.fire(el, "durationchange");
   p.hlsError(el);
-  p.advance(1000);
-  el.currentSrc = "https://cdn.example/other/index.m3u8";
-  p.advance(5000);
-  assert.deepStrictEqual(p.calls, []);
+  p.advance(3000);
+  assert.deepStrictEqual(p.calls, ["load"]);
 });
 
 test("in a page: paused before the error: never", () => {
@@ -580,23 +863,6 @@ test("in a page: paused before the error: never", () => {
   p.hlsError(el);
   p.advance(60000);
   assert.deepStrictEqual(p.calls, []);
-});
-
-test("in a page: two stall restarts, one error restart, then nothing more", () => {
-  const p = page();
-  p.start();
-  const el = livePlaylist(p);
-  p.fire(el, "waiting");
-  p.advance(12000 + 24000);
-  assert.deepStrictEqual(p.calls, ["load", "load"]);
-  // The second reload ends in the HLS player's error.
-  p.hlsError(el);
-  p.advance(24000);
-  assert.deepStrictEqual(p.calls, ["load", "load", "load"]);
-  p.hlsError(el);
-  p.fire(el, "waiting");
-  p.advance(300000);
-  assert.deepStrictEqual(p.calls, ["load", "load", "load"]);
 });
 
 // ---- The manifest ------------------------------------------------------------------------------------------------

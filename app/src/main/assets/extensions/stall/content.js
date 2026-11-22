@@ -9,12 +9,14 @@
 // the buffered data moving) does not count: a slow download that works is never restarted. Sends nothing, stores
 // nothing, logs nothing.
 //
-// One error is restarted: a LIVE playlist on the engine's own HLS player that dies with that player's error while it
-// was playing (the player gives up for good, for example when a stall made it fall out of the live window). It is
-// restarted 3, 12 or 24 seconds after the error, sharing the same limit of MAX_TRIES. Never a plain file on an error.
+// One error is handled: a LIVE playlist on the engine's own HLS player that dies with that player's error while it
+// was playing (the player gives up for good, for example when a stall made it fall out of the live window). That opens
+// a 30-second reconnect window: a reload 3 seconds after the error, then each next one 1 second after the previous one
+// FAILED (never two at once). Back after 10 seconds of playing. If it is not back after 30 seconds, the script stops and
+// raises "dropped" once (streamSignal). Never for a plain file on an error.
 //
-// The decision (OrbisStall.arm / step / errorDelayMs / errorDue / restartPlan / afterMetadata) is pure, so it can be
-// tested without a browser.
+// The decisions (OrbisStall.arm / step for stalls, onError / onMetadata / onDownload / winStep / reopen for the
+// window) are pure, so they can be tested without a browser.
 
 "use strict";
 
@@ -25,15 +27,41 @@ var OrbisStall = {
   HAVE_FUTURE_DATA: 3,
   // The engine's own HLS player reports any player error to the page as MEDIA_ERR_NETWORK (2), with no message, once
   // data has arrived (HLSDecoder.cpp, HLSResourceCallbacksSupport::OnError -> HTMLMediaElement::NetworkError). Before
-  // any data it is 4 (MEDIA_ERR_SRC_NOT_SUPPORTED), as for any address that cannot be loaded; that one is not retried.
+  // any data it is 4 (MEDIA_ERR_SRC_NOT_SUPPORTED), as for any address that cannot be loaded. Only code 2 opens a
+  // window; inside an open window any code means "still dead".
   HLS_PLAYER_ERROR: 2,
-  // Wait after such an error before restart number tries + 1 (the count is shared with the stall restarts).
-  ERROR_DELAYS_MS: [3000, 12000, 24000],
+  // The reconnect window (times are window time, which stands still while the device is offline).
+  WINDOW_MS: 30000,
+  FIRST_ATTEMPT_MS: 3000,
+  RETRY_GAP_MS: 1000,
+  HANG_MS: 6000,
+  // Seconds of playing (currentTime moving) after which the stream counts as back.
+  BACK_AFTER_S: 10,
+  // A larger jump of currentTime between two looks is a jump (to the live edge), not playing.
+  MAX_PLAY_STEP_S: 2.5,
 
-  /** Per-element state. tries counts restarts of both kinds for the whole page load and never goes down. */
+  /** Per-element state. tries counts stall restarts for the whole page load and never goes down. */
   newTrack: function () {
-    return { armed: false, since: null, time: null, bufEnd: null, tries: 0, pending: false, onMeta: null, live: false };
+    return {
+      armed: false,
+      since: null,
+      time: null,
+      bufEnd: null,
+      tries: 0,
+      pending: false,
+      onMeta: null,
+      live: false,
+      win: null,
+      dropped: false,
+      lastSignal: null,
+    };
   },
+
+  /**
+   * The hook for the app's "stream dropped" message (brief live12-8). value is "dropped" or "playing"; nothing else
+   * is passed, no address. It does nothing yet.
+   */
+  streamSignal: function (value) {},
 
   /** How long the stall must have lasted, unbroken, before restart number tries + 1. */
   stallNeededMs: function (tries) {
@@ -42,7 +70,7 @@ var OrbisStall = {
 
   /**
    * Whether the element is one this script may act on for a stall. s is a snapshot of the element:
-   * { src, paused, ended, online, error, errorCode, live, readyState, currentTime, duration, bufferedEnd }.
+   * { src, paused, ended, online, connected, error, errorCode, live, readyState, currentTime, duration, bufferedEnd }.
    */
   eligible: function (s) {
     return (
@@ -57,6 +85,7 @@ var OrbisStall = {
 
   /** A stall began (waiting or stalled fired, or found waiting). Starts the clock if it is not running. */
   arm: function (t, s, now) {
+    if (t.win) return false;
     if (t.tries >= OrbisStall.MAX_TRIES) return false;
     if (!OrbisStall.eligible(s) || s.readyState >= OrbisStall.HAVE_FUTURE_DATA) return false;
     if (!t.armed) {
@@ -83,7 +112,7 @@ var OrbisStall = {
   step: function (t, s, now) {
     if (!t.armed) return "stop";
     var progressed = s.readyState >= OrbisStall.HAVE_FUTURE_DATA || (t.time !== null && s.currentTime !== t.time);
-    if (t.tries >= OrbisStall.MAX_TRIES || !OrbisStall.eligible(s) || progressed) {
+    if (t.win || t.tries >= OrbisStall.MAX_TRIES || !OrbisStall.eligible(s) || progressed) {
       t.armed = false;
       t.since = null;
       t.time = null;
@@ -114,31 +143,130 @@ var OrbisStall = {
     return /\.m3u8$/i.test(src.split(/[?#]/)[0]) && live === true;
   },
 
-  /** On an error event: how long to wait before an error restart, or null for never. */
-  errorDelayMs: function (t, s) {
-    if (t.tries >= OrbisStall.MAX_TRIES) return null;
-    if (!OrbisStall.isLivePlaylist(s.src, s.live)) return null;
-    if (s.errorCode !== OrbisStall.HLS_PLAYER_ERROR) return null;
-    if (s.paused || s.ended) return null;
-    return OrbisStall.ERROR_DELAYS_MS[t.tries];
+  newWindow: function (src, now) {
+    return {
+      src: src,
+      elapsed: 0,
+      last: now,
+      nextAt: OrbisStall.FIRST_ATTEMPT_MS,
+      attempt: null,
+      played: 0,
+      lastCur: null,
+      bufEnd: null,
+    };
+  },
+
+  /** Window time runs only while online. */
+  winClock: function (w, now, online) {
+    if (online === true) w.elapsed += Math.max(0, now - w.last);
+    w.last = now;
+  },
+
+  /** The attempt in flight (or the stream that was playing again) failed: the next comes RETRY_GAP_MS after now. */
+  winFail: function (w) {
+    w.attempt = null;
+    w.played = 0;
+    w.lastCur = null;
+    w.bufEnd = null;
+    w.nextAt = w.elapsed + OrbisStall.RETRY_GAP_MS;
   },
 
   /**
-   * When the wait after an error is over. "act" (restart now; the try is counted), "offline" (wait until the device
-   * is online), or "drop": the page replaced the source or cleared the error itself, the user paused, or the tries
-   * are used up.
+   * An error event. Returns "open" (a window opened), "failed" (inside a window: the attempt failed, whatever the
+   * code), or "none".
    */
-  errorDue: function (t, plan, s) {
-    if (t.tries >= OrbisStall.MAX_TRIES) return "drop";
-    if (s.src !== plan.src || s.errorCode !== OrbisStall.HLS_PLAYER_ERROR) return "drop";
-    if (s.paused || s.ended) return "drop";
-    if (s.online !== true) return "offline";
-    t.tries += 1;
+  onError: function (t, s, now) {
+    if (t.win) {
+      OrbisStall.winClock(t.win, now, s.online);
+      OrbisStall.winFail(t.win);
+      return "failed";
+    }
+    if (t.dropped) return "none";
+    if (!OrbisStall.isLivePlaylist(s.src, s.live)) return "none";
+    if (s.errorCode !== OrbisStall.HLS_PLAYER_ERROR) return "none";
+    if (s.paused || s.ended) return "none";
+    t.win = OrbisStall.newWindow(s.src, now);
     t.armed = false;
     t.since = null;
-    t.time = null;
-    t.bufEnd = null;
-    return "act";
+    return "open";
+  },
+
+  /** loadedmetadata during an attempt: it loaded; from now on it must play (or it fails by error or by hanging). */
+  onMetadata: function (t, now, online) {
+    var w = t.win;
+    if (!w || !w.attempt) return;
+    OrbisStall.winClock(w, now, online);
+    w.attempt.loaded = true;
+    w.attempt.lastSign = w.elapsed;
+  },
+
+  /** progress during an attempt: not hung. */
+  onDownload: function (t, now, online) {
+    var w = t.win;
+    if (!w || !w.attempt) return;
+    OrbisStall.winClock(w, now, online);
+    w.attempt.lastSign = w.elapsed;
+  },
+
+  /**
+   * One look (every second) at an element with an open window. Returns:
+   * "load" (start an attempt now), "wait", "stop" (the window ends without a signal), "back" (it plays again),
+   * or a signal to raise: "dropped" (gave up) or "playing" (back after "dropped" was raised).
+   */
+  winStep: function (t, s, now) {
+    var w = t.win;
+    if (!w) return "stop";
+    OrbisStall.winClock(w, now, s.online);
+    var notLive = w.attempt && w.attempt.loaded && isFinite(s.duration);
+    if (s.src !== w.src || s.connected === false || s.paused || s.ended || notLive) {
+      t.win = null;
+      return "stop";
+    }
+    var a = w.attempt;
+    if (a) {
+      var step = w.lastCur === null ? 0 : s.currentTime - w.lastCur;
+      var moved = step > 0;
+      var grew = w.bufEnd !== null && s.bufferedEnd !== w.bufEnd;
+      if (moved || grew) a.lastSign = w.elapsed;
+      if (a.loaded && moved && step <= OrbisStall.MAX_PLAY_STEP_S) w.played += step;
+      w.lastCur = s.currentTime;
+      w.bufEnd = s.bufferedEnd;
+      if (w.played >= OrbisStall.BACK_AFTER_S) {
+        t.win = null;
+        if (t.lastSignal === "dropped") {
+          t.lastSignal = "playing";
+          return "playing";
+        }
+        return "back";
+      }
+      if (w.elapsed - a.lastSign < OrbisStall.HANG_MS) return "wait";
+      // Hung: counts as failed.
+      OrbisStall.winFail(w);
+    }
+    if (w.elapsed >= OrbisStall.WINDOW_MS) {
+      t.win = null;
+      t.dropped = true;
+      if (t.lastSignal !== "dropped") {
+        t.lastSignal = "dropped";
+        return "dropped";
+      }
+      return "stop";
+    }
+    if (s.online !== true || w.elapsed < w.nextAt) return "wait";
+    w.attempt = { lastSign: w.elapsed, loaded: false };
+    w.lastCur = null;
+    w.bufEnd = null;
+    w.nextAt = null;
+    return "load";
+  },
+
+  /** After giving up: the device came back online, or the user pressed play. One fresh window opens. */
+  reopen: function (t, s, now) {
+    if (!t.dropped || t.win) return false;
+    if (!OrbisStall.isLivePlaylist(s.src, s.live) || s.connected === false) return false;
+    t.dropped = false;
+    t.win = OrbisStall.newWindow(s.src, now);
+    return true;
   },
 
   /** What to restore after load(). A live stream (duration Infinity) is not sought back; nor is position 0. */
@@ -158,10 +286,12 @@ var OrbisStall = {
   if (typeof document === "undefined" || !document.addEventListener) return;
 
   var tracks = new WeakMap();
+  // Elements with a running stall clock, and elements with an open reconnect window.
   var active = new Set();
+  var windows = new Set();
+  // Elements that gave up ("dropped"), for the online event.
+  var dropped = new Set();
   var timer = null;
-  // Elements whose error restart came due while offline, with their plan.
-  var waitingOnline = new Map();
 
   function isMedia(el) {
     return !!el && (el.localName === "video" || el.localName === "audio") && typeof el.load === "function";
@@ -183,6 +313,7 @@ var OrbisStall = {
       paused: el.paused && !t.pending,
       ended: el.ended,
       online: navigator.onLine,
+      connected: el.isConnected !== false,
       error: !!el.error,
       errorCode: el.error ? el.error.code : 0,
       live: t.live || el.duration === Infinity,
@@ -198,11 +329,23 @@ var OrbisStall = {
     return b && b.length > 0 ? b.end(b.length - 1) : 0;
   }
 
+  function startTimer() {
+    if (timer === null) timer = setInterval(tick, 1000);
+  }
+
   function watch(el) {
     var t = trackOf(el);
     if (!OrbisStall.arm(t, snapshot(el, t), performance.now())) return;
     active.add(el);
-    if (timer === null) timer = setInterval(tick, 1000);
+    startTimer();
+  }
+
+  function signal(value) {
+    try {
+      OrbisStall.streamSignal(value);
+    } catch (e) {
+      // The hook must never break the page.
+    }
   }
 
   function restart(el, t, plan) {
@@ -212,6 +355,7 @@ var OrbisStall = {
       if (t.onMeta !== onMeta) return;
       t.onMeta = null;
       t.pending = false;
+      OrbisStall.onMetadata(t, performance.now(), navigator.onLine);
       var next = OrbisStall.afterMetadata(plan, el.currentSrc);
       if (next.seekTo !== null) {
         el.currentTime = next.seekTo;
@@ -229,10 +373,18 @@ var OrbisStall = {
     el.load();
   }
 
+  function closeWindow(el, t) {
+    windows.delete(el);
+    if (t.onMeta) el.removeEventListener("loadedmetadata", t.onMeta);
+    t.onMeta = null;
+    t.pending = false;
+  }
+
   function tick() {
+    var now = performance.now();
     active.forEach(function (el) {
       var t = trackOf(el);
-      var verdict = el.isConnected === false ? "stop" : OrbisStall.step(t, snapshot(el, t), performance.now());
+      var verdict = el.isConnected === false ? "stop" : OrbisStall.step(t, snapshot(el, t), now);
       if (verdict === "stop") {
         t.armed = false;
         active.delete(el);
@@ -240,45 +392,50 @@ var OrbisStall = {
         restart(el, t, OrbisStall.restartPlan(snapshot(el, t)));
       }
     });
-    if (active.size === 0 && timer !== null) {
+    windows.forEach(function (el) {
+      var t = trackOf(el);
+      var verdict = OrbisStall.winStep(t, snapshot(el, t), now);
+      if (verdict === "load") {
+        // A live playlist joins the live edge again: no seek back.
+        restart(el, t, { src: t.win.src, seekTo: null });
+        return;
+      }
+      if (verdict === "wait") return;
+      closeWindow(el, t);
+      if (verdict === "dropped") dropped.add(el);
+      if (verdict === "dropped" || verdict === "playing") signal(verdict);
+    });
+    if (active.size === 0 && windows.size === 0 && timer !== null) {
       clearInterval(timer);
       timer = null;
     }
   }
 
-  function errorRestartDue(el, plan) {
-    var t = trackOf(el);
-    var verdict = OrbisStall.errorDue(t, plan, snapshot(el, t));
-    if (verdict === "offline") {
-      waitingOnline.set(el, plan);
-    } else if (verdict === "act") {
-      active.delete(el);
-      // A live playlist joins the live edge again: no seek back.
-      restart(el, t, { src: plan.src, seekTo: null });
-    }
+  function openWindow(el) {
+    dropped.delete(el);
+    active.delete(el);
+    windows.add(el);
+    startTimer();
   }
 
   function onError(e) {
     var el = e.target;
     if (!isMedia(el)) return;
     var t = trackOf(el);
-    var s = snapshot(el, t);
-    var delay = OrbisStall.errorDelayMs(t, s);
-    if (delay === null) return;
-    var plan = { src: s.src };
-    setTimeout(function () {
-      errorRestartDue(el, plan);
-    }, delay);
+    if (OrbisStall.onError(t, snapshot(el, t), performance.now()) === "open") openWindow(el);
+  }
+
+  function reopen(el) {
+    var t = trackOf(el);
+    if (!OrbisStall.reopen(t, snapshot(el, t), performance.now())) return;
+    // The element is still paused by this script's last load(); that pause is not the user's.
+    if (el.paused) t.pending = true;
+    openWindow(el);
   }
 
   function onOnline() {
     scan();
-    waitingOnline.forEach(function (plan, el) {
-      waitingOnline.delete(el);
-      setTimeout(function () {
-        errorRestartDue(el, plan);
-      }, OrbisStall.ERROR_DELAYS_MS[0]);
-    });
+    dropped.forEach(reopen);
   }
 
   function scan() {
@@ -298,23 +455,32 @@ var OrbisStall = {
   document.addEventListener(
     "durationchange",
     function (e) {
-      // Remembered so that "live" is still known when an error comes.
-      if (isMedia(e.target)) trackOf(e.target).live = e.target.duration === Infinity;
+      // Remembered so that "live" is still known after an error or a reload (NaN while loading changes nothing).
+      if (!isMedia(e.target)) return;
+      var d = e.target.duration;
+      if (typeof d === "number" && !isNaN(d)) trackOf(e.target).live = d === Infinity;
     },
     true,
   );
   document.addEventListener(
     "progress",
     function (e) {
-      if (isMedia(e.target) && tracks.has(e.target)) OrbisStall.downloaded(tracks.get(e.target), performance.now());
+      if (!isMedia(e.target) || !tracks.has(e.target)) return;
+      var t = tracks.get(e.target);
+      OrbisStall.downloaded(t, performance.now());
+      OrbisStall.onDownload(t, performance.now(), navigator.onLine);
     },
     true,
   );
   document.addEventListener(
     "play",
     function (e) {
+      if (!isMedia(e.target) || !tracks.has(e.target)) return;
+      var t = tracks.get(e.target);
       // The user or the page started playback itself: this script's restart no longer owns the pause.
-      if (isMedia(e.target) && tracks.has(e.target)) tracks.get(e.target).pending = false;
+      if (!t.win) t.pending = false;
+      // After giving up, the user pressing play opens one fresh window.
+      if (t.dropped) reopen(e.target);
     },
     true,
   );
