@@ -52,6 +52,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.Autocomplete
 import org.mozilla.geckoview.ContentBlocking
+import org.mozilla.geckoview.ExperimentalGeckoViewApi
+import org.mozilla.geckoview.GeckoPreferenceController
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
@@ -300,9 +302,14 @@ class GeckoEngineImpl(
                     .strictSocialTrackingProtection(true)
                     .build()
             val dnsUrl = secureDnsUrl
+            // The connectivity probes off before the engine starts (see EngineStartupPrefs). If the file cannot be
+            // written the engine starts as before, and the read-back below logs false.
+            val startupPrefs = File(appContext.filesDir, EngineStartupPrefs.FILE_NAME)
+            val startupPrefsReady = EngineStartupPrefs.ensureFile(startupPrefs) != EngineStartupPrefs.FileState.FAILED
             val settings =
                 GeckoRuntimeSettings.Builder()
                     .aboutConfigEnabled(false)
+                    .apply { if (startupPrefsReady) configFilePath(startupPrefs.absolutePath) }
                     // No page addresses in the system log (brief priv11-2): sets consoleservice.logcat and devtools.console.stdout.chrome to false and the engine log level to Fatal.
                     .debugLogging(false)
                     .contentBlocking(contentBlocking)
@@ -356,7 +363,20 @@ class GeckoEngineImpl(
             )
             // Older builds denied location silently and Gecko stored every such answer for good.
             reconciler.runNow()
+            logConnectivityProbeState()
         }
+    }
+
+    /** Reads the start-up prefs back once and logs whether both probes are off. Only logs; never fails start-up. */
+    @androidx.annotation.OptIn(markerClass = [ExperimentalGeckoViewApi::class])
+    private fun logConnectivityProbeState() {
+        val log = { off: Boolean -> debugLog.log("GeckoEngine", EngineStartupPrefs.logLine(off)) }
+        runCatching {
+            GeckoPreferenceController.getGeckoPrefs(EngineStartupPrefs.OFF).accept(
+                { prefs -> log(EngineStartupPrefs.probeOff(prefs.orEmpty().associate { it.pref to it.value })) },
+                { log(false) },
+            )
+        }.onFailure { log(false) }
     }
 
     /**
