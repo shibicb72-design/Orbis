@@ -13,7 +13,8 @@
 // was playing (the player gives up for good, for example when a stall made it fall out of the live window). That opens
 // a 30-second reconnect window: a reload 3 seconds after the error, then each next one 1 second after the previous one
 // FAILED (never two at once). Back after 10 seconds of playing. If it is not back after 30 seconds, the script stops and
-// raises "dropped" once (streamSignal). Never for a plain file on an error.
+// raises "dropped" once (streamSignal). After that only the user pressing play opens a fresh window, or coming back
+// online while the page is visible within 5 minutes of the drop. Never for a plain file on an error.
 //
 // The decisions (OrbisStall.arm / step for stalls, onError / onMetadata / onDownload / winStep / reopen for the
 // window) are pure, so they can be tested without a browser.
@@ -39,6 +40,8 @@ var OrbisStall = {
   BACK_AFTER_S: 10,
   // A larger jump of currentTime between two looks is a jump (to the live edge), not playing.
   MAX_PLAY_STEP_S: 2.5,
+  // After "dropped", coming back online reopens a window only within this time, and only with the page visible.
+  ONLINE_REOPEN_MS: 5 * 60 * 1000,
 
   /** Per-element state. tries counts stall restarts for the whole page load and never goes down. */
   newTrack: function () {
@@ -54,6 +57,8 @@ var OrbisStall = {
       win: null,
       dropped: false,
       lastSignal: null,
+      droppedAt: null,
+      onlineMayReopen: false,
     };
   },
 
@@ -260,6 +265,8 @@ var OrbisStall = {
       t.dropped = true;
       if (t.lastSignal !== "dropped") {
         t.lastSignal = "dropped";
+        t.droppedAt = now;
+        t.onlineMayReopen = true;
         return "dropped";
       }
       return "stop";
@@ -272,11 +279,25 @@ var OrbisStall = {
     return "load";
   },
 
-  /** After giving up: the device came back online, or the user pressed play. One fresh window opens. */
-  reopen: function (t, s, now) {
+  /**
+   * After giving up, one fresh window opens when cause is "play" (the user pressed play), at any time; or when cause
+   * is "online" (the device came back online), but only if the page is visible right then and no more than
+   * ONLINE_REOPEN_MS have passed since "dropped" was raised. A phone that regains its connection in a pocket must not
+   * start sound by itself. An "online" that misses either condition ends it: no later "online" reopens; only play does.
+   */
+  reopen: function (t, s, now, cause) {
     if (!t.dropped || t.win) return false;
+    if (cause !== "play" && cause !== "online") return false;
+    if (cause === "online") {
+      if (!t.onlineMayReopen) return false;
+      if (s.visible !== true || t.droppedAt === null || now - t.droppedAt > OrbisStall.ONLINE_REOPEN_MS) {
+        t.onlineMayReopen = false;
+        return false;
+      }
+    }
     if (!OrbisStall.isLivePlaylist(s.src, s.live) || s.connected === false) return false;
     t.dropped = false;
+    t.onlineMayReopen = false;
     t.win = OrbisStall.newWindow(s.src, now);
     return true;
   },
@@ -326,6 +347,7 @@ var OrbisStall = {
       ended: el.ended,
       online: navigator.onLine,
       connected: el.isConnected !== false,
+      visible: document.visibilityState === "visible",
       error: !!el.error,
       errorCode: el.error ? el.error.code : 0,
       live: t.live || el.duration === Infinity,
@@ -437,9 +459,9 @@ var OrbisStall = {
     if (OrbisStall.onError(t, snapshot(el, t), performance.now()) === "open") openWindow(el);
   }
 
-  function reopen(el) {
+  function reopen(el, cause) {
     var t = trackOf(el);
-    if (!OrbisStall.reopen(t, snapshot(el, t), performance.now())) return;
+    if (!OrbisStall.reopen(t, snapshot(el, t), performance.now(), cause)) return;
     // The element is still paused by this script's last load(); that pause is not the user's.
     if (el.paused) t.pending = true;
     openWindow(el);
@@ -447,7 +469,9 @@ var OrbisStall = {
 
   function onOnline() {
     scan();
-    dropped.forEach(reopen);
+    dropped.forEach(function (el) {
+      reopen(el, "online");
+    });
   }
 
   function scan() {
@@ -492,7 +516,7 @@ var OrbisStall = {
       // The user or the page started playback itself: this script's restart no longer owns the pause.
       if (!t.win) t.pending = false;
       // After giving up, the user pressing play opens one fresh window.
-      if (t.dropped) reopen(e.target);
+      if (t.dropped) reopen(e.target, "play");
     },
     true,
   );
