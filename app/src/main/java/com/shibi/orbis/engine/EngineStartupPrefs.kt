@@ -30,15 +30,21 @@ internal object EngineStartupPrefs {
     data class NumberPref(val name: String, val value: Int)
 
     /**
-     * Media read-ahead for plain video files (a direct MP4 or WebM; not a site's own player, not a live stream), in
-     * seconds (MediaCache.cpp: `predictedNewDataUse.ToSeconds() > ReadaheadLimit()`). Engine defaults at 160.0.1: 60 on
-     * Wi-Fi, 30 on mobile data. Both become 300, written as numbers. The resume thresholds, the cache sizes and
-     * `media.throttle-cellular-regardless-of-download-rate` are left as the engine has them (brief live12-3).
+     * Media cache settings for plain video files (a direct MP4 or WebM; not a site's own player, not a live stream), all
+     * whole numbers (brief live12-3; engine defaults at 160.0.1 from MediaCache.cpp and StaticPrefList):
+     * - read-ahead limit, seconds: 60 on Wi-Fi, 30 on mobile data, both become 300;
+     * - resume threshold, seconds (a stopped read starts again when the buffer falls below it): 30 and 10, both become 240;
+     * - cache size on mobile data, KiB: 32768, becomes 512000 (the Wi-Fi default; `media.cache_size` itself is not set).
+     * The cache is an anonymous temporary file on disk, not memory (FileBlockCache). `media.throttle-cellular-regardless-
+     * of-download-rate` is left as the engine has it.
      */
     val NUMBERS: List<NumberPref> =
         listOf(
             NumberPref("media.cache_readahead_limit", 300),
             NumberPref("media.cache_readahead_limit.cellular", 300),
+            NumberPref("media.cache_resume_threshold", 240),
+            NumberPref("media.cache_resume_threshold.cellular", 240),
+            NumberPref("media.cache_size.cellular", 512000),
         )
 
     /** In the app's own files directory. */

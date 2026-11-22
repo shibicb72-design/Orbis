@@ -17,7 +17,7 @@ class EngineConfigReaderTest {
     val tmp = TemporaryFolder()
 
     @Test(timeout = 10_000)
-    fun engineConfigReaderParsesTheFileToTheTwoPrefsOffAndTheTwoReadAheadNumbers() {
+    fun engineConfigReaderParsesTheFileToTheTwoPrefsOffAndTheFiveMediaCacheNumbers() {
         val f = File(tmp.root, EngineStartupPrefs.FILE_NAME)
         assertEquals(EngineStartupPrefs.FileState.WRITTEN, EngineStartupPrefs.ensureFile(f))
         // SnakeYAML reads DebugConfig's fields directly only on the Android runtime, which it detects by this property
@@ -36,6 +36,9 @@ class EngineConfigReaderTest {
                 "network.captive-portal-service.enabled" to java.lang.Boolean.FALSE,
                 "media.cache_readahead_limit" to Integer.valueOf(300),
                 "media.cache_readahead_limit.cellular" to Integer.valueOf(300),
+                "media.cache_resume_threshold" to Integer.valueOf(240),
+                "media.cache_resume_threshold.cellular" to Integer.valueOf(240),
+                "media.cache_size.cellular" to Integer.valueOf(512000),
             ),
             prefs,
         )

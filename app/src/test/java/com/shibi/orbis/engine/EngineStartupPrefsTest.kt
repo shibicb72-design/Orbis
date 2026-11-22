@@ -20,7 +20,10 @@ class EngineStartupPrefsTest {
                 "  \"network.connectivity-service.enabled\": false\n" +
                 "  \"network.captive-portal-service.enabled\": false\n" +
                 "  \"media.cache_readahead_limit\": 300\n" +
-                "  \"media.cache_readahead_limit.cellular\": 300\n",
+                "  \"media.cache_readahead_limit.cellular\": 300\n" +
+                "  \"media.cache_resume_threshold\": 240\n" +
+                "  \"media.cache_resume_threshold.cellular\": 240\n" +
+                "  \"media.cache_size.cellular\": 512000\n",
             EngineStartupPrefs.CONTENT,
         )
     }
@@ -34,11 +37,14 @@ class EngineStartupPrefsTest {
     }
 
     @Test(timeout = 10_000)
-    fun numbersAreExactlyTheTwoReadAheadLimitsOf300Seconds() {
+    fun numbersAreExactlyTheFiveMediaCacheEntries() {
         assertEquals(
             listOf(
                 EngineStartupPrefs.NumberPref("media.cache_readahead_limit", 300),
                 EngineStartupPrefs.NumberPref("media.cache_readahead_limit.cellular", 300),
+                EngineStartupPrefs.NumberPref("media.cache_resume_threshold", 240),
+                EngineStartupPrefs.NumberPref("media.cache_resume_threshold.cellular", 240),
+                EngineStartupPrefs.NumberPref("media.cache_size.cellular", 512000),
             ),
             EngineStartupPrefs.NUMBERS,
         )
