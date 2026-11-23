@@ -90,6 +90,20 @@ class AutoDesktopRetry {
         return Action.RetryMobile
     }
 
+    /**
+     * A top-level navigation from a page of [host]. [byPage]: the page started it by itself (no user gesture, not a
+     * load the user or Orbis started). During a mobile retry that is the mobile-only script acting, so the retried
+     * page has content: decided now, as the page is often gone before its 3 s report (often to another host). A
+     * navigation the user started settles nothing: the retry is dropped and the stored choice stays.
+     */
+    fun onNavigation(host: String, byPage: Boolean): Action {
+        if (retryingMobile != host) return Action.None
+        retryingMobile = null
+        if (!byPage) return Action.None
+        mobileKept.add(host)
+        return Action.KeepMobile
+    }
+
     fun onLeft(host: String) {
         if (retrying == host) retrying = null
         if (retryingMobile == host) retryingMobile = null

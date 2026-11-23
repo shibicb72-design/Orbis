@@ -169,6 +169,61 @@ class AutoDesktopRetryTest {
         assertEquals(Action.None, r.empty())
     }
 
+    // ---- navigations during the mobile retry (onNavigation) ----
+
+    @Test
+    fun pageStartedNavigationToTheSameHostKeepsMobileOnce_theArrivingPageChangesNothingMore() {
+        val r = AutoDesktopRetry()
+        assertEquals(Action.RetryMobile, r.empty())
+        assertEquals(Action.KeepMobile, r.onNavigation("a.test", byPage = true))
+        // The page it arrives on reports, whatever it is: nothing more happens.
+        assertEquals(Action.None, r.onNavigation("a.test", byPage = true))
+        assertEquals(Action.None, r.onCleanPage("a.test"))
+        assertEquals(Action.None, r.empty(desktop = false))
+        assertEquals(Action.None, r.empty())
+        assertEquals(Action.None, r.blocked())
+    }
+
+    @Test
+    fun pageStartedNavigationToAnotherHostKeepsMobileForTheRetriedHost() {
+        val r = AutoDesktopRetry()
+        assertEquals(Action.RetryMobile, r.empty("short.test"))
+        assertEquals(Action.KeepMobile, r.onNavigation("short.test", byPage = true))
+        r.onLeft("short.test")
+        // The arriving host was not retried and is not affected.
+        assertEquals(Action.None, r.onCleanPage("main.test"))
+        assertEquals(Action.None, r.empty("main.test", byAuto = false))
+        // The retried host is never switched to desktop again in this tab.
+        assertEquals(Action.None, r.blocked("short.test"))
+    }
+
+    @Test
+    fun userStartedNavigationDuringTheRetrySettlesNothing() {
+        val r = AutoDesktopRetry()
+        assertEquals(Action.RetryMobile, r.empty())
+        // No KeepMobile: the caller performs nothing, so the automatic choice stays stored.
+        assertEquals(Action.None, r.onNavigation("a.test", byPage = false))
+        // The retry is dropped: no later report keeps or restores anything, and there is no second try.
+        assertEquals(Action.None, r.onCleanPage("a.test"))
+        assertEquals(Action.None, r.empty())
+        assertEquals(Action.None, r.onNavigation("a.test", byPage = true))
+    }
+
+    @Test
+    fun pageStartedNavigationWithNoRetryPendingIsNothing() {
+        val r = AutoDesktopRetry()
+        assertEquals(Action.None, r.onNavigation("a.test", byPage = true))
+        assertEquals(Action.None, r.onNavigation("a.test", byPage = false))
+        // A pending desktop retry is not touched either.
+        assertEquals(Action.Retry, r.blocked())
+        assertEquals(Action.None, r.onNavigation("a.test", byPage = true))
+        assertEquals(Action.Keep, r.onCleanPage("a.test"))
+        // A mobile retry of another host is not settled by this host's navigation.
+        assertEquals(Action.RetryMobile, r.empty("b.test"))
+        assertEquals(Action.None, r.onNavigation("a.test", byPage = true))
+        assertEquals(Action.KeepMobile, r.onCleanPage("b.test"))
+    }
+
     @Test
     fun leavingDoesNotResetTheAttemptedMark() {
         val r = AutoDesktopRetry()

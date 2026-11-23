@@ -945,6 +945,7 @@ private class GeckoBrowserSession(
                 }
                 if ((request.hasUserGesture || request.isDirectNavigation) && isWebUrl(request.uri)) importLeaveAllowed = true
                 if (request.hasUserGesture && !request.isRedirect) lastGestureNavigationAt = SystemClock.elapsedRealtime()
+                onNavigationForAutoDesktop(request)
                 // Only the load loadExtensionPage started counts as Orbis's own; a page cannot set this flag.
                 val appExtensionLoad =
                     schemeOf(request.uri) == "moz-extension" && request.isDirectNavigation && pendingExtensionLoad
@@ -1546,6 +1547,24 @@ private class GeckoBrowserSession(
                     }
                 }
             }
+        performAutoDesktop(action, url, policy)
+    }
+
+    /**
+     * A top-level load request while a mobile retry is pending for the page shown. Started by the page itself (no user
+     * gesture, not a load the app started) -> the retried page has content (see AutoDesktopRetry.onNavigation). A
+     * server redirect follows a request already counted; a load of the page's own URL is the retry's reload or another
+     * reload, and settles nothing.
+     */
+    private fun onNavigationForAutoDesktop(request: GeckoSession.NavigationDelegate.LoadRequest) {
+        val retried = retryMobileHost ?: return
+        val url = _state.value.url
+        if (request.isRedirect || request.uri == url) return
+        if (hostOfUrl(url)?.lowercase() != retried) return
+        val policy = sitePolicy() ?: return
+        val byPage = !request.hasUserGesture && !request.isDirectNavigation
+        val action = autoDesktop.onNavigation(retried, byPage)
+        if (!byPage) retryMobileHost = null
         performAutoDesktop(action, url, policy)
     }
 
