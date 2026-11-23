@@ -1,6 +1,6 @@
 # Orbis privacy policy (draft)
 
-Last updated: November 21, 2026.
+Last updated: November 22, 2026.
 
 Orbis is a web browser. It has no account and shows no ads. The people who make Orbis receive no data about you
 or your browsing, and there is no crash reporting. Cast talks only to a device on your local network.
@@ -44,6 +44,7 @@ your fingerprint or face data stays with Android. Orbis is available in English 
   button or panel can open one of that add-on's own pages in a new tab; it cannot open other addresses that way.
 - **Page translation**: done on your phone; the language models are downloaded from Mozilla the first time.
 - **Safe Browsing**: Gecko's built-in protection checks pages against lists from Google's Safe Browsing service.
+- **Engine data updates**: the Gecko engine downloads its own safety and compatibility data from Mozilla's settings service, for example lists of revoked certificates and blocked add-ons. Orbis does not send your browsing history with these requests.
 - **Voice search** uses your phone's speech recognizer (for example Google's); its privacy terms apply.
 - **Updates** are delivered by Google Play.
 - **Cast**: the video or audio address is sent only to the TV or speaker you pick on your local network. Orbis sends

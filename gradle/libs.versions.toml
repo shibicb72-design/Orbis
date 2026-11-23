@@ -12,6 +12,12 @@ junit = "4.13.2"
 orgJson = "20240303"
 # Real Compose on the JVM (test only): Robolectric runs the Compose UI test rule without a device.
 robolectric = "4.17"
+# Robolectric 4.17 (DefaultSdkProvider) wants org.robolectric:android-all-instrumented:<android>-robolectric-<build>-i7 for
+# these SDK levels; the tests use 31, 33 and 35. Gradle fetches them (app/build.gradle.kts, robolectricAndroidAllSdk*).
+# Only versions here, no [libraries] entries: lint would warn about "newer version" and "similar dependency" on them.
+robolectricAndroidAllSdk31 = "12-robolectric-7732740-i7"
+robolectricAndroidAllSdk33 = "13-robolectric-9030017-i7"
+robolectricAndroidAllSdk35 = "15-robolectric-13954326-i7"
 appcompat = "1.8.0"
 # Matching stable pair from maven.mozilla.org (2026-11-18):
 # browser-engine-gecko 160.0.1 -> geckoview-omni 160.0.20261116130455
