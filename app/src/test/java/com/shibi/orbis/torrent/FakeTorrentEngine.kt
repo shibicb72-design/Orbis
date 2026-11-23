@@ -59,6 +59,7 @@ class FakeTorrentEngine(
         calls += "stop"
         if (started) sessionFile?.let { it.parentFile?.mkdirs(); it.writeText("session") }
         started = false
+        finishes.clear()
         known.clear()
         privateIds.clear()
         discovery.clear()
@@ -95,6 +96,7 @@ class FakeTorrentEngine(
     override fun remove(id: EngineId, deleteFiles: Boolean) {
         calls += "remove ${id.value} $deleteFiles"
         removed += id to deleteFiles
+        finishes.forget(id.value)
         known -= id
         privateIds -= id
         discovery -= id
@@ -109,8 +111,25 @@ class FakeTorrentEngine(
         calls += "approve ${id.value}"
         if (renames.isNotEmpty()) this.renames[id] = renames
         approved += id
+        finishes.approve(id.value)
         // The real engine reports a torrent that is already complete on disk when its files are approved.
-        if (id in completeOnApproval) check(_events.tryEmit(TorrentEvent.Finished(id)))
+        if (id in completeOnApproval && finishes.report(id.value)) check(_events.tryEmit(TorrentEvent.Finished(id)))
+    }
+
+    /** The same bookkeeping the real engine keeps for its finish routes. */
+    private val finishes = FinishReports()
+
+    /**
+     * The real engine's once-a-second finish net for [id]: what its tick decides from libtorrent's status, here given
+     * as [complete] (every wanted byte on disk) and [finishedOrSeeding]; running is whether the manager resumed it.
+     * Returns whether it reported the torrent finished.
+     */
+    fun tick(id: EngineId, complete: Boolean = true, finishedOrSeeding: Boolean = complete): Boolean {
+        if (id !in known) return false
+        val facts = TorrentFinish.TickFacts(running = id in running, checking = false, finishedOrSeeding = finishedOrSeeding, complete = complete)
+        if (!finishes.tick(id.value, facts)) return false
+        check(_events.tryEmit(TorrentEvent.Finished(id)))
+        return true
     }
 
     /** Engine ids whose payload is already complete when approved (restored after the last piece). */
