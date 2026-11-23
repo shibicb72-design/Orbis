@@ -32,19 +32,10 @@ internal object EngineStartupPrefs {
     /** In the app's own files directory: present only while the engine is being created with [FILE_NAME]. */
     const val MARKER_NAME = "orbis-engine-prefs.starting"
 
-    /**
-     * etp21-1 spike K2 only: the tracking-protection feature's exception pref. Read by
-     * UrlClassifierExceptionListService (one entry per comma, category "internal-pref", applied whatever the allow-list
-     * switches say); each entry is a WebExtension match pattern matched against the request URL (path included).
-     */
-    const val SKIP_URLS_PREF = "urlclassifier.trackingSkipURLs"
-    const val SKIP_URLS = "*://ajax.googleapis.com/ajax/libs/*"
-
     val CONTENT: String =
         buildString {
             append("prefs:\n")
             for (name in OFF) append("  \"").append(name).append("\": false\n")
-            append("  \"").append(SKIP_URLS_PREF).append("\": \"").append(SKIP_URLS).append("\"\n")
         }
 
     enum class FileState { UNCHANGED, WRITTEN, FAILED }
