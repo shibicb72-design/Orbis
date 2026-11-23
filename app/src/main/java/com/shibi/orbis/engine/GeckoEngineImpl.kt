@@ -294,7 +294,9 @@ class GeckoEngineImpl(
             // Built via ContentBlocking.Settings.Builder: setEnhancedTrackingProtectionLevel alone only sets ETP prefs.
             val contentBlocking =
                 ContentBlocking.Settings.Builder()
-                    .antiTracking(ContentBlocking.AntiTracking.STRICT)
+                    // etp21-1 spike K1: STRICT without the "content" class (content-track-digest256 leaves
+                    // urlclassifier.trackingTable). The engine has one table for normal and private tabs.
+                    .antiTracking(ContentBlocking.AntiTracking.STRICT and ContentBlocking.AntiTracking.CONTENT.inv())
                     .safeBrowsing(ContentBlocking.SafeBrowsing.DEFAULT)
                     .cookieBehavior(ContentBlocking.CookieBehavior.ACCEPT_FIRST_PARTY_AND_ISOLATE_OTHERS)
                     .cookieBehaviorPrivateMode(ContentBlocking.CookieBehavior.ACCEPT_FIRST_PARTY_AND_ISOLATE_OTHERS)
