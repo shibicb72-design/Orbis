@@ -36,6 +36,7 @@ class BrowserSettingsTest {
         override var forceDark: Boolean = false
         override var magnetHandler: MagnetHandler = MagnetHandler.ORBIS
         override var torrentIpNoteSeen: Boolean = false
+        override var protectedVideo: Boolean = true
     }
 
     @Test

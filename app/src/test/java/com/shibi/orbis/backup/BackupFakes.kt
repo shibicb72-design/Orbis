@@ -76,6 +76,7 @@ internal class MemBrowserPrefs : BrowserPrefs, NeverSavePrefs {
     override var toolbarBottom = false
     override var copyToDownloadFolder = true
     override var forceDark = false
+    override var protectedVideo = true
     override var magnetHandler = MagnetHandler.ORBIS
     override var torrentIpNoteSeen = false
     override var neverSave: Set<String> = emptySet()

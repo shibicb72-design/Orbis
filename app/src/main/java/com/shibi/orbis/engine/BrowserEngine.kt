@@ -224,6 +224,8 @@ data class SessionState(
      * dismissed by Gecko, the queue, a crash), or the content process died.
      */
     val navigationsCancelled: Int = 0,
+    /** Protected video (DRM) the page asked for and Orbis refused, for the notice. Memory only. */
+    val protectedVideo: ProtectedVideoRefusal = ProtectedVideoRefusal(),
 )
 
 // The one definition of how engine events change the session state, so the counters are maintained in one place and
@@ -415,6 +417,8 @@ interface BrowserSession {
      * notice. Not replayed: only a collector that is listening sees it. Test doubles never emit.
      */
     val autoDesktopKept: Flow<Unit> get() = emptyFlow()
+    /** The protected-video notice for page load [load] has appeared (see [SessionState.protectedVideo]). */
+    fun protectedVideoNoticeShown(load: Int) {}
     /** Callbacks that need the tab layer. Set by whoever owns the session (the tab manager). */
     var host: SessionHost?
     /** Puts this session in [contentView], releasing whatever the view held first. No-op if it already holds it. */
@@ -528,6 +532,8 @@ interface SitePolicy {
     fun rememberAutoDesktop(url: String, isPrivate: Boolean) {}
     /** The retry did not help: Desktop site off for the site, and no retry there again. */
     fun declineAutoDesktop(url: String, isPrivate: Boolean) {}
+    /** Settings > Play protected video (DRM). False here, so a policy that does not say refuses. */
+    fun protectedVideoOn(): Boolean = false
 }
 
 /** The translator's view of a page. Language tags are BCP 47 ("en", "fr", "zh-Hans"); empty when unknown. */

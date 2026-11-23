@@ -82,6 +82,9 @@ interface BrowserPrefs {
 
     /** The user confirmed a torrent while the full "peers can see your IP address" note was on the sheet. */
     var torrentIpNoteSeen: Boolean
+
+    /** Sites may play protected video (DRM) in normal tabs. On unless the user turned it off, also after an update. */
+    var protectedVideo: Boolean
 }
 
 /** [ORBIS]: the torrent confirm sheet (the default). [OTHER_APP]: as before torrents, another app is asked to open it. */
@@ -171,6 +174,12 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         get() = prefs.getBoolean(KEY_TORRENT_IP_NOTE, false)
         set(value) {
             prefs.edit { putBoolean(KEY_TORRENT_IP_NOTE, value) }
+        }
+
+    override var protectedVideo: Boolean
+        get() = prefs.getBoolean(KEY_PROTECTED_VIDEO, true)
+        set(value) {
+            prefs.edit { putBoolean(KEY_PROTECTED_VIDEO, value) }
         }
 
     override var httpsOnly: HttpsOnlyMode
@@ -335,6 +344,7 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         private const val KEY_FORCE_DARK = "force_dark"
         private const val KEY_MAGNET_HANDLER = "magnet_handler"
         private const val KEY_TORRENT_IP_NOTE = "torrent_ip_note_seen"
+        private const val KEY_PROTECTED_VIDEO = "protected_video"
         // Legacy name from before themes existed: it holds the DarkMode. Never change the key or its values.
         private const val KEY_APP_THEME = "app_theme"
         private const val KEY_THEME_ID = "theme_id"
@@ -521,6 +531,18 @@ class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
         prefs.torrentIpNoteSeen = false
         _torrentIpNoteSeen.value = false
     }
+
+    private val _protectedVideo = MutableStateFlow(prefs.protectedVideo)
+
+    /** Settings > Play protected video (DRM). Read by the engine at each DRM request, so it applies to pages loaded later. */
+    val protectedVideo: StateFlow<Boolean> = _protectedVideo.asStateFlow()
+
+    fun setProtectedVideo(on: Boolean) {
+        prefs.protectedVideo = on
+        _protectedVideo.value = on
+    }
+
+    override fun protectedVideoOn(): Boolean = _protectedVideo.value
 
     private val _forceDark = MutableStateFlow(prefs.forceDark)
     val forceDark: StateFlow<Boolean> = _forceDark.asStateFlow()

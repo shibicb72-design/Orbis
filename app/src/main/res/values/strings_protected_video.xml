@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings > Privacy: the switch for protected video (DRM). -->
+    <string name="protected_video_setting_title" translatable="false">Play protected video (DRM)</string>
+    <string name="protected_video_setting_summary" translatable="false">Lets sites play video that uses DRM, such as streaming services. Uses Android\'s DRM system. Turn off to refuse it for all sites. Sites that use it may be able to recognise this phone.</string>
+    <!-- Shown under the switch after it was changed on this visit to Settings. -->
+    <string name="protected_video_setting_reload" translatable="false">Reload open pages to apply.</string>
+    <!-- Snackbar after a page's protected video was refused because the setting is off. -->
+    <string name="protected_video_notice_setting_off" translatable="false">This video is protected (DRM). Protected video is turned off in Settings.</string>
+    <!-- Snackbar after a page's protected video was refused in a private tab. -->
+    <string name="protected_video_notice_private_tab" translatable="false">Protected video is not played in private tabs.</string>
+</resources>

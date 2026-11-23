@@ -86,6 +86,7 @@ class BackupManagerTest {
             setTextZoomPercent(150)
             setHomepage("https://home.example/")
             setJavaScript(false)
+            setProtectedVideo(false)
             setReaderTheme(ReaderTheme.SEPIA)
             pinSite("https://pin.example/", "Pin")
             rememberJavaScript("https://js.example/x", true, isPrivate = false)
@@ -143,6 +144,9 @@ class BackupManagerTest {
             // Every allow-listed setting, read back through the settings classes (so their flows show the new values).
             assertEquals(settingsOf(from), settingsOf(to))
             assertEquals(HttpsOnlyMode.PRIVATE, to.browserSettings.httpsOnly.value)
+            // Protected video was turned off: the restored app has it off too (the default is on).
+            assertFalse(to.browserSettings.protectedVideo.value)
+            assertFalse(to.browserPrefs.protectedVideo)
             assertEquals("Mine", (to.searchEngine.selected.value as com.shibi.orbis.engine.SearchProvider.Custom).name)
             assertEquals("https://dns.example/q", to.doh.config.value.resolverUrl)
             assertEquals(MenuAction.SETTINGS, to.toolbar.menuOrder.value.last())
