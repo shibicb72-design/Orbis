@@ -207,6 +207,7 @@ class SlowLoadNoticeComposeTest {
     fun didNotFinishShowsWithReloadAndReloadCallsReload() {
         show()
         startLoad(a)
+        advance(SILENT_BEFORE_STOP_MILLIS)
         a.stateFlow.value = a.stateFlow.value.afterPageStop(success = false, now = now())
         rule.waitForIdle()
         rule.onNodeWithText(didNotFinish).assertDoesNotExist()
@@ -224,6 +225,7 @@ class SlowLoadNoticeComposeTest {
     fun anUnfinishedStopFollowedByANewLoadShowsNothing() {
         show()
         startLoad(a)
+        advance(SILENT_BEFORE_STOP_MILLIS)
         a.stateFlow.value = a.stateFlow.value.afterPageStop(success = false, now = now())
         advance(500)
         a.stateFlow.value = a.stateFlow.value.afterPageStart("https://next.example/", now())
@@ -284,5 +286,49 @@ class SlowLoadNoticeComposeTest {
         host.currentSnackbarData?.dismiss()
         rule.waitForIdle()
         rule.onNodeWithText(takingLong).assertIsDisplayed()
+    }
+
+    // ---- X3: each notice closes itself ----
+
+    @Test
+    fun takingLongClosesItselfAfter20SecondsAndAWaitingSnackbarThenShows() {
+        show()
+        startLoad(a)
+        advance(31_000)
+        rule.onNodeWithText(takingLong).assertIsDisplayed()
+        // "Tab closed" is asked for while the notice is up: it waits behind it.
+        scope.launch { host.showSnackbar("Tab closed", actionLabel = "Undo", duration = SnackbarDuration.Indefinite) }
+        advance(TAKING_LONG_SHOWN_MILLIS - 2_000)
+        rule.onNodeWithText(takingLong).assertIsDisplayed()
+        rule.onNodeWithText("Tab closed").assertDoesNotExist()
+        advance(2_000)
+        rule.onNodeWithText(takingLong).assertDoesNotExist()
+        rule.onNodeWithText("Tab closed").assertIsDisplayed()
+        host.currentSnackbarData?.dismiss()
+        // The load still runs: the notice counts as shown and does not come back.
+        advance(120_000)
+        rule.onNodeWithText(takingLong).assertDoesNotExist()
+        assertEquals(0, a.stops + a.reloads)
+        assertEquals(listOf("slow load notice shown"), logged)
+    }
+
+    @Test
+    fun didNotFinishClosesItselfAfter30SecondsAndDoesNotComeBack() {
+        show()
+        startLoad(a)
+        advance(SILENT_BEFORE_STOP_MILLIS)
+        a.stateFlow.value = a.stateFlow.value.afterPageStop(success = false, now = now())
+        advance(UNFINISHED_SETTLE_MILLIS + 100)
+        rule.onNodeWithText(didNotFinish).assertIsDisplayed()
+        advance(DID_NOT_FINISH_SHOWN_MILLIS - 1_000)
+        rule.onNodeWithText(didNotFinish).assertIsDisplayed()
+        advance(2_000)
+        rule.onNodeWithText(didNotFinish).assertDoesNotExist()
+        selected.value = 2L
+        rule.waitForIdle()
+        selected.value = 1L
+        advance(60_000)
+        rule.onNodeWithText(didNotFinish).assertDoesNotExist()
+        assertEquals(0, a.reloads)
     }
 }

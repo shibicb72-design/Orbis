@@ -1582,6 +1582,8 @@ private class GeckoBrowserSession(
             }
 
             override fun onExternalResponse(session: GeckoSession, response: WebResponse) {
+                // For the slow-load notices: this load became a download; it did not fail to finish.
+                _state.update { it.afterDownloadResponse() }
                 val download = GeckoIncomingDownload(response)
                 val owner = host
                 if (owner == null) {

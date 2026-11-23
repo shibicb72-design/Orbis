@@ -9,6 +9,7 @@ import com.shibi.orbis.engine.afterPageStop
 import com.shibi.orbis.engine.afterProgressChange
 import com.shibi.orbis.engine.afterUserEndedLoad
 import com.shibi.orbis.engine.afterContentProcessGone
+import com.shibi.orbis.engine.afterDownloadResponse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -167,6 +168,56 @@ class SlowLoadNoticeTest {
     fun neverForALinkAnotherAppOpensOrANoContentAnswer() {
         // A redirect to an app's scheme or a 204 ends the same way: no new address.
         assertNull(decide(old.afterPageStart(url, t0).afterPageStop(false, stopAt), settled + 60_000))
+    }
+
+    // ---- X1: a silence before the stop ----
+
+    @Test
+    fun aStopAfter9SecondsWithoutProgressGivesNoNotice() {
+        val stopped = committedLoad().afterPageStop(false, t0 + 9_000)
+        assertNull(decide(stopped, t0 + 9_000 + UNFINISHED_SETTLE_MILLIS + 60_000))
+    }
+
+    @Test
+    fun aStopAfter10SecondsWithoutProgressGivesTheNotice() {
+        val stopped = committedLoad().afterPageStop(false, t0 + 10_000)
+        assertEquals(SlowLoadKind.DID_NOT_FINISH, decide(stopped, t0 + 10_000 + UNFINISHED_SETTLE_MILLIS))
+    }
+
+    @Test
+    fun progress3SecondsBeforeTheStopGivesNoNotice() {
+        // A page that stops itself (window.stop()) while things move.
+        val stopped = committedLoad().afterProgressChange(55, t0 + 57_000).afterPageStop(false, t0 + 60_000)
+        assertNull(decide(stopped, t0 + 60_000 + UNFINISHED_SETTLE_MILLIS + 60_000))
+    }
+
+    @Test
+    fun the100GeckoSendsJustBeforeTheStopIsNotProgress() {
+        val stopped = committedLoad().afterProgressChange(100, t0 + 30_000).afterPageStop(false, t0 + 30_000)
+        assertEquals(SlowLoadKind.DID_NOT_FINISH, decide(stopped, t0 + 30_000 + UNFINISHED_SETTLE_MILLIS))
+    }
+
+    // ---- X2: a download is known, not guessed ----
+
+    @Test
+    fun aLoadMarkedAsADownloadNeverGetsTheNoticeEvenWithAnAddressCommitted() {
+        // A pushState by the old page between the tap and the download answer commits an address.
+        val marked = committedLoad().afterDownloadResponse().afterPageStop(false, stopAt)
+        assertNull(decide(marked, settled + 60_000))
+        // The mark can also arrive after the stop, inside the settle time.
+        assertNull(decide(unfinished().afterDownloadResponse(), settled + 60_000))
+    }
+
+    @Test
+    fun theDownloadMarkTakesAShownNoticeAway() {
+        assertFalse(slowLoadNoticeStillApplies(SlowLoadKind.DID_NOT_FINISH, snap(unfinished().afterDownloadResponse(), settled)))
+    }
+
+    @Test
+    fun theDownloadMarkEndsWithTheNextLoad() {
+        val next = unfinished().afterDownloadResponse().afterPageStart(url, t0 + 20_000).afterLocationChange(url)
+            .afterPageStop(false, t0 + 40_000)
+        assertEquals(SlowLoadKind.DID_NOT_FINISH, decide(next, t0 + 40_000 + UNFINISHED_SETTLE_MILLIS))
     }
 
     @Test

@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** Notice A: the load runs and its progress value has not moved for this long. */
 internal const val SLOW_LOAD_MILLIS = 30_000L
@@ -50,6 +51,19 @@ internal const val SLOW_LOAD_MILLIS = 30_000L
  * may flash the notice.
  */
 internal const val UNFINISHED_SETTLE_MILLIS = 2_000L
+
+/**
+ * Notice B only for a load whose progress had not moved for this long when it stopped. A page that calls window.stop()
+ * itself does so while things move; a dead or silent connection stops after a silence. A connection cut while the page
+ * still arrives gives no notice, on purpose.
+ */
+internal const val SILENT_BEFORE_STOP_MILLIS = 10_000L
+
+/** Notice A closes itself after this long on screen, so other snackbars (Tab closed, Undo) do not wait for ever. */
+internal const val TAKING_LONG_SHOWN_MILLIS = 20_000L
+
+/** Notice B closes itself after this long on screen. */
+internal const val DID_NOT_FINISH_SHOWN_MILLIS = 30_000L
 
 internal enum class SlowLoadKind {
     /** "This page is taking a long time to load." Stop, Reload. */
@@ -68,6 +82,10 @@ internal data class SlowLoadSnapshot(
     val ended: Boolean,
     val endedWell: Boolean,
     val millisSinceEnd: Long,
+    /** How long the progress value had not moved when the load stopped (0 while it runs). */
+    val millisSilentBeforeStop: Long,
+    /** The engine handed a response of this load to Orbis as a download. */
+    val becameDownload: Boolean,
     /** Orbis's error banner (load failed, HTTPS-only, content process gone) is up. */
     val errorPageShowing: Boolean,
     /** Stop, Reload, Back, Forward or a new address since the load started. */
@@ -99,6 +117,8 @@ internal fun slowLoadSnapshot(
         ended = !state.isLoading && watch.endedWell != null,
         endedWell = watch.endedWell == true,
         millisSinceEnd = now - watch.endedAt,
+        millisSilentBeforeStop = if (watch.endedWell != null) watch.endedAt - watch.progressAt else 0L,
+        becameDownload = watch.download,
         errorPageShowing = state.loadFailed || state.httpsOnlyBlocked || state.crashed || state.contentGone,
         stoppedByUser = watch.endedByUser,
         noNewPage = !watch.committed,
@@ -114,7 +134,8 @@ private fun SlowLoadSnapshot.mayShowAny(): Boolean = selected && inFront && !hid
 
 private fun SlowLoadSnapshot.isLong(): Boolean = loading && progress < 100
 
-private fun SlowLoadSnapshot.isUnfinished(): Boolean = ended && !endedWell && !stoppedByUser && !noNewPage
+private fun SlowLoadSnapshot.isUnfinished(): Boolean =
+    ended && !endedWell && !stoppedByUser && !noNewPage && !becameDownload && millisSilentBeforeStop >= SILENT_BEFORE_STOP_MILLIS
 
 /** The notice to show now, or null. Each at most once per load ([SlowLoadSnapshot.shownThisLoad]). */
 internal fun slowLoadNotice(s: SlowLoadSnapshot): SlowLoadKind? =
@@ -273,9 +294,11 @@ internal fun SlowLoadNotice(
                     }
                 logLine(if (kind == SlowLoadKind.TAKING_LONG) "slow load notice shown" else "unfinished load notice shown")
                 // Not a child of this collector: the next input must not take the notice away unless it no longer applies.
+                // It closes itself at its limit and stays marked as shown for this load.
+                val limit = if (kind == SlowLoadKind.TAKING_LONG) TAKING_LONG_SHOWN_MILLIS else DID_NOT_FINISH_SHOWN_MILLIS
                 val job =
                     effect.launch {
-                        if (snackbars.showSnackbar(visuals) == SnackbarResult.ActionPerformed) {
+                        if (withTimeoutOrNull(limit) { snackbars.showSnackbar(visuals) } == SnackbarResult.ActionPerformed) {
                             if (kind == SlowLoadKind.TAKING_LONG) tab.stop() else tab.reload()
                         }
                     }

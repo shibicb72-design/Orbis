@@ -246,6 +246,8 @@ data class LoadWatch(
     val endedAt: Long = 0L,
     /** The user ended or replaced it since it started: Stop, Reload, Back, Forward or a new address. */
     val endedByUser: Boolean = false,
+    /** The engine handed a response of this load to Orbis as a download (onExternalResponse). */
+    val download: Boolean = false,
 )
 
 // The one definition of how engine events change the session state, so the counters are maintained in one place and
@@ -290,9 +292,20 @@ internal fun SessionState.afterPageStop(success: Boolean, now: Long = 0L): Sessi
         loadWatch = loadWatch.copy(endedWell = success, endedAt = now),
     )
 
-/** Gecko's progress value for the running load; [now] is kept only when the value changed. */
+/**
+ * Gecko's progress value for the running load; [now] is kept only when the value changed to below 100. Gecko sends 100
+ * just before every stop (a failed one too) and when a redirect ends the first request: that is not the page moving.
+ */
 internal fun SessionState.afterProgressChange(progress: Int, now: Long): SessionState =
-    if (progress == this.progress) this else copy(progress = progress, loadWatch = loadWatch.copy(progressAt = now))
+    when {
+        progress == this.progress -> this
+        progress >= 100 -> copy(progress = progress)
+        else -> copy(progress = progress, loadWatch = loadWatch.copy(progressAt = now))
+    }
+
+/** A response of the running or last load became a download: that load is never reported as unfinished. */
+internal fun SessionState.afterDownloadResponse(): SessionState =
+    if (loadWatch.download) this else copy(loadWatch = loadWatch.copy(download = true))
 
 /** The user stopped, reloaded or stepped back or forward: the running or last load is not reported as unfinished. */
 internal fun SessionState.afterUserEndedLoad(): SessionState =
