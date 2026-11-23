@@ -74,9 +74,9 @@ Android. Orbis is available in English only.</p>
   <li><strong>Page translation</strong> runs on your phone. The language models it needs are downloaded from Mozilla the first time.</li>
   <li><strong>Voice search</strong> uses your phone's speech recognizer (for example Google's). Its own privacy terms apply.</li>
   <li><strong>Protected video (DRM)</strong>: Orbis lets sites play protected video in normal tabs unless you turn it off in Settings. It is never played in private tabs. When a site plays
-      it, the Gecko engine uses Android's own DRM system (Widevine): that system's set-up server is contacted once, and that site's licence server for each protected stream.
+      it, the Gecko engine uses Android's own DRM system (Widevine): that system's set-up server is contacted when the DRM system first needs setting up, and that site's licence server for each protected stream.
       What these requests tell the servers about your phone is decided by the DRM system and is not published. The engine asks the DRM system to use a separate random id
-      for each site, but not every phone's DRM system accepts that.</li>
+      for each site, but this may not take effect on your phone.</li>
   <li><strong>Updates</strong> are delivered by Google Play.</li>
   <li><strong>Cast</strong>: when you choose Cast, the video or audio address (and, for YouTube, the video id) is sent only to the
       TV or speaker you pick on your local network. Orbis sends nothing to Google or any server for Cast. Casting YouTube
