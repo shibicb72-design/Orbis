@@ -1,7 +1,8 @@
 // Tells Orbis when the top page says this browser is unsupported (see compat/UnsupportedBrowserClassifier.kt).
 // Top frame only. Reads the page a few times right after it loads and sends exactly one message, to the Orbis app
-// only: a sample, or "clean" at 3 s or at the first interaction, so a retry is always resolved. No network, no
-// storage, no changes to the page, nothing on the page's window.
+// only: a sample, or "clean" at 3 s or at the first interaction, so a retry is always resolved. "clean" also says
+// whether the page was empty at 3 s ("empty" / "not-empty", nothing else). No network, no storage, no changes to the
+// page, nothing on the page's window.
 (() => {
   const MAX_TEXT_CONTENT = 20000;
   const MAX_VISIBLE_TEXT = 800;
@@ -30,10 +31,39 @@
     document.removeEventListener("scroll", interacted, true);
   }
 
-  // The user started using the page: look one last time, then stop for good.
+  // The user started using the page: look one last time, then stop for good. Before 3 s a page is never called empty.
   function interacted() {
     if (done) return;
-    if (!check()) send({ type: "clean" });
+    if (!check()) send({ type: "clean", page: "not-empty" });
+  }
+
+  // "Empty" (for the auto-desktop mobile retry): loaded, and showing fewer than MIN_VISIBLE_TEXT characters of visible
+  // text (spaces not counted) and no visible image, video, canvas, frame or form control. Only "empty" or "not-empty"
+  // leaves this script.
+  const MIN_VISIBLE_TEXT = 20;
+  const CONTENT_ELEMENTS = "img, svg, picture, video, canvas, iframe, embed, object, input, select, textarea, button";
+
+  function shows(el) {
+    if (typeof el.checkVisibility === "function") {
+      if (!el.checkVisibility({ visibilityProperty: true, opacityProperty: true })) return false;
+    } else if (!visible(el)) {
+      return false;
+    }
+    const r = el.getBoundingClientRect();
+    return r.width > 1 && r.height > 1;
+  }
+
+  function isEmpty() {
+    if (document.readyState !== "complete") return false;
+    const body = document.body;
+    if (!body) return false;
+    const text = (body.innerText || "").replace(/\s+/g, "");
+    if (text.length >= MIN_VISIBLE_TEXT) return false;
+    const nodes = document.querySelectorAll(CONTENT_ELEMENTS);
+    for (let i = 0; i < nodes.length; i++) {
+      if (shows(nodes[i])) return false;
+    }
+    return true;
   }
 
   function send(message) {
@@ -97,7 +127,7 @@
   timers.push(setTimeout(check, 1500));
   timers.push(
     setTimeout(() => {
-      if (!check()) send({ type: "clean" });
+      if (!check()) send({ type: "clean", page: isEmpty() ? "empty" : "not-empty" });
     }, 3000),
   );
 })();
