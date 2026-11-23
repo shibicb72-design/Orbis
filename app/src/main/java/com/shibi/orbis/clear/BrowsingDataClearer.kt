@@ -17,8 +17,11 @@ data class ClearSelection(
     val bookmarks: Boolean = false,
     /** Saved logins. Never on unless the user ticks it, like bookmarks. */
     val passwords: Boolean = false,
+    /** Settings > Video diagnostics' log; on by default. */
+    val videoDiagnostics: Boolean = true,
 ) {
-    val isEmpty: Boolean get() = !(history || cookiesAndSiteData || cache || downloadsList || openTabs || bookmarks || passwords)
+    val isEmpty: Boolean
+        get() = !(history || cookiesAndSiteData || cache || downloadsList || openTabs || bookmarks || passwords || videoDiagnostics)
 
     /** The ticked categories, in the order the panel lists them. */
     val categories: List<ClearCategory>
@@ -31,11 +34,12 @@ data class ClearSelection(
                 ClearCategory.OPEN_TABS.takeIf { openTabs },
                 ClearCategory.BOOKMARKS.takeIf { bookmarks },
                 ClearCategory.PASSWORDS.takeIf { passwords },
+                ClearCategory.VIDEO_DIAGNOSTICS.takeIf { videoDiagnostics },
             )
 }
 
 /** The things that can be cleared; what an outcome names when one of them did not go through. */
-enum class ClearCategory { HISTORY, COOKIES_AND_SITE_DATA, CACHE, DOWNLOADS_LIST, OPEN_TABS, BOOKMARKS, PASSWORDS }
+enum class ClearCategory { HISTORY, COOKIES_AND_SITE_DATA, CACHE, DOWNLOADS_LIST, OPEN_TABS, BOOKMARKS, PASSWORDS, VIDEO_DIAGNOSTICS }
 
 /** Cookies and cache are the only categories that go through the engine. */
 fun needsEngine(selection: ClearSelection): Boolean = selection.cookiesAndSiteData || selection.cache
@@ -72,6 +76,9 @@ interface ClearTargets {
      * names it.
      */
     fun clearPasswords() {}
+
+    /** Deletes the video diagnostics log (Settings > Video diagnostics); a new header follows while recording is on. */
+    fun clearVideoDiagnostics() {}
     fun hasPrivateTabs(): Boolean
 
     /** True only when the engine confirmed the clear. Must not be called while a private tab is open. */
@@ -158,6 +165,7 @@ class BrowsingDataClearer(
         if (selection.downloadsList) attempt(ClearCategory.DOWNLOADS_LIST, failed) { targets.clearDownloadsList() }
         if (selection.bookmarks) attempt(ClearCategory.BOOKMARKS, failed) { targets.clearBookmarks() }
         if (selection.passwords) attempt(ClearCategory.PASSWORDS, failed) { targets.clearPasswords() }
+        if (selection.videoDiagnostics) attempt(ClearCategory.VIDEO_DIAGNOSTICS, failed) { targets.clearVideoDiagnostics() }
         if (needsEngine(selection)) {
             val engineCategories = selection.categories.filter { it == ClearCategory.COOKIES_AND_SITE_DATA || it == ClearCategory.CACHE }
             val confirmed =

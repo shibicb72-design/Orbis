@@ -128,6 +128,7 @@ fun SettingsScreen(
     onOpenSitePermissions: () -> Unit,
     onOpenClearData: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenVideoDiagnostics: () -> Unit = {},
     onOpenPasswords: () -> Unit = {},
     onOpenBackup: () -> Unit = {},
     /** Theme, desktop site, HTTPS-only and JavaScript rows; hidden when null (screen tests). */
@@ -499,6 +500,10 @@ fun SettingsScreen(
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.settings_error_log)) },
                     modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenErrorLog),
+                )
+                SettingsItem(
+                    headlineContent = { Text(stringResource(R.string.video_diag_title)) },
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenVideoDiagnostics),
                 )
             }
             val installedVersion = remember { installedVersionName(context) }

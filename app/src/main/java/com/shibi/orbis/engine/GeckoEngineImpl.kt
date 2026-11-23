@@ -45,6 +45,10 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -118,6 +122,21 @@ class GeckoEngineImpl(
         }
 
     override val extensions: ExtensionHost get() = extensionHost
+
+    /** Video diagnostics' page script (see DiagExtensionHolder). Installed only once recording is first switched on. */
+    private val diag =
+        DiagExtensionHolder { debugLog.log("GeckoEngine", it) }.also { holder ->
+            holder.badgeFor = { session -> extensionHost.tabBadge(session, com.shibi.orbis.ubo.UBO_ID) }
+            extensionHost.onSelected = holder::selected
+        }
+
+    override var videoDiagnostics: DiagSink?
+        get() = diag.sink
+        set(value) {
+            diag.sink = value
+        }
+
+    override fun setVideoDiagnostics(recording: Boolean, privateTabs: Boolean) = diag.set(recording, privateTabs)
 
     /** Picked files copied for upload. Wiped once per process start, never while a page may still hold one. */
     private val uploads = UploadCache(appContext.cacheDir)
@@ -368,6 +387,7 @@ class GeckoEngineImpl(
             youtubeAdObserver.install(created)
             YoutubePipExtension.install(created) { debugLog.log("GeckoEngine", it) }
             clearExit.install(created)
+            diag.onRuntime(created)
             // Without a prompt delegate, WebExtensionController.install() hangs forever.
             created.webExtensionController.setPromptDelegate(extensionHost.promptDelegate)
             runtime = created
@@ -627,6 +647,7 @@ class GeckoEngineImpl(
             reader = reader,
             castExtension = castExtension,
             compatExtension = compatExtension,
+            diag = diag,
             sitePolicy = { sitePolicy },
             onYoutubeAd = { onYoutubeAdEvent },
             // A popup child takes the desktop/mobile choice of its own site (never the opener's page: that would carry
@@ -703,6 +724,7 @@ private class GeckoBrowserSession(
     private val reader: ReaderExtensionHolder,
     private val castExtension: CastExtensionHolder,
     private val compatExtension: CompatExtensionHolder,
+    private val diag: DiagExtensionHolder,
     private val sitePolicy: () -> SitePolicy?,
     private val onYoutubeAd: () -> ((YoutubeAdEvent) -> Unit)?,
     private val newPopupChild: (opener: GeckoBrowserSession, uri: String) -> GeckoBrowserSession,
@@ -789,6 +811,29 @@ private class GeckoBrowserSession(
 
     val geckoSession: GeckoSession get() = session
 
+    /** Blocked requests on the page shown now, for video diagnostics. */
+    private val pageBlocks = PageBlockCounter()
+
+    /** This tab as video diagnostics sees it (see DiagExtensionHolder). */
+    private val diagTab =
+        object : DiagTab {
+            override val isPrivate: Boolean get() = this@GeckoBrowserSession.isPrivate
+
+            override fun pageUrl(): String? = _state.value.url
+
+            override fun blockedOnPage(): Map<com.shibi.orbis.stats.BlockKind, Int> = pageBlocks.snapshot(_state.value.url)
+
+            override fun uboBadge(): String? = diag.badgeFor(session)
+
+            override fun inFront(): Boolean = diag.isSelected(session)
+
+            override fun awake(): Boolean = wantActive
+
+            override fun fullScreen(): Boolean = _state.value.fullScreen
+
+            override fun shieldOn(): Boolean? = _state.value.trackingProtectionOff?.not()
+        }
+
     init {
         // Delegates must be set before open().
         session.navigationDelegate = navigationDelegate()
@@ -825,6 +870,7 @@ private class GeckoBrowserSession(
                         )
                     }
                     val kind = blockKindOf(event.antiTrackingCategory, event.cookieBehaviorCategory) ?: return
+                    pageBlocks.count(kind, _state.value.url)
                     onBlocked()?.invoke(kind, uri, isPrivate)
                 }
             }
@@ -836,7 +882,23 @@ private class GeckoBrowserSession(
         attachReader()
         attachCast()
         attachCompat()
+        attachDiag()
         restorePage(init.restoredState, init.fallbackUrl)
+    }
+
+    /** Video diagnostics: this tab's messages, and its full screen and shield changes (the recorder drops them while off). */
+    fun attachDiag() {
+        diag.register(session, diagTab)
+        scope.launch {
+            state.map { it.fullScreen }.distinctUntilChanged().drop(1).collect { full ->
+                diag.tabEvent(session, if (full) DiagTabEvent.FULL_SCREEN_ON else DiagTabEvent.FULL_SCREEN_OFF)
+            }
+        }
+        scope.launch {
+            state.map { it.trackingProtectionOff }.distinctUntilChanged().drop(1).filterNotNull().collect { off ->
+                diag.tabEvent(session, if (off) DiagTabEvent.SHIELD_OFF else DiagTabEvent.SHIELD_ON)
+            }
+        }
     }
 
     /**
@@ -1017,6 +1079,7 @@ private class GeckoBrowserSession(
                 runCatching { child.attachReader() }
                 runCatching { child.attachCast() }
                 runCatching { child.attachCompat() }
+                runCatching { child.attachDiag() }
                 owner.onPopupSession(child, this@GeckoBrowserSession)
                 debugLog.log("GeckoSession", "popup session created")
                 return GeckoResult.fromValue(child.geckoSession)
@@ -2877,6 +2940,7 @@ private class GeckoBrowserSession(
     }
 
     override fun setActive(active: Boolean) {
+        if (active != wantActive) diag.tabEvent(session, if (active) DiagTabEvent.WOKEN else DiagTabEvent.PUT_TO_SLEEP)
         wantActive = active
         applyActive()
         // A page lost to a kill while the tab was in the background comes back when the tab is shown.
@@ -3055,6 +3119,12 @@ private class GeckoExtensionHost(
     /** A tab's own button values (an add-on may set a badge per tab), by session. */
     private val tabActions = java.util.WeakHashMap<GeckoSession, HashMap<String, WebExtension.Action>>()
 
+    /** Add-on [id]'s badge set for [session] itself (not its default one) as last received; null when none. */
+    fun tabBadge(session: GeckoSession, id: String): String? = tabActions[session]?.get(id)?.badgeText
+
+    /** The tab in front changed (video diagnostics); null when none is, or the private-tab lock hides it. */
+    var onSelected: ((GeckoSession?) -> Unit)? = null
+
     /** The add-ons whose per-tab values each session already reports to us. */
     private val watchedSessions = java.util.WeakHashMap<GeckoSession, MutableSet<String>>()
 
@@ -3214,6 +3284,7 @@ private class GeckoExtensionHost(
         }
         selectedSession = gecko
         selectedPrivate = session?.isPrivate == true
+        onSelected?.invoke(gecko)
         gecko?.let(::watchSession)
         publishActions()
     }

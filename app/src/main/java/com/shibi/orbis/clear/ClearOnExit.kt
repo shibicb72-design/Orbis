@@ -36,7 +36,7 @@ interface ClearOnExitHooks {
 /**
  * Settings > Clear on exit. When it is on and Orbis was fully closed (see [UiSessionTracker]), browsing data is wiped
  * at the next start, before the tab list is restored and before any session is created: open tabs, Recently closed,
- * history, cookies, site data and cache. Settings, bookmarks, saved passwords, the Downloads list, torrents, site
+ * history, the video diagnostics log, cookies, site data and cache. Settings, bookmarks, saved passwords, the Downloads list, torrents, site
  * permissions and add-ons are never touched. Android gives no reliable callback at the moment of closing, so this is the
  * earliest point.
  *
@@ -103,6 +103,7 @@ class ClearOnExit(
         if (!processStarted) step("tabs") { hooks.closeOpenTabs() }
         // History, Recently closed and opened files. Queued in the history store if it has not finished loading.
         step("history") { targets.clearHistory() }
+        step("video diagnostics") { targets.clearVideoDiagnostics() }
         scope.launch {
             var storedTabsGone = !processStarted
             try {

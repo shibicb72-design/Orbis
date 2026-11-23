@@ -64,6 +64,7 @@ your fingerprint or face data stays with Android. Orbis is available in English 
   finished" in Settings > Torrents; by default nothing is uploaded after a download is finished. DHT and peer
   exchange can each be turned off there too, and local peer discovery turned on. Speed limits and "Wi-Fi only" are settings on your
   phone and send nothing.
+- Video diagnostics (off unless you turn it on in Settings): while it is on, Orbis keeps a log on your phone of how videos played: times, stops, errors, the type of connection and a few settings. The log has no page addresses or titles. It names a site only if you turn on "Include site names", and it leaves out private tabs unless you turn on "Also record private tabs". Orbis never sends this log anywhere. You can read, copy, save and delete it in Settings. Recording turns itself off after 7 days. The log is deleted 7 days after its last entry, or the next time Orbis starts after that.
 
 ## Backup
 Backup is optional and only runs when you use Settings > Backup and restore. Orbis saves one file where you choose.
