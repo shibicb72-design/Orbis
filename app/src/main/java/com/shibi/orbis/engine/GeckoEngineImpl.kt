@@ -380,6 +380,10 @@ class GeckoEngineImpl(
             // Older builds denied location silently and Gecko stored every such answer for good.
             reconciler.runNow()
             logConnectivityProbeState()
+            // etp21-1 spike only: which build this is, and the tracking prefs as the engine has them.
+            debugLog.log("GeckoEngine", EtpSpike.START_LINE)
+            android.util.Log.i(EtpSpike.TAG, EtpSpike.START_LINE)
+            EtpSpike.readBack("start") { debugLog.log("GeckoEngine", it) }
         }
     }
 
@@ -807,7 +811,14 @@ private class GeckoBrowserSession(
             }
         session.contentBlockingDelegate =
             object : ContentBlocking.Delegate {
+                override fun onContentLoaded(session: GeckoSession, event: ContentBlocking.BlockEvent) {
+                    // etp21-1 spike only: a classified request that was let through (annotated, or skipped).
+                    EtpSpike.logEvent("loaded", event, isPrivate)
+                }
+
                 override fun onContentBlocked(session: GeckoSession, event: ContentBlocking.BlockEvent) {
+                    // etp21-1 spike only: every event with its raw classes.
+                    EtpSpike.logEvent(if (event.isBlocking) "blocked" else "not-blocking", event, isPrivate)
                     if (!event.isBlocking) return
                     val uri = event.uri
                     if (!isPrivate && mightReportYoutubeAd(_state.value.url, uri)) {
