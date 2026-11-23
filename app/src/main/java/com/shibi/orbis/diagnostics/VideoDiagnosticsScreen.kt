@@ -62,6 +62,8 @@ fun VideoDiagnosticsScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     clock: Clock = Clock.systemDefaultZone(),
+    /** Writes the log's text to the file the user picked; false when it could not be written. */
+    writeFile: suspend (Context, Uri, String) -> Boolean = ::writeText,
 ) {
     val switches by diagnostics.switches.collectAsStateWithLifecycle()
     val version by diagnostics.log.version.collectAsStateWithLifecycle()
@@ -69,11 +71,17 @@ fun VideoDiagnosticsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val copied = stringResource(R.string.video_diag_copied)
+    val saved = stringResource(R.string.video_diag_saved)
+    val saveFailed = stringResource(R.string.video_diag_save_failed)
+    // A cancelled picker (null) says nothing.
     val saveLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
             if (uri != null) {
                 val text = diagnostics.log.text()
-                scope.launch { writeText(context, uri, text) }
+                scope.launch {
+                    val ok = writeFile(context, uri, text)
+                    Toast.makeText(context, if (ok) saved else saveFailed, Toast.LENGTH_SHORT).show()
+                }
             }
         }
     Scaffold(

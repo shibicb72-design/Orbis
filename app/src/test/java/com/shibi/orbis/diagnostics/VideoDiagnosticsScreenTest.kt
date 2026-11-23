@@ -2,6 +2,14 @@ package com.shibi.orbis.diagnostics
 
 import android.content.ClipboardManager
 import android.content.Context
+import android.net.Uri
+import android.os.Looper
+import androidx.activity.compose.LocalActivityResultRegistryOwner
+import androidx.activity.result.ActivityResultRegistry
+import androidx.activity.result.ActivityResultRegistryOwner
+import androidx.activity.result.contract.ActivityResultContract
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.core.app.ActivityOptionsCompat
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -17,13 +25,16 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
 import com.shibi.orbis.ui.browser.ComposeActivityRegistration
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowToast
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = android.app.Application::class)
@@ -97,6 +108,63 @@ class VideoDiagnosticsScreenTest {
         rule.waitForIdle()
         assertTrue(h.log.isEmpty)
         rule.onNodeWithText("The log is empty.").assertExists()
+    }
+
+    /** The system file picker, answered at once with [picked] (null: the user cancelled). */
+    private fun picker(picked: Uri?, names: MutableList<Any?>) =
+        object : ActivityResultRegistryOwner {
+            override val activityResultRegistry =
+                object : ActivityResultRegistry() {
+                    override fun <I, O> onLaunch(requestCode: Int, contract: ActivityResultContract<I, O>, input: I, options: ActivityOptionsCompat?) {
+                        names += input
+                        dispatchResult(requestCode, picked)
+                    }
+                }
+        }
+
+    /** Taps "Save as text file" with a picker that returns [picked] and a writer that answers [writes]. */
+    private fun save(picked: Uri?, writes: Boolean): Pair<DiagHarness, List<String>> {
+        val h = DiagHarness().apply { diag.start() }
+        h.diag.setRecording(true)
+        val written = mutableListOf<String>()
+        val names = mutableListOf<Any?>()
+        rule.setContent {
+            CompositionLocalProvider(LocalActivityResultRegistryOwner provides picker(picked, names)) {
+                MaterialTheme {
+                    VideoDiagnosticsScreen(diagnostics = h.diag, onBack = {}, clock = h.clock, writeFile = { _, _, text ->
+                        written += text
+                        writes
+                    })
+                }
+            }
+        }
+        rule.onNodeWithTag("video_diag_list").performScrollToNode(hasText("Save as text file"))
+        rule.onNodeWithText("Save as text file").performClick()
+        rule.waitForIdle()
+        shadowOf(Looper.getMainLooper()).idle()
+        if (picked != null) assertEquals(listOf<Any?>("orbis-video-diagnostics-2026-11-23.txt"), names)
+        return h to written
+    }
+
+    @Test
+    fun aSavedFileSaysSavedAndHoldsExactlyTheShownText() {
+        val (h, written) = save(Uri.parse("content://picked/orbis-video-diagnostics-2026-11-23.txt"), writes = true)
+        assertEquals(listOf(h.log.lines().joinToString("\n")), written)
+        assertEquals("Saved", ShadowToast.getTextOfLatestToast())
+    }
+
+    @Test
+    fun aWriteErrorSaysCouldNotSaveTheFile() {
+        save(Uri.parse("content://picked/readonly.txt"), writes = false)
+        assertEquals("Could not save the file.", ShadowToast.getTextOfLatestToast())
+    }
+
+    @Test
+    fun aCancelledPickerSaysNothing() {
+        val (_, written) = save(null, writes = true)
+        assertTrue(written.isEmpty())
+        assertEquals(0, ShadowToast.shownToastCount())
+        assertNull(ShadowToast.getTextOfLatestToast())
     }
 
     @Test

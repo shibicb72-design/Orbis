@@ -16,6 +16,8 @@
     <string name="video_diag_save" translatable="false">Save as text file</string>
     <string name="video_diag_delete" translatable="false">Delete log</string>
     <string name="video_diag_copied" translatable="false">Copied</string>
+    <string name="video_diag_saved" translatable="false">Saved</string>
+    <string name="video_diag_save_failed" translatable="false">Could not save the file.</string>
     <string name="video_diag_empty" translatable="false">The log is empty.</string>
     <!-- Clear browsing data: its own line. -->
     <string name="clear_video_diagnostics" translatable="false">Video diagnostics log</string>
