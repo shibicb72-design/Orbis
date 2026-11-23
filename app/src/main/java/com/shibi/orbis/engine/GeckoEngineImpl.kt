@@ -2454,7 +2454,9 @@ private class GeckoBrowserSession(
                 if (perm.permission == GeckoSession.PermissionDelegate.PERMISSION_GEOLOCATION) {
                     return geolocationRequest(perm)
                 }
-                val allow = perm.permission == GeckoSession.PermissionDelegate.PERMISSION_AUTOPLAY_INAUDIBLE
+                val drm = perm.permission == GeckoSession.PermissionDelegate.PERMISSION_MEDIA_KEY_SYSTEM_ACCESS
+                if (drm) debugLog.log("GeckoSession", "spike: drm allowed")
+                val allow = drm || perm.permission == GeckoSession.PermissionDelegate.PERMISSION_AUTOPLAY_INAUDIBLE
                 // The kind only: the page address is not logged.
                 debugLog.log(
                     "GeckoSession",
