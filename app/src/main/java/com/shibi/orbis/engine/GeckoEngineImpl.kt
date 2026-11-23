@@ -10,6 +10,7 @@ import android.view.View
 import android.webkit.MimeTypeMap
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import com.shibi.orbis.BuildConfig
 import com.shibi.orbis.compat.AUTO_DESKTOP_RETRY
 import com.shibi.orbis.compat.Action
 import com.shibi.orbis.compat.AutoDesktopRetry
@@ -52,6 +53,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.Autocomplete
 import org.mozilla.geckoview.ContentBlocking
+import org.mozilla.geckoview.ExperimentalGeckoViewApi
+import org.mozilla.geckoview.GeckoPreferenceController
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
@@ -300,9 +303,28 @@ class GeckoEngineImpl(
                     .strictSocialTrackingProtection(true)
                     .build()
             val dnsUrl = secureDnsUrl
+            // The connectivity probes off before the engine starts (see EngineStartupPrefs). If the file cannot be
+            // written the engine starts as before, and the read-back below sets the prefs late.
+            val startupPrefs = File(appContext.filesDir, EngineStartupPrefs.FILE_NAME)
+            // A marker left behind means the last start died inside GeckoRuntime.create with the file: leave the file
+            // out until the app is updated. No catch and no second create here; the marker is the only recovery.
+            val startMarker = File(appContext.filesDir, EngineStartupPrefs.MARKER_NAME)
+            val versionCode = BuildConfig.VERSION_CODE
+            val markerText = EngineStartupPrefs.readMarker(startMarker)
+            val useStartupFile = EngineStartupPrefs.useStartupFile(markerText, versionCode)
+            if (!useStartupFile) {
+                debugLog.log("GeckoEngine", EngineStartupPrefs.SKIPPED_LINE)
+                // An unreadable marker is kept as this version's, so the next update tries the file again.
+                if (markerText?.trim()?.toIntOrNull() == null) EngineStartupPrefs.writeMarker(startMarker, versionCode)
+            }
+            val startupPrefsReady =
+                useStartupFile &&
+                    EngineStartupPrefs.ensureFile(startupPrefs) != EngineStartupPrefs.FileState.FAILED &&
+                    EngineStartupPrefs.writeMarker(startMarker, versionCode)
             val settings =
                 GeckoRuntimeSettings.Builder()
                     .aboutConfigEnabled(false)
+                    .apply { if (startupPrefsReady) configFilePath(startupPrefs.absolutePath) }
                     // No page addresses in the system log (brief priv11-2): sets consoleservice.logcat and devtools.console.stdout.chrome to false and the engine log level to Fatal.
                     .debugLogging(false)
                     .contentBlocking(contentBlocking)
@@ -312,6 +334,7 @@ class GeckoEngineImpl(
                     .apply { if (dnsUrl != null) trustedRecursiveResolverUri(dnsUrl) }
                     .build()
             val created = GeckoRuntime.create(appContext, settings)
+            if (startupPrefsReady) startMarker.delete()
             defaultAutomaticFontSize = created.settings.automaticFontSizeAdjustment
             applyDisplayPrefs(created)
             applyPagePrefs(created)
@@ -356,7 +379,43 @@ class GeckoEngineImpl(
             )
             // Older builds denied location silently and Gecko stored every such answer for good.
             reconciler.runNow()
+            logConnectivityProbeState()
         }
+    }
+
+    /**
+     * Reads the start-up prefs back once and logs whether both probes are off; when they are not, sets both off on the
+     * user branch (EngineStartupPrefs.afterReadBack). Never fails start-up.
+     *
+     * GeckoPreferenceController is an experimental GeckoView API, so the opt-in stays here, in the one file that imports
+     * GeckoView. An engine bump may change or remove it; CI then fails to compile and this must be looked at again.
+     */
+    @androidx.annotation.OptIn(markerClass = [ExperimentalGeckoViewApi::class])
+    private fun logConnectivityProbeState() {
+        val log = { line: String -> debugLog.log("GeckoEngine", line) }
+        val setBothOff = { onDone: (Boolean) -> Unit -> setProbePrefsOffLate(onDone) }
+        runCatching {
+            GeckoPreferenceController.getGeckoPrefs(EngineStartupPrefs.OFF).accept(
+                { prefs ->
+                    EngineStartupPrefs.afterReadBack(prefs.orEmpty().associate { it.pref to it.value }, setBothOff, log)
+                },
+                { EngineStartupPrefs.afterReadBack(null, setBothOff, log) },
+            )
+        }.onFailure { EngineStartupPrefs.afterReadBack(null, setBothOff, log) }
+    }
+
+    /** Sets both start-up prefs to false on the user branch; [onDone] gets true only when both calls succeed. Called once. */
+    @androidx.annotation.OptIn(markerClass = [ExperimentalGeckoViewApi::class])
+    private fun setProbePrefsOffLate(onDone: (Boolean) -> Unit) {
+        val reported = AtomicBoolean(false)
+        val report = { ok: Boolean -> if (reported.compareAndSet(false, true)) onDone(ok) }
+        runCatching {
+            val sets =
+                EngineStartupPrefs.OFF.map {
+                    GeckoPreferenceController.setGeckoPref(it, false, GeckoPreferenceController.PREF_BRANCH_USER)
+                }
+            GeckoResult.allOf(sets).accept({ report(true) }, { report(false) })
+        }.onFailure { report(false) }
     }
 
     /**

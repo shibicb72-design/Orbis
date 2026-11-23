@@ -11,6 +11,11 @@
 -keep class org.libtorrent4j.swig.** { *; }
 -keep class org.libtorrent4j.swig.libtorrent_jni { *; }
 
+# The engine's start-up prefs file (brief priv11-3-connectivity-probe-off.md) is read by GeckoView's DebugConfig with SnakeYAML,
+# whose static initializers call getPackage().getName(): renamed into the root package, getPackage() is null and engine start
+# crashes. Mozilla's own fix (Bug 2089508) adds this rule to GeckoView's consumer rules; remove it here once the engine's rules carry it.
+-keepnames class org.yaml.snakeyaml.**
+
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
 
