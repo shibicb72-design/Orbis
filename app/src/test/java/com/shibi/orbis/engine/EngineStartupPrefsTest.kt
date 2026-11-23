@@ -18,7 +18,8 @@ class EngineStartupPrefsTest {
         assertEquals(
             "prefs:\n" +
                 "  \"network.connectivity-service.enabled\": false\n" +
-                "  \"network.captive-portal-service.enabled\": false\n",
+                "  \"network.captive-portal-service.enabled\": false\n" +
+                "  \"urlclassifier.trackingSkipURLs\": \"*://ajax.googleapis.com/ajax/libs/*\"\n",
             EngineStartupPrefs.CONTENT,
         )
     }
@@ -33,7 +34,8 @@ class EngineStartupPrefsTest {
 
     @Test(timeout = 10_000)
     fun contentHoldsNoAddressAndNoOtherValue() {
-        val c = EngineStartupPrefs.CONTENT
+        // etp21-1 spike K2: the one skip line is the only address; the rest is checked as before.
+        val c = EngineStartupPrefs.CONTENT.lines().filterNot { it.contains(EngineStartupPrefs.SKIP_URLS_PREF) }.joinToString("\n")
         for (word in listOf("http", "://", ".com", ".org", "portal-detection", "url", "domain", "true")) {
             assertFalse("content must not hold '$word'", c.contains(word, ignoreCase = true))
         }

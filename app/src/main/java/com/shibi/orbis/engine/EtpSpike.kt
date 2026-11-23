@@ -14,9 +14,10 @@ import org.mozilla.geckoview.GeckoPreferenceController
 internal object EtpSpike {
     const val TAG = "OrbisEtp"
 
-    /** K1 = K0 with the CONTENT class taken out of antiTracking (all tabs: the engine has one table). */
-    const val BUILD = "K1"
-    const val WHAT = "antiTracking=STRICT minus CONTENT in every tab; everything else as main; no skip list"
+    /** K2 = K0 plus one skipped address for the tracking-protection feature, set through the start-up file. */
+    const val BUILD = "K2"
+    const val WHAT = "antiTracking=STRICT as main; start-up file adds urlclassifier.trackingSkipURLs=" +
+        EngineStartupPrefs.SKIP_URLS
 
     val START_LINE = "etp21-1 spike build $BUILD: $WHAT"
 
