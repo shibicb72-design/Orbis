@@ -81,7 +81,7 @@ internal object EtpSpike {
                         inApp(line)
                     },
                     { e ->
-                        val line = "etp21-1 pref[$whenTag] $name read failed: ${e.javaClass.simpleName} build=$BUILD"
+                        val line = "etp21-1 pref[$whenTag] $name read failed: ${e?.javaClass?.simpleName} build=$BUILD"
                         Log.i(TAG, line)
                         inApp(line)
                     },
