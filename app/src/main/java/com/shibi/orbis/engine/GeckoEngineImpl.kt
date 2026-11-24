@@ -930,22 +930,27 @@ private class GeckoBrowserSession(
                         request.hasUserGesture && isWebUrl(request.uri) && host?.canOpenTab() == true
                     return GeckoResult.fromValue(if (allow) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
                 }
+                // The load that followed an app link's web fallback is the page's own navigation, not a direct one.
+                val fallbackLoad =
+                    isOwnFallbackLoad(pendingFallbackLoad, request.uri, request.hasUserGesture, request.isDirectNavigation)
+                if (fallbackLoad) pendingFallbackLoad = null
+                val direct = request.isDirectNavigation && !fallbackLoad
                 // A shared file must not send the tab to the web by itself (meta refresh); a tapped link still works,
                 // and so does the server redirect that follows it.
                 if (blocksImportAutoNavigation(
                         committedUrl = _state.value.url,
                         targetUrl = request.uri,
                         hasUserGesture = request.hasUserGesture,
-                        isDirectNavigation = request.isDirectNavigation,
+                        isDirectNavigation = direct,
                         redirectOfAllowedLoad = request.isRedirect && importLeaveAllowed,
                     )
                 ) {
                     debugLog.log("GeckoSession", "import auto-navigation blocked")
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
-                if ((request.hasUserGesture || request.isDirectNavigation) && isWebUrl(request.uri)) importLeaveAllowed = true
+                if ((request.hasUserGesture || direct) && isWebUrl(request.uri)) importLeaveAllowed = true
                 if (request.hasUserGesture && !request.isRedirect) lastGestureNavigationAt = SystemClock.elapsedRealtime()
-                onNavigationForAutoDesktop(request)
+                onNavigationForAutoDesktop(request, direct)
                 // Only the load loadExtensionPage started counts as Orbis's own; a page cannot set this flag.
                 val appExtensionLoad =
                     schemeOf(request.uri) == "moz-extension" && request.isDirectNavigation && pendingExtensionLoad
@@ -1181,6 +1186,12 @@ private class GeckoBrowserSession(
      */
     private var pendingExtensionLoad = false
 
+    /**
+     * The web address of a followed app-link fallback whose load request has not arrived yet. onLoadRequest consumes it
+     * and treats that load as the page's own navigation (not direct), so it grants nothing for the next one. Main thread.
+     */
+    private var pendingFallbackLoad: String? = null
+
     /** An "Open in app" question is on screen or queued for this tab. Main thread. */
     private var openInAppPending = false
 
@@ -1190,16 +1201,24 @@ private class GeckoBrowserSession(
         val sinceTap = lastGestureNavigationAt?.let { SystemClock.elapsedRealtime() - it }
         val tapAllowed = externalLaunchAllowed(request.hasUserGesture, request.isRedirect, sinceTap)
         // One question at a time: further requests while one is open are refused, so a page cannot queue a stream of them.
-        when (val step = planExternalRequest(tapAllowed, openInAppPending, request.uri)) {
+        when (val step = planExternalRequest(tapAllowed, openInAppPending, request.uri, _state.value.url)) {
             ExternalRequestStep.BlockedNoTap -> {
                 debugLog.log("GeckoSession", "external app link without a tap: blocked")
                 return deny
             }
-            // An intent: link's web fallback is only a web address: an ordinary load, no app is started.
+            // An imported document may not leave for the web by itself, not even through an app link's fallback.
+            ExternalRequestStep.BlockedImportLeave -> {
+                debugLog.log("GeckoSession", "external app link without a tap: blocked")
+                debugLog.log("GeckoSession", "import auto-navigation blocked")
+                return deny
+            }
+            // An intent: link's web fallback, which the page could have gone to itself: no app is started. The load is
+            // marked so that onLoadRequest treats it as the page's own navigation, not as a direct one.
             is ExternalRequestStep.FollowWebFallback -> {
                 debugLog.log("GeckoSession", "external app link without a tap: blocked")
                 debugLog.log("GeckoSession", "external app link without a tap: web fallback followed")
                 loadUrl(step.url)
+                pendingFallbackLoad = step.url
                 return deny
             }
             ExternalRequestStep.BlockedPending -> {
@@ -1567,13 +1586,13 @@ private class GeckoBrowserSession(
      * server redirect follows a request already counted; a load of the page's own URL is the retry's reload or another
      * reload, and settles nothing.
      */
-    private fun onNavigationForAutoDesktop(request: GeckoSession.NavigationDelegate.LoadRequest) {
+    private fun onNavigationForAutoDesktop(request: GeckoSession.NavigationDelegate.LoadRequest, direct: Boolean) {
         val retried = retryMobileHost ?: return
         val url = _state.value.url
         if (request.isRedirect || request.uri == url) return
         if (hostOfUrl(url)?.lowercase() != retried) return
         val policy = sitePolicy() ?: return
-        val byPage = !request.hasUserGesture && !request.isDirectNavigation
+        val byPage = !request.hasUserGesture && !direct
         val action = autoDesktop.onNavigation(retried, byPage)
         if (!byPage) retryMobileHost = null
         performAutoDesktop(action, url, policy)
@@ -1801,6 +1820,7 @@ private class GeckoBrowserSession(
 
     /** A navigation the user asked for replaces a lost page: no restore is left waiting for it. */
     private fun userNavigation() {
+        pendingFallbackLoad = null
         restoreWhenShown = false
         _state.update { it.afterNavigationRequested() }
     }

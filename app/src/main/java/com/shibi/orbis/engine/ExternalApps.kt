@@ -60,7 +60,10 @@ internal sealed interface ExternalRequestStep {
     /** No tap started it: no app is started, no question is asked. */
     data object BlockedNoTap : ExternalRequestStep
 
-    /** No tap, but the link is an intent: link whose web fallback is a plain http(s) address: load [url] here instead. */
+    /** No tap, an intent: link with a web fallback, but an imported document may not leave for the web by itself. */
+    data object BlockedImportLeave : ExternalRequestStep
+
+    /** No tap, but the link is an intent: link whose web fallback a page could have gone to itself: load [url] here. */
     data class FollowWebFallback(val url: String) : ExternalRequestStep
 
     /** A tapped link, but one question is already open: refused. */
@@ -73,16 +76,28 @@ internal sealed interface ExternalRequestStep {
 /**
  * A page may not start an app on its own, so a link with no [tapAllowed] never reaches [ExternalRequestStep.Proceed].
  * It may go to a web address though (one line of script does it), so an intent: link's `browser_fallback_url` is
- * followed when it is a plain http(s) address. An app's own scheme, an intent: link with no web fallback, and a
- * fallback that is not http(s) (another intent:, file:, javascript:, data:, content:, an app scheme, empty, malformed)
- * stay refused. A tapped link while [questionPending] is refused and its fallback is not followed.
+ * followed when it is a plain http(s) address AND the page could have gone there itself, with no tap, from the page
+ * shown now ([committedUrl]): the rules of a page-started top-level navigation apply to it ([blocksImportAutoNavigation]
+ * with no gesture, not direct, not a redirect; [topLevelLoadVerdict] must say WEB). An app's own scheme, an intent: link
+ * with no web fallback, and a fallback that is not http(s) (another intent:, file:, javascript:, data:, content:, an app
+ * scheme, empty, malformed) stay refused. A tapped link while [questionPending] is refused and its fallback is not
+ * followed.
  */
-internal fun planExternalRequest(tapAllowed: Boolean, questionPending: Boolean, uri: String): ExternalRequestStep =
+internal fun planExternalRequest(tapAllowed: Boolean, questionPending: Boolean, uri: String, committedUrl: String?): ExternalRequestStep =
     when {
-        !tapAllowed -> intentWebFallback(uri)?.let { ExternalRequestStep.FollowWebFallback(it) } ?: ExternalRequestStep.BlockedNoTap
+        !tapAllowed -> planNoTapLink(uri, committedUrl)
         questionPending -> ExternalRequestStep.BlockedPending
         else -> ExternalRequestStep.Proceed
     }
+
+private fun planNoTapLink(uri: String, committedUrl: String?): ExternalRequestStep {
+    val web = intentWebFallback(uri) ?: return ExternalRequestStep.BlockedNoTap
+    if (blocksImportAutoNavigation(committedUrl, web, hasUserGesture = false, isDirectNavigation = false, redirectOfAllowedLoad = false)) {
+        return ExternalRequestStep.BlockedImportLeave
+    }
+    if (topLevelLoadVerdict(web, committedUrl, appExtensionLoad = false) != LoadVerdict.WEB) return ExternalRequestStep.BlockedNoTap
+    return ExternalRequestStep.FollowWebFallback(web)
+}
 
 /** The http(s) `browser_fallback_url` of an intent: link, or null. */
 private fun intentWebFallback(uri: String): String? {
@@ -91,6 +106,14 @@ private fun intentWebFallback(uri: String): String? {
     val fallback = intent.getStringExtra("browser_fallback_url") ?: return null
     return externalUrlFrom(Intent.ACTION_VIEW, fallback)
 }
+
+/**
+ * True for the one load [externalSchemeRequest][com.shibi.orbis.engine.GeckoEngineImpl] started for a followed web
+ * fallback ([pending] is its address). Gecko reports that load as a direct navigation; it must not count as one (nor as a
+ * tap) for what comes next, because the page started it, not the user: the caller treats it as a page's own navigation.
+ */
+internal fun isOwnFallbackLoad(pending: String?, uri: String, hasUserGesture: Boolean, isDirectNavigation: Boolean): Boolean =
+    pending != null && isDirectNavigation && !hasUserGesture && uri.trimEnd('/') == pending.trimEnd('/')
 
 /** Data schemes an intent: link may never hand to another app: local files and content providers. */
 private val BLOCKED_INTENT_DATA_SCHEMES = setOf("file", "content")

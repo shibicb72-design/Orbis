@@ -10,12 +10,15 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = android.app.Application::class)
 class ExternalRequestStepTest {
+    private val PAGE = "https://example.com/page"
+    private val IMPORT = "file:///data/user/0/com.shibi.orbis/cache/imports/doc.html"
+
     private fun intentLink(fallback: String?, scheme: String = "orbistest"): String {
         val extra = fallback?.let { ";S.browser_fallback_url=" + java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") } ?: ""
         return "intent://open?x=1#Intent;scheme=$scheme$extra;end"
     }
 
-    private fun noTap(uri: String) = planExternalRequest(tapAllowed = false, questionPending = false, uri = uri)
+    private fun noTap(uri: String) = planExternalRequest(tapAllowed = false, questionPending = false, uri = uri, committedUrl = PAGE)
 
     @Test
     fun anIntentLinkWithAnHttpsFallbackLoadsTheFallbackWithoutATap() {
@@ -91,15 +94,15 @@ class ExternalRequestStepTest {
     fun aTappedLinkIsNeverTurnedIntoAFallbackHere() {
         // With a tap the link goes on to the app, the question and the fallback chain, as before.
         val link = intentLink("https://example.com/landing")
-        assertEquals(ExternalRequestStep.Proceed, planExternalRequest(tapAllowed = true, questionPending = false, uri = link))
-        assertEquals(ExternalRequestStep.Proceed, planExternalRequest(tapAllowed = true, questionPending = false, uri = "orbistest://open"))
+        assertEquals(ExternalRequestStep.Proceed, planExternalRequest(tapAllowed = true, questionPending = false, uri = link, committedUrl = PAGE))
+        assertEquals(ExternalRequestStep.Proceed, planExternalRequest(tapAllowed = true, questionPending = false, uri = "orbistest://open", committedUrl = PAGE))
     }
 
     @Test
     fun aTappedLinkWhileOneQuestionIsOpenIsRefusedAndItsFallbackIsNotFollowed() {
         val link = intentLink("https://example.com/landing")
-        assertEquals(ExternalRequestStep.BlockedPending, planExternalRequest(tapAllowed = true, questionPending = true, uri = link))
-        assertEquals(ExternalRequestStep.BlockedPending, planExternalRequest(tapAllowed = true, questionPending = true, uri = "tel:+1555"))
+        assertEquals(ExternalRequestStep.BlockedPending, planExternalRequest(tapAllowed = true, questionPending = true, uri = link, committedUrl = PAGE))
+        assertEquals(ExternalRequestStep.BlockedPending, planExternalRequest(tapAllowed = true, questionPending = true, uri = "tel:+1555", committedUrl = PAGE))
     }
 
     @Test
@@ -108,9 +111,9 @@ class ExternalRequestStepTest {
         val link = intentLink("https://example.com/landing")
         assertEquals(
             ExternalRequestStep.FollowWebFallback("https://example.com/landing"),
-            planExternalRequest(tapAllowed = false, questionPending = true, uri = link),
+            planExternalRequest(tapAllowed = false, questionPending = true, uri = link, committedUrl = PAGE),
         )
-        assertEquals(ExternalRequestStep.BlockedNoTap, planExternalRequest(tapAllowed = false, questionPending = true, uri = "tel:+1555"))
+        assertEquals(ExternalRequestStep.BlockedNoTap, planExternalRequest(tapAllowed = false, questionPending = true, uri = "tel:+1555", committedUrl = PAGE))
     }
 
     @Test
@@ -124,9 +127,79 @@ class ExternalRequestStepTest {
             "",
         ).forEach { uri ->
             listOf(false, true).forEach { pending ->
-                val step = planExternalRequest(tapAllowed = false, questionPending = pending, uri = uri)
+                val step = planExternalRequest(tapAllowed = false, questionPending = pending, uri = uri, committedUrl = PAGE)
                 assertEquals(uri, false, step == ExternalRequestStep.Proceed || step == ExternalRequestStep.BlockedPending)
             }
         }
+    }
+
+    @Test
+    fun anImportedDocumentCannotLeaveForTheWebThroughAnAppLinkFallback() {
+        val link = intentLink("https://example.com/landing")
+        assertEquals(
+            ExternalRequestStep.BlockedImportLeave,
+            planExternalRequest(tapAllowed = false, questionPending = false, uri = link, committedUrl = IMPORT),
+        )
+        assertEquals(
+            ExternalRequestStep.BlockedImportLeave,
+            planExternalRequest(tapAllowed = false, questionPending = true, uri = link, committedUrl = IMPORT),
+        )
+        // The same rule the page's own navigation meets.
+        assertEquals(true, blocksImportAutoNavigation(IMPORT, "https://example.com/landing", false, false, false))
+        // Nothing to follow: still the plain refusal.
+        assertEquals(
+            ExternalRequestStep.BlockedNoTap,
+            planExternalRequest(tapAllowed = false, questionPending = false, uri = intentLink(null), committedUrl = IMPORT),
+        )
+        assertEquals(
+            ExternalRequestStep.BlockedNoTap,
+            planExternalRequest(tapAllowed = false, questionPending = false, uri = "orbistest://open", committedUrl = IMPORT),
+        )
+    }
+
+    @Test
+    fun aWebPageOrABlankTabStillFollowsTheFallback() {
+        val link = intentLink("https://example.com/landing")
+        listOf(PAGE, null, "about:blank", "").forEach { committed ->
+            assertEquals(
+                committed,
+                ExternalRequestStep.FollowWebFallback("https://example.com/landing"),
+                planExternalRequest(tapAllowed = false, questionPending = false, uri = link, committedUrl = committed),
+            )
+        }
+    }
+
+    @Test
+    fun theLoadOfAFollowedFallbackIsNotADirectNavigation() {
+        val url = "https://example.com/landing"
+        // Gecko reports the load Orbis started as direct; it is the page's own navigation, so it is not.
+        assertEquals(true, isOwnFallbackLoad(url, url, hasUserGesture = false, isDirectNavigation = true))
+        // A trailing slash added by the engine is the same address.
+        assertEquals(true, isOwnFallbackLoad("https://example.com", "https://example.com/", false, true))
+        // Anything else is untouched: a typed address, a tap, a redirect that is not direct, nothing pending.
+        assertEquals(false, isOwnFallbackLoad(url, "https://other.example/", false, true))
+        assertEquals(false, isOwnFallbackLoad(url, url, hasUserGesture = true, isDirectNavigation = true))
+        assertEquals(false, isOwnFallbackLoad(url, url, hasUserGesture = false, isDirectNavigation = false))
+        assertEquals(false, isOwnFallbackLoad(null, url, hasUserGesture = false, isDirectNavigation = true))
+    }
+
+    @Test
+    fun afterAFollowedFallbackNothingNewIsGranted() {
+        val url = "https://example.com/landing"
+        val direct = !isOwnFallbackLoad(url, url, hasUserGesture = false, isDirectNavigation = true)
+        // The fallback load is not direct and has no tap: it does not set importLeaveAllowed or the tapped-navigation time
+        // (both need a gesture or a direct load), as for a page's own navigation.
+        assertEquals(false, direct)
+        // A second no-tap app link from the arrived page is refused as before.
+        assertEquals(false, externalLaunchAllowed(hasUserGesture = false, isRedirect = false, msSinceGestureNavigation = null))
+        assertEquals(
+            ExternalRequestStep.BlockedNoTap,
+            planExternalRequest(tapAllowed = false, questionPending = false, uri = "orbistest://open", committedUrl = url),
+        )
+        // A web navigation from an import context is still blocked (the fallback never granted a leave).
+        assertEquals(true, blocksImportAutoNavigation(IMPORT, "https://other.example/", false, direct, false))
+        // The user's own typed load of the same address in an import context is still a direct load.
+        val typed = !isOwnFallbackLoad(null, url, hasUserGesture = false, isDirectNavigation = true)
+        assertEquals(false, blocksImportAutoNavigation(IMPORT, url, false, typed, false))
     }
 }
