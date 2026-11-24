@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tabs_close_all" translatable="false">Close all tabs</string>
+    <plurals name="tabs_closed_all" translatable="false">
+        <item quantity="one">%1$d tab closed</item>
+        <item quantity="other">%1$d tabs closed</item>
+    </plurals>
+    <plurals name="tabs_many_warning" translatable="false">
+        <item quantity="one">%1$d tab is open. Orbis may use a lot of memory.</item>
+        <item quantity="other">%1$d tabs are open. Orbis may use a lot of memory.</item>
+    </plurals>
+    <string name="tabs_many_close" translatable="false">Close tabs</string>
+</resources>

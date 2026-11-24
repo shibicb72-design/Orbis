@@ -13,6 +13,7 @@ import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.runtime.rememberCoroutineScope
 import com.shibi.orbis.engine.PageCapture
 import androidx.compose.ui.graphics.asImageBitmap
@@ -99,6 +100,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalDensity
@@ -137,6 +139,7 @@ import com.shibi.orbis.engine.SitePrompt
 import com.shibi.orbis.engine.isWebUrl
 import com.shibi.orbis.engine.pickerMimeTypes
 import com.shibi.orbis.downloads.DownloadIntents
+import com.shibi.orbis.tabs.CLOSE_ALL_UNDO_MILLIS
 import com.shibi.orbis.tabs.PendingDownload
 import com.shibi.orbis.tabs.TabEvent
 import com.shibi.orbis.ui.OrbisEmptyState
@@ -354,6 +357,8 @@ private fun BrowserContent(
     val closedMessage = stringResource(R.string.tabs_closed_snackbar)
     val lockedTabTitle = stringResource(R.string.private_lock_card_title)
     val undoLabel = stringResource(R.string.undo)
+    val manyTabsAction = stringResource(R.string.tabs_many_close)
+    val resources = LocalResources.current
     // Tab previews: taken of the page shown when it finishes loading and when the tab list opens. Memory only.
     var contentView by remember { mutableStateOf<android.view.View?>(null) }
     val thumbnailMap by container.thumbnails.all.collectAsStateWithLifecycle()
@@ -1214,6 +1219,23 @@ private fun BrowserContent(
                 tabs.closeAllPrivate()
                 showTabs = false
             },
+            onCloseAllTabs = {
+                val closedCount = tabs.closeAllNormalUndoable()
+                if (closedCount > 0) {
+                    scope.launch {
+                        snackbars.currentSnackbarData?.dismiss()
+                        // Ten seconds, the length of the manager's Undo window (a standard duration would be shorter).
+                        val result = withTimeoutOrNull(CLOSE_ALL_UNDO_MILLIS) {
+                            snackbars.showSnackbar(
+                                resources.getQuantityString(R.plurals.tabs_closed_all, closedCount, closedCount),
+                                actionLabel = undoLabel,
+                                duration = SnackbarDuration.Indefinite,
+                            )
+                        }
+                        if (result == SnackbarResult.ActionPerformed) tabs.undoCloseAll()
+                    }
+                }
+            },
             onDismiss = { showTabs = false },
             privateLocked = privateLocked,
             onUnlockRequest = { id ->
@@ -1234,6 +1256,21 @@ private fun BrowserContent(
                 onCloseGroup = tabs::closeGroup,
             ),
         )
+    }
+
+    // The tab count reached 51, 101, 151 ...: say so, and offer the tab switcher to close some.
+    LaunchedEffect(tabs) {
+        tabs.manyTabsWarnings.collect { count ->
+            scope.launch {
+                snackbars.currentSnackbarData?.dismiss()
+                val result = snackbars.showSnackbar(
+                    resources.getQuantityString(R.plurals.tabs_many_warning, count, count),
+                    actionLabel = manyTabsAction,
+                    duration = SnackbarDuration.Long,
+                )
+                if (result == SnackbarResult.ActionPerformed) showTabs = true
+            }
+        }
     }
 
     LaunchedEffect(sheetReturnFocus, showTabs) {
