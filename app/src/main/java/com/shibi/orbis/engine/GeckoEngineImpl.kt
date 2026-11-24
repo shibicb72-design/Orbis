@@ -1182,14 +1182,25 @@ private class GeckoBrowserSession(
         val deny = GeckoResult.fromValue(AllowOrDeny.DENY)
         // A page cannot start an app on its own: a tap, or a redirect of a navigation tapped moments ago, is needed.
         val sinceTap = lastGestureNavigationAt?.let { SystemClock.elapsedRealtime() - it }
-        if (!externalLaunchAllowed(request.hasUserGesture, request.isRedirect, sinceTap)) {
-            debugLog.log("GeckoSession", "external app link without a tap: blocked")
-            return deny
-        }
+        val tapAllowed = externalLaunchAllowed(request.hasUserGesture, request.isRedirect, sinceTap)
         // One question at a time: further requests while one is open are refused, so a page cannot queue a stream of them.
-        if (openInAppPending) {
-            debugLog.log("GeckoSession", "external app link while one is pending: blocked")
-            return deny
+        when (val step = planExternalRequest(tapAllowed, openInAppPending, request.uri)) {
+            ExternalRequestStep.BlockedNoTap -> {
+                debugLog.log("GeckoSession", "external app link without a tap: blocked")
+                return deny
+            }
+            // An intent: link's web fallback is only a web address: an ordinary load, no app is started.
+            is ExternalRequestStep.FollowWebFallback -> {
+                debugLog.log("GeckoSession", "external app link without a tap: blocked")
+                debugLog.log("GeckoSession", "external app link without a tap: web fallback followed")
+                loadUrl(step.url)
+                return deny
+            }
+            ExternalRequestStep.BlockedPending -> {
+                debugLog.log("GeckoSession", "external app link while one is pending: blocked")
+                return deny
+            }
+            ExternalRequestStep.Proceed -> Unit
         }
         // A magnet for Orbis's own downloader: the confirm sheet asks; the page stays where it is.
         if (schemeOf(request.uri) == "magnet" && sitePolicy()?.magnetsToOrbis() == true &&
