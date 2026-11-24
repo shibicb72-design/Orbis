@@ -26,8 +26,22 @@ class CompatMessageTest {
     }
 
     @Test
+    fun cleanCarriesOnlyEmptyOrNotEmpty_anythingElseIsDropped() {
+        fun clean(page: Any?) = parseCompatMessage(JSONObject().put("type", "clean").also { if (page != null) it.put("page", page) })
+        assertEquals(CompatMessage.Clean(empty = true), clean("empty"))
+        assertEquals(CompatMessage.Clean(empty = false), clean("not-empty"))
+        assertNull(clean(null))
+        assertNull(clean(""))
+        assertNull(clean("EMPTY"))
+        assertNull(clean("empty "))
+        assertNull(clean("maybe"))
+        assertNull(clean(true))
+        assertNull(clean(1))
+        assertNull(clean(JSONObject().put("page", "empty")))
+    }
+
+    @Test
     fun cleanAndUnknownMessages() {
-        assertEquals(CompatMessage.Clean, parseCompatMessage(JSONObject().put("type", "clean")))
         assertNull(parseCompatMessage(JSONObject().put("type", "probe")))
         assertEquals(
             CompatMessage.Sample(PageSample(title = "", headlines = emptyList(), visibleText = "", blockPath = false)),

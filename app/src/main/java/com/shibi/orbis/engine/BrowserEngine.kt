@@ -415,6 +415,11 @@ interface BrowserSession {
      * notice. Not replayed: only a collector that is listening sees it. Test doubles never emit.
      */
     val autoDesktopKept: Flow<Unit> get() = emptyFlow()
+    /**
+     * One event each time a page of a site kept as desktop stayed empty, worked as mobile, and the site went back to
+     * mobile; the UI shows a one-line notice. Not replayed. Test doubles never emit.
+     */
+    val autoDesktopDropped: Flow<Unit> get() = emptyFlow()
     /** Callbacks that need the tab layer. Set by whoever owns the session (the tab manager). */
     var host: SessionHost?
     /** Puts this session in [contentView], releasing whatever the view held first. No-op if it already holds it. */
@@ -528,6 +533,10 @@ interface SitePolicy {
     fun rememberAutoDesktop(url: String, isPrivate: Boolean) {}
     /** The retry did not help: Desktop site off for the site, and no retry there again. */
     fun declineAutoDesktop(url: String, isPrivate: Boolean) {}
+    /** Desktop site is on for the site because auto desktop kept it (the site sheet's note). */
+    fun isAutoDesktop(url: String, isPrivate: Boolean): Boolean = false
+    /** A page of an auto-desktop site stayed empty and worked as mobile: the automatic choice goes, not marked declined. */
+    fun forgetAutoDesktop(url: String, isPrivate: Boolean) {}
 }
 
 /** The translator's view of a page. Language tags are BCP 47 ("en", "fr", "zh-Hans"); empty when unknown. */

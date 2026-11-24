@@ -746,6 +746,11 @@ private class GeckoBrowserSession(
     private val autoDesktop = AutoDesktopRetry()
     private val _autoDesktopKept = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val autoDesktopKept: SharedFlow<Unit> = _autoDesktopKept.asSharedFlow()
+    private val _autoDesktopDropped = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val autoDesktopDropped: SharedFlow<Unit> = _autoDesktopDropped.asSharedFlow()
+
+    /** Host (lowercase) of a pending mobile retry of an empty page: mobile for this tab only until kept or restored. */
+    private var retryMobileHost: String? = null
 
     private val queue = PromptQueue()
     override val prompts: StateFlow<SitePrompt?> = queue.head
@@ -940,6 +945,7 @@ private class GeckoBrowserSession(
                 }
                 if ((request.hasUserGesture || request.isDirectNavigation) && isWebUrl(request.uri)) importLeaveAllowed = true
                 if (request.hasUserGesture && !request.isRedirect) lastGestureNavigationAt = SystemClock.elapsedRealtime()
+                onNavigationForAutoDesktop(request)
                 // Only the load loadExtensionPage started counts as Orbis's own; a page cannot set this flag.
                 val appExtensionLoad =
                     schemeOf(request.uri) == "moz-extension" && request.isDirectNavigation && pendingExtensionLoad
@@ -1523,7 +1529,19 @@ private class GeckoBrowserSession(
         val retrying = retryDesktopHost == host
         val action =
             when (message) {
-                CompatMessage.Clean -> autoDesktop.onCleanPage(host)
+                is CompatMessage.Clean ->
+                    if (!message.empty) {
+                        autoDesktop.onCleanPage(host)
+                    } else {
+                        // Not blocked, so a pending desktop retry is kept first; then the empty page, with desktop
+                        // counted as automatic only when the site policy is the automatic choice and nothing else.
+                        if (retrying) performAutoDesktop(autoDesktop.onCleanPage(host), url, policy)
+                        val desktop = _state.value.desktopMode
+                        val byAuto =
+                            desktop && retryDesktopHost == null && !policy.alwaysDesktopOn() &&
+                                policy.desktopFor(url, isPrivate) && policy.isAutoDesktop(url, isPrivate)
+                        autoDesktop.onEmptyPage(host, desktop, byAuto)
+                    }
                 is CompatMessage.Sample -> {
                     // Desktop already on and not by our retry (Always desktop, the user's choice): nothing to detect.
                     if (_state.value.desktopMode && !retrying) return
@@ -1540,6 +1558,29 @@ private class GeckoBrowserSession(
                     }
                 }
             }
+        performAutoDesktop(action, url, policy)
+    }
+
+    /**
+     * A top-level load request while a mobile retry is pending for the page shown. Started by the page itself (no user
+     * gesture, not a load the app started) -> the retried page has content (see AutoDesktopRetry.onNavigation). A
+     * server redirect follows a request already counted; a load of the page's own URL is the retry's reload or another
+     * reload, and settles nothing.
+     */
+    private fun onNavigationForAutoDesktop(request: GeckoSession.NavigationDelegate.LoadRequest) {
+        val retried = retryMobileHost ?: return
+        val url = _state.value.url
+        if (request.isRedirect || request.uri == url) return
+        if (hostOfUrl(url)?.lowercase() != retried) return
+        val policy = sitePolicy() ?: return
+        val byPage = !request.hasUserGesture && !request.isDirectNavigation
+        val action = autoDesktop.onNavigation(retried, byPage)
+        if (!byPage) retryMobileHost = null
+        performAutoDesktop(action, url, policy)
+    }
+
+    private fun performAutoDesktop(action: Action, url: String, policy: SitePolicy) {
+        val host = hostOfUrl(url)?.lowercase() ?: return
         // No URL or host in the log: it would record browsing history.
         when (action) {
             Action.Retry -> {
@@ -1561,6 +1602,25 @@ private class GeckoBrowserSession(
                 debugLog.log("GeckoSession", "auto desktop: reverted")
                 session.reload()
             }
+            Action.RetryMobile -> {
+                retryMobileHost = host
+                applyDesktop(false)
+                debugLog.log("GeckoSession", "auto desktop: empty page, mobile retry")
+                session.reload()
+            }
+            Action.KeepMobile -> {
+                retryMobileHost = null
+                policy.forgetAutoDesktop(url, isPrivate)
+                debugLog.log("GeckoSession", "auto desktop: mobile kept")
+                _autoDesktopDropped.tryEmit(Unit)
+            }
+            Action.RestoreDesktop -> {
+                // The stored automatic choice was never changed: desktop for the host again, without a notice.
+                retryMobileHost = null
+                applyDesktop(true)
+                debugLog.log("GeckoSession", "auto desktop: desktop restored")
+                session.reload()
+            }
             Action.None -> Unit
         }
     }
@@ -1573,6 +1633,7 @@ private class GeckoBrowserSession(
         if (!isWebUrl(url)) return null
         val host = hostOfUrl(url)?.lowercase()
         if (host != null && host == retryDesktopHost) return true
+        if (host != null && host == retryMobileHost) return false
         return sitePolicy()?.desktopFor(url, isPrivate)
     }
 
@@ -1587,6 +1648,7 @@ private class GeckoBrowserSession(
             committedHost?.let { autoDesktop.onLeft(it) }
             committedHost = host
             if (retryDesktopHost != null && retryDesktopHost != host) retryDesktopHost = null
+            if (retryMobileHost != null && retryMobileHost != host) retryMobileHost = null
         }
         val reloaded = desktopReloadPending
         desktopReloadPending = false
@@ -2635,8 +2697,9 @@ private class GeckoBrowserSession(
         if (closed || _state.value.desktopMode == enabled) return
         // The user decided: a pending retry for this page's site ends here (both menus store the choice first).
         hostOfUrl(_state.value.url)?.lowercase()?.let { host ->
-            if (host == retryDesktopHost) {
+            if (host == retryDesktopHost || host == retryMobileHost) {
                 retryDesktopHost = null
+                retryMobileHost = null
                 autoDesktop.onLeft(host)
             }
         }

@@ -468,7 +468,22 @@ class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
         }
     }
 
-    fun isAutoDesktop(url: String, isPrivate: Boolean): Boolean {
+    /**
+     * A page of a site auto desktop kept stayed empty and worked as mobile: the site goes back to the default (mobile)
+     * and is no longer automatic. Not declined: a blocked page there may still be retried in another tab.
+     */
+    override fun forgetAutoDesktop(url: String, isPrivate: Boolean) {
+        val host = siteKey(url) ?: return
+        desktopChoice.set(url, false, isPrivate)
+        if (isPrivate) {
+            privateDesktopAuto -= host
+        } else {
+            desktopAuto = desktopAuto - host
+            prefs.desktopAuto = desktopAuto
+        }
+    }
+
+    override fun isAutoDesktop(url: String, isPrivate: Boolean): Boolean {
         val host = siteKey(url) ?: return false
         if (isPrivate) {
             if (host in privateDesktopAuto) return true
