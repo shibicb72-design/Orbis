@@ -108,6 +108,7 @@ class OrbisApp : Application() {
     val startedActivities =
         StartedActivities { foreground ->
             container.tabs.setForeground(foreground)
+            container.memorySampler?.onForeground(foreground)
             if (foreground) {
                 downloadForeground?.onAppForeground()
                 torrentForeground?.onAppForeground()
@@ -499,6 +500,22 @@ class OrbisApp : Application() {
             com.shibi.orbis.stats.PrivacyStats(File(filesDir, "privacy_stats.json"), appScope, Dispatchers.IO, log = { debugLog.log("Stats", it) })
         stats.load()
         container.privacyStats = stats
+        // Dashboard memory: Orbis's own processes measured when the dashboard opens and every 15 minutes in front, never
+        // in the background. The history holds numbers only, in its own file beside the statistics, on this phone.
+        val memoryHistory = com.shibi.orbis.stats.MemoryHistory(File(filesDir, "memory_history.json"), appScope, Dispatchers.IO, log = { debugLog.log("Memory", it) })
+        memoryHistory.load()
+        val memoryReader = com.shibi.orbis.stats.MemoryReader.forApp(this)
+        container.memoryHistory = memoryHistory
+        container.memorySampler =
+            com.shibi.orbis.stats.MemorySampler(
+                read = memoryReader::read,
+                tabCounts = { container.tabs.normalTabCounts() },
+                history = memoryHistory,
+                scope = appScope,
+                io = Dispatchers.IO,
+                threadCpuMillis = android.os.SystemClock::currentThreadTimeMillis,
+                log = { debugLog.log("Memory", it) },
+            ).also { if (!startedActivities.noneStarted) it.onForeground(true) }
         container.youtubeAdSavings = youtubeAds
         container.torrents = torrents
         container.torrentSettings = torrentSettings
@@ -558,6 +575,10 @@ class AppContainer(
     val thumbnails: com.shibi.orbis.tabs.TabThumbnails = com.shibi.orbis.tabs.TabThumbnails(),
     /** What Orbis blocked and the data it used (the start page dashboard); set by the app after creation. */
     var privacyStats: com.shibi.orbis.stats.PrivacyStats? = null,
+    /** The dashboard's memory history (numbers only, on this phone); set by the app after creation. */
+    var memoryHistory: com.shibi.orbis.stats.MemoryHistory? = null,
+    /** Measures Orbis's memory for the dashboard, in front only; set by the app after creation. */
+    var memorySampler: com.shibi.orbis.stats.MemorySampler? = null,
     /** Estimated time saved from blocked YouTube ads; set by the app after creation. Cleared with browsing history. */
     var youtubeAdSavings: com.shibi.orbis.youtube.YoutubeAdSavings? = null,
     /** Torrent downloads; set by the app after creation. */
