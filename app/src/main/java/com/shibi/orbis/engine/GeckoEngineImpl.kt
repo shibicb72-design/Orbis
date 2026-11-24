@@ -241,6 +241,9 @@ class GeckoEngineImpl(
             if (cb.antiTrackingCategories != classes) cb.setAntiTracking(classes)
         }.onFailure { debugLog.log("GeckoEngine", "antiTracking change failed: ${it.javaClass.simpleName}") }
         debugLog.log("GeckoEngine", "antiTracking=${antiTrackingLogName(on)}")
+        // etp21-2 measurement build only: the change and the tracking prefs as the engine now has them.
+        android.util.Log.i(EtpSpike.TAG, "etp21-2 antiTracking=${antiTrackingLogName(on)} build=${EtpSpike.BUILD}")
+        EtpSpike.readBack("after-change") { debugLog.log("GeckoEngine", it) }
     }
 
     override fun setWebsiteColorScheme(dark: Boolean?) {
@@ -402,6 +405,10 @@ class GeckoEngineImpl(
             // Older builds denied location silently and Gecko stored every such answer for good.
             reconciler.runNow()
             logConnectivityProbeState()
+            // etp21-1 spike only: which build this is, and the tracking prefs as the engine has them.
+            debugLog.log("GeckoEngine", EtpSpike.START_LINE)
+            android.util.Log.i(EtpSpike.TAG, EtpSpike.START_LINE)
+            EtpSpike.readBack("start") { debugLog.log("GeckoEngine", it) }
         }
     }
 
@@ -829,7 +836,14 @@ private class GeckoBrowserSession(
             }
         session.contentBlockingDelegate =
             object : ContentBlocking.Delegate {
+                override fun onContentLoaded(session: GeckoSession, event: ContentBlocking.BlockEvent) {
+                    // etp21-1 spike only: a classified request that was let through (annotated, or skipped).
+                    EtpSpike.logEvent("loaded", event, isPrivate)
+                }
+
                 override fun onContentBlocked(session: GeckoSession, event: ContentBlocking.BlockEvent) {
+                    // etp21-1 spike only: every event with its raw classes.
+                    EtpSpike.logEvent(if (event.isBlocking) "blocked" else "not-blocking", event, isPrivate)
                     if (!event.isBlocking) return
                     val uri = event.uri
                     if (!isPrivate && mightReportYoutubeAd(_state.value.url, uri)) {
