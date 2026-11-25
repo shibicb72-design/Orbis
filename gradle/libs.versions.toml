@@ -19,10 +19,10 @@ robolectricAndroidAllSdk31 = "12-robolectric-7732740-i7"
 robolectricAndroidAllSdk33 = "13-robolectric-9030017-i7"
 robolectricAndroidAllSdk35 = "15-robolectric-13954326-i7"
 appcompat = "1.8.0"
-# Matching stable pair from maven.mozilla.org (2026-11-18):
-# browser-engine-gecko 160.0.1 -> geckoview-omni 160.0.20261116130455
-mozillaAc = "160.0.1"
-geckoview = "160.0.20261116130455"
+# Matching stable pair from maven.mozilla.org (2026-11-25):
+# browser-engine-gecko 161.0 -> geckoview-omni 161.0.20261118180411
+mozillaAc = "161.0"
+geckoview = "161.0.20261118180411"
 # QR scanner: CameraX (Google Maven) and ZXing core (Maven Central), latest stable on 2026-11-08.
 camerax = "1.6.2"
 # Custom Tabs service and intent helpers (Google Maven), latest stable on 2026-11-09.
