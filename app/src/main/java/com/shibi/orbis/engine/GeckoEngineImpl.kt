@@ -224,6 +224,25 @@ class GeckoEngineImpl(
         debugLog.log("GeckoEngine", "secure dns on=${url != null}")
     }
 
+    // Matches the setting's default (off) before the setting flow delivers.
+    @Volatile private var blockContentTrackers = false
+
+    override fun setContentTrackerBlocking(on: Boolean) {
+        blockContentTrackers = on
+        runtime?.let(::applyAntiTracking)
+    }
+
+    /** The running engine takes a new class set for the pages loaded after it (Mozilla's own Android code does the same). */
+    private fun applyAntiTracking(rt: GeckoRuntime) {
+        val on = blockContentTrackers
+        val classes = antiTrackingClasses(on)
+        runCatching {
+            val cb = rt.settings.contentBlocking
+            if (cb.antiTrackingCategories != classes) cb.setAntiTracking(classes)
+        }.onFailure { debugLog.log("GeckoEngine", "antiTracking change failed: ${it.javaClass.simpleName}") }
+        debugLog.log("GeckoEngine", "antiTracking=${antiTrackingLogName(on)}")
+    }
+
     override fun setWebsiteColorScheme(dark: Boolean?) {
         websiteDark = dark
         runtime?.let(::applyPagePrefs)
@@ -292,9 +311,10 @@ class GeckoEngineImpl(
                 ).start()
             }
             // Built via ContentBlocking.Settings.Builder: setEnhancedTrackingProtectionLevel alone only sets ETP prefs.
+            val blockContent = blockContentTrackers
             val contentBlocking =
                 ContentBlocking.Settings.Builder()
-                    .antiTracking(ContentBlocking.AntiTracking.STRICT)
+                    .antiTracking(antiTrackingClasses(blockContent))
                     .safeBrowsing(ContentBlocking.SafeBrowsing.DEFAULT)
                     .cookieBehavior(ContentBlocking.CookieBehavior.ACCEPT_FIRST_PARTY_AND_ISOLATE_OTHERS)
                     .cookieBehaviorPrivateMode(ContentBlocking.CookieBehavior.ACCEPT_FIRST_PARTY_AND_ISOLATE_OTHERS)
@@ -375,8 +395,10 @@ class GeckoEngineImpl(
             extensionHost.refreshActions()
             debugLog.log(
                 "GeckoEngine",
-                "runtime created; ETP level=STRICT category=STRICT antiTracking=STRICT cookies=isolate-others",
+                "runtime created; ETP level=STRICT category=STRICT antiTracking=${antiTrackingLogName(blockContent)} cookies=isolate-others",
             )
+            // The setting may have changed while the runtime was being created.
+            if (blockContentTrackers != blockContent) applyAntiTracking(created)
             // Older builds denied location silently and Gecko stored every such answer for good.
             reconciler.runNow()
             logConnectivityProbeState()
@@ -3932,6 +3954,21 @@ internal const val CLEAR_EXIT_NATIVE_APP = "orbisClearExit"
 /** The built-in Force dark extension (assets/extensions/darken). */
 internal const val DARKEN_ID = "darken@orbis.shibi.com"
 internal const val DARKEN_ASSET_URL = "resource://android/assets/extensions/darken/"
+
+/**
+ * The tracker classes Orbis blocks by default: the engine's STRICT set without "content" (scripts, fonts and video
+ * players that large companies host for other sites, which Firefox for Android never blocks). Written as "STRICT
+ * without CONTENT" so that a class an engine update adds to STRICT is blocked too.
+ */
+private const val STRICT_WITHOUT_CONTENT = ContentBlocking.AntiTracking.STRICT and ContentBlocking.AntiTracking.CONTENT.inv()
+
+/** The anti-tracking classes for Settings > Also block content trackers: on is exactly the engine's STRICT. */
+internal fun antiTrackingClasses(blockContentTrackers: Boolean): Int =
+    if (blockContentTrackers) ContentBlocking.AntiTracking.STRICT else STRICT_WITHOUT_CONTENT
+
+/** The name of [antiTrackingClasses] in the start-up log line. */
+internal fun antiTrackingLogName(blockContentTrackers: Boolean): String =
+    if (blockContentTrackers) "STRICT" else "STRICT-minus-content"
 
 /** What a Gecko block event counts as on the dashboard; null for one that is not counted (safe browsing, unknown). */
 internal fun blockKindOf(antiTracking: Int, cookieBehavior: Int): com.shibi.orbis.stats.BlockKind? {
