@@ -78,6 +78,10 @@ submodule's `version.hpp` defines `LIBTORRENT_VERSION "2.1.0.0"`, which matches.
 - libtorrent itself has newer tags (`v2.1.1`, `v2.1.2`). Moving to them was PR 7b (OD-4 approved). It is stopped:
   the libtorrent4j 2.1.0-39 bindings do not fit libtorrent 2.1.2 without a libtorrent4j fork. See "libtorrent
   2.1.2 (PR 7b): stopped" below. The build pipeline changes OpenSSL only.
+- `v2.1.3` (2026-11-23, tag `87b77c0`) is newer still. Its changelog names memory-safety fixes, among them a use-after-free reading a UPnP
+  response, a signed overflow validating a peer request and a limit on the allowed-fast set received from a peer. None of them is assessed
+  for reachability in Orbis. The owner accepted this gap for release 0.8.4 on 2026-11-25
+  (`scripts/engine-currency-accepted.env`); the libtorrent update is its own job.
 
 ## What the OpenSSL update fixes, plainly
 
