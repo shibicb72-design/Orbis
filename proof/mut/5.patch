@@ -1,0 +1,13 @@
+diff --git a/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt b/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
+index a2a6da9..1f7ee5d 100644
+--- a/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
++++ b/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
+@@ -143,7 +143,7 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
+     private fun endReplaced(nowMs: Long) {
+         if (!open) return
+         val ms = nowMs - startedAt
+-        finish(if (committed) LoadEnd(committedKind(), ms, ended = LoadEnded.NO) else LoadEnd(LoadKind.UNFINISHED, ms))
++        finish(if (committed) LoadEnd(committedKind(), ms, ended = LoadEnded.YES) else LoadEnd(LoadKind.UNFINISHED, ms))
+     }
+ 
+     private fun committedKind(): LoadKind = if (redirected) LoadKind.REDIRECTED else LoadKind.COMMITTED

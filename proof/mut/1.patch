@@ -1,0 +1,13 @@
+diff --git a/app/src/main/java/com/shibi/orbis/diag/OutcomeLines.kt b/app/src/main/java/com/shibi/orbis/diag/OutcomeLines.kt
+index b9a5e73..943447f 100644
+--- a/app/src/main/java/com/shibi/orbis/diag/OutcomeLines.kt
++++ b/app/src/main/java/com/shibi/orbis/diag/OutcomeLines.kt
+@@ -88,7 +88,7 @@ object OutcomeLines {
+         "load: ${kind.text} tab=${tabNumber(isPrivate, tab)} ms=$ms" + if (ended == LoadEnded.YES) "" else " ended=${ended.text}"
+ 
+     /** `page empty: tab=<n> blocked=<k>`; ` blocked=` is left out when [blocked] is negative (the engine gave no count). */
+-    fun pageEmpty(isPrivate: Boolean, tab: Long, blocked: Int): String =
++    fun pageEmpty(isPrivate: Boolean, tab: Long, blocked: Int, note: String = ""): String =
+         "page empty: tab=${tabNumber(isPrivate, tab)}" + if (blocked >= 0) " blocked=$blocked" else ""
+ 
+     /** `load: error-<category> tab=<n> ms=<t>`. */

@@ -1,0 +1,13 @@
+diff --git a/app/src/main/java/com/shibi/orbis/diag/OutcomeLines.kt b/app/src/main/java/com/shibi/orbis/diag/OutcomeLines.kt
+index b9a5e73..bacba3a 100644
+--- a/app/src/main/java/com/shibi/orbis/diag/OutcomeLines.kt
++++ b/app/src/main/java/com/shibi/orbis/diag/OutcomeLines.kt
+@@ -78,7 +78,7 @@ enum class DesktopWhy(val text: String) {
+  */
+ object OutcomeLines {
+     /** The number a line shows for a tab: its own id, or 0 for a private tab. */
+-    fun tabNumber(isPrivate: Boolean, tab: Long): Long = if (isPrivate) 0L else tab
++    fun tabNumber(isPrivate: Boolean, tab: Long): Long = tab
+ 
+     /**
+      * `load: <kind> tab=<n> ms=<t>`. [ended] adds ` ended=no` or ` ended=stopped` for a page that committed but did not

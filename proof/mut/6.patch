@@ -1,0 +1,13 @@
+diff --git a/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt b/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
+index a2a6da9..913441d 100644
+--- a/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
++++ b/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
+@@ -119,7 +119,7 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
+      * A pop-up opened from this tab's page: its number since the tab's last committed load, this one included, for the
+      * first [POPUP_LINES_PER_PAGE]; null after that (the count still rises, so no line is written for a pop-up flood).
+      */
+-    fun nextPopupLine(): Int? = if (++popups <= POPUP_LINES_PER_PAGE) popups else null
++    fun nextPopupLine(): Int? = ++popups
+ 
+     private fun endNow(kind: LoadKind, nowMs: Long) {
+         if (dead) return

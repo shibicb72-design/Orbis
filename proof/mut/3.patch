@@ -1,0 +1,12 @@
+diff --git a/app/src/main/java/com/shibi/orbis/engine/GeckoEngineImpl.kt b/app/src/main/java/com/shibi/orbis/engine/GeckoEngineImpl.kt
+index e3574f8..6e84a1d 100644
+--- a/app/src/main/java/com/shibi/orbis/engine/GeckoEngineImpl.kt
++++ b/app/src/main/java/com/shibi/orbis/engine/GeckoEngineImpl.kt
+@@ -894,6 +894,7 @@ private class GeckoBrowserSession(
+     private fun logPageEmpty(): Unit =
+         logOutcome(OutcomeLines.pageEmpty(isPrivate, tabNumberForLog(), pageBlocks.snapshot(_state.value.url).values.sum()))
+ 
++    // popup session created
+     private fun logPopup(result: PopupResult, child: Long) {
+         val count = loadOutcome.nextPopupLine() ?: return
+         logOutcome(OutcomeLines.popup(result, isPrivate, tabNumberForLog(), child, count))

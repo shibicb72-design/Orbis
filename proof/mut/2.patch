@@ -1,0 +1,11 @@
+diff --git a/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt b/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
+index a2a6da9..3853f82 100644
+--- a/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
++++ b/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
+@@ -151,5 +151,6 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
+     private fun finish(end: LoadEnd) {
+         open = false
+         emit(end)
++        emit(end)
+     }
+ }
