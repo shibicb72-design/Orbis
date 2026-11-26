@@ -148,11 +148,11 @@ jobs:
       # (app/debug.keystore), the same key as a local r8check build; no keystore added, no signingConfigs change. So the
       # release smoke finds it ready when main turns green. A separate Gradle call: the build type has its own R8 run.
       - name: Build the r8check APK (main and manual runs only)
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ github.event_name != 'never' }}
         run: ./gradlew assembleR8check --stacktrace
 
       - name: Pick the r8check APK and hash its contents
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ github.event_name != 'never' }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -173,7 +173,7 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload r8check APK
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ github.event_name != 'never' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: r8check-apk-x86_64
@@ -183,7 +183,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload r8check content hashes
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ github.event_name != 'never' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: r8check-hashes
