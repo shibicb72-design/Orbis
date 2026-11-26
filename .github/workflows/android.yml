@@ -56,6 +56,18 @@ jobs:
         run: |
           python3 -I scripts/test_check_torrent_natives.py
           python3 -I scripts/test_compare_torrent_natives.py
+      - name: Extension version check script tests (offline)
+        run: python3 -I scripts/test_check_extension_versions.py
+
+      # L20: an extension whose files changed without a new manifest.json version never reaches phones that have it
+      # installed. The checkout is a merge commit of the PR into main; the base commit is fetched alone (depth 1).
+      # Skipped on a push to main: the pull request already ran it.
+      - name: Extension versions raised where files changed
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          python3 -I scripts/check_extension_versions.py --base "${{ github.event.pull_request.base.sha }}"
+
       - name: Assemble debug APK, unit tests, lint, and shrink a release APK
         run: |
           chmod +x gradlew
