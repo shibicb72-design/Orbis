@@ -394,6 +394,10 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth().padding(16.dp),
                     )
                 }
+                if (site != null) {
+                    ContentTrackersRow(site)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                }
                 if (dohFlow != null) {
                     val doh by dohFlow.collectAsStateWithLifecycle()
                     SettingsItem(
@@ -548,6 +552,18 @@ private fun httpsOnlyLabel(m: HttpsOnlyMode): Int =
         HttpsOnlyMode.PRIVATE -> R.string.https_only_private
         HttpsOnlyMode.ALL -> R.string.https_only_all
     }
+
+/** "Also block content trackers": a switch row that toggles anywhere on the row. Off by default. */
+@Composable
+internal fun ContentTrackersRow(site: BrowserSettings) {
+    val on by site.blockContentTrackers.collectAsStateWithLifecycle()
+    SettingsItem(
+        headlineContent = { Text(stringResource(R.string.content_trackers_title)) },
+        supportingContent = { Text(stringResource(R.string.content_trackers_summary)) },
+        trailingContent = { Switch(checked = on, onCheckedChange = null) },
+        modifier = Modifier.fillMaxWidth().toggleable(value = on, role = Role.Switch, onValueChange = site::setBlockContentTrackers),
+    )
+}
 
 /** A single-choice dialog of radio rows. */
 @Composable

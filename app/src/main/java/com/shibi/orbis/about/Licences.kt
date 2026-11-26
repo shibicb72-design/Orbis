@@ -51,7 +51,7 @@ class LicenceEntry(
 object Licences {
     const val LIBTORRENT4J_VERSION = "2.1.0-39"
     const val OPENSSL_VERSION = "3.5.9"
-    const val ANDROID_COMPONENTS_VERSION = "160.0.1"
+    const val ANDROID_COMPONENTS_VERSION = "161.0"
     const val ZXING_VERSION = "3.5.4"
 
     const val LIBDATACHANNEL_COMMIT = "a4d3211da33bc1114ae50d2dd12f4186b67aaba4"

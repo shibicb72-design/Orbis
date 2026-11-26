@@ -410,6 +410,7 @@ class BackupManager(
                     "theme_id" to Setting({ b.themeId.value }) { b.setThemeId(it as String); true },
                     "dark_websites" to bool({ b.darkWebsites.value }, b::setDarkWebsites),
                     "force_dark" to bool({ b.forceDark.value }, b::setForceDark),
+                    "block_content_trackers" to bool({ b.blockContentTrackers.value }, b::setBlockContentTrackers),
                     "homepage" to Setting({ b.homepage.value ?: NoValue }) { b.setHomepage(if (it == NoValue) null else it as String) },
                     "search_suggestions" to bool({ b.searchSuggestions.value }, b::setSearchSuggestions),
                     "text_zoom_percent" to int({ b.textZoomPercent.value }, b::setTextZoomPercent),

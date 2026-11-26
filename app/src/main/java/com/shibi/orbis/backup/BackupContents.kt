@@ -311,6 +311,7 @@ object SettingsAllowList {
                     "theme_id" to SettingType.Text { id -> id.takeIf { it.isNotEmpty() && it.length <= 64 && it.all { c -> c in 'a'..'z' || c in '0'..'9' || c == '_' } } },
                     "dark_websites" to SettingType.Bool,
                     "force_dark" to SettingType.Bool,
+                    "block_content_trackers" to SettingType.Bool,
                     "homepage" to SettingType.Text(nullable = true) { it.takeIf(::isWebUrl) },
                     "search_suggestions" to SettingType.Bool,
                     "text_zoom_percent" to SettingType.IntIn(TEXT_ZOOM_STEPS.first()..TEXT_ZOOM_STEPS.last()),
