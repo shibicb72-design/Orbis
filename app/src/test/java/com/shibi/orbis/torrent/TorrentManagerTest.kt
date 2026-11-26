@@ -517,7 +517,7 @@ class TorrentManagerTest {
     }
 
     @Test
-    fun v2SourcesNeverReachTheEngineAndAreDiscarded() = runTest {
+    fun v2SourcesNeverReachTheEngineAndAreRefused() = runTest {
         val s = setup(this)
         val v2 = "a".repeat(64)
         s.manager.add(TorrentSource.Magnet("magnet:?xt=urn:btmh:1220$v2&dn=x"), isPrivate = false)
@@ -536,20 +536,42 @@ class TorrentManagerTest {
     }
 
     @Test
-    fun v2FoundByTheEngineAfterTheDetailsFailsAndDiscardsTheRecord() = runTest {
-        // A btih magnet whose details turn out v2 or hybrid: the engine removes it and reports UNSUPPORTED_V2.
+    fun v2RefusalOfAnEntryAlreadyListedKeepsItsDataAndState() = runTest {
         val s = setup(this)
         val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
         advanceUntilIdle()
         val eid = s.lastId()
-        s.engine.resumeBytes = { "must-not-be-kept".toByteArray() }
+        s.engine.emitMetadata(eid, sintelFiles)
+        advanceUntilIdle()
+        writePayload(s.only())
+        s.engine.resumeBytes = { "kept".toByteArray() }
         s.engine.fail(eid, TorrentErrorKind.UNSUPPORTED_V2)
         advanceUntilIdle()
         assertEquals(TorrentStatus.FAILED, s.only().status)
         assertEquals(TorrentErrorKind.UNSUPPORTED_V2, s.only().errorKind)
-        assertTrue(s.engine.removed.contains(eid to true))
+        assertTrue(s.engine.removed.contains(eid to false))
+        assertFalse(s.engine.removed.contains(eid to true))
+        assertTrue(File(s.only().saveDir, "$secretName/movie.mp4").isFile)
+        assertTrue(File(s.only().saveDir, "$secretName/sub/en.srt").isFile)
+        assertArrayEquals("kept".toByteArray(), s.store.readResume(id))
+        assertNotNull(s.store.readTorrent(id))
+    }
+
+    @Test
+    fun v2FoundByTheEngineAfterTheDetailsFailsAndKeepsTheRow() = runTest {
+        // A btih magnet whose details turn out v2 or hybrid: the engine removes it and reports UNSUPPORTED_V2.
+        val s = setup(this)
+        s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
+        advanceUntilIdle()
+        val eid = s.lastId()
+        s.engine.fail(eid, TorrentErrorKind.UNSUPPORTED_V2)
+        advanceUntilIdle()
+        assertEquals(1, s.manager.entries.value.size)
+        assertEquals(TorrentStatus.FAILED, s.only().status)
+        assertEquals(TorrentErrorKind.UNSUPPORTED_V2, s.only().errorKind)
+        assertTrue(s.engine.removed.contains(eid to false))
+        assertFalse(s.engine.removed.contains(eid to true))
         assertFalse(eid in s.engine.running)
-        assertNull(s.store.readResume(id))
     }
 
     @Test

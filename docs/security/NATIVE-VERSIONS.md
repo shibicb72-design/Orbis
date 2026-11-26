@@ -78,8 +78,16 @@ submodule's `version.hpp` defines `LIBTORRENT_VERSION "2.1.0.0"`, which matches.
 - libtorrent itself has newer tags (`v2.1.1`, `v2.1.2`). Moving to them was PR 7b (OD-4 approved). It is stopped:
   the libtorrent4j 2.1.0-39 bindings do not fit libtorrent 2.1.2 without a libtorrent4j fork. See "libtorrent
   2.1.2 (PR 7b): stopped" below. The build pipeline changes OpenSSL only.
-- Since lt213-2b, Orbis opens v1 torrents only (v2 and hybrid refused at intake and after magnet details arrive): interim
+- Since #157, Orbis opens v1 torrents only (v2 and hybrid refused at intake and after magnet details arrive): interim
   guard for the v2 hash faults fixed in libtorrent 2.1.3. Remove the guard when libtorrent >= 2.1.3 is bundled.
+- `v2.1.3` (2026-11-23, tag `87b77c0`) is newer still. A source check on 2026-11-25 (read only, nothing run) found six of its fixes
+  reachable in Orbis with default settings: an out-of-bounds write in `hash_picker::hashes_rejected` (a remote peer, v2-only
+  torrents); merkle tree bounds (a remote peer, v2 and hybrid torrents); a hybrid torrent without `pieces` (out-of-bounds read);
+  a tracker URL with dot-segments passing the loopback path test of `ssrf_mitigation`; the web seed test of `ssrf_mitigation`
+  skipped for IPv6; a crash with a v1 magnet and an incoming peer before its details arrive. Not reachable: the UPnP fixes (UPnP is
+  off) and the `pread_disk_io` fixes (not in 2.1.0.0). The owner accepted this gap for release 0.8.4 on 2026-11-25 and confirmed it
+  on 2026-11-26 with this list (`scripts/engine-currency-accepted.env`). The same exposure is in 0.8.3. The libtorrent update is its own
+  job; the bindings still do not fit 2.1.3.
 
 ## What the OpenSSL update fixes, plainly
 

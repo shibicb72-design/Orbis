@@ -136,7 +136,9 @@ object TorrentPreview {
                         if (++tokens > MAX_TOKENS) throw Malformed()
                         val key = readString()
                         val k = String(b, key.start, key.length, Charsets.ISO_8859_1)
-                        map[k] = read(depth + 1)
+                        // libtorrent keeps the first of two equal keys; so do we, still reading the value to skip it.
+                        val v = read(depth + 1)
+                        if (k !in map) map[k] = v
                     }
                     Node.Dict(map)
                 }
