@@ -78,6 +78,8 @@ submodule's `version.hpp` defines `LIBTORRENT_VERSION "2.1.0.0"`, which matches.
 - libtorrent itself has newer tags (`v2.1.1`, `v2.1.2`). Moving to them was PR 7b (OD-4 approved). It is stopped:
   the libtorrent4j 2.1.0-39 bindings do not fit libtorrent 2.1.2 without a libtorrent4j fork. See "libtorrent
   2.1.2 (PR 7b): stopped" below. The build pipeline changes OpenSSL only.
+- Since lt213-2b, Orbis opens v1 torrents only (v2 and hybrid refused at intake and after magnet details arrive): interim
+  guard for the v2 hash faults fixed in libtorrent 2.1.3. Remove the guard when libtorrent >= 2.1.3 is bundled.
 
 ## What the OpenSSL update fixes, plainly
 

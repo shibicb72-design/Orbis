@@ -517,6 +517,25 @@ class TorrentManagerTest {
     }
 
     @Test
+    fun v2SourcesNeverReachTheEngineAndAreDiscarded() = runTest {
+        val s = setup(this)
+        val v2 = "a".repeat(64)
+        s.manager.add(TorrentSource.Magnet("magnet:?xt=urn:btmh:1220$v2&dn=x"), isPrivate = false)
+        s.manager.add(TorrentSource.Magnet("magnet:?xt=urn:btih:$hash&xt=urn:btmh:1220$v2"), isPrivate = false)
+        val tree = mapOf("a" to mapOf("" to mapOf("length" to 1L)))
+        s.manager.add(TorrentSource.TorrentFile(bencode(mapOf("info" to mapOf("name" to "t", "file tree" to tree, "piece length" to 16_384)))), isPrivate = false)
+        advanceUntilIdle()
+        assertEquals(0, s.engine.added.size)
+        assertEquals(0, s.engine.startCount)
+        val all = s.manager.entries.value
+        assertEquals(3, all.size)
+        for (t in all) {
+            assertEquals(TorrentStatus.FAILED, t.status)
+            assertEquals(TorrentErrorKind.UNSUPPORTED_V2, t.errorKind)
+        }
+    }
+
+    @Test
     fun atMostFiveRunAndTheRestQueue() = runTest {
         val s = setup(this)
         val ids =

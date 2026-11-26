@@ -5,7 +5,7 @@ import java.util.Locale
 /**
  * A magnet link checked well enough to show in the confirm sheet. Pure and Android-free.
  *
- * [infoHash] is lowercase hex: 40 characters for a v1 torrent, 64 for a v2-only one. It is only ever compared and
+ * [infoHash] is lowercase hex, 40 characters (v1 only: Orbis refuses v2 and hybrid links, see [Check.V2]). It is only ever compared and
  * shown nowhere: never logged, never persisted by intake, never put in a notification ([toString] leaves it out).
  */
 class MagnetLink private constructor(
@@ -16,25 +16,37 @@ class MagnetLink private constructor(
 ) {
     override fun toString(): String = "MagnetLink(trackers=$trackerCount)"
 
+    /** What [check] makes of a link: usable (v1), refused as v2 or hybrid, or not a usable magnet at all. */
+    sealed interface Check {
+        class Ok(val link: MagnetLink) : Check
+
+        /** Any `xt=urn:btmh:` (v2 or hybrid): refused until libtorrent >= 2.1.3 is bundled. */
+        object V2 : Check
+
+        object Invalid : Check
+    }
+
     companion object {
         private val HEX40 = Regex("[0-9a-fA-F]{40}")
         private val BASE32 = Regex("[A-Za-z2-7]{32}")
-        private val HEX64 = Regex("[0-9a-fA-F]{64}")
         private const val BTIH = "urn:btih:"
-        private const val BTMH = "urn:btmh:1220"
+        private const val BTMH = "urn:btmh:"
+
+        /** The link if [check] accepts it; null for v2, hybrid and everything unusable. */
+        fun parse(uri: String): MagnetLink? = (check(uri) as? Check.Ok)?.link
 
         /**
-         * Null unless [uri] is `magnet:?` (any case), at most [TorrentLimits.MAX_MAGNET_CHARS] long, free of control
-         * characters and whitespace, and names its torrent with exactly one `xt=urn:btih:` (40 hex or 32 base32) or
-         * exactly one `xt=urn:btmh:1220` (64 hex). A hybrid link carrying one of each is accepted (v1 hash reported);
-         * two of the same kind, or an `xt` of any other form, is not.
+         * [Check.Invalid] unless [uri] is `magnet:?` (any case), at most [TorrentLimits.MAX_MAGNET_CHARS] long, free of
+         * control characters and whitespace, and names its torrent with exactly one `xt=urn:btih:` (40 hex or 32
+         * base32). A link with any `xt=urn:btmh:` (v2 only, or hybrid with a btih too) is [Check.V2], so the caller can
+         * say so. Two btih, or an `xt` of any other form, is invalid.
          */
-        fun parse(uri: String): MagnetLink? {
-            if (uri.length > TorrentLimits.MAX_MAGNET_CHARS) return null
-            if (!uri.startsWith("magnet:?", ignoreCase = true)) return null
-            if (uri.any { it.isWhitespace() || it.isISOControl() }) return null
+        fun check(uri: String): Check {
+            if (uri.length > TorrentLimits.MAX_MAGNET_CHARS) return Check.Invalid
+            if (!uri.startsWith("magnet:?", ignoreCase = true)) return Check.Invalid
+            if (uri.any { it.isWhitespace() || it.isISOControl() }) return Check.Invalid
             var v1: String? = null
-            var v2: String? = null
+            var v2 = false
             var trackers = 0
             for (part in uri.substring("magnet:?".length).split('&')) {
                 val eq = part.indexOf('=')
@@ -46,22 +58,18 @@ class MagnetLink private constructor(
                     "xt" -> {
                         when {
                             value.startsWith(BTIH, ignoreCase = true) -> {
-                                if (v1 != null) return null
-                                v1 = v1Hash(value.substring(BTIH.length)) ?: return null
+                                if (v1 != null) return Check.Invalid
+                                v1 = v1Hash(value.substring(BTIH.length)) ?: return Check.Invalid
                             }
-                            value.startsWith(BTMH, ignoreCase = true) -> {
-                                if (v2 != null) return null
-                                val hex = value.substring(BTMH.length)
-                                if (!HEX64.matches(hex)) return null
-                                v2 = hex.lowercase(Locale.ROOT)
-                            }
-                            else -> return null
+                            value.startsWith(BTMH, ignoreCase = true) -> v2 = true
+                            else -> return Check.Invalid
                         }
                     }
                 }
             }
-            val hash = v1 ?: v2 ?: return null
-            return MagnetLink(hash, TorrentPaths.magnetDisplayName(uri), trackers)
+            if (v2) return Check.V2
+            val hash = v1 ?: return Check.Invalid
+            return Check.Ok(MagnetLink(hash, TorrentPaths.magnetDisplayName(uri), trackers))
         }
 
         private fun v1Hash(raw: String): String? =

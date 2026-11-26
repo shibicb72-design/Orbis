@@ -3,6 +3,8 @@ package com.shibi.orbis.torrent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MagnetLinkTest {
@@ -25,13 +27,27 @@ class MagnetLinkTest {
     }
 
     @Test
-    fun v2MultihashIsAccepted() {
+    fun v2OnlyIsRefusedAsV2() {
         val v2 = "a".repeat(64)
-        val m = MagnetLink.parse("magnet:?xt=urn:btmh:1220$v2&dn=x")!!
-        assertEquals(v2, m.infoHash)
-        assertNull(MagnetLink.parse("magnet:?xt=urn:btmh:1220${"a".repeat(63)}"))
-        // A hybrid link names both; the v1 hash is reported.
-        assertEquals(hex, MagnetLink.parse("magnet:?xt=urn:btih:$hex&xt=urn:btmh:1220$v2")!!.infoHash)
+        assertNull(MagnetLink.parse("magnet:?xt=urn:btmh:1220$v2&dn=x"))
+        assertSame(MagnetLink.Check.V2, MagnetLink.check("magnet:?xt=urn:btmh:1220$v2&dn=x"))
+        // Even a malformed btmh is v2, not "not a magnet".
+        assertSame(MagnetLink.Check.V2, MagnetLink.check("magnet:?xt=urn:btmh:1220${"a".repeat(63)}"))
+    }
+
+    @Test
+    fun hybridIsRefusedAsV2() {
+        val v2 = "a".repeat(64)
+        assertNull(MagnetLink.parse("magnet:?xt=urn:btih:$hex&xt=urn:btmh:1220$v2"))
+        assertSame(MagnetLink.Check.V2, MagnetLink.check("magnet:?xt=urn:btih:$hex&xt=urn:btmh:1220$v2"))
+        assertSame(MagnetLink.Check.V2, MagnetLink.check("magnet:?xt=urn:btmh:1220$v2&xt=urn:btih:$hex"))
+    }
+
+    @Test
+    fun notAMagnetIsInvalidNotV2() {
+        assertSame(MagnetLink.Check.Invalid, MagnetLink.check("https://example.com/?xt=urn:btmh:1220${"a".repeat(64)}"))
+        assertSame(MagnetLink.Check.Invalid, MagnetLink.check("magnet:?xt=urn:btih:$hex&xt=urn:btih:$hex"))
+        assertTrue(MagnetLink.check("magnet:?xt=urn:btih:$hex") is MagnetLink.Check.Ok)
     }
 
     @Test

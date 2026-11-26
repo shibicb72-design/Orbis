@@ -28,20 +28,33 @@ object TorrentPreview {
     /** Nothing known: the sheet shows its generic title. */
     val UNKNOWN = Preview(null, null, null)
 
-    /** Null when [bytes] break any limit or are not a torrent (the sheet then shows [UNKNOWN]). */
-    fun fromTorrent(bytes: ByteArray): Preview? {
-        if (bytes.isEmpty() || bytes.size > TorrentLimits.MAX_TORRENT_FILE_BYTES) return null
-        val root = runCatching { Reader(bytes).readTop() }.getOrNull() as? Node.Dict ?: return null
-        val info = root.map["info"] as? Node.Dict ?: return null
+    /** What the reader made of a .torrent: a preview, a v2 or hybrid torrent (refused), or nothing usable. */
+    sealed interface Outcome {
+        class Ok(val preview: Preview) : Outcome
+
+        /** `info` has a `meta version` or a `file tree` key: v2 or hybrid, refused until libtorrent >= 2.1.3 is bundled. */
+        object V2 : Outcome
+
+        object Unusable : Outcome
+    }
+
+    fun analyze(bytes: ByteArray): Outcome {
+        if (bytes.isEmpty() || bytes.size > TorrentLimits.MAX_TORRENT_FILE_BYTES) return Outcome.Unusable
+        val root = runCatching { Reader(bytes).readTop() }.getOrNull() as? Node.Dict ?: return Outcome.Unusable
+        val info = root.map["info"] as? Node.Dict ?: return Outcome.Unusable
+        if (info.map.containsKey("meta version") || info.map.containsKey("file tree")) return Outcome.V2
         val name = ((info.map["name.utf-8"] ?: info.map["name"]) as? Node.Str)?.let { DownloadFileNames.safeName(it.text()) }?.takeIf { it.isNotEmpty() }
-        val sizes = v1Sizes(info) ?: v2Sizes(info) ?: return null
+        val sizes = v1Sizes(info) ?: return Outcome.Unusable
         var total = 0L
         for (s in sizes) {
-            if (s < 0) return null
-            total = runCatching { Math.addExact(total, s) }.getOrNull() ?: return null
+            if (s < 0) return Outcome.Unusable
+            total = runCatching { Math.addExact(total, s) }.getOrNull() ?: return Outcome.Unusable
         }
-        return Preview(name, total, sizes.size)
+        return Outcome.Ok(Preview(name, total, sizes.size))
     }
+
+    /** Null when [bytes] break any limit, are not a torrent, or are v2 or hybrid (the sheet then shows [UNKNOWN] or the v2 refusal: see [analyze]). */
+    fun fromTorrent(bytes: ByteArray): Preview? = (analyze(bytes) as? Outcome.Ok)?.preview
 
     /** A magnet carries only its `dn`: size and file count stay unknown. */
     fun fromMagnet(magnet: MagnetLink): Preview = Preview(magnet.displayName, null, null)
@@ -59,24 +72,6 @@ object TorrentPreview {
             out += len.value
         }
         return out
-    }
-
-    /** v2: every leaf of `info["file tree"]` (a "" key holding a dict with `length`). */
-    private fun v2Sizes(info: Node.Dict): List<Long>? {
-        val tree = info.map["file tree"] as? Node.Dict ?: return null
-        val out = ArrayList<Long>()
-        fun walk(d: Node.Dict): Boolean {
-            for ((key, value) in d.map) {
-                val child = value as? Node.Dict ?: return false
-                if (key.isEmpty()) {
-                    out += (child.map["length"] as? Node.Int ?: return false).value
-                } else if (!walk(child)) {
-                    return false
-                }
-            }
-            return true
-        }
-        return if (walk(tree)) out else null
     }
 
     internal sealed interface Node {
