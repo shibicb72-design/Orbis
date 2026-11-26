@@ -81,6 +81,7 @@ class BackupManagerTest {
         w.logins.setNeverSave("https://never.example", true)
         with(w.browserSettings) {
             setHttpsOnly(HttpsOnlyMode.PRIVATE)
+            setBlockContentTrackers(true)
             setDarkMode(DarkMode.DARK)
             setThemeId("graphite")
             setTextZoomPercent(150)
@@ -147,6 +148,9 @@ class BackupManagerTest {
             // Protected video was turned off: the restored app has it off too (the default is on).
             assertFalse(to.browserSettings.protectedVideo.value)
             assertFalse(to.browserPrefs.protectedVideo)
+            // "Also block content trackers" was on: the restored app has it on too (the default is off).
+            assertTrue(to.browserSettings.blockContentTrackers.value)
+            assertTrue(to.browserPrefs.blockContentTrackers)
             assertEquals("Mine", (to.searchEngine.selected.value as com.shibi.orbis.engine.SearchProvider.Custom).name)
             assertEquals("https://dns.example/q", to.doh.config.value.resolverUrl)
             assertEquals(MenuAction.SETTINGS, to.toolbar.menuOrder.value.last())

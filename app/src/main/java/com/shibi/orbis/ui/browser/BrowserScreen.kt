@@ -1105,6 +1105,7 @@ private fun BrowserContent(
         snackbars = snackbars,
         onShown = { load -> session?.protectedVideoNoticeShown(load) },
     )
+    AutoDesktopDroppedNotice(session = session, snackbars = snackbars)
 
     if (showSiteSettings && session != null && isWebUrl(state.url)) {
         val s0 = session

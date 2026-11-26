@@ -60,6 +60,20 @@ internal fun AutoDesktopNotice(
 }
 
 /**
+ * Tells the user in one line that Desktop site was turned off again for the site of [session]'s page (a page stayed
+ * empty as desktop and worked as mobile). Each event shows once, for the tab shown; another snackbar is never dismissed.
+ */
+@Composable
+internal fun AutoDesktopDroppedNotice(session: BrowserSession?, snackbars: SnackbarHostState) {
+    val message = stringResource(R.string.auto_desktop_dropped)
+    LaunchedEffect(session, snackbars) {
+        session ?: return@LaunchedEffect
+        // showSnackbar waits its turn behind a snackbar already shown.
+        session.autoDesktopDropped.collect { snackbars.showSnackbar(message, duration = SnackbarDuration.Short) }
+    }
+}
+
+/**
  * Undo of an automatic Desktop site: the site the notice was shown for is never retried. The page goes back to the
  * mobile site only while it is still on that site ([currentUrl]); on another site it is left alone.
  */

@@ -45,6 +45,8 @@ interface BrowserPrefs {
     var readerTheme: ReaderTheme
 
     var httpsOnly: HttpsOnlyMode
+    /** Also block the "content" tracker class. Off unless the user turned it on, also after an update. */
+    var blockContentTrackers: Boolean
     /** Light/dark choice. Stored under the legacy key "app_theme" (see KEY_APP_THEME). */
     var darkMode: DarkMode
 
@@ -192,6 +194,12 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         get() = DarkMode.entries.firstOrNull { it.name == prefs.getString(KEY_APP_THEME, null) } ?: DarkMode.SYSTEM
         set(value) {
             prefs.edit { putString(KEY_APP_THEME, value.name) }
+        }
+
+    override var blockContentTrackers: Boolean
+        get() = prefs.getBoolean(KEY_BLOCK_CONTENT_TRACKERS, false)
+        set(value) {
+            prefs.edit { putBoolean(KEY_BLOCK_CONTENT_TRACKERS, value) }
         }
 
     override var themeId: String?
@@ -363,6 +371,7 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         private const val KEY_HOMEPAGE = "homepage"
         private const val KEY_SUGGESTIONS = "search_suggestions"
         private const val KEY_TEXT_ZOOM = "text_zoom_percent"
+        private const val KEY_BLOCK_CONTENT_TRACKERS = "block_content_trackers"
     }
 }
 
@@ -379,6 +388,16 @@ class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
     fun setHttpsOnly(mode: HttpsOnlyMode) {
         prefs.httpsOnly = mode
         _httpsOnly.value = mode
+    }
+
+    private val _blockContentTrackers = MutableStateFlow(prefs.blockContentTrackers)
+
+    /** Settings > Also block content trackers. The engine follows it for the pages loaded after a change. */
+    val blockContentTrackers: StateFlow<Boolean> = _blockContentTrackers.asStateFlow()
+
+    fun setBlockContentTrackers(on: Boolean) {
+        prefs.blockContentTrackers = on
+        _blockContentTrackers.value = on
     }
 
     private val _darkMode = MutableStateFlow(prefs.darkMode)
@@ -478,7 +497,22 @@ class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
         }
     }
 
-    fun isAutoDesktop(url: String, isPrivate: Boolean): Boolean {
+    /**
+     * A page of a site auto desktop kept stayed empty and worked as mobile: the site goes back to the default (mobile)
+     * and is no longer automatic. Not declined: a blocked page there may still be retried in another tab.
+     */
+    override fun forgetAutoDesktop(url: String, isPrivate: Boolean) {
+        val host = siteKey(url) ?: return
+        desktopChoice.set(url, false, isPrivate)
+        if (isPrivate) {
+            privateDesktopAuto -= host
+        } else {
+            desktopAuto = desktopAuto - host
+            prefs.desktopAuto = desktopAuto
+        }
+    }
+
+    override fun isAutoDesktop(url: String, isPrivate: Boolean): Boolean {
         val host = siteKey(url) ?: return false
         if (isPrivate) {
             if (host in privateDesktopAuto) return true

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings > Privacy, under the tracking-protection note (etp21-2). English only. -->
+    <string name="content_trackers_title" translatable="false">Also block content trackers</string>
+    <string name="content_trackers_summary" translatable="false">Blocks scripts, fonts and video players that large companies host for other sites. More private, but many pages break: empty pages, missing videos, failed \'are you human\' checks.</string>
+</resources>

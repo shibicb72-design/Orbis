@@ -77,6 +77,8 @@ interface BrowserEngine {
     fun setForceZoom(enabled: Boolean) {}
     /** HTTPS-only mode: http pages are upgraded, and refused when the site has no https version. */
     fun setHttpsOnly(normalTabs: Boolean, privateTabs: Boolean) {}
+    /** Settings > Also block content trackers: also the "content" tracker class. For pages loaded from now on. */
+    fun setContentTrackerBlocking(on: Boolean) {}
     /**
      * Secure DNS (DNS over HTTPS): the provider address (https), or null to follow the phone's DNS. When the provider
      * cannot be reached the engine falls back to the phone's DNS. Applies now and to a runtime created later.
@@ -419,6 +421,11 @@ interface BrowserSession {
     val autoDesktopKept: Flow<Unit> get() = emptyFlow()
     /** The protected-video notice for page load [load] has appeared (see [SessionState.protectedVideo]). */
     fun protectedVideoNoticeShown(load: Int) {}
+    /**
+     * One event each time a page of a site kept as desktop stayed empty, worked as mobile, and the site went back to
+     * mobile; the UI shows a one-line notice. Not replayed. Test doubles never emit.
+     */
+    val autoDesktopDropped: Flow<Unit> get() = emptyFlow()
     /** Callbacks that need the tab layer. Set by whoever owns the session (the tab manager). */
     var host: SessionHost?
     /** Puts this session in [contentView], releasing whatever the view held first. No-op if it already holds it. */
@@ -534,6 +541,10 @@ interface SitePolicy {
     fun declineAutoDesktop(url: String, isPrivate: Boolean) {}
     /** Settings > Play protected video (DRM). False here, so a policy that does not say refuses. */
     fun protectedVideoOn(): Boolean = false
+    /** Desktop site is on for the site because auto desktop kept it (the site sheet's note). */
+    fun isAutoDesktop(url: String, isPrivate: Boolean): Boolean = false
+    /** A page of an auto-desktop site stayed empty and worked as mobile: the automatic choice goes, not marked declined. */
+    fun forgetAutoDesktop(url: String, isPrivate: Boolean) {}
 }
 
 /** The translator's view of a page. Language tags are BCP 47 ("en", "fr", "zh-Hans"); empty when unknown. */

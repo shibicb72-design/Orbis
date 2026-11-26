@@ -61,6 +61,7 @@ internal class MemBrowserPrefs : BrowserPrefs, NeverSavePrefs {
     override var readerSerif = true
     override var readerTheme = ReaderTheme.LIGHT
     override var httpsOnly = HttpsOnlyMode.ALL
+    override var blockContentTrackers = false
     override var darkMode = DarkMode.SYSTEM
     override var themeId: String? = null
     override var darkWebsites = false
