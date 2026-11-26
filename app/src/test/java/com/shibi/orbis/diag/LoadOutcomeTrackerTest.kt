@@ -267,8 +267,8 @@ class LoadOutcomeTrackerTest {
     @Test
     fun everyKindIsReachableAndEachLoadWritesOneLine() {
         // committed, redirected, download, app, refused, stopped, unfinished, error: eight loads, eight lines.
-        t.onLoadRequest(false, 0); t.onPageStart(1); t.onCommit(); t.onPageStop(true, 2); t.onEmptyReport(false)
-        t.onLoadRequest(false, 10); t.onLoadRequest(true, 11); t.onPageStart(12); t.onCommit(); t.onPageStop(true, 13); t.onEmptyReport(false)
+        t.onLoadRequest(false, 0); t.onPageStart(1); t.onCommit(); t.onPageStop(true, 2)
+        t.onLoadRequest(false, 10); t.onLoadRequest(true, 11); t.onPageStart(12); t.onCommit(); t.onPageStop(true, 13)
         t.onLoadRequest(false, 20); t.onDownload(21)
         t.onLoadRequest(false, 30); t.onAppHandOff(31)
         t.onLoadRequest(false, 40); t.onRefused(41)
