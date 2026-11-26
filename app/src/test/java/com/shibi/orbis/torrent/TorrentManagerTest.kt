@@ -1311,6 +1311,85 @@ class TorrentManagerTest {
         assertTrue(s.logs.contains("removed PAUSED, publishing"))
     }
 
+    /** A finished, seeding row; the engine then refuses it as v2 (the update to a build that cannot seed v2). */
+    private fun TestScope.finishedThenRefusedAsV2(s: TorrentTestSetup): String {
+        s.settings.value = keepSeeding
+        val id = seedingTorrent(s)
+        s.engine.fail(s.lastId(), TorrentErrorKind.UNSUPPORTED_V2)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.FAILED, s.entry(id).status)
+        assertEquals(TorrentErrorKind.UNSUPPORTED_V2, s.entry(id).errorKind)
+        assertTrue(s.entry(id).finishedUnsaved)
+        return id
+    }
+
+    @Test
+    fun saveAndRemoveOnAFinishedV2RefusedRowPublishesThenRemovesTheRow() = runTest {
+        val s = setup(this)
+        val id = finishedThenRefusedAsV2(s)
+        val dir = File(s.entry(id).saveDir)
+        s.manager.remove(id, deleteFiles = false)
+        advanceUntilIdle()
+        assertTrue(s.manager.entries.value.isEmpty())
+        assertEquals(setOf("Orbis/$secretName" to "movie.mp4", "Orbis/$secretName/sub" to "en.srt"), s.published.map { it.dir to it.name }.toSet())
+        assertEquals("movie123", s.published.first { it.name == "movie.mp4" }.content)
+        assertFalse("payload goes after the copy", dir.exists())
+        assertTrue(s.logs.contains("removed FAILED, publishing"))
+    }
+
+    @Test
+    fun deleteOnAFinishedV2RefusedRowPublishesNothingAndDeletesThePayload() = runTest {
+        val s = setup(this)
+        val id = finishedThenRefusedAsV2(s)
+        val dir = File(s.entry(id).saveDir)
+        s.manager.remove(id, deleteFiles = true)
+        advanceUntilIdle()
+        assertTrue(s.manager.entries.value.isEmpty())
+        assertTrue(s.published.isEmpty())
+        assertFalse(dir.exists())
+    }
+
+    @Test
+    fun aFailedCopyOfAFinishedV2RefusedRowLeavesAPublishFailedRowWithRetry() = runTest {
+        val s = setup(this)
+        val id = finishedThenRefusedAsV2(s)
+        s.publishOk = false
+        s.manager.remove(id, deleteFiles = false)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.FAILED, s.entry(id).status)
+        assertEquals(TorrentErrorKind.PUBLISH_FAILED, s.entry(id).errorKind)
+        assertTrue(File(s.entry(id).saveDir, "$secretName/movie.mp4").isFile)
+        s.publishOk = true
+        s.manager.retry(id)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.COMPLETED, s.entry(id).status)
+    }
+
+    @Test
+    fun clearKeepsAFinishedV2RefusedRowAndDropsAnUnfinishedOne() = runTest {
+        val s = setup(this)
+        s.manager.restore()
+        val finished = finishedThenRefusedAsV2(s)
+        s.clock += 1
+        val unfinished = downloadingTorrent(s)
+        val eid = s.lastId()
+        s.engine.advance(eid, done = 5, total = 10)
+        advanceUntilIdle()
+        writePayload(s.entry(unfinished))
+        val unfinishedDir = File(s.entry(unfinished).saveDir)
+        s.engine.fail(eid, TorrentErrorKind.UNSUPPORTED_V2)
+        advanceUntilIdle()
+        assertEquals(TorrentErrorKind.UNSUPPORTED_V2, s.entry(unfinished).errorKind)
+        assertFalse(s.entry(unfinished).finishedUnsaved)
+
+        assertEquals(listOf(unfinished), s.manager.clearSettled())
+        advanceUntilIdle()
+
+        assertEquals(listOf(finished), s.manager.entries.value.map { it.id })
+        assertTrue(File(s.entry(finished).saveDir, "$secretName/movie.mp4").isFile)
+        assertFalse(unfinishedDir.exists())
+    }
+
     // ---- private torrents kept inside Orbis (security PR 9, F-06; OD-3) ----
 
     /** A private torrent that finished with stop seeding on: kept inside Orbis. */
