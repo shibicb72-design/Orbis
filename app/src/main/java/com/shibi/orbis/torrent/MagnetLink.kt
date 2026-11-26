@@ -51,7 +51,7 @@ class MagnetLink private constructor(
             for (part in uri.substring("magnet:?".length).split('&')) {
                 val eq = part.indexOf('=')
                 if (eq <= 0) continue
-                val key = part.substring(0, eq).lowercase(Locale.ROOT)
+                val key = baseKey(part.substring(0, eq).lowercase(Locale.ROOT))
                 val value = part.substring(eq + 1)
                 when (key) {
                     "tr" -> trackers++
@@ -70,6 +70,13 @@ class MagnetLink private constructor(
             if (v2) return Check.V2
             val hash = v1 ?: return Check.Invalid
             return Check.Ok(MagnetLink(hash, TorrentPaths.magnetDisplayName(uri), trackers))
+        }
+
+        /** libtorrent drops a ".<digits>" suffix from every key (`xt.1` is `xt`); anything else stays as it is. */
+        private fun baseKey(key: String): String {
+            val dot = key.lastIndexOf('.')
+            if (dot <= 0 || dot == key.length - 1) return key
+            return if (key.substring(dot + 1).all { it in '0'..'9' }) key.substring(0, dot) else key
         }
 
         private fun v1Hash(raw: String): String? =

@@ -580,7 +580,7 @@ class TorrentManager(
         val e = find(id) ?: return
         // Only an untrustworthy or unusable torrent loses its files. A full disk or a file error keeps the partial
         // download and its resume data, so a later retry continues from there.
-        val discard = kind == TorrentErrorKind.UNSAFE_METADATA || kind == TorrentErrorKind.UNSUPPORTED_V2 || kind == TorrentErrorKind.INVALID_SOURCE || kind == TorrentErrorKind.MISSING_DATA
+        val discard = kind == TorrentErrorKind.UNSAFE_METADATA || kind == TorrentErrorKind.INVALID_SOURCE || kind == TorrentErrorKind.MISSING_DATA
         val a = attached[id]
         if (a != null && !discard) checkpoint(id, a)
         detach(id, deleteFiles = discard)

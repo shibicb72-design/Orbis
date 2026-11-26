@@ -517,7 +517,7 @@ class TorrentManagerTest {
     }
 
     @Test
-    fun v2SourcesNeverReachTheEngineAndAreDiscarded() = runTest {
+    fun v2SourcesNeverReachTheEngineAndAreRefused() = runTest {
         val s = setup(this)
         val v2 = "a".repeat(64)
         s.manager.add(TorrentSource.Magnet("magnet:?xt=urn:btmh:1220$v2&dn=x"), isPrivate = false)
@@ -533,6 +533,28 @@ class TorrentManagerTest {
             assertEquals(TorrentStatus.FAILED, t.status)
             assertEquals(TorrentErrorKind.UNSUPPORTED_V2, t.errorKind)
         }
+    }
+
+    @Test
+    fun v2RefusalOfAnEntryAlreadyListedKeepsItsDataAndState() = runTest {
+        val s = setup(this)
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
+        advanceUntilIdle()
+        val eid = s.lastId()
+        s.engine.emitMetadata(eid, sintelFiles)
+        advanceUntilIdle()
+        writePayload(s.only())
+        s.engine.resumeBytes = { "kept".toByteArray() }
+        s.engine.fail(eid, TorrentErrorKind.UNSUPPORTED_V2)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.FAILED, s.only().status)
+        assertEquals(TorrentErrorKind.UNSUPPORTED_V2, s.only().errorKind)
+        assertTrue(s.engine.removed.contains(eid to false))
+        assertFalse(s.engine.removed.contains(eid to true))
+        assertTrue(File(s.only().saveDir, "$secretName/movie.mp4").isFile)
+        assertTrue(File(s.only().saveDir, "$secretName/sub/en.srt").isFile)
+        assertArrayEquals("kept".toByteArray(), s.store.readResume(id))
+        assertNotNull(s.store.readTorrent(id))
     }
 
     @Test

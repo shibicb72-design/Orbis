@@ -5,6 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** A tiny bencode writer for the tests: Long, String, ByteArray, List and Map (keys sorted as the format wants). */
@@ -72,6 +73,16 @@ class TorrentPreviewTest {
         val bytes = torrent(mapOf("name" to "Sintel", "file tree" to tree, "piece length" to 16_384))
         assertSame(TorrentPreview.Outcome.V2, TorrentPreview.analyze(bytes))
         assertNull(TorrentPreview.fromTorrent(bytes))
+    }
+
+    @Test
+    fun firstOfTwoInfoKeysDecidesAsInLibtorrent() {
+        val v2Info = "d12:meta versioni2e4:name1:te"
+        val v1Info = "d6:lengthi1e4:name1:t12:piece lengthi16384e6:pieces20:" + "a".repeat(20) + "e"
+        val v2First = "d4:info$v2Info" + "4:info$v1Info" + "e"
+        val v1First = "d4:info$v1Info" + "4:info$v2Info" + "e"
+        assertSame(TorrentPreview.Outcome.V2, TorrentPreview.analyze(v2First.toByteArray(Charsets.ISO_8859_1)))
+        assertTrue(TorrentPreview.analyze(v1First.toByteArray(Charsets.ISO_8859_1)) is TorrentPreview.Outcome.Ok)
     }
 
     @Test

@@ -51,6 +51,24 @@ class MagnetLinkTest {
     }
 
     @Test
+    fun suffixedTopicKeysCountAsTopics() {
+        val v2 = "1220" + "a".repeat(64)
+        assertSame(MagnetLink.Check.V2, MagnetLink.check("magnet:?xt=urn:btih:$hex&xt.1=urn:btmh:$v2"))
+        assertSame(MagnetLink.Check.V2, MagnetLink.check("magnet:?xt.1=urn:btmh:$v2"))
+        assertSame(MagnetLink.Check.V2, MagnetLink.check("magnet:?XT.12=urn:btmh:$v2&xt=urn:btih:$hex"))
+        assertSame(MagnetLink.Check.Invalid, MagnetLink.check("magnet:?xt=urn:btih:$hex&xt.2=urn:btih:$hex"))
+        assertEquals(hex, MagnetLink.parse("magnet:?xt.1=urn:btih:$hex")!!.infoHash)
+    }
+
+    @Test
+    fun nonNumericSuffixIsNotStripped() {
+        val v2 = "1220" + "a".repeat(64)
+        // "xt.x" and "xt." are other keys, ignored as before.
+        assertEquals(hex, MagnetLink.parse("magnet:?xt=urn:btih:$hex&xt.x=urn:btmh:$v2&xt.=urn:btmh:$v2")!!.infoHash)
+        assertSame(MagnetLink.Check.Invalid, MagnetLink.check("magnet:?xt.x=urn:btih:$hex"))
+    }
+
+    @Test
     fun upperCaseSchemeIsAccepted() {
         assertEquals(hex, MagnetLink.parse("MAGNET:?XT=URN:BTIH:$hex")!!.infoHash)
     }
