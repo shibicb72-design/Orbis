@@ -51,6 +51,7 @@ import org.libtorrent4j.alerts.TrackerErrorAlert
 import org.libtorrent4j.alerts.TrackerReplyAlert
 import org.libtorrent4j.swig.add_torrent_params
 import org.libtorrent4j.swig.address
+import org.libtorrent4j.swig.alert as SwigAlert
 import org.libtorrent4j.swig.error_code
 import org.libtorrent4j.swig.int_vector
 import org.libtorrent4j.swig.ip_filter
@@ -131,6 +132,12 @@ class Libtorrent4jEngine(
     /** Asks the DHT and the trackers again while a torrent knows no peer (keyed by engine id). */
     private val peerSearch = PeerSearchRetry()
 
+    /**
+     * Engine ids whose details were handled: v2 checked, then announced ([onDetails]). A torrent with details that is
+     * not in here is handled by the STATE_UPDATE backstop (its metadata_received alert was dropped or is late).
+     */
+    private val detailsHandled = HashSet<Long>()
+
     /** Approved torrents and the ones reported finished: each is reported once per time in the session (tor17-1). */
     private val finishes = FinishReports()
 
@@ -209,6 +216,25 @@ class Libtorrent4jEngine(
         try {
             // Before the first torrent is added: libtorrent runs session calls in the order they are made.
             started.swig().set_ip_filter(filters.getValue(lsd))
+            // start() forces its own alert mask (every category but the logs, ip_block included) over the params, so
+            // it is replaced here, before the first torrent: with the filter every blocked address would post a
+            // peer_blocked_alert, and one tracker answer full of blocked peers would fill the alert queue and push out
+            // metadata_received ([alertMask]).
+            val mask =
+                alertMask(
+                    all = SwigAlert.all_categories.to_int(),
+                    ipBlock = SwigAlert.ip_block_notification.to_int(),
+                    logs =
+                        listOf(
+                            SwigAlert.session_log_notification,
+                            SwigAlert.torrent_log_notification,
+                            SwigAlert.peer_log_notification,
+                            SwigAlert.dht_log_notification,
+                            SwigAlert.port_mapping_log_notification,
+                            SwigAlert.picker_log_notification,
+                        ).map { it.to_int() },
+                )
+            started.applySettings(SettingsPack().setInteger(settings_pack.int_types.alert_mask.swigValue(), mask))
         } catch (e: Throwable) {
             started.removeListener(listener)
             runCatching { started.stop() }
@@ -217,6 +243,7 @@ class Libtorrent4jEngine(
         addressFilters = filters
         filterLsd = lsd
         log("address filter set n=${blockedRanges(lsd).size}")
+        log("alert mask set ip_block=false")
         session = started
         alertSession = started
         ticker =
@@ -269,6 +296,7 @@ class Libtorrent4jEngine(
             timeline.sessionEnded()
             peerSearch.clear()
             finishes.clear()
+            detailsHandled.clear()
             _snapshots.value = emptyMap()
             log("engine stopped")
         }
@@ -422,7 +450,11 @@ class Libtorrent4jEngine(
         applySessionDiscovery()
         log("added ${id.value} metadata=$withMetadata bep27=$bep27")
         timeline.added(id.value, addedAt, sessionStartedAt)
-        if (withMetadata) announceMetadata(id, handle)
+        if (withMetadata) {
+            // Checked for v2 above, before the add.
+            detailsHandled += id.value
+            announceMetadata(id, handle)
+        }
     }
 
     private fun hasInfo(p: add_torrent_params): Boolean = runCatching { p.ti_ptr()?.is_valid() == true }.getOrDefault(false)
@@ -570,6 +602,32 @@ class Libtorrent4jEngine(
         }
     }
 
+    /**
+     * Engine thread: the details of [id] came in and are not v2. Stops it until the manager checked the list, then
+     * announces them (once: [detailsHandled]).
+     */
+    private suspend fun onDetails(id: EngineId, h: TorrentHandle, at: Long) {
+        detailsHandled += id.value
+        timeline.milestone(id.value, TorrentTimeline.Step.DETAILS, at)
+        // Nothing may be written under the torrent's own names: stop until the manager checked the list.
+        h.pause()
+        markIfBep27(id, h)
+        announceMetadata(id, h)
+    }
+
+    /**
+     * Engine thread: the details of [id] are v2 or hybrid ([v2] true) or could not be read (null). It leaves the
+     * session and the manager hears UNSUPPORTED_V2 (ENGINE_ERROR when unread). [removed]: already removed from the
+     * session on the alert thread. Nothing is deleted: no file is wanted before approval.
+     */
+    private suspend fun refuseAfterDetails(id: EngineId, v2: Boolean?, removed: Boolean) {
+        val h = forget(id) ?: return
+        if (!removed) runCatching { session?.remove(h) }.onFailure { log("v2 remove failed: ${it.javaClass.simpleName}") }
+        log(if (v2 == true) "v2 after details, removed" else "v2 check failed after details, removed")
+        applySessionDiscovery()
+        emit(TorrentEvent.Error(id, if (v2 == true) TorrentErrorKind.UNSUPPORTED_V2 else TorrentErrorKind.ENGINE_ERROR))
+    }
+
     private suspend fun announceMetadata(id: EngineId, handle: TorrentHandle) {
         val ti = runCatching { handle.torrentFile() }.getOrNull()
         if (ti == null || !ti.isValid) {
@@ -642,6 +700,7 @@ class Libtorrent4jEngine(
         searchStart.remove(id.value)
         peerSearch.forget(id.value)
         finishes.forget(id.value)
+        detailsHandled -= id.value
         _snapshots.value = latest.toMap()
         sampleTimeline(id.value, h, clock())
         timeline.removed(id.value, clock())
@@ -774,6 +833,19 @@ class Libtorrent4jEngine(
                         if (before == null || before.state != snap.state || before.hasMetadata != snap.hasMetadata) {
                             log("torrent ${id.value} ${snap.state.name} metadata=${snap.hasMetadata} peers=${snap.peers}")
                         }
+                        // Backstop for a dropped or late metadata_received alert (state_update_alert is high
+                        // priority and comes each second): the same pause, v2 check and removal or announcement.
+                        if (snap.hasMetadata && id.value !in detailsHandled) {
+                            val h = handles[id.value] ?: continue
+                            log("details without alert ${id.value}")
+                            runCatching { h.pause() }
+                            val v2 = runCatching { h.swig().info_hashes().has_v2() }.getOrNull()
+                            if (v2 != false) {
+                                refuseAfterDetails(id, v2, removed = false)
+                                continue
+                            }
+                            onDetails(id, h, at)
+                        }
                         // The search fields come from [searchTick] (engine thread): keep the last ones.
                         latest[id] = if (before == null) snap else snap.withSearch(before)
                     }
@@ -801,27 +873,17 @@ class Libtorrent4jEngine(
                             s != null
                         }.onFailure { log("v2 remove failed: ${it.javaClass.simpleName}") }
                             .getOrDefault(false)
-                    post {
-                        val id = byHandle[key] ?: return@post
-                        val h = forget(id) ?: return@post
-                        // Not removed above (no session for that thread, or the call failed): remove it here.
-                        if (!removed) session?.remove(h)
-                        log(if (v2 == true) "v2 after details, removed" else "v2 check failed after details, removed")
-                        applySessionDiscovery()
-                        emit(TorrentEvent.Error(id, if (v2 == true) TorrentErrorKind.UNSUPPORTED_V2 else TorrentErrorKind.ENGINE_ERROR))
-                    }
+                    post { byHandle[key]?.let { refuseAfterDetails(it, v2, removed) } }
                     return
                 }
                 val at = clock()
                 post {
                     val id = byHandle[key] ?: return@post
-                    timeline.milestone(id.value, TorrentTimeline.Step.DETAILS, at)
+                    // Already handled by the STATE_UPDATE backstop.
+                    if (id.value in detailsHandled) return@post
                     // The alert's handle dies with the alert: use the one add_torrent returned.
                     val h = handles[id.value] ?: return@post
-                    // Nothing may be written under the torrent's own names: stop until the manager checked the list.
-                    h.pause()
-                    markIfBep27(id, h)
-                    announceMetadata(id, h)
+                    onDetails(id, h, at)
                 }
             }
             AlertType.TORRENT_FINISHED -> {
@@ -1259,6 +1321,14 @@ internal fun sessionSettings(s: EngineSettings, d: SessionDiscovery): List<Pair<
         add(SessionSetting.ANNOUNCE_TO_ALL_TRACKERS to true)
         add(SessionSetting.ANNOUNCE_TO_ALL_TIERS to true)
     }
+
+/**
+ * The session's alert mask: [all] categories minus ip_block ([ipBlock]) and the [logs], which is libtorrent4j's own
+ * mask without ip_block. With the address filter every blocked address would post a peer_blocked_alert (normal
+ * priority, like metadata_received), so one tracker answer could fill the 2000-alert queue and push the others out.
+ * No type the listener takes is in the ip_block category. Pure (category bits as numbers), so a test can read it.
+ */
+internal fun alertMask(all: Int, ipBlock: Int, logs: List<Int>): Int = logs.fold(all and ipBlock.inv()) { m, c -> m and c.inv() }
 
 /** This device and "no address": never a peer, web seed or tracker. */
 private val ALWAYS_V4 = listOf("0.0.0.0" to "0.255.255.255", "127.0.0.0" to "127.255.255.255")
