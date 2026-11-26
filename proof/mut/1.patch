@@ -1,0 +1,12 @@
+diff --git a/app/src/main/java/com/shibi/orbis/tabs/TabSleep.kt b/app/src/main/java/com/shibi/orbis/tabs/TabSleep.kt
+index 0d3cf2e..d0af2eb 100644
+--- a/app/src/main/java/com/shibi/orbis/tabs/TabSleep.kt
++++ b/app/src/main/java/com/shibi/orbis/tabs/TabSleep.kt
+@@ -107,7 +107,6 @@ fun tabSleepVerdict(facts: TabSleepFacts, now: Long, setting: TabSleepAfter, low
+     val afterMillis = if (lowMemory) minOf(setMillis, LOW_MEMORY_SLEEP_AFTER_MILLIS) else setMillis
+     return when {
+         !facts.hasSession -> TabSleepVerdict.ALREADY_ASLEEP
+-        facts.isSelected -> TabSleepVerdict.SELECTED
+         facts.openerOfSelected -> TabSleepVerdict.OPENER_OF_SELECTED
+         facts.isPrivate -> TabSleepVerdict.PRIVATE
+         facts.playing -> TabSleepVerdict.PLAYING

@@ -1,0 +1,12 @@
+diff --git a/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt b/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
+index 9ad125e..bf48baa 100644
+--- a/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
++++ b/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
+@@ -699,7 +699,6 @@ class TabManager(
+             // Asked again now: the page may have started something while its state was read.
+             val i = indexOf(id)
+             if (i < 0 || list[i].session !== session) continue
+-            if (tabSleepVerdict(sleepFacts(list[i]), clock(), setting, lowMemory) != TabSleepVerdict.SLEEP) continue
+             putToSleep(i, saved)
+             count++
+         }

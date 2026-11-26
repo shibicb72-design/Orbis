@@ -1,0 +1,13 @@
+diff --git a/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt b/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
+index 9ad125e..bc9f7e9 100644
+--- a/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
++++ b/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
+@@ -738,7 +738,7 @@ class TabManager(
+                     _pendingTorrentIntake.value?.sourceTabId == tab.id ||
+                     _linkMenu.value?.tabId == tab.id,
+             uploadRunning = holds.fileHanded,
+-            downloadRunning = downloadRunning(),
++            downloadRunning = false,
+         )
+     }
+ 

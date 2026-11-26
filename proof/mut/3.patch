@@ -1,0 +1,12 @@
+diff --git a/app/src/main/java/com/shibi/orbis/tabs/TabSleep.kt b/app/src/main/java/com/shibi/orbis/tabs/TabSleep.kt
+index 0d3cf2e..f2c9eeb 100644
+--- a/app/src/main/java/com/shibi/orbis/tabs/TabSleep.kt
++++ b/app/src/main/java/com/shibi/orbis/tabs/TabSleep.kt
+@@ -109,7 +109,6 @@ fun tabSleepVerdict(facts: TabSleepFacts, now: Long, setting: TabSleepAfter, low
+         !facts.hasSession -> TabSleepVerdict.ALREADY_ASLEEP
+         facts.isSelected -> TabSleepVerdict.SELECTED
+         facts.openerOfSelected -> TabSleepVerdict.OPENER_OF_SELECTED
+-        facts.isPrivate -> TabSleepVerdict.PRIVATE
+         facts.playing -> TabSleepVerdict.PLAYING
+         facts.loading -> TabSleepVerdict.LOADING
+         facts.fullScreen -> TabSleepVerdict.FULL_SCREEN

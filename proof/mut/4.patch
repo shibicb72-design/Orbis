@@ -1,0 +1,13 @@
+diff --git a/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt b/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
+index 9ad125e..26c6158 100644
+--- a/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
++++ b/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
+@@ -755,7 +755,7 @@ class TabManager(
+         lastCanGoBack.remove(tab.id)
+         lastCanGoForward.remove(tab.id)
+         historyPending.remove(tab.id)
+-        list[index] = tab.copy(session = null, savedState = saved)
++        list[index] = tab.copy(session = null)
+         slept += tab.id
+         tab.session?.let {
+             it.host = null

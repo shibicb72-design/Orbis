@@ -1,0 +1,13 @@
+diff --git a/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt b/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
+index 9ad125e..2dfb513 100644
+--- a/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
++++ b/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
+@@ -730,7 +730,7 @@ class TabManager(
+             fullScreen = st?.fullScreen == true,
+             // Picture-in-picture always shows the selected tab, which never sleeps.
+             pictureInPicture = false,
+-            cameraOrMicrophoneInUse = holds.captureGranted,
++            cameraOrMicrophoneInUse = false,
+             casting = castActive(),
+             pageDialogOpen = session?.prompts?.value != null,
+             orbisQuestionOpen =
