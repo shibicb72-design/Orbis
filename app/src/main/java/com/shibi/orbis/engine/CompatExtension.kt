@@ -52,13 +52,19 @@ class CompatExtensionHolder(private val log: (String) -> Unit) {
 internal sealed interface CompatMessage {
     data class Sample(val sample: PageSample) : CompatMessage
 
-    data object Clean : CompatMessage
+    /** Not blocked. [empty]: the page showed almost nothing 3 s after it loaded (the script's only other fact). */
+    data class Clean(val empty: Boolean) : CompatMessage
 }
 
 /** Parses a compat port message; null for anything malformed. Lengths are capped again here: the page is untrusted. */
 internal fun parseCompatMessage(obj: JSONObject): CompatMessage? =
     when (obj.optString("type")) {
-        "clean" -> CompatMessage.Clean
+        "clean" ->
+            when (obj.opt("page") as? String) {
+                "empty" -> CompatMessage.Clean(empty = true)
+                "not-empty" -> CompatMessage.Clean(empty = false)
+                else -> null
+            }
         "sample" -> {
             val heads = obj.optJSONArray("headlines")
             val headlines =

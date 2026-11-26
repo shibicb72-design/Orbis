@@ -110,6 +110,34 @@ class AutoDesktopSettingsTest {
     }
 
     @Test
+    fun forgettingAnAutoSiteMakesItMobileAgainWithoutDecliningIt() {
+        val s = open()
+        s.rememberAutoDesktop("https://gate.example/", isPrivate = false)
+        s.forgetAutoDesktop("https://gate.example/page", isPrivate = false)
+
+        val again = open()
+        assertFalse(again.desktopFor("https://gate.example/", isPrivate = false))
+        assertFalse(again.isAutoDesktop("https://gate.example/", isPrivate = false))
+        assertFalse(again.isAutoDesktopDeclined("https://gate.example/", isPrivate = false))
+        assertEquals(emptySet<String>(), prefs.getStringSet("desktop_auto_sites", null))
+        assertEquals(emptySet<String>(), prefs.getStringSet("desktop_on_sites", null))
+        assertEquals(emptySet<String>(), prefs.getStringSet("desktop_off_sites", null) ?: emptySet<String>())
+    }
+
+    @Test
+    fun forgettingInAPrivateTabStaysInThePrivateTab() {
+        val s = open()
+        s.rememberAutoDesktop("https://gate.example/", isPrivate = true)
+        val before = prefs.all.toMap()
+        s.forgetAutoDesktop("https://gate.example/", isPrivate = true)
+
+        assertEquals(before, prefs.all.toMap())
+        assertFalse(s.desktopFor("https://gate.example/", isPrivate = true))
+        assertFalse(s.isAutoDesktop("https://gate.example/", isPrivate = true))
+        assertFalse(s.isAutoDesktopDeclined("https://gate.example/", isPrivate = true))
+    }
+
+    @Test
     fun privateTabsReadTheNormalChoices() {
         val s = open()
         s.rememberAutoDesktop("https://gate.example/", isPrivate = false)

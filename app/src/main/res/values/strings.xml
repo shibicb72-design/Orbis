@@ -434,4 +434,6 @@
     <string name="auto_desktop_notice" translatable="false">Showing desktop site because this site blocked Orbis</string>
     <string name="auto_desktop_undo" translatable="false">Undo</string>
     <string name="auto_desktop_note" translatable="false">Turned on automatically because this site blocked Orbis</string>
+    <!-- Auto desktop: a page of a site kept as desktop came up empty and worked as a mobile site. English only. -->
+    <string name="auto_desktop_dropped" translatable="false">Desktop site was turned off again for this site: a page stayed empty.</string>
 </resources>
