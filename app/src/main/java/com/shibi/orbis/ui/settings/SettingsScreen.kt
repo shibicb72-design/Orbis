@@ -6,6 +6,7 @@ import com.shibi.orbis.settings.BrowserSettings
 import com.shibi.orbis.settings.DohConfig
 import com.shibi.orbis.settings.HttpsOnlyMode
 import com.shibi.orbis.settings.MagnetHandler
+import com.shibi.orbis.tabs.TabSleepAfter
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
@@ -174,6 +175,21 @@ fun SettingsScreen(
             )
         }
     }
+    var tabSleepDialogOpen by remember { mutableStateOf(false) }
+    if (site != null && tabSleepDialogOpen) {
+        val sleepAfter by site.tabSleepAfter.collectAsStateWithLifecycle()
+        ChoiceDialog(
+            title = R.string.tab_sleep_title,
+            options = TabSleepAfter.entries.map { it to tabSleepLabel(it) },
+            selected = sleepAfter,
+            onSelect = {
+                site.setTabSleepAfter(it)
+                tabSleepDialogOpen = false
+            },
+            onDismiss = { tabSleepDialogOpen = false },
+            note = R.string.tab_sleep_note,
+        )
+    }
     val uboState by uboStateFlow.collectAsStateWithLifecycle()
     val searchEngine by searchEngineFlow.collectAsStateWithLifecycle()
     val homepage by homepageFlow.collectAsStateWithLifecycle()
@@ -283,6 +299,18 @@ fun SettingsScreen(
                     val openInApps by site.openLinksInApps.collectAsStateWithLifecycle()
                     val toolbarBottom by site.toolbarBottom.collectAsStateWithLifecycle()
                     val copyDownloads by site.copyToDownloadFolder.collectAsStateWithLifecycle()
+                    val sleepAfter by site.tabSleepAfter.collectAsStateWithLifecycle()
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.tab_sleep_title)) },
+                        supportingContent = {
+                            Column {
+                                Text(stringResource(tabSleepLabel(sleepAfter)))
+                                Text(stringResource(R.string.tab_sleep_note))
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().clickable { tabSleepDialogOpen = true },
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     SettingsItem(
                         headlineContent = { Text(stringResource(R.string.copy_downloads_title)) },
                         supportingContent = { Text(stringResource(R.string.copy_downloads_summary)) },
@@ -538,6 +566,15 @@ internal fun magnetHandlerLabel(h: MagnetHandler): Int =
     when (h) {
         MagnetHandler.ORBIS -> R.string.torrents_setting_magnets_orbis
         MagnetHandler.OTHER_APP -> R.string.torrents_setting_magnets_other_app
+    }
+
+@StringRes
+internal fun tabSleepLabel(after: TabSleepAfter): Int =
+    when (after) {
+        TabSleepAfter.AFTER_15_MINUTES -> R.string.tab_sleep_after_15_minutes
+        TabSleepAfter.AFTER_1_HOUR -> R.string.tab_sleep_after_1_hour
+        TabSleepAfter.AFTER_1_DAY -> R.string.tab_sleep_after_1_day
+        TabSleepAfter.NEVER -> R.string.tab_sleep_never
     }
 
 @StringRes

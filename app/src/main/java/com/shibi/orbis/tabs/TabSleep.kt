@@ -11,6 +11,31 @@ enum class TabSleepAfter(val afterMillis: Long?) {
 /** When Android reports that memory is running low, a tab not looked at for this long may sleep (unless the setting is Never). */
 const val LOW_MEMORY_SLEEP_AFTER_MILLIS = 5 * 60_000L
 
+/** While Orbis is in front, the sleep check runs this often. */
+const val TAB_SLEEP_CHECK_EVERY_MILLIS = 5 * 60_000L
+
+/**
+ * True when an `onTrimMemory` level is Android's report that memory is running low: RUNNING_LOW (10), RUNNING_CRITICAL
+ * (15), or BACKGROUND (40) and above. RUNNING_MODERATE (5) and UI_HIDDEN (20) are not. The numbers are written out
+ * because most of the named constants are deprecated since API 34; the system and `am send-trim-memory` still send them.
+ */
+fun isLowMemoryReport(trimLevel: Int): Boolean = trimLevel == 10 || trimLevel == 15 || trimLevel >= 40
+
+/**
+ * What a session has done that keeps its tab awake until the session closes. Memory only; set by the engine, never
+ * cleared on a new page (a download link starts a load without leaving the page).
+ */
+data class SleepHolds(
+    /** Orbis granted the camera or the microphone to this session (asked, or from a saved site setting). */
+    val captureGranted: Boolean,
+    /** A file chooser of this session was confirmed with at least one file. */
+    val fileHanded: Boolean,
+) {
+    companion object {
+        val NONE = SleepHolds(captureGranted = false, fileHanded = false)
+    }
+}
+
 /**
  * What Orbis knows about one tab at the moment of the check, without touching its page. Every field is read from state
  * the tab layer already holds; none is measured.
@@ -26,17 +51,23 @@ data class TabSleepFacts(
     val lastLookedAt: Long?,
     /** When the tab's current session was opened, or null when that is not known. */
     val awakeSince: Long?,
+    /** The selected tab was opened from this one (a sign-in or payment window): its opener waits for it. */
+    val openerOfSelected: Boolean = false,
     val playing: Boolean = false,
     val loading: Boolean = false,
     val fullScreen: Boolean = false,
     val pictureInPicture: Boolean = false,
+    /** Orbis granted the camera or microphone to this tab's session since it was opened ([SleepHolds.captureGranted]). */
     val cameraOrMicrophoneInUse: Boolean = false,
+    /** A cast is active or connecting (from any tab: which tab started it is not known). */
     val casting: Boolean = false,
     /** A page dialog (alert, file chooser, a site permission or password-save question...) waits in the session. */
     val pageDialogOpen: Boolean = false,
     /** An Orbis question for this tab is open: a download or torrent offer, the long-press menu. */
     val orbisQuestionOpen: Boolean = false,
+    /** A file was handed to this tab's session since it was opened ([SleepHolds.fileHanded]). */
     val uploadRunning: Boolean = false,
+    /** A download is in progress (any download: the tab it came from is not known). */
     val downloadRunning: Boolean = false,
 )
 
@@ -46,6 +77,7 @@ enum class TabSleepVerdict {
     SETTING_NEVER,
     ALREADY_ASLEEP,
     SELECTED,
+    OPENER_OF_SELECTED,
     PRIVATE,
     PLAYING,
     LOADING,
@@ -76,6 +108,7 @@ fun tabSleepVerdict(facts: TabSleepFacts, now: Long, setting: TabSleepAfter, low
     return when {
         !facts.hasSession -> TabSleepVerdict.ALREADY_ASLEEP
         facts.isSelected -> TabSleepVerdict.SELECTED
+        facts.openerOfSelected -> TabSleepVerdict.OPENER_OF_SELECTED
         facts.isPrivate -> TabSleepVerdict.PRIVATE
         facts.playing -> TabSleepVerdict.PLAYING
         facts.loading -> TabSleepVerdict.LOADING

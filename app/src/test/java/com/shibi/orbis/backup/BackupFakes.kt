@@ -79,6 +79,7 @@ internal class MemBrowserPrefs : BrowserPrefs, NeverSavePrefs {
     override var forceDark = false
     override var magnetHandler = MagnetHandler.ORBIS
     override var torrentIpNoteSeen = false
+    override var tabSleepAfter = com.shibi.orbis.tabs.TabSleepAfter.AFTER_1_HOUR
     override var neverSave: Set<String> = emptySet()
 }
 

@@ -78,7 +78,10 @@ data class Tab(
     val groupId: Long? = null,
 )
 
-/** What the tab switcher draws. [groupId] is the tab's [TabGroup], or null. */
+/**
+ * What the tab switcher draws. [groupId] is the tab's [TabGroup], or null. [asleep]: a tab that is not selected and has no
+ * engine session (put to sleep, or restored and not shown yet); opening it reloads it.
+ */
 data class TabUi(
     val id: Long,
     val title: String,
@@ -86,6 +89,7 @@ data class TabUi(
     val selected: Boolean,
     val isPrivate: Boolean = false,
     val groupId: Long? = null,
+    val asleep: Boolean = false,
 )
 
 /** What Orbis knows about a tab's page without measuring anything: playing media, open (awake), or not loaded (asleep). */
@@ -217,6 +221,10 @@ class TabManager(
     private val clock: () -> Long = System::currentTimeMillis,
     private val maxGroups: Int = MAX_TAB_GROUPS,
     private val closeAllUndoMillis: Long = CLOSE_ALL_UNDO_MILLIS,
+    /** True while any download is in progress: then no tab is put to sleep (the tab it came from is not known). */
+    private val downloadRunning: () -> Boolean = { false },
+    /** True while a cast is active or connecting: then no tab is put to sleep (the tab it came from is not known). */
+    private val castActive: () -> Boolean = { false },
 ) : SessionHost {
     private val list = ArrayList<Tab>()
     private var selectedId: Long
@@ -243,6 +251,12 @@ class TabManager(
 
     /** The tab id that was selected at the last [noteLooked]; it is stamped once more when it stops being selected. */
     private var lookedSelectedId: Long? = null
+
+    /** When each tab's current session was opened (clock time). Memory only; gone when the session closes. */
+    private val awakeSince = HashMap<Long, Long>()
+
+    /** Tabs [sleepUnusedTabs] put to sleep that have not been woken since; only for the "tab woken" log line. */
+    private val slept = HashSet<Long>()
 
     private val observers = HashMap<Long, Job>()
     private val noticeObservers = HashMap<Long, Job>()
@@ -441,7 +455,11 @@ class TabManager(
     private fun publish() {
         val sel = list.firstOrNull { it.id == selectedId } ?: list.first().also { selectedId = it.id }
         noteLooked(sel.id)
-        _tabs.value = list.map { TabUi(it.id, it.title, it.url, it.id == selectedId, it.isPrivate, it.groupId) }
+        _tabs.value =
+            list.map {
+                val isSelected = it.id == selectedId
+                TabUi(it.id, it.title, it.url, isSelected, it.isPrivate, it.groupId, asleep = !isSelected && it.session == null)
+            }
         _groups.value = groupList.toList()
         if (!sel.isPrivate) lastNormalSelectedId = sel.id
         if (sel.id != lastShownId) {
@@ -510,10 +528,12 @@ class TabManager(
         val opened = tab.copy(session = session)
         list[i] = opened
         observe(id, session)
+        if (slept.remove(id)) log("tab woken")
         return opened
     }
 
     private fun observe(id: Long, session: BrowserSession) {
+        awakeSince[id] = clock()
         // autoDesktopKept is not replayed, so every session is collected from the moment it joins the list (started
         // undispatched: no event can fall between creation and the first collect). Background tabs get their mark too.
         noticeObservers[id]?.cancel()
@@ -659,6 +679,90 @@ class TabManager(
         return NormalTabCounts(open = normal.size, awake = normal.count { it.session != null })
     }
 
+    // ---- sleep ---------------------------------------------------------------------------------------------
+
+    /**
+     * Puts every tab to sleep that [tabSleepVerdict] allows under [setting] ([lowMemory]: Android reported that memory is
+     * running low). For each such tab the page state is saved first, the verdict is asked again at the moment of closing,
+     * and only then is the session closed. The tab stays in the list with its title, address, group and the saved state;
+     * showing it wakes it the way a restored tab wakes. Returns how many tabs were put to sleep. Nothing happens before
+     * the stored tab list has been read.
+     */
+    fun sleepUnusedTabs(setting: TabSleepAfter, lowMemory: Boolean = false): Int {
+        if (!_ready.value) return 0
+        var count = 0
+        for (id in list.map { it.id }) {
+            val tab = list.firstOrNull { it.id == id } ?: continue
+            if (tabSleepVerdict(sleepFacts(tab), clock(), setting, lowMemory) != TabSleepVerdict.SLEEP) continue
+            val session = tab.session ?: continue
+            val saved = runCatching { session.savedState() }.getOrNull() ?: continue
+            // Asked again now: the page may have started something while its state was read.
+            val i = indexOf(id)
+            if (i < 0 || list[i].session !== session) continue
+            if (tabSleepVerdict(sleepFacts(list[i]), clock(), setting, lowMemory) != TabSleepVerdict.SLEEP) continue
+            putToSleep(i, saved)
+            count++
+        }
+        if (count > 0) {
+            log("tabs put to sleep: $count (awake now: ${list.count { it.session != null }})")
+            publish()
+            schedulePersist()
+        }
+        return count
+    }
+
+    /** What the sleep check knows about [tab], read only from what the manager and the session already hold. */
+    private fun sleepFacts(tab: Tab): TabSleepFacts {
+        val session = tab.session
+        val st = session?.state?.value
+        val holds = session?.let { runCatching { it.sleepHolds() }.getOrNull() } ?: SleepHolds.NONE
+        val selectedTab = list.firstOrNull { it.id == selectedId }
+        return TabSleepFacts(
+            isPrivate = tab.isPrivate,
+            isSelected = tab.id == selectedId,
+            hasSession = session != null,
+            hasSavedState = session != null && runCatching { session.savedState() }.getOrNull() != null,
+            lastLookedAt = lookedAt[tab.id],
+            awakeSince = awakeSince[tab.id],
+            openerOfSelected = selectedTab != null && selectedTab.openerTabId == tab.id,
+            playing = st?.media?.playing == true,
+            loading = st?.isLoading == true,
+            fullScreen = st?.fullScreen == true,
+            // Picture-in-picture always shows the selected tab, which never sleeps.
+            pictureInPicture = false,
+            cameraOrMicrophoneInUse = holds.captureGranted,
+            casting = castActive(),
+            pageDialogOpen = session?.prompts?.value != null,
+            orbisQuestionOpen =
+                _pendingDownload.value?.sourceTabId == tab.id ||
+                    _pendingTorrentIntake.value?.sourceTabId == tab.id ||
+                    _linkMenu.value?.tabId == tab.id,
+            uploadRunning = holds.fileHanded,
+            downloadRunning = downloadRunning(),
+        )
+    }
+
+    /** Closes the session of the tab at [index] and keeps the tab, with [saved] as its page state (as a restored tab). */
+    private fun putToSleep(index: Int, saved: String) {
+        val tab = list[index]
+        observers.remove(tab.id)?.cancel()
+        noticeObservers.remove(tab.id)?.cancel()
+        awakeSince.remove(tab.id)
+        // As for a tab restored from disk: the saved history may still lead back to an opened file, so the file is kept
+        // (the day-old sweep and Clear browsing data remove it), and the history flags start again with the next session.
+        importsShown.remove(tab.id)
+        importLoading.remove(tab.id)
+        lastCanGoBack.remove(tab.id)
+        lastCanGoForward.remove(tab.id)
+        historyPending.remove(tab.id)
+        list[index] = tab.copy(session = null, savedState = saved)
+        slept += tab.id
+        tab.session?.let {
+            it.host = null
+            it.close()
+        }
+    }
+
     fun select(id: Long) {
         if (indexOf(id) < 0) return
         if (id != selectedId) {
@@ -775,6 +879,8 @@ class TabManager(
     private fun dispose(tab: Tab) {
         val privateId = tab.id.takeIf { tab.isPrivate }
         lookedAt.remove(tab.id)
+        awakeSince.remove(tab.id)
+        slept.remove(tab.id)
         observers.remove(tab.id)?.cancel()
         noticeObservers.remove(tab.id)?.cancel()
         lastUsed.remove(tab.id)

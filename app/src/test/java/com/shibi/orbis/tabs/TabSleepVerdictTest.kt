@@ -38,6 +38,7 @@ class TabSleepVerdictTest {
         val cases =
             listOf(
                 idle.copy(isSelected = true) to TabSleepVerdict.SELECTED,
+                idle.copy(openerOfSelected = true) to TabSleepVerdict.OPENER_OF_SELECTED,
                 idle.copy(isPrivate = true) to TabSleepVerdict.PRIVATE,
                 idle.copy(playing = true) to TabSleepVerdict.PLAYING,
                 idle.copy(loading = true) to TabSleepVerdict.LOADING,
@@ -132,6 +133,40 @@ class TabSleepVerdictTest {
             TabSleepVerdict.SLEEP,
             tabSleepVerdict(playing.copy(playing = false), anHourAndAMinuteAfterLeaving, TabSleepAfter.AFTER_1_HOUR),
         )
+    }
+
+    @Test
+    fun theOpenerOfTheSelectedTabNeverSleepsAlsoWithLowMemory() {
+        // A sign-in or payment window is in front; the tab that opened it waits for it.
+        val opener = idle.copy(openerOfSelected = true, lastLookedAt = now - 365 * 24 * hour, awakeSince = null)
+        for (setting in TabSleepAfter.entries.filter { it != TabSleepAfter.NEVER }) {
+            assertEquals("$setting", TabSleepVerdict.OPENER_OF_SELECTED, verdict(opener, setting))
+            assertEquals("$setting, low memory", TabSleepVerdict.OPENER_OF_SELECTED, verdict(opener, setting, lowMemory = true))
+        }
+        assertEquals(TabSleepVerdict.SLEEP, verdict(opener.copy(openerOfSelected = false)))
+    }
+
+    @Test
+    fun aMicrophoneGrantAFileADownloadAndACastHoldTheTabAlsoWithLowMemory() {
+        val old = idle.copy(lastLookedAt = now - 365 * 24 * hour, awakeSince = now - 365 * 24 * hour)
+        val holds =
+            listOf(
+                old.copy(cameraOrMicrophoneInUse = true) to TabSleepVerdict.CAMERA_OR_MICROPHONE,
+                old.copy(uploadRunning = true) to TabSleepVerdict.UPLOAD,
+                old.copy(downloadRunning = true) to TabSleepVerdict.DOWNLOAD,
+                old.copy(casting = true) to TabSleepVerdict.CASTING,
+            )
+        for ((facts, expected) in holds) {
+            assertEquals(expected, verdict(facts, TabSleepAfter.AFTER_15_MINUTES, lowMemory = true))
+        }
+    }
+
+    @Test
+    fun onlyAndroidsLowMemoryLevelsCountAsLowMemory() {
+        // RUNNING_LOW, RUNNING_CRITICAL, BACKGROUND, MODERATE, COMPLETE.
+        for (level in listOf(10, 15, 40, 60, 80)) assertEquals("$level", true, isLowMemoryReport(level))
+        // RUNNING_MODERATE, UI_HIDDEN, and nothing at all.
+        for (level in listOf(0, 5, 20)) assertEquals("$level", false, isLowMemoryReport(level))
     }
 
     @Test

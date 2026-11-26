@@ -63,8 +63,14 @@ import com.shibi.orbis.history.FileHistoryStore
 import com.shibi.orbis.history.HistoryManager
 import com.shibi.orbis.storage.AtomicTextFile
 import com.shibi.orbis.tabs.FileTabStore
+import com.shibi.orbis.tabs.TAB_SLEEP_CHECK_EVERY_MILLIS
 import com.shibi.orbis.tabs.TabManager
 import com.shibi.orbis.tabs.VisitSink
+import com.shibi.orbis.tabs.isLowMemoryReport
+import com.shibi.orbis.cast.CastPhase
+import com.shibi.orbis.downloads.DownloadStatus
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import com.shibi.orbis.addons.AddonManager
 import com.shibi.orbis.addons.SharedPreferencesAddonPrefs
 import com.shibi.orbis.ubo.SharedPreferencesUboPrefs
@@ -116,7 +122,41 @@ class OrbisApp : Application() {
                 downloadForeground?.onAppBackground()
                 torrentForeground?.onAppBackground()
             }
+            tabSleepOnForeground(foreground)
         }
+
+    /** The sleep check every [TAB_SLEEP_CHECK_EVERY_MILLIS] while Orbis is in front; null in the background. */
+    private var tabSleepTimer: Job? = null
+
+    /** In front: the check every 5 minutes. To the background: the check once, now. */
+    private fun tabSleepOnForeground(foreground: Boolean) {
+        tabSleepTimer?.cancel()
+        tabSleepTimer = null
+        if (!foreground) {
+            sleepUnusedTabs(lowMemory = false)
+            return
+        }
+        tabSleepTimer =
+            appScope.launch {
+                while (true) {
+                    delay(TAB_SLEEP_CHECK_EVERY_MILLIS)
+                    sleepUnusedTabs(lowMemory = false)
+                }
+            }
+    }
+
+    /** One sleep check with the user's setting (Settings > Put unused tabs to sleep). Main thread. */
+    private fun sleepUnusedTabs(lowMemory: Boolean) {
+        if (!::container.isInitialized) return
+        runCatching { container.tabs.sleepUnusedTabs(container.browserSettings.tabSleepAfter.value, lowMemory) }
+            .onFailure { container.debugLog.log("Tabs", "sleep check failed: ${it.javaClass.simpleName}") }
+    }
+
+    /** Android reports that memory is running low: the check at once, with the low-memory time. */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (isLowMemoryReport(level)) sleepUnusedTabs(lowMemory = true)
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -235,6 +275,7 @@ class OrbisApp : Application() {
         engine.logins = LoginBridgeImpl(logins) { browserSettings.offerSavePasswords.value }
         var downloadsRef: DownloadManager? = null
         var torrentsRef: TorrentManager? = null
+        var castRef: CastCoordinator? = null
         // The tab manager creates NO session here: sessions appear only once the browser screen asks for them, which
         // is after the onboarding decision. restore() only reads the stored tab list.
         val tabsFile = File(filesDir, "tabs/tabs.json")
@@ -266,6 +307,11 @@ class OrbisApp : Application() {
                         runCatching { imports.deleteImport(url) }
                             .onFailure { debugLog.log("Import", "not deleted") }
                     }
+                },
+                // Both are created just below; no sleep check runs before then (the tab list is not read yet).
+                downloadRunning = { downloadsRef?.entries?.value?.any { it.status == DownloadStatus.IN_PROGRESS } == true },
+                castActive = {
+                    castRef?.let { it.playback.value != null || it.phase.value == CastPhase.Connecting || it.phase.value == CastPhase.Controls } == true
                 },
             )
         // Selection menu > Search: a new tab (private for a private page) with the user's search engine.
@@ -436,6 +482,7 @@ class OrbisApp : Application() {
                 log = { debugLog.log("ClearOnExit", it) },
             )
         val cast = CastCoordinator(this, appScope, log = { debugLog.log("Cast", it) })
+        castRef = cast
         tabs.onPrivateTabDisposed = { id -> cast.onPrivateTabClosed(id) }
         val privacyPrefs = SharedPreferencesPrivacyPrefs(getSharedPreferences(SharedPreferencesPrivacyPrefs.FILE_NAME, MODE_PRIVATE))
         val backup =
