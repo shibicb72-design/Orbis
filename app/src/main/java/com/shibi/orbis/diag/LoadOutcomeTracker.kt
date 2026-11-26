@@ -1,10 +1,14 @@
 package com.shibi.orbis.diag
 
 /**
- * How one page load ended. [error] is set for an engine error; otherwise [kind] says. [empty] is true when the page that
- * committed came up almost empty. [ms] is the time from the load being asked for to its end.
+ * How one page load ended. [error] is set for an engine error; otherwise [kind] says. [ended] says how a load whose page
+ * committed came to its end: [LoadEnded.YES] when the page stopped normally. [ms] is the time from the load being asked
+ * for to its end.
  */
-data class LoadEnd(val kind: LoadKind, val ms: Long, val error: ErrorCategory? = null, val empty: Boolean = false)
+data class LoadEnd(val kind: LoadKind, val ms: Long, val error: ErrorCategory? = null, val ended: LoadEnded = LoadEnded.YES)
+
+/** The most pop-up lines written for one page (since the tab's last committed load). */
+const val POPUP_LINES_PER_PAGE = 20
 
 /**
  * Turns the engine's page callbacks of ONE tab into exactly one [LoadEnd] per load. No I/O, no clock of its own and no
@@ -14,9 +18,9 @@ data class LoadEnd(val kind: LoadKind, val ms: Long, val error: ErrorCategory? =
  * - at an engine error, a download, a hand-off to an app or a refusal, at once;
  * - at the user's stop, or when the page stops;
  * - when another load replaces it, or the tab closes, before it ended: `unfinished`, or what it already was when
- *   its page had committed.
- * A load whose page committed is held until the page's "almost empty" report arrives ([onEmptyReport]) or the next
- * event of the tab, so the line can say `empty=yes`. Redirect requests of a load belong to that load.
+ *   its page had committed, with [LoadEnded.NO].
+ * A load whose page committed is written at its page stop, or at the user's stop, at once. Redirect requests of a load
+ * belong to that load.
  */
 class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
     private var open = false
@@ -24,9 +28,6 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
     private var started = false
     private var redirected = false
     private var committed = false
-    private var held: LoadEnd? = null
-    private var reported = false
-    private var reportedEmpty = false
     private var popups = 0
     private var dead = false
 
@@ -70,9 +71,11 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
     fun onPageStop(success: Boolean, nowMs: Long) {
         // A stop of an earlier load can arrive after a new request: the new load has not started.
         if (!open || !started) return
-        if (committed || success) {
-            if (!committed) committed = true
-            holdCommitted(nowMs)
+        if (success) {
+            committed = true
+            finish(LoadEnd(committedKind(), nowMs - startedAt))
+        } else if (committed) {
+            finish(LoadEnd(committedKind(), nowMs - startedAt, ended = LoadEnded.STOPPED))
         } else {
             finish(LoadEnd(LoadKind.STOPPED, nowMs - startedAt))
         }
@@ -93,19 +96,10 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
     /** The user pressed stop. */
     fun onUserStop(nowMs: Long) {
         if (!open) return
-        if (committed) holdCommitted(nowMs) else finish(LoadEnd(LoadKind.STOPPED, nowMs - startedAt))
-    }
-
-    /**
-     * The page's report: it came up almost empty ([empty]) or not. Writes the held line; a report that arrives before
-     * the page stopped is kept for the line.
-     */
-    fun onEmptyReport(empty: Boolean) {
-        if (held != null) {
-            flushHeld(empty)
-        } else if (open && committed) {
-            reported = true
-            reportedEmpty = empty
+        if (committed) {
+            finish(LoadEnd(committedKind(), nowMs - startedAt, ended = LoadEnded.STOPPED))
+        } else {
+            finish(LoadEnd(LoadKind.STOPPED, nowMs - startedAt))
         }
     }
 
@@ -118,12 +112,14 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
     /** The content process died: the load in flight will never end by itself. */
     fun onInterrupted(nowMs: Long) {
         if (dead) return
-        flushHeld(false)
         endReplaced(nowMs)
     }
 
-    /** A pop-up opened from this tab's page: how many since its last committed load, this one included. */
-    fun nextPopupCount(): Int = ++popups
+    /**
+     * A pop-up opened from this tab's page: its number since the tab's last committed load, this one included, for the
+     * first [POPUP_LINES_PER_PAGE]; null after that (the count still rises, so no line is written for a pop-up flood).
+     */
+    fun nextPopupLine(): Int? = if (++popups <= POPUP_LINES_PER_PAGE) popups else null
 
     private fun endNow(kind: LoadKind, nowMs: Long) {
         if (dead) return
@@ -136,37 +132,21 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
     }
 
     private fun begin(nowMs: Long, started: Boolean) {
-        flushHeld(false)
         endReplaced(nowMs)
         open = true
         startedAt = nowMs
         this.started = started
         redirected = false
         committed = false
-        reported = false
-        reportedEmpty = false
     }
 
     private fun endReplaced(nowMs: Long) {
         if (!open) return
         val ms = nowMs - startedAt
-        finish(if (committed) LoadEnd(committedKind(), ms) else LoadEnd(LoadKind.UNFINISHED, ms))
+        finish(if (committed) LoadEnd(committedKind(), ms, ended = LoadEnded.NO) else LoadEnd(LoadKind.UNFINISHED, ms))
     }
 
     private fun committedKind(): LoadKind = if (redirected) LoadKind.REDIRECTED else LoadKind.COMMITTED
-
-    private fun holdCommitted(nowMs: Long) {
-        val end = LoadEnd(committedKind(), nowMs - startedAt)
-        open = false
-        held = end
-        if (reported) flushHeld(reportedEmpty)
-    }
-
-    private fun flushHeld(empty: Boolean) {
-        val end = held ?: return
-        held = null
-        emit(if (empty) end.copy(empty = true) else end)
-    }
 
     private fun finish(end: LoadEnd) {
         open = false

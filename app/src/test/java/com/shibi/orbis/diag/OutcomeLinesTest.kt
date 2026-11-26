@@ -43,17 +43,23 @@ class OutcomeLinesTest {
     }
 
     @Test
-    fun loadLine_emptyPageWithAndWithoutBlockedCount() {
-        assertEquals(
-            "load: committed tab=2 ms=900 empty=yes blocked=14",
-            OutcomeLines.load(LoadKind.COMMITTED, isPrivate = false, tab = 2, ms = 900, empty = true, blocked = 14),
-        )
-        assertEquals(
-            "load: committed tab=2 ms=900 empty=yes",
-            OutcomeLines.load(LoadKind.COMMITTED, isPrivate = false, tab = 2, ms = 900, empty = true, blocked = -1),
-        )
-        // A count without the empty signal is not written.
-        assertEquals("load: committed tab=2 ms=900", OutcomeLines.load(LoadKind.COMMITTED, isPrivate = false, tab = 2, ms = 900, blocked = 5))
+    fun loadLine_everyKindWithEveryEndedValue() {
+        for (kind in LoadKind.entries) {
+            assertEquals("load: ${kind.text} tab=2 ms=900", OutcomeLines.load(kind, isPrivate = false, tab = 2, ms = 900))
+            assertEquals("load: ${kind.text} tab=2 ms=900", OutcomeLines.load(kind, false, 2, 900, LoadEnded.YES))
+            assertEquals("load: ${kind.text} tab=2 ms=900 ended=no", OutcomeLines.load(kind, false, 2, 900, LoadEnded.NO))
+            assertEquals("load: ${kind.text} tab=2 ms=900 ended=stopped", OutcomeLines.load(kind, false, 2, 900, LoadEnded.STOPPED))
+        }
+        assertEquals(setOf(LoadEnded.YES, LoadEnded.NO, LoadEnded.STOPPED), LoadEnded.entries.toSet())
+    }
+
+    @Test
+    fun pageEmptyLine_withACount_withMinusOne_andForAPrivateTab() {
+        assertEquals("page empty: tab=2 blocked=14", OutcomeLines.pageEmpty(isPrivate = false, tab = 2, blocked = 14))
+        assertEquals("page empty: tab=2 blocked=0", OutcomeLines.pageEmpty(isPrivate = false, tab = 2, blocked = 0))
+        assertEquals("page empty: tab=2", OutcomeLines.pageEmpty(isPrivate = false, tab = 2, blocked = -1))
+        assertEquals("page empty: tab=0 blocked=3", OutcomeLines.pageEmpty(isPrivate = true, tab = 77, blocked = 3))
+        assertEquals("page empty: tab=0", OutcomeLines.pageEmpty(isPrivate = true, tab = 77, blocked = -1))
     }
 
     @Test
@@ -166,6 +172,7 @@ class OutcomeLinesTest {
                 OutcomeLines.popup(PopupResult.OPENED, isPrivate = true, opener = 77, child = 78, count = 1),
                 OutcomeLines.appLink(AppLinkKind.TEL, AppLinkDecision.ASKED, asked = true, isPrivate = true, tab = 77),
                 OutcomeLines.desktopMode(true, DesktopWhy.USER, isPrivate = true, tab = 77),
+                OutcomeLines.pageEmpty(isPrivate = true, tab = 77, blocked = 2),
             )
         for (line in lines) {
             assertFalse(line, line.contains("77") || line.contains("78"))

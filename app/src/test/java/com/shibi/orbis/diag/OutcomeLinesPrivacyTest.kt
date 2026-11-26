@@ -64,18 +64,24 @@ class OutcomeLinesPrivacyTest {
                 if (error != null) {
                     OutcomeLines.loadError(error, isPrivate = false, tab = 4, ms = end.ms)
                 } else {
-                    OutcomeLines.load(end.kind, isPrivate = false, tab = 4, ms = end.ms, empty = end.empty, blocked = if (end.empty) 9 else -1)
+                    OutcomeLines.load(end.kind, isPrivate = false, tab = 4, ms = end.ms, ended = end.ended)
                 },
             )
         }
         // One load of every kind.
-        tracker.onLoadRequest(false, 0); tracker.onPageStart(1); tracker.onCommit(); tracker.onPageStop(true, 2); tracker.onEmptyReport(true)
+        tracker.onLoadRequest(false, 0); tracker.onPageStart(1); tracker.onCommit(); tracker.onPageStop(true, 2)
         tracker.onLoadRequest(false, 3); tracker.onLoadRequest(true, 4); tracker.onPageStart(5); tracker.onCommit(); tracker.onPageStop(true, 6)
         tracker.onLoadRequest(false, 7); tracker.onDownload(8)
         tracker.onLoadRequest(false, 9); tracker.onAppHandOff(10)
         tracker.onLoadRequest(false, 11); tracker.onRefused(12)
         tracker.onLoadRequest(false, 13); tracker.onPageStart(14); tracker.onUserStop(15)
         tracker.onLoadRequest(false, 16); tracker.onPageStart(17); tracker.onClosed(18)
+        // A committed load that did not stop normally: stopped by the user, then replaced.
+        val ended = LoadOutcomeTracker { end -> log.log("GeckoSession", OutcomeLines.load(end.kind, false, 4, end.ms, end.ended)) }
+        ended.onLoadRequest(false, 0); ended.onPageStart(1); ended.onCommit(); ended.onUserStop(2)
+        ended.onLoadRequest(false, 3); ended.onPageStart(4); ended.onCommit(); ended.onLoadRequest(false, 5)
+        log.log("GeckoSession", OutcomeLines.pageEmpty(false, 4, 9))
+        log.log("GeckoSession", OutcomeLines.pageEmpty(false, 4, -1))
         for (category in ErrorCategory.entries) {
             val one = LoadOutcomeTracker { end -> log.log("GeckoSession", OutcomeLines.loadError(end.error!!, false, 4, end.ms)) }
             one.onLoadRequest(false, 0)
@@ -92,6 +98,7 @@ class OutcomeLinesPrivacyTest {
         log.log("GeckoSession", OutcomeLines.load(LoadKind.COMMITTED, true, 4, 5))
         log.log("GeckoSession", OutcomeLines.popup(PopupResult.OPENED, true, 4, 5, 1))
         log.log("GeckoSession", OutcomeLines.processKilled(true, 12, 3, true))
+        log.log("GeckoSession", OutcomeLines.pageEmpty(true, 4, 9))
 
         val lines = log.lines()
         assertTrue(lines.size > 40)
@@ -102,8 +109,8 @@ class OutcomeLinesPrivacyTest {
             assertTrue(line, allowed.matches(message))
             assertFalse(line, message.contains("http") || message.contains("://") || message.contains('.') || message.contains('/'))
         }
-        // The private lines carry no tab number.
-        assertTrue(lines.takeLast(3).none { it.contains("tab=4") || it.contains("opener=4") || it.contains("tabs=12") })
+        // The private lines (the last four) carry no tab number.
+        assertTrue(lines.takeLast(4).none { it.contains("tab=4") || it.contains("opener=4") || it.contains("tabs=12") })
     }
 
     @Test

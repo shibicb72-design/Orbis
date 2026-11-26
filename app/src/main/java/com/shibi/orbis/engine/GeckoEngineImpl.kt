@@ -885,15 +885,19 @@ private class GeckoBrowserSession(
             if (error != null) {
                 OutcomeLines.loadError(error, isPrivate, tab, end.ms)
             } else {
-                // The engine's own count of requests it blocked on the page shown (see pageBlocks).
-                val blocked = if (end.empty) pageBlocks.snapshot(_state.value.url).values.sum() else -1
-                OutcomeLines.load(end.kind, isPrivate, tab, end.ms, end.empty, blocked)
+                OutcomeLines.load(end.kind, isPrivate, tab, end.ms, end.ended)
             },
         )
     }
 
-    private fun logPopup(result: PopupResult, child: Long) =
-        logOutcome(OutcomeLines.popup(result, isPrivate, tabNumberForLog(), child, loadOutcome.nextPopupCount()))
+    /** The compat report said the page came up almost empty. The count is the engine's own (see pageBlocks). */
+    private fun logPageEmpty(): Unit =
+        logOutcome(OutcomeLines.pageEmpty(isPrivate, tabNumberForLog(), pageBlocks.snapshot(_state.value.url).values.sum()))
+
+    private fun logPopup(result: PopupResult, child: Long) {
+        val count = loadOutcome.nextPopupLine() ?: return
+        logOutcome(OutcomeLines.popup(result, isPrivate, tabNumberForLog(), child, count))
+    }
 
     private fun logAppLink(uri: String?, decision: AppLinkDecision, asked: Boolean) =
         logOutcome(
@@ -1761,7 +1765,7 @@ private class GeckoBrowserSession(
         val host = hostOfUrl(url)?.lowercase() ?: return
         val policy = sitePolicy() ?: return
         val message = parseCompatMessage(obj) ?: return
-        loadOutcome.onEmptyReport((message as? CompatMessage.Clean)?.empty == true)
+        if ((message as? CompatMessage.Clean)?.empty == true) logPageEmpty()
         val retrying = retryDesktopHost == host
         val action =
             when (message) {

@@ -11,6 +11,13 @@ enum class LoadKind(val text: String) {
     UNFINISHED("unfinished"),
 }
 
+/** Whether a load whose page committed ended normally: YES (no text), NO (replaced, closed or killed first), STOPPED. */
+enum class LoadEnded(val text: String) {
+    YES(""),
+    NO("no"),
+    STOPPED("stopped"),
+}
+
 /** The engine's error category, by name only (never the error code, the address or any message). */
 enum class ErrorCategory(val text: String) {
     UNKNOWN("unknown"),
@@ -74,18 +81,19 @@ object OutcomeLines {
     fun tabNumber(isPrivate: Boolean, tab: Long): Long = if (isPrivate) 0L else tab
 
     /**
-     * `load: <kind> tab=<n> ms=<t>`. [empty] adds ` empty=yes`, and ` blocked=<count>` when [blocked] is not negative
-     * (a negative count means the engine gave none).
+     * `load: <kind> tab=<n> ms=<t>`. [ended] adds ` ended=no` or ` ended=stopped` for a page that committed but did not
+     * stop normally; nothing for [LoadEnded.YES].
      */
-    fun load(kind: LoadKind, isPrivate: Boolean, tab: Long, ms: Long, empty: Boolean = false, blocked: Int = -1): String =
-        "load: ${kind.text} tab=${tabNumber(isPrivate, tab)} ms=$ms" + emptySuffix(empty, blocked)
+    fun load(kind: LoadKind, isPrivate: Boolean, tab: Long, ms: Long, ended: LoadEnded = LoadEnded.YES): String =
+        "load: ${kind.text} tab=${tabNumber(isPrivate, tab)} ms=$ms" + if (ended == LoadEnded.YES) "" else " ended=${ended.text}"
+
+    /** `page empty: tab=<n> blocked=<k>`; ` blocked=` is left out when [blocked] is negative (the engine gave no count). */
+    fun pageEmpty(isPrivate: Boolean, tab: Long, blocked: Int): String =
+        "page empty: tab=${tabNumber(isPrivate, tab)}" + if (blocked >= 0) " blocked=$blocked" else ""
 
     /** `load: error-<category> tab=<n> ms=<t>`. */
     fun loadError(category: ErrorCategory, isPrivate: Boolean, tab: Long, ms: Long): String =
         "load: error-${category.text} tab=${tabNumber(isPrivate, tab)} ms=$ms"
-
-    private fun emptySuffix(empty: Boolean, blocked: Int): String =
-        if (!empty) "" else " empty=yes" + if (blocked >= 0) " blocked=$blocked" else ""
 
     /** `link in: via=<..> tab=<n> new-tab=<yes|no>`. */
     fun linkIn(via: LinkVia, isPrivate: Boolean, tab: Long, newTab: Boolean): String =

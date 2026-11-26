@@ -1,6 +1,7 @@
 package com.shibi.orbis.diag
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class LoadOutcomeTrackerTest {
@@ -10,49 +11,92 @@ class LoadOutcomeTrackerTest {
     private fun kinds() = ends.map { if (it.error != null) "error-${it.error.text}" else it.kind.text }
 
     @Test
-    fun aNormalLoad_oneCommittedLine_afterTheEmptyReport() {
+    fun aNormalLoad_oneCommittedLine_atThePageStop_endedYes() {
         t.onLoadRequest(redirect = false, nowMs = 100)
         t.onPageStart(110)
         t.onCommit()
-        t.onPageStop(true, 400)
-        // Held for the page's own report.
         assertEquals(emptyList<LoadEnd>(), ends)
-        t.onEmptyReport(false)
-        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 300)), ends)
+        t.onPageStop(true, 400)
+        // Written at once: no report is needed.
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 300, ended = LoadEnded.YES)), ends)
         // Nothing more is written for the same load.
         t.onClosed(9_000)
         assertEquals(1, ends.size)
     }
 
     @Test
-    fun anEmptyPage_saysSo() {
-        t.onLoadRequest(false, 0)
-        t.onPageStart(1)
-        t.onCommit()
-        t.onPageStop(true, 50)
-        t.onEmptyReport(true)
-        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 50, empty = true)), ends)
-    }
-
-    @Test
-    fun theReportBeforeThePageStopped_isKept() {
-        t.onLoadRequest(false, 0)
-        t.onPageStart(1)
-        t.onCommit()
-        t.onEmptyReport(true)
-        assertEquals(emptyList<LoadEnd>(), ends)
-        t.onPageStop(true, 70)
-        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 70, empty = true)), ends)
-    }
-
-    @Test
-    fun aCommittedLine_isWrittenWhenTheNextLoadStartsEvenWithoutAReport() {
+    fun aCommittedLine_isNotWaitingForTheNextLoad() {
         t.onLoadRequest(false, 0)
         t.onPageStart(1)
         t.onCommit()
         t.onPageStop(true, 20)
+        assertEquals(listOf("committed"), kinds())
         t.onLoadRequest(false, 5_000)
         assertEquals(listOf("committed"), kinds())
+    }
+
+    @Test
+    fun aLoadReplacedAfterItsCommit_isCommittedEndedNo_thenTheNewLoadsOwnLine() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onCommit()
+        t.onLoadRequest(false, 300)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 300, ended = LoadEnded.NO)), ends)
+        t.onPageStart(310)
+        t.onCommit()
+        t.onPageStop(true, 500)
+        assertEquals(
+            listOf(LoadEnd(LoadKind.COMMITTED, 300, ended = LoadEnded.NO), LoadEnd(LoadKind.COMMITTED, 200, ended = LoadEnded.YES)),
+            ends,
+        )
+    }
+
+    @Test
+    fun aTabClosedAfterTheCommitBeforeTheStop_isEndedNo_once() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onCommit()
+        t.onClosed(250)
+        t.onPageStop(true, 260)
+        t.onClosed(300)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 250, ended = LoadEnded.NO)), ends)
+    }
+
+    @Test
+    fun aKillAfterTheCommitBeforeTheStop_isEndedNo() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onCommit()
+        t.onInterrupted(90)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 90, ended = LoadEnded.NO)), ends)
+    }
+
+    @Test
+    fun theUsersStopAfterTheCommit_isEndedStopped_andTheLatePageStopAddsNothing() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onCommit()
+        t.onUserStop(700)
+        t.onPageStop(false, 705)
+        t.onPageStop(true, 710)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 700, ended = LoadEnded.STOPPED)), ends)
+    }
+
+    @Test
+    fun aFailedPageStopAfterTheCommit_isEndedStopped() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onCommit()
+        t.onPageStop(false, 60)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 60, ended = LoadEnded.STOPPED)), ends)
+    }
+
+    @Test
+    fun aFailedPageStopBeforeAnyCommit_isStoppedWithNoEnded() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onPageStop(false, 60)
+        assertEquals(listOf(LoadEnd(LoadKind.STOPPED, 60)), ends)
     }
 
     @Test
@@ -65,8 +109,17 @@ class LoadOutcomeTrackerTest {
         t.onPageStart(30)
         t.onCommit()
         t.onPageStop(true, 90)
-        t.onEmptyReport(false)
         assertEquals(listOf(LoadEnd(LoadKind.REDIRECTED, 90)), ends)
+    }
+
+    @Test
+    fun aRedirectChainReplacedAfterItsCommit_isRedirectedEndedNo() {
+        t.onLoadRequest(false, 0)
+        t.onLoadRequest(true, 10)
+        t.onPageStart(25)
+        t.onCommit()
+        t.onLoadRequest(false, 80)
+        assertEquals(listOf(LoadEnd(LoadKind.REDIRECTED, 80, ended = LoadEnded.NO)), ends)
     }
 
     @Test
@@ -78,7 +131,6 @@ class LoadOutcomeTrackerTest {
         t.onPageStart(310)
         t.onCommit()
         t.onPageStop(true, 500)
-        t.onEmptyReport(false)
         assertEquals(listOf("unfinished", "committed"), kinds())
     }
 
@@ -148,7 +200,6 @@ class LoadOutcomeTrackerTest {
         t.onPageStart(30)
         t.onCommit()
         t.onPageStop(true, 80)
-        t.onEmptyReport(false)
         assertEquals(listOf("error-content", "committed"), kinds())
     }
 
@@ -181,7 +232,6 @@ class LoadOutcomeTrackerTest {
         t.onPageStart(101)
         t.onCommit()
         t.onPageStop(true, 150)
-        t.onEmptyReport(false)
         assertEquals(listOf("unfinished", "committed"), kinds())
     }
 
@@ -190,13 +240,28 @@ class LoadOutcomeTrackerTest {
         t.onLoadRequest(false, 0)
         t.onPageStart(1)
         t.onCommit()
-        assertEquals(1, t.nextPopupCount())
-        assertEquals(2, t.nextPopupCount())
-        assertEquals(3, t.nextPopupCount())
+        assertEquals(1, t.nextPopupLine())
+        assertEquals(2, t.nextPopupLine())
+        assertEquals(3, t.nextPopupLine())
         t.onLoadRequest(false, 100)
         t.onPageStart(101)
         t.onCommit()
-        assertEquals(1, t.nextPopupCount())
+        assertEquals(1, t.nextPopupLine())
+    }
+
+    @Test
+    fun popupLinesStopAfterTwenty_andACommitStartsTheCountAgain() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onCommit()
+        for (n in 1..20) assertEquals(n, t.nextPopupLine())
+        assertEquals(20, POPUP_LINES_PER_PAGE)
+        assertNull(t.nextPopupLine())
+        assertNull(t.nextPopupLine())
+        t.onLoadRequest(false, 100)
+        t.onPageStart(101)
+        t.onCommit()
+        assertEquals(1, t.nextPopupLine())
     }
 
     @Test
