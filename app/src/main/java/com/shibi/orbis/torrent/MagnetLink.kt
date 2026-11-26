@@ -72,10 +72,13 @@ class MagnetLink private constructor(
             return Check.Ok(MagnetLink(hash, TorrentPaths.magnetDisplayName(uri), trackers))
         }
 
-        /** libtorrent drops a ".<digits>" suffix from every key (`xt.1` is `xt`); anything else stays as it is. */
+        /**
+         * libtorrent splits at the FIRST dot and drops the rest when it is empty or all digits
+         * (`xt.` and `xt.1` are `xt`; `xt.1.2` and `xt.x` stay as they are).
+         */
         private fun baseKey(key: String): String {
-            val dot = key.lastIndexOf('.')
-            if (dot <= 0 || dot == key.length - 1) return key
+            val dot = key.indexOf('.')
+            if (dot < 0) return key
             return if (key.substring(dot + 1).all { it in '0'..'9' }) key.substring(0, dot) else key
         }
 

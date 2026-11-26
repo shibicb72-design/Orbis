@@ -63,9 +63,24 @@ class MagnetLinkTest {
     @Test
     fun nonNumericSuffixIsNotStripped() {
         val v2 = "1220" + "a".repeat(64)
-        // "xt.x" and "xt." are other keys, ignored as before.
-        assertEquals(hex, MagnetLink.parse("magnet:?xt=urn:btih:$hex&xt.x=urn:btmh:$v2&xt.=urn:btmh:$v2")!!.infoHash)
+        // "xt.x" is another key, ignored as before.
+        assertEquals(hex, MagnetLink.parse("magnet:?xt=urn:btih:$hex&xt.x=urn:btmh:$v2")!!.infoHash)
         assertSame(MagnetLink.Check.Invalid, MagnetLink.check("magnet:?xt.x=urn:btih:$hex"))
+    }
+
+    @Test
+    fun emptySuffixIsStrippedLikeLibtorrent() {
+        val v2 = "1220" + "a".repeat(64)
+        assertSame(MagnetLink.Check.V2, MagnetLink.check("magnet:?xt=urn:btih:$hex&xt.=urn:btmh:$v2"))
+        assertSame(MagnetLink.Check.V2, MagnetLink.check("magnet:?xt.=urn:btmh:$v2"))
+        assertSame(MagnetLink.Check.Invalid, MagnetLink.check("magnet:?xt=urn:btih:$hex&xt.=urn:btih:$hex"))
+    }
+
+    @Test
+    fun suffixWithSecondDotIsNotStripped() {
+        val v2 = "1220" + "a".repeat(64)
+        // libtorrent splits at the first dot; "1.2" is not all digits, so "xt.1.2" is not "xt".
+        assertTrue(MagnetLink.check("magnet:?xt=urn:btih:$hex&xt.1.2=urn:btmh:$v2") is MagnetLink.Check.Ok)
     }
 
     @Test
