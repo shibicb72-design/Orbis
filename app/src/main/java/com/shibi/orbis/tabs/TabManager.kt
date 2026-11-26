@@ -1,5 +1,7 @@
 package com.shibi.orbis.tabs
 
+import com.shibi.orbis.diag.LinkVia
+import com.shibi.orbis.diag.OutcomeLines
 import com.shibi.orbis.engine.BrowserSession
 import com.shibi.orbis.engine.ContextElementInfo
 import com.shibi.orbis.engine.IncomingDownload
@@ -8,6 +10,7 @@ import com.shibi.orbis.engine.PageContextType
 import com.shibi.orbis.engine.SessionHost
 import com.shibi.orbis.engine.SessionInit
 import com.shibi.orbis.engine.SessionState
+import com.shibi.orbis.engine.TabFacts
 import com.shibi.orbis.engine.isExternalScheme
 import com.shibi.orbis.engine.isImportLoadUrl
 import com.shibi.orbis.engine.isWebUrl
@@ -610,10 +613,13 @@ class TabManager(
                 session.setActive(foreground)
                 session.loadExternalUrl(url)
                 changed()
+                log(OutcomeLines.linkIn(LinkVia.VIEW, isPrivate = false, tab = current.id, newTab = false))
                 return
             }
         }
-        createTab(url, openerId = null, external = true)
+        val created = createTab(url, openerId = null, external = true)
+        // Only ACTION_VIEW reaches here (see externalUrlFrom). 0 when the tab cap stopped it.
+        log(OutcomeLines.linkIn(LinkVia.VIEW, isPrivate = false, tab = created ?: 0L, newTab = true))
     }
 
     /**
@@ -1264,6 +1270,7 @@ class TabManager(
         observe(id, session)
         session.setActive(foreground)
         changed()
+        log(OutcomeLines.linkIn(LinkVia.CUSTOM_TAB, isPrivate = false, tab = id, newTab = true))
         return true
     }
 
@@ -1302,6 +1309,16 @@ class TabManager(
         }
         offerTorrentIntake(request, list[i].id)
         return true
+    }
+
+    override fun tabFacts(session: BrowserSession): TabFacts {
+        val i = indexOfSession(session)
+        return TabFacts(
+            number = if (i >= 0) list[i].id else 0L,
+            selected = i >= 0 && list[i].id == selectedId,
+            open = list.size,
+            awake = list.count { it.session != null },
+        )
     }
 
     override fun onExternalAppMissing(url: String) {

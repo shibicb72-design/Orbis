@@ -16,6 +16,13 @@ import com.shibi.orbis.compat.Action
 import com.shibi.orbis.compat.AutoDesktopRetry
 import com.shibi.orbis.compat.isUnsupportedBrowserPage
 import com.shibi.orbis.debug.DebugLog
+import com.shibi.orbis.diag.AppLinkDecision
+import com.shibi.orbis.diag.DesktopWhy
+import com.shibi.orbis.diag.ErrorCategory
+import com.shibi.orbis.diag.LoadEnd
+import com.shibi.orbis.diag.LoadOutcomeTracker
+import com.shibi.orbis.diag.OutcomeLines
+import com.shibi.orbis.diag.PopupResult
 import com.shibi.orbis.downloads.DownloadIntents
 import com.shibi.orbis.history.VisitTracker
 import com.shibi.orbis.youtube.CONTENT_BLOCKING_ERROR
@@ -724,6 +731,18 @@ internal fun profileClearFlags(cookiesAndSiteData: Boolean, cache: Boolean): Lon
     return flags
 }
 
+/** The engine's error category by name, for the Error log's `load: error-<category>` line. Never the code or a message. */
+internal fun outcomeErrorCategory(category: Int): ErrorCategory =
+    when (category) {
+        WebRequestError.ERROR_CATEGORY_SECURITY -> ErrorCategory.SECURITY
+        WebRequestError.ERROR_CATEGORY_NETWORK -> ErrorCategory.NETWORK
+        WebRequestError.ERROR_CATEGORY_CONTENT -> ErrorCategory.CONTENT
+        WebRequestError.ERROR_CATEGORY_URI -> ErrorCategory.URI
+        WebRequestError.ERROR_CATEGORY_PROXY -> ErrorCategory.PROXY
+        WebRequestError.ERROR_CATEGORY_SAFEBROWSING -> ErrorCategory.SAFEBROWSING
+        else -> ErrorCategory.UNKNOWN
+    }
+
 private typealias Response = GeckoSession.PromptDelegate.PromptResponse
 private typealias AuthFlags = GeckoSession.PromptDelegate.AuthPrompt.AuthOptions.Flags
 
@@ -840,6 +859,55 @@ private class GeckoBrowserSession(
 
     /** Blocked requests on the page shown now, for video diagnostics. */
     private val pageBlocks = PageBlockCounter()
+
+    /**
+     * The Error log's outcome lines (diag/OutcomeLines): one line per page load, pop-up, app link, killed page process
+     * and desktop-mode change. Facts only, never text. Log only: no behaviour depends on it.
+     */
+    private val loadOutcome = LoadOutcomeTracker { end -> logLoadEnd(end) }
+
+    /** The tab number last seen for this session: a closing tab's host is already gone when its session closes. */
+    private var lastTabNumber = 0L
+
+    private fun outcomeNow(): Long = SystemClock.elapsedRealtime()
+
+    private fun tabNumberForLog(): Long {
+        host?.tabFacts(this)?.number?.takeIf { it > 0L }?.let { lastTabNumber = it }
+        return lastTabNumber
+    }
+
+    private fun logOutcome(line: String) = debugLog.log("GeckoSession", line)
+
+    private fun logLoadEnd(end: LoadEnd) {
+        val tab = tabNumberForLog()
+        val error = end.error
+        logOutcome(
+            if (error != null) {
+                OutcomeLines.loadError(error, isPrivate, tab, end.ms)
+            } else {
+                // The engine's own count of requests it blocked on the page shown (see pageBlocks).
+                val blocked = if (end.empty) pageBlocks.snapshot(_state.value.url).values.sum() else -1
+                OutcomeLines.load(end.kind, isPrivate, tab, end.ms, end.empty, blocked)
+            },
+        )
+    }
+
+    private fun logPopup(result: PopupResult, child: Long) =
+        logOutcome(OutcomeLines.popup(result, isPrivate, tabNumberForLog(), child, loadOutcome.nextPopupCount()))
+
+    private fun logAppLink(uri: String?, decision: AppLinkDecision, asked: Boolean) =
+        logOutcome(
+            OutcomeLines.appLink(
+                if (uri == null) com.shibi.orbis.diag.AppLinkKind.OTHER else appLinkKindOf(uri),
+                decision,
+                asked,
+                isPrivate,
+                tabNumberForLog(),
+            ),
+        )
+
+    private fun logDesktopMode(on: Boolean, why: DesktopWhy) =
+        logOutcome(OutcomeLines.desktopMode(on, why, isPrivate, tabNumberForLog()))
 
     /** This tab as video diagnostics sees it (see DiagExtensionHolder). */
     private val diagTab =
@@ -981,6 +1049,7 @@ private class GeckoBrowserSession(
                     applyImportedScript(url, reloadIfChanged = true)
                     tabHistory.onCommit(url)
                     onCommitForDesktop(url)
+                    loadOutcome.onCommit()
                 }
                 // Gecko hands every web page its tracking permission record; ALLOW means a stored (normal) exception.
                 trackingPermission = perms.firstOrNull { it.permission == GeckoSession.PermissionDelegate.PERMISSION_TRACKING }
@@ -1012,6 +1081,13 @@ private class GeckoBrowserSession(
                 if (request.target == GeckoSession.NavigationDelegate.TARGET_WINDOW_NEW) {
                     val allow =
                         request.hasUserGesture && isWebUrl(request.uri) && host?.canOpenTab() == true
+                    // No gesture or no web address: blocked. Otherwise the host has no room (or is gone): the tab limit.
+                    if (!allow) {
+                        logPopup(
+                            if (request.hasUserGesture && isWebUrl(request.uri)) PopupResult.CLOSED_AT_TAB_LIMIT else PopupResult.BLOCKED,
+                            child = 0L,
+                        )
+                    }
                     return GeckoResult.fromValue(if (allow) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
                 }
                 // The load that followed an app link's web fallback is the page's own navigation, not a direct one.
@@ -1019,6 +1095,7 @@ private class GeckoBrowserSession(
                     isOwnFallbackLoad(pendingFallbackLoad, request.uri, request.hasUserGesture, request.isDirectNavigation)
                 if (fallbackLoad) pendingFallbackLoad = null
                 val direct = request.isDirectNavigation && !fallbackLoad
+                loadOutcome.onLoadRequest(request.isRedirect, outcomeNow())
                 // A shared file must not send the tab to the web by itself (meta refresh); a tapped link still works,
                 // and so does the server redirect that follows it.
                 if (blocksImportAutoNavigation(
@@ -1030,6 +1107,7 @@ private class GeckoBrowserSession(
                     )
                 ) {
                     debugLog.log("GeckoSession", "import auto-navigation blocked")
+                    loadOutcome.onRefused(outcomeNow())
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
                 if ((request.hasUserGesture || direct) && isWebUrl(request.uri)) importLeaveAllowed = true
@@ -1042,6 +1120,7 @@ private class GeckoBrowserSession(
                 when (topLevelLoadVerdict(request.uri, _state.value.url, appExtensionLoad)) {
                     LoadVerdict.DENY -> {
                         debugLog.log("GeckoSession", "refused load scheme=${loggableScheme(request.uri)}")
+                        loadOutcome.onRefused(outcomeNow())
                         return GeckoResult.fromValue(AllowOrDeny.DENY)
                     }
                     // Gecko applies its own rules (about:, data:, blob:, javascript:, an allowed extension page).
@@ -1054,6 +1133,7 @@ private class GeckoBrowserSession(
                     LoadVerdict.IMPORT_FILE -> {
                         if (!importFileAllowed(importRoot, request.uri)) {
                             debugLog.log("GeckoSession", "refused file uri")
+                            loadOutcome.onRefused(outcomeNow())
                             return GeckoResult.fromValue(AllowOrDeny.DENY)
                         }
                         applyImportedScript(request.uri)
@@ -1104,6 +1184,8 @@ private class GeckoBrowserSession(
                 // The scheme check here is defense in depth.
                 if (owner == null || !isWebUrl(uri) || !owner.canOpenTab()) {
                     debugLog.log("GeckoSession", "popup refused")
+                    // A host and a web address that still said no: the tab limit.
+                    logPopup(if (owner != null && isWebUrl(uri)) PopupResult.CLOSED_AT_TAB_LIMIT else PopupResult.BLOCKED, child = 0L)
                     return GeckoResult.fromValue<GeckoSession>(null)
                 }
                 // The child is deliberately NOT opened: Gecko opens the session it is handed, and opening it
@@ -1114,7 +1196,9 @@ private class GeckoBrowserSession(
                 runCatching { child.attachCompat() }
                 runCatching { child.attachDiag() }
                 owner.onPopupSession(child, this@GeckoBrowserSession)
-                debugLog.log("GeckoSession", "popup session created")
+                // The host closes the child when the tab list is full: then it has no tab number.
+                val childTab = owner.tabFacts(child).number
+                logPopup(OutcomeLines.popupResultOf(childTab), child = childTab)
                 return GeckoResult.fromValue(child.geckoSession)
             }
 
@@ -1127,6 +1211,7 @@ private class GeckoBrowserSession(
                     "GeckoSession",
                     "load error code=0x${error.code.toString(16)} category=0x${error.category.toString(16)}",
                 )
+                loadOutcome.onError(outcomeErrorCategory(error.category), outcomeNow())
                 visits.onLoadError()
                 tabHistory.onLoadEndedWithoutCommit()
                 _state.update { it.afterLoadError(uri?.takeIf { failed -> isWebUrl(failed) }) }
@@ -1157,11 +1242,13 @@ private class GeckoBrowserSession(
                 _state.update { it.afterPageStart(url) }
                 _state.update { it.copy(readerable = false) }
                 visits.onPageStart()
+                loadOutcome.onPageStart(outcomeNow())
             }
 
             override fun onPageStop(session: GeckoSession, success: Boolean) {
                 _state.update { it.afterPageStop(success) }
                 visits.onPageStop(success)?.let { host?.onVisit(this@GeckoBrowserSession, it.url, it.title) }
+                loadOutcome.onPageStop(success, outcomeNow())
             }
 
             override fun onProgressChange(session: GeckoSession, progress: Int) {
@@ -1289,12 +1376,16 @@ private class GeckoBrowserSession(
         when (val step = planExternalRequest(tapAllowed, openInAppPending, request.uri, _state.value.url)) {
             ExternalRequestStep.BlockedNoTap -> {
                 debugLog.log("GeckoSession", "external app link without a tap: blocked")
+                logAppLink(request.uri, AppLinkDecision.REFUSED, asked = false)
+                loadOutcome.onRefused(outcomeNow())
                 return deny
             }
             // An imported document may not leave for the web by itself, not even through an app link's fallback.
             ExternalRequestStep.BlockedImportLeave -> {
                 debugLog.log("GeckoSession", "external app link without a tap: blocked")
                 debugLog.log("GeckoSession", "import auto-navigation blocked")
+                logAppLink(request.uri, AppLinkDecision.BLOCKED_IMPORT, asked = false)
+                loadOutcome.onRefused(outcomeNow())
                 return deny
             }
             // An intent: link's web fallback, which the page could have gone to itself: no app is started. The load is
@@ -1302,12 +1393,17 @@ private class GeckoBrowserSession(
             is ExternalRequestStep.FollowWebFallback -> {
                 debugLog.log("GeckoSession", "external app link without a tap: blocked")
                 debugLog.log("GeckoSession", "external app link without a tap: web fallback followed")
+                logAppLink(request.uri, AppLinkDecision.WEB_FALLBACK_FOLLOWED, asked = false)
+                // This load is refused here; the fallback is a load of its own that follows.
+                loadOutcome.onRefused(outcomeNow())
                 loadUrl(step.url)
                 pendingFallbackLoad = step.url
                 return deny
             }
             ExternalRequestStep.BlockedPending -> {
                 debugLog.log("GeckoSession", "external app link while one is pending: blocked")
+                logAppLink(request.uri, AppLinkDecision.REFUSED, asked = false)
+                loadOutcome.onRefused(outcomeNow())
                 return deny
             }
             ExternalRequestStep.Proceed -> Unit
@@ -1316,25 +1412,38 @@ private class GeckoBrowserSession(
         if (schemeOf(request.uri) == "magnet" && sitePolicy()?.magnetsToOrbis() == true &&
             host?.onTorrentIntake(com.shibi.orbis.torrent.IntakeRequest.Magnet(request.uri, isPrivate), this) == true
         ) {
+            loadOutcome.onAppHandOff(outcomeNow())
             return deny
         }
         when (val route = routeExternalNavigation(request.uri, appContext.packageName)) {
             is ExternalNavigation.Web -> {
                 // An intent: link that is really an http(s) address stays in this tab. Never load the raw intent: URI.
+                logAppLink(request.uri, AppLinkDecision.WEB_FALLBACK_FOLLOWED, asked = false)
+                loadOutcome.onRefused(outcomeNow())
                 if (route.url != null) loadUrl(route.url)
                 return deny
             }
-            ExternalNavigation.Blocked -> return deny
+            ExternalNavigation.Blocked -> {
+                logAppLink(request.uri, AppLinkDecision.REFUSED, asked = false)
+                loadOutcome.onRefused(outcomeNow())
+                return deny
+            }
             is ExternalNavigation.App -> {
                 val target = externalApps.targetFor(route)
                 when (externalOpenChoice(target.intent != null, target.resolvable)) {
                     ExternalOpenChoice.ASK -> return askOpenInApp(target, webLink = false, originalUrl = request.uri)
                     ExternalOpenChoice.LAUNCH -> {
                         // Not visible to PackageManager. The tap already happened: try the app anyway.
-                        if (!externalApps.launch(target)) followExternalMiss(target, request.uri)
+                        loadOutcome.onAppHandOff(outcomeNow())
+                        if (externalApps.launch(target)) {
+                            logAppLink(request.uri, AppLinkDecision.OPENED, asked = false)
+                        } else {
+                            followExternalMiss(target, request.uri)
+                        }
                         return deny
                     }
                     ExternalOpenChoice.MISS -> {
+                        loadOutcome.onAppHandOff(outcomeNow())
                         followExternalMiss(target, request.uri)
                         return deny
                     }
@@ -1347,15 +1456,23 @@ private class GeckoBrowserSession(
      * startActivity failed. An intent: link's browser_fallback_url loads here; otherwise the Play listing for the
      * package the link named; otherwise the UI says no app can open it and offers to copy [originalUrl].
      */
-    private fun followExternalMiss(target: AppTarget, originalUrl: String) {
+    private fun followExternalMiss(target: AppTarget, originalUrl: String, asked: Boolean = false) {
         when (val miss = planExternalMiss(target.fallbackUrl, target.marketPackage)) {
-            is ExternalMiss.OpenWeb -> loadUrl(miss.url)
+            is ExternalMiss.OpenWeb -> {
+                logAppLink(originalUrl, AppLinkDecision.WEB_FALLBACK_FOLLOWED, asked)
+                loadUrl(miss.url)
+            }
             is ExternalMiss.OpenMarket -> {
                 val market = externalApps.forExternalScheme(miss.uri)
+                // The app is missing either way: the store listing is the fallback, not the link opened.
+                logAppLink(originalUrl, AppLinkDecision.NO_APP, asked)
                 if (market != null && externalApps.launch(market)) return
                 if (originalUrl.isNotBlank()) host?.onExternalAppMissing(originalUrl)
             }
-            ExternalMiss.NoHandler -> if (originalUrl.isNotBlank()) host?.onExternalAppMissing(originalUrl)
+            ExternalMiss.NoHandler -> {
+                logAppLink(originalUrl, AppLinkDecision.NO_APP, asked)
+                if (originalUrl.isNotBlank()) host?.onExternalAppMissing(originalUrl)
+            }
         }
     }
 
@@ -1364,19 +1481,33 @@ private class GeckoBrowserSession(
         // Staying loads a web link here; anything else has nothing to load.
         val stay = if (webLink) AllowOrDeny.ALLOW else AllowOrDeny.DENY
         if (closed) return GeckoResult.fromValue(stay)
-        if (openInAppPending) return GeckoResult.fromValue(stay)
+        if (openInAppPending) {
+            logAppLink(originalUrl, AppLinkDecision.REFUSED, asked = false)
+            return GeckoResult.fromValue(stay)
+        }
         openInAppPending = true
+        logAppLink(originalUrl, AppLinkDecision.ASKED, asked = true)
         queue.add(
             SitePrompt.OpenInApp(originHost(), target.label, webLink, isPrivate) { open ->
                 openInAppPending = false
                 if (open == true) {
                     if (externalApps.launch(target)) {
+                        logAppLink(originalUrl, AppLinkDecision.OPENED, asked = true)
+                        loadOutcome.onAppHandOff(outcomeNow())
                         result.complete(AllowOrDeny.DENY)
                     } else {
-                        if (!webLink) followExternalMiss(target, originalUrl.orEmpty())
+                        if (!webLink) {
+                            loadOutcome.onAppHandOff(outcomeNow())
+                            followExternalMiss(target, originalUrl.orEmpty(), asked = true)
+                        } else {
+                            logAppLink(originalUrl, AppLinkDecision.NO_APP, asked = true)
+                        }
                         result.complete(stay)
                     }
                 } else {
+                    logAppLink(originalUrl, AppLinkDecision.REFUSED, asked = true)
+                    // A declined link for another app loads nothing; a declined web link loads here.
+                    if (!webLink) loadOutcome.onRefused(outcomeNow())
                     result.complete(stay)
                 }
             },
@@ -1630,6 +1761,7 @@ private class GeckoBrowserSession(
         val host = hostOfUrl(url)?.lowercase() ?: return
         val policy = sitePolicy() ?: return
         val message = parseCompatMessage(obj) ?: return
+        loadOutcome.onEmptyReport((message as? CompatMessage.Clean)?.empty == true)
         val retrying = retryDesktopHost == host
         val action =
             when (message) {
@@ -1689,7 +1821,7 @@ private class GeckoBrowserSession(
         when (action) {
             Action.Retry -> {
                 retryDesktopHost = host
-                applyDesktop(true)
+                applyDesktop(true, DesktopWhy.AUTO_BLOCKED_PAGE)
                 debugLog.log("GeckoSession", "auto desktop: retry")
                 session.reload()
             }
@@ -1702,13 +1834,13 @@ private class GeckoBrowserSession(
             Action.Revert -> {
                 retryDesktopHost = null
                 policy.declineAutoDesktop(url, isPrivate)
-                applyDesktop(false)
+                applyDesktop(false, DesktopWhy.AUTO_BLOCKED_PAGE)
                 debugLog.log("GeckoSession", "auto desktop: reverted")
                 session.reload()
             }
             Action.RetryMobile -> {
                 retryMobileHost = host
-                applyDesktop(false)
+                applyDesktop(false, DesktopWhy.AUTO_EMPTY_PAGE)
                 debugLog.log("GeckoSession", "auto desktop: empty page, mobile retry")
                 session.reload()
             }
@@ -1717,11 +1849,13 @@ private class GeckoBrowserSession(
                 policy.forgetAutoDesktop(url, isPrivate)
                 debugLog.log("GeckoSession", "auto desktop: mobile kept")
                 _autoDesktopDropped.tryEmit(Unit)
+                // The tab is already mobile (the retry); this is the site's automatic desktop choice going away.
+                logDesktopMode(on = false, why = DesktopWhy.AUTO_DROPPED)
             }
             Action.RestoreDesktop -> {
                 // The stored automatic choice was never changed: desktop for the host again, without a notice.
                 retryMobileHost = null
-                applyDesktop(true)
+                applyDesktop(true, DesktopWhy.RESTORED)
                 debugLog.log("GeckoSession", "auto desktop: desktop restored")
                 session.reload()
             }
@@ -1828,6 +1962,7 @@ private class GeckoBrowserSession(
                 owner.onDownload(download, this@GeckoBrowserSession)
                 // No file name or url in the log.
                 debugLog.log("GeckoSession", "download offered")
+                loadOutcome.onDownload(outcomeNow())
             }
 
             override fun onCrash(session: GeckoSession) = onContentProcessGone(ContentProcessGone.CRASH)
@@ -1881,6 +2016,12 @@ private class GeckoBrowserSession(
                 userNavigation()
                 debugLog.log("GeckoSession", "content process ${kind.logName}; no page to restore")
             }
+        }
+        // A kill ends the load in flight; a crash is not "killed" and has its own line above.
+        loadOutcome.onInterrupted(now)
+        if (kind == ContentProcessGone.KILL) {
+            val facts = host?.tabFacts(this) ?: TabFacts.NONE
+            logOutcome(OutcomeLines.processKilled(isPrivate, facts.open, facts.awake, facts.selected))
         }
     }
 
@@ -2808,18 +2949,19 @@ private class GeckoBrowserSession(
                 autoDesktop.onLeft(host)
             }
         }
-        applyDesktop(enabled)
+        applyDesktop(enabled, DesktopWhy.USER)
         // Settings only take effect for the next load.
         if (session.isOpen && _state.value.url.isNotEmpty()) reload()
     }
 
-    private fun applyDesktop(enabled: Boolean) {
+    private fun applyDesktop(enabled: Boolean, why: DesktopWhy = DesktopWhy.SITE_SETTING) {
         if (_state.value.desktopMode == enabled) return
         session.settings.userAgentMode =
             if (enabled) GeckoSessionSettings.USER_AGENT_MODE_DESKTOP else GeckoSessionSettings.USER_AGENT_MODE_MOBILE
         session.settings.viewportMode =
             if (enabled) GeckoSessionSettings.VIEWPORT_MODE_DESKTOP else GeckoSessionSettings.VIEWPORT_MODE_MOBILE
         _state.update { it.copy(desktopMode = enabled) }
+        logDesktopMode(enabled, why)
     }
 
     /** The site's desktop and JavaScript choices, set before its page loads (like tracking protection). */
@@ -2902,6 +3044,7 @@ private class GeckoBrowserSession(
 
     override fun stop() {
         if (!closed) session.stop()
+        if (!closed) loadOutcome.onUserStop(outcomeNow())
     }
 
     private fun applyTrackingProtection(on: Boolean) {
@@ -3067,6 +3210,8 @@ private class GeckoBrowserSession(
 
     override fun close() {
         if (closed) return
+        // A load still running ends here: its one line is written before anything is dismissed.
+        loadOutcome.onClosed(outcomeNow())
         // Answer everything first: a pending GeckoResult must not outlive its session.
         queue.dismissAll()
         // Cancels any file copy still running; dismissAll already answered its prompt.

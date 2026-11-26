@@ -614,4 +614,13 @@ interface SessionHost {
     fun onVisit(session: BrowserSession, url: String, title: String)
     /** The page that [onVisit] reported for [url] got or changed its title. Never creates a visit. */
     fun onVisitTitle(session: BrowserSession, url: String, title: String)
+    /** For the Error log only (numbers and flags, never text): where [session] stands in the tab list. Test doubles: none. */
+    fun tabFacts(session: BrowserSession): TabFacts = TabFacts.NONE
+}
+
+/** [number] is the tab's own id (0 when the session has no tab); [open] tabs in all; [awake] of them hold a session. */
+data class TabFacts(val number: Long, val selected: Boolean, val open: Int, val awake: Int) {
+    companion object {
+        val NONE = TabFacts(number = 0L, selected = false, open = 0, awake = 0)
+    }
 }
