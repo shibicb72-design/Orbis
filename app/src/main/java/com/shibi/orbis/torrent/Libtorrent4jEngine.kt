@@ -117,6 +117,9 @@ class Libtorrent4jEngine(
     /** Asks the DHT and the trackers again while a torrent knows no peer (keyed by engine id). */
     private val peerSearch = PeerSearchRetry()
 
+    /** Approved torrents and the ones reported finished: each is reported once per time in the session (tor17-1). */
+    private val finishes = FinishReports()
+
     // Lazy: nothing of libtorrent4j is touched before the first start (its classes load the native library).
     private val listener by lazy {
         object : AlertListener {
@@ -186,6 +189,7 @@ class Libtorrent4jEngine(
                     runCatching { timelineTick() }
                     runCatching { searchTick() }
                     runCatching { peerSearchTick() }
+                    runCatching { finishTick() }
                     delay(1000)
                 }
             }
@@ -224,6 +228,7 @@ class Libtorrent4jEngine(
             searchStart.clear()
             timeline.sessionEnded()
             peerSearch.clear()
+            finishes.clear()
             _snapshots.value = emptyMap()
             log("engine stopped")
         }
@@ -514,6 +519,7 @@ class Libtorrent4jEngine(
             latest.remove(id)
             searchStart.remove(id.value)
             peerSearch.forget(id.value)
+            finishes.forget(id.value)
             _snapshots.value = latest.toMap()
             sampleTimeline(id.value, h, clock())
             timeline.removed(id.value, clock())
@@ -531,10 +537,11 @@ class Libtorrent4jEngine(
             renames.forEach { (index, path) -> h.renameFile(index, path) }
             val count = h.torrentFile()?.numFiles() ?: return@post
             h.prioritizeFiles(Priority.array(Priority.DEFAULT, count))
+            finishes.approve(id.value)
             // libtorrent posts "finished" only on a not-finished -> finished change, and a torrent with nothing wanted
             // already counts as finished. One that is complete on disk (restored after its last piece) would never
             // get the alert, so it is reported here.
-            if (isComplete(h)) {
+            if (isComplete(h) && finishes.report(id.value)) {
                 log("complete at approval ${id.value}")
                 timeline.finished(id.value, clock())
                 emit(TorrentEvent.Finished(id))
@@ -546,8 +553,7 @@ class Libtorrent4jEngine(
      * Every wanted byte is on disk. A torrent made only of empty files wants nothing at all (totalWanted 0) and is
      * complete as soon as it has metadata; for any other torrent 0 wanted means "not approved yet", never done.
      */
-    private fun isComplete(h: TorrentHandle): Boolean {
-        val st = h.status()
+    private fun isComplete(h: TorrentHandle, st: TorrentStatus = h.status()): Boolean {
         if (!st.hasMetadata()) return false
         if (st.totalWanted() > 0) return st.totalWantedDone() >= st.totalWanted()
         return runCatching { h.torrentFile()?.totalSize() == 0L }.getOrDefault(false)
@@ -672,15 +678,20 @@ class Libtorrent4jEngine(
                     val id = byHandle[key] ?: return@post
                     val h = handles[id.value] ?: return@post
                     // libtorrent also calls a torrent "finished" while no file is wanted yet (before approveFiles), and
-                    // that alert can arrive after the approval. Only a torrent with every file wanted and every wanted
-                    // byte on disk is really done.
-                    val allWanted = h.filePriorities().none { it == Priority.IGNORE }
-                    if (allWanted && isComplete(h)) {
-                        sampleTimeline(id.value, h, clock())
-                        timeline.finished(id.value, clock())
-                        emit(TorrentEvent.Finished(id))
-                    } else {
-                        log("finished alert ignored ${id.value}")
+                    // that alert can arrive after the approval. Only a torrent with every real file wanted (padding
+                    // files are never wanted) and every wanted byte on disk is really done. One this alert misses is
+                    // reported by finishTick.
+                    val wanted = allRealFilesWanted(h)
+                    val complete = isComplete(h)
+                    when {
+                        !wanted || !complete -> log("finished alert ignored ${id.value} wanted=$wanted complete=$complete")
+                        !finishes.report(id.value) -> log("finished alert, already reported ${id.value}")
+                        else -> {
+                            log("finished by alert ${id.value}")
+                            sampleTimeline(id.value, h, clock())
+                            timeline.finished(id.value, clock())
+                            emit(TorrentEvent.Finished(id))
+                        }
                     }
                 }
             }
@@ -908,6 +919,40 @@ class Libtorrent4jEngine(
         // Every tracker; libtorrent still keeps to each tracker's minimum announce interval.
         if (trackers) h.forceReannounce()
         timeline.forced(key, dht = dht, trackers = trackers, at = at)
+    }
+
+    /**
+     * Once a second (engine thread): an approved, running torrent that libtorrent calls finished and that has every
+     * wanted byte on disk is reported finished, once ([FinishReports.tick]). The net under the alert: a torrent whose
+     * alert was ignored or lost does not stay "downloading" at 100% (tor17-1).
+     */
+    private suspend fun finishTick() {
+        // A copy: emit may suspend, and a remove posted meanwhile changes [handles].
+        for ((key, h) in handles.toList()) {
+            val st = runCatching { h.status() }.getOrNull() ?: continue
+            val state = st.state()
+            val facts =
+                TorrentFinish.TickFacts(
+                    running = !st.flags().and_(TorrentFlags.PAUSED).non_zero(),
+                    checking = state == TorrentStatus.State.CHECKING_FILES || state == TorrentStatus.State.CHECKING_RESUME_DATA,
+                    finishedOrSeeding = state == TorrentStatus.State.FINISHED || state == TorrentStatus.State.SEEDING,
+                    complete = runCatching { isComplete(h, st) }.getOrDefault(false),
+                )
+            if (!finishes.tick(key, facts)) continue
+            val id = EngineId(key)
+            log("finished by tick $key")
+            sampleTimeline(key, h, clock())
+            timeline.finished(key, clock())
+            emit(TorrentEvent.Finished(id))
+        }
+    }
+
+    /** Every file of [h] that is not a padding file is wanted ([TorrentFinish.allRealFilesWanted]). */
+    private fun allRealFilesWanted(h: TorrentHandle): Boolean {
+        val wanted = h.filePriorities().map { it != Priority.IGNORE }
+        val fs = h.torrentFile()?.files()
+        val pad = if (fs == null) emptyList() else (0 until fs.numFiles()).map { fs.padFileAt(it) }
+        return TorrentFinish.allRealFilesWanted(wanted, pad)
     }
 
     /** Counts from the peer list of [h]; no address leaves this function. */

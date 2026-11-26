@@ -10,6 +10,7 @@ import android.view.View
 import android.webkit.MimeTypeMap
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import com.shibi.orbis.BuildConfig
 import com.shibi.orbis.compat.AUTO_DESKTOP_RETRY
 import com.shibi.orbis.compat.Action
 import com.shibi.orbis.compat.AutoDesktopRetry
@@ -52,6 +53,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.Autocomplete
 import org.mozilla.geckoview.ContentBlocking
+import org.mozilla.geckoview.ExperimentalGeckoViewApi
+import org.mozilla.geckoview.GeckoPreferenceController
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
@@ -221,6 +224,25 @@ class GeckoEngineImpl(
         debugLog.log("GeckoEngine", "secure dns on=${url != null}")
     }
 
+    // Matches the setting's default (off) before the setting flow delivers.
+    @Volatile private var blockContentTrackers = false
+
+    override fun setContentTrackerBlocking(on: Boolean) {
+        blockContentTrackers = on
+        runtime?.let(::applyAntiTracking)
+    }
+
+    /** The running engine takes a new class set for the pages loaded after it (Mozilla's own Android code does the same). */
+    private fun applyAntiTracking(rt: GeckoRuntime) {
+        val on = blockContentTrackers
+        val classes = antiTrackingClasses(on)
+        runCatching {
+            val cb = rt.settings.contentBlocking
+            if (cb.antiTrackingCategories != classes) cb.setAntiTracking(classes)
+        }.onFailure { debugLog.log("GeckoEngine", "antiTracking change failed: ${it.javaClass.simpleName}") }
+        debugLog.log("GeckoEngine", "antiTracking=${antiTrackingLogName(on)}")
+    }
+
     override fun setWebsiteColorScheme(dark: Boolean?) {
         websiteDark = dark
         runtime?.let(::applyPagePrefs)
@@ -289,9 +311,10 @@ class GeckoEngineImpl(
                 ).start()
             }
             // Built via ContentBlocking.Settings.Builder: setEnhancedTrackingProtectionLevel alone only sets ETP prefs.
+            val blockContent = blockContentTrackers
             val contentBlocking =
                 ContentBlocking.Settings.Builder()
-                    .antiTracking(ContentBlocking.AntiTracking.STRICT)
+                    .antiTracking(antiTrackingClasses(blockContent))
                     .safeBrowsing(ContentBlocking.SafeBrowsing.DEFAULT)
                     .cookieBehavior(ContentBlocking.CookieBehavior.ACCEPT_FIRST_PARTY_AND_ISOLATE_OTHERS)
                     .cookieBehaviorPrivateMode(ContentBlocking.CookieBehavior.ACCEPT_FIRST_PARTY_AND_ISOLATE_OTHERS)
@@ -300,9 +323,28 @@ class GeckoEngineImpl(
                     .strictSocialTrackingProtection(true)
                     .build()
             val dnsUrl = secureDnsUrl
+            // The connectivity probes off before the engine starts (see EngineStartupPrefs). If the file cannot be
+            // written the engine starts as before, and the read-back below sets the prefs late.
+            val startupPrefs = File(appContext.filesDir, EngineStartupPrefs.FILE_NAME)
+            // A marker left behind means the last start died inside GeckoRuntime.create with the file: leave the file
+            // out until the app is updated. No catch and no second create here; the marker is the only recovery.
+            val startMarker = File(appContext.filesDir, EngineStartupPrefs.MARKER_NAME)
+            val versionCode = BuildConfig.VERSION_CODE
+            val markerText = EngineStartupPrefs.readMarker(startMarker)
+            val useStartupFile = EngineStartupPrefs.useStartupFile(markerText, versionCode)
+            if (!useStartupFile) {
+                debugLog.log("GeckoEngine", EngineStartupPrefs.SKIPPED_LINE)
+                // An unreadable marker is kept as this version's, so the next update tries the file again.
+                if (markerText?.trim()?.toIntOrNull() == null) EngineStartupPrefs.writeMarker(startMarker, versionCode)
+            }
+            val startupPrefsReady =
+                useStartupFile &&
+                    EngineStartupPrefs.ensureFile(startupPrefs) != EngineStartupPrefs.FileState.FAILED &&
+                    EngineStartupPrefs.writeMarker(startMarker, versionCode)
             val settings =
                 GeckoRuntimeSettings.Builder()
                     .aboutConfigEnabled(false)
+                    .apply { if (startupPrefsReady) configFilePath(startupPrefs.absolutePath) }
                     // No page addresses in the system log (brief priv11-2): sets consoleservice.logcat and devtools.console.stdout.chrome to false and the engine log level to Fatal.
                     .debugLogging(false)
                     .contentBlocking(contentBlocking)
@@ -312,6 +354,7 @@ class GeckoEngineImpl(
                     .apply { if (dnsUrl != null) trustedRecursiveResolverUri(dnsUrl) }
                     .build()
             val created = GeckoRuntime.create(appContext, settings)
+            if (startupPrefsReady) startMarker.delete()
             defaultAutomaticFontSize = created.settings.automaticFontSizeAdjustment
             applyDisplayPrefs(created)
             applyPagePrefs(created)
@@ -352,11 +395,49 @@ class GeckoEngineImpl(
             extensionHost.refreshActions()
             debugLog.log(
                 "GeckoEngine",
-                "runtime created; ETP level=STRICT category=STRICT antiTracking=STRICT cookies=isolate-others",
+                "runtime created; ETP level=STRICT category=STRICT antiTracking=${antiTrackingLogName(blockContent)} cookies=isolate-others",
             )
+            // The setting may have changed while the runtime was being created.
+            if (blockContentTrackers != blockContent) applyAntiTracking(created)
             // Older builds denied location silently and Gecko stored every such answer for good.
             reconciler.runNow()
+            logConnectivityProbeState()
         }
+    }
+
+    /**
+     * Reads the start-up prefs back once and logs whether both probes are off; when they are not, sets both off on the
+     * user branch (EngineStartupPrefs.afterReadBack). Never fails start-up.
+     *
+     * GeckoPreferenceController is an experimental GeckoView API, so the opt-in stays here, in the one file that imports
+     * GeckoView. An engine bump may change or remove it; CI then fails to compile and this must be looked at again.
+     */
+    @androidx.annotation.OptIn(markerClass = [ExperimentalGeckoViewApi::class])
+    private fun logConnectivityProbeState() {
+        val log = { line: String -> debugLog.log("GeckoEngine", line) }
+        val setBothOff = { onDone: (Boolean) -> Unit -> setProbePrefsOffLate(onDone) }
+        runCatching {
+            GeckoPreferenceController.getGeckoPrefs(EngineStartupPrefs.OFF).accept(
+                { prefs ->
+                    EngineStartupPrefs.afterReadBack(prefs.orEmpty().associate { it.pref to it.value }, setBothOff, log)
+                },
+                { EngineStartupPrefs.afterReadBack(null, setBothOff, log) },
+            )
+        }.onFailure { EngineStartupPrefs.afterReadBack(null, setBothOff, log) }
+    }
+
+    /** Sets both start-up prefs to false on the user branch; [onDone] gets true only when both calls succeed. Called once. */
+    @androidx.annotation.OptIn(markerClass = [ExperimentalGeckoViewApi::class])
+    private fun setProbePrefsOffLate(onDone: (Boolean) -> Unit) {
+        val reported = AtomicBoolean(false)
+        val report = { ok: Boolean -> if (reported.compareAndSet(false, true)) onDone(ok) }
+        runCatching {
+            val sets =
+                EngineStartupPrefs.OFF.map {
+                    GeckoPreferenceController.setGeckoPref(it, false, GeckoPreferenceController.PREF_BRANCH_USER)
+                }
+            GeckoResult.allOf(sets).accept({ report(true) }, { report(false) })
+        }.onFailure { report(false) }
     }
 
     /**
@@ -687,6 +768,11 @@ private class GeckoBrowserSession(
     private val autoDesktop = AutoDesktopRetry()
     private val _autoDesktopKept = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val autoDesktopKept: SharedFlow<Unit> = _autoDesktopKept.asSharedFlow()
+    private val _autoDesktopDropped = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val autoDesktopDropped: SharedFlow<Unit> = _autoDesktopDropped.asSharedFlow()
+
+    /** Host (lowercase) of a pending mobile retry of an empty page: mobile for this tab only until kept or restored. */
+    private var retryMobileHost: String? = null
 
     private val queue = PromptQueue()
     override val prompts: StateFlow<SitePrompt?> = queue.head
@@ -866,21 +952,27 @@ private class GeckoBrowserSession(
                         request.hasUserGesture && isWebUrl(request.uri) && host?.canOpenTab() == true
                     return GeckoResult.fromValue(if (allow) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
                 }
+                // The load that followed an app link's web fallback is the page's own navigation, not a direct one.
+                val fallbackLoad =
+                    isOwnFallbackLoad(pendingFallbackLoad, request.uri, request.hasUserGesture, request.isDirectNavigation)
+                if (fallbackLoad) pendingFallbackLoad = null
+                val direct = request.isDirectNavigation && !fallbackLoad
                 // A shared file must not send the tab to the web by itself (meta refresh); a tapped link still works,
                 // and so does the server redirect that follows it.
                 if (blocksImportAutoNavigation(
                         committedUrl = _state.value.url,
                         targetUrl = request.uri,
                         hasUserGesture = request.hasUserGesture,
-                        isDirectNavigation = request.isDirectNavigation,
+                        isDirectNavigation = direct,
                         redirectOfAllowedLoad = request.isRedirect && importLeaveAllowed,
                     )
                 ) {
                     debugLog.log("GeckoSession", "import auto-navigation blocked")
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
-                if ((request.hasUserGesture || request.isDirectNavigation) && isWebUrl(request.uri)) importLeaveAllowed = true
+                if ((request.hasUserGesture || direct) && isWebUrl(request.uri)) importLeaveAllowed = true
                 if (request.hasUserGesture && !request.isRedirect) lastGestureNavigationAt = SystemClock.elapsedRealtime()
+                onNavigationForAutoDesktop(request, direct)
                 // Only the load loadExtensionPage started counts as Orbis's own; a page cannot set this flag.
                 val appExtensionLoad =
                     schemeOf(request.uri) == "moz-extension" && request.isDirectNavigation && pendingExtensionLoad
@@ -1116,6 +1208,12 @@ private class GeckoBrowserSession(
      */
     private var pendingExtensionLoad = false
 
+    /**
+     * The web address of a followed app-link fallback whose load request has not arrived yet. onLoadRequest consumes it
+     * and treats that load as the page's own navigation (not direct), so it grants nothing for the next one. Main thread.
+     */
+    private var pendingFallbackLoad: String? = null
+
     /** An "Open in app" question is on screen or queued for this tab. Main thread. */
     private var openInAppPending = false
 
@@ -1123,14 +1221,33 @@ private class GeckoBrowserSession(
         val deny = GeckoResult.fromValue(AllowOrDeny.DENY)
         // A page cannot start an app on its own: a tap, or a redirect of a navigation tapped moments ago, is needed.
         val sinceTap = lastGestureNavigationAt?.let { SystemClock.elapsedRealtime() - it }
-        if (!externalLaunchAllowed(request.hasUserGesture, request.isRedirect, sinceTap)) {
-            debugLog.log("GeckoSession", "external app link without a tap: blocked")
-            return deny
-        }
+        val tapAllowed = externalLaunchAllowed(request.hasUserGesture, request.isRedirect, sinceTap)
         // One question at a time: further requests while one is open are refused, so a page cannot queue a stream of them.
-        if (openInAppPending) {
-            debugLog.log("GeckoSession", "external app link while one is pending: blocked")
-            return deny
+        when (val step = planExternalRequest(tapAllowed, openInAppPending, request.uri, _state.value.url)) {
+            ExternalRequestStep.BlockedNoTap -> {
+                debugLog.log("GeckoSession", "external app link without a tap: blocked")
+                return deny
+            }
+            // An imported document may not leave for the web by itself, not even through an app link's fallback.
+            ExternalRequestStep.BlockedImportLeave -> {
+                debugLog.log("GeckoSession", "external app link without a tap: blocked")
+                debugLog.log("GeckoSession", "import auto-navigation blocked")
+                return deny
+            }
+            // An intent: link's web fallback, which the page could have gone to itself: no app is started. The load is
+            // marked so that onLoadRequest treats it as the page's own navigation, not as a direct one.
+            is ExternalRequestStep.FollowWebFallback -> {
+                debugLog.log("GeckoSession", "external app link without a tap: blocked")
+                debugLog.log("GeckoSession", "external app link without a tap: web fallback followed")
+                loadUrl(step.url)
+                pendingFallbackLoad = step.url
+                return deny
+            }
+            ExternalRequestStep.BlockedPending -> {
+                debugLog.log("GeckoSession", "external app link while one is pending: blocked")
+                return deny
+            }
+            ExternalRequestStep.Proceed -> Unit
         }
         // A magnet for Orbis's own downloader: the confirm sheet asks; the page stays where it is.
         if (schemeOf(request.uri) == "magnet" && sitePolicy()?.magnetsToOrbis() == true &&
@@ -1453,7 +1570,19 @@ private class GeckoBrowserSession(
         val retrying = retryDesktopHost == host
         val action =
             when (message) {
-                CompatMessage.Clean -> autoDesktop.onCleanPage(host)
+                is CompatMessage.Clean ->
+                    if (!message.empty) {
+                        autoDesktop.onCleanPage(host)
+                    } else {
+                        // Not blocked, so a pending desktop retry is kept first; then the empty page, with desktop
+                        // counted as automatic only when the site policy is the automatic choice and nothing else.
+                        if (retrying) performAutoDesktop(autoDesktop.onCleanPage(host), url, policy)
+                        val desktop = _state.value.desktopMode
+                        val byAuto =
+                            desktop && retryDesktopHost == null && !policy.alwaysDesktopOn() &&
+                                policy.desktopFor(url, isPrivate) && policy.isAutoDesktop(url, isPrivate)
+                        autoDesktop.onEmptyPage(host, desktop, byAuto)
+                    }
                 is CompatMessage.Sample -> {
                     // Desktop already on and not by our retry (Always desktop, the user's choice): nothing to detect.
                     if (_state.value.desktopMode && !retrying) return
@@ -1470,6 +1599,29 @@ private class GeckoBrowserSession(
                     }
                 }
             }
+        performAutoDesktop(action, url, policy)
+    }
+
+    /**
+     * A top-level load request while a mobile retry is pending for the page shown. Started by the page itself (no user
+     * gesture, not a load the app started) -> the retried page has content (see AutoDesktopRetry.onNavigation). A
+     * server redirect follows a request already counted; a load of the page's own URL is the retry's reload or another
+     * reload, and settles nothing.
+     */
+    private fun onNavigationForAutoDesktop(request: GeckoSession.NavigationDelegate.LoadRequest, direct: Boolean) {
+        val retried = retryMobileHost ?: return
+        val url = _state.value.url
+        if (request.isRedirect || request.uri == url) return
+        if (hostOfUrl(url)?.lowercase() != retried) return
+        val policy = sitePolicy() ?: return
+        val byPage = !request.hasUserGesture && !direct
+        val action = autoDesktop.onNavigation(retried, byPage)
+        if (!byPage) retryMobileHost = null
+        performAutoDesktop(action, url, policy)
+    }
+
+    private fun performAutoDesktop(action: Action, url: String, policy: SitePolicy) {
+        val host = hostOfUrl(url)?.lowercase() ?: return
         // No URL or host in the log: it would record browsing history.
         when (action) {
             Action.Retry -> {
@@ -1491,6 +1643,25 @@ private class GeckoBrowserSession(
                 debugLog.log("GeckoSession", "auto desktop: reverted")
                 session.reload()
             }
+            Action.RetryMobile -> {
+                retryMobileHost = host
+                applyDesktop(false)
+                debugLog.log("GeckoSession", "auto desktop: empty page, mobile retry")
+                session.reload()
+            }
+            Action.KeepMobile -> {
+                retryMobileHost = null
+                policy.forgetAutoDesktop(url, isPrivate)
+                debugLog.log("GeckoSession", "auto desktop: mobile kept")
+                _autoDesktopDropped.tryEmit(Unit)
+            }
+            Action.RestoreDesktop -> {
+                // The stored automatic choice was never changed: desktop for the host again, without a notice.
+                retryMobileHost = null
+                applyDesktop(true)
+                debugLog.log("GeckoSession", "auto desktop: desktop restored")
+                session.reload()
+            }
             Action.None -> Unit
         }
     }
@@ -1503,6 +1674,7 @@ private class GeckoBrowserSession(
         if (!isWebUrl(url)) return null
         val host = hostOfUrl(url)?.lowercase()
         if (host != null && host == retryDesktopHost) return true
+        if (host != null && host == retryMobileHost) return false
         return sitePolicy()?.desktopFor(url, isPrivate)
     }
 
@@ -1517,6 +1689,7 @@ private class GeckoBrowserSession(
             committedHost?.let { autoDesktop.onLeft(it) }
             committedHost = host
             if (retryDesktopHost != null && retryDesktopHost != host) retryDesktopHost = null
+            if (retryMobileHost != null && retryMobileHost != host) retryMobileHost = null
         }
         val reloaded = desktopReloadPending
         desktopReloadPending = false
@@ -1671,6 +1844,7 @@ private class GeckoBrowserSession(
 
     /** A navigation the user asked for replaces a lost page: no restore is left waiting for it. */
     private fun userNavigation() {
+        pendingFallbackLoad = null
         restoreWhenShown = false
         _state.update { it.afterNavigationRequested() }
     }
@@ -2567,8 +2741,9 @@ private class GeckoBrowserSession(
         if (closed || _state.value.desktopMode == enabled) return
         // The user decided: a pending retry for this page's site ends here (both menus store the choice first).
         hostOfUrl(_state.value.url)?.lowercase()?.let { host ->
-            if (host == retryDesktopHost) {
+            if (host == retryDesktopHost || host == retryMobileHost) {
                 retryDesktopHost = null
+                retryMobileHost = null
                 autoDesktop.onLeft(host)
             }
         }
@@ -3786,6 +3961,21 @@ internal const val CLEAR_EXIT_NATIVE_APP = "orbisClearExit"
 /** The built-in Force dark extension (assets/extensions/darken). */
 internal const val DARKEN_ID = "darken@orbis.shibi.com"
 internal const val DARKEN_ASSET_URL = "resource://android/assets/extensions/darken/"
+
+/**
+ * The tracker classes Orbis blocks by default: the engine's STRICT set without "content" (scripts, fonts and video
+ * players that large companies host for other sites, which Firefox for Android never blocks). Written as "STRICT
+ * without CONTENT" so that a class an engine update adds to STRICT is blocked too.
+ */
+private const val STRICT_WITHOUT_CONTENT = ContentBlocking.AntiTracking.STRICT and ContentBlocking.AntiTracking.CONTENT.inv()
+
+/** The anti-tracking classes for Settings > Also block content trackers: on is exactly the engine's STRICT. */
+internal fun antiTrackingClasses(blockContentTrackers: Boolean): Int =
+    if (blockContentTrackers) ContentBlocking.AntiTracking.STRICT else STRICT_WITHOUT_CONTENT
+
+/** The name of [antiTrackingClasses] in the start-up log line. */
+internal fun antiTrackingLogName(blockContentTrackers: Boolean): String =
+    if (blockContentTrackers) "STRICT" else "STRICT-minus-content"
 
 /** What a Gecko block event counts as on the dashboard; null for one that is not counted (safe browsing, unknown). */
 internal fun blockKindOf(antiTracking: Int, cookieBehavior: Int): com.shibi.orbis.stats.BlockKind? {

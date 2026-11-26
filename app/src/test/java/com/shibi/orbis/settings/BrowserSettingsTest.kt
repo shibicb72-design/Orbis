@@ -19,6 +19,7 @@ class BrowserSettingsTest {
         override var readerSerif: Boolean = true
         override var readerTheme: ReaderTheme = ReaderTheme.LIGHT
         override var httpsOnly: HttpsOnlyMode = HttpsOnlyMode.ALL
+        override var blockContentTrackers: Boolean = false
         override var darkMode: DarkMode = DarkMode.SYSTEM
         override var themeId: String? = null
         override var darkWebsites: Boolean = false

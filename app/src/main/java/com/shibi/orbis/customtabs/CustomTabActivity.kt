@@ -67,6 +67,7 @@ import com.shibi.orbis.engine.isWebUrl
 import com.shibi.orbis.engine.noticeStillApplies
 import com.shibi.orbis.tabs.PendingDownload
 import com.shibi.orbis.ui.chromeWindowInsets
+import com.shibi.orbis.ui.browser.AutoDesktopDroppedNotice
 import com.shibi.orbis.ui.browser.AutoDesktopNotice
 import com.shibi.orbis.ui.browser.DownloadConfirmDialog
 import com.shibi.orbis.ui.browser.undoAutoDesktop
@@ -333,6 +334,7 @@ private fun CustomTabScreen(
         onShown = { autoMarkUrl = null },
         onUndo = { noticeUrl -> undoAutoDesktop(app.container.browserSettings, session, noticeUrl, state.url) },
     )
+    AutoDesktopDroppedNotice(session = session, snackbars = snackbars)
     prompt?.let { SitePromptDialog(it) }
     PageShareDialogs(pageShare)
     download?.let { pending ->

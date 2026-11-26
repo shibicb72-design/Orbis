@@ -179,6 +179,7 @@ class OrbisApp : Application() {
         appScope.launch {
             browserSettings.websiteColorScheme().collect { engine.setWebsiteColorScheme(it) }
         }
+        appScope.launch { browserSettings.blockContentTrackers.collect { engine.setContentTrackerBlocking(it) } }
         val doh =
             DohSettings(SharedPreferencesDohPrefs(getSharedPreferences(SharedPreferencesDohPrefs.FILE_NAME, Context.MODE_PRIVATE)))
         appScope.launch { doh.config.collect { engine.setSecureDns(it.resolverUrl) } }

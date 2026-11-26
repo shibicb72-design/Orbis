@@ -1094,6 +1094,7 @@ private fun BrowserContent(
         onShown = { tabs.clearAutoDesktopNotice(selectedTab.id) },
         onUndo = { noticeUrl -> session?.let { undoAutoDesktop(container.browserSettings, it, noticeUrl, state.url) } },
     )
+    AutoDesktopDroppedNotice(session = session, snackbars = snackbars)
     SlowLoadNotice(
         tabId = selectedTab.id,
         session = session,
