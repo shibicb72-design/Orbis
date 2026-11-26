@@ -536,6 +536,23 @@ class TorrentManagerTest {
     }
 
     @Test
+    fun v2FoundByTheEngineAfterTheDetailsFailsAndDiscardsTheRecord() = runTest {
+        // A btih magnet whose details turn out v2 or hybrid: the engine removes it and reports UNSUPPORTED_V2.
+        val s = setup(this)
+        val id = s.manager.add(TorrentSource.Magnet(magnet), isPrivate = false)!!
+        advanceUntilIdle()
+        val eid = s.lastId()
+        s.engine.resumeBytes = { "must-not-be-kept".toByteArray() }
+        s.engine.fail(eid, TorrentErrorKind.UNSUPPORTED_V2)
+        advanceUntilIdle()
+        assertEquals(TorrentStatus.FAILED, s.only().status)
+        assertEquals(TorrentErrorKind.UNSUPPORTED_V2, s.only().errorKind)
+        assertTrue(s.engine.removed.contains(eid to true))
+        assertFalse(eid in s.engine.running)
+        assertNull(s.store.readResume(id))
+    }
+
+    @Test
     fun atMostFiveRunAndTheRestQueue() = runTest {
         val s = setup(this)
         val ids =

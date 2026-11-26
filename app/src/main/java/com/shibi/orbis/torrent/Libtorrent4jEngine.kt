@@ -50,8 +50,10 @@ import org.libtorrent4j.alerts.TorrentErrorAlert
 import org.libtorrent4j.alerts.TrackerErrorAlert
 import org.libtorrent4j.alerts.TrackerReplyAlert
 import org.libtorrent4j.swig.add_torrent_params
+import org.libtorrent4j.swig.address
 import org.libtorrent4j.swig.error_code
 import org.libtorrent4j.swig.int_vector
+import org.libtorrent4j.swig.ip_filter
 import org.libtorrent4j.swig.libtorrent
 import org.libtorrent4j.swig.peer_info
 import org.libtorrent4j.swig.session_handle
@@ -85,6 +87,18 @@ class Libtorrent4jEngine(
 
     // ---- engine thread only ----
     private var session: SessionManager? = null
+
+    /**
+     * The session for libtorrent's alert thread, which may only make thread-safe session calls with it (a torrent
+     * found to be v2 is removed there). Set and cleared on the engine thread with [session].
+     */
+    @Volatile private var alertSession: SessionManager? = null
+
+    /** The two address filters ([blockedRanges]): by "local peers on". Built before the session starts. */
+    private var addressFilters: Map<Boolean, ip_filter>? = null
+
+    /** The "local peers" value of the address filter the session holds; null: none set yet, or the last set failed. */
+    private var filterLsd: Boolean? = null
     private var settings = EngineSettings(listenPort = 0) // replaced by the first start, before any torrent is added
     private var ticker: Job? = null
     private val handles = HashMap<Long, TorrentHandle>()
@@ -163,13 +177,20 @@ class Libtorrent4jEngine(
     override fun start(settings: EngineSettings) {
         post {
             this.settings = settings
-            session?.applySettings(pack(settings))
+            session?.let {
+                it.applySettings(pack(settings))
+                applyAddressFilter(it)
+            }
         }
     }
 
-    /** Builds the session for its first torrent ([first]). Throws when the native library cannot load. */
+    /**
+     * Builds the session for its first torrent ([first]). Throws when the native library cannot load, and when the
+     * address filter cannot be built or set: never a session without it.
+     */
     private fun open(first: Kind): SessionManager {
         val started = SessionManager(false)
+        val filters = mapOf(false to addressFilter(lsd = false), true to addressFilter(lsd = true))
         val params =
             runCatching { if (sessionFile.isFile) SessionParams(sessionFile.readBytes()) else null }.getOrNull()
                 ?: SessionParams(SettingsPack())
@@ -177,11 +198,27 @@ class Libtorrent4jEngine(
         // listen on 6881 the moment the session is built. This replaces any settings in session.dat (an older
         // one may still carry the "Orbis/<version>" user agent; it is not set any more, libtorrent's own goes out).
         params.setSettings(pack(settings, sessionDiscovery(adding = first)))
+        val lsd = appliedSession?.lsd == true
+        // The address filter goes in the same way (and replaces any filter saved in session.dat): the session holds it
+        // from its first moment. It is set again right after the start below, with the call every later change uses.
+        params.swig().setIp_filter(filters.getValue(lsd))
         // Files go through plain read/write: mmap on Android's external storage is not worth the risk.
         params.setPosixDiskIO()
         started.addListener(listener)
         started.start(params)
+        try {
+            // Before the first torrent is added: libtorrent runs session calls in the order they are made.
+            started.swig().set_ip_filter(filters.getValue(lsd))
+        } catch (e: Throwable) {
+            started.removeListener(listener)
+            runCatching { started.stop() }
+            throw e
+        }
+        addressFilters = filters
+        filterLsd = lsd
+        log("address filter set n=${blockedRanges(lsd).size}")
         session = started
+        alertSession = started
         ticker =
             scope.launch {
                 while (isActive) {
@@ -214,9 +251,12 @@ class Libtorrent4jEngine(
                     }
                 }
             }.onFailure { log("session state not saved: ${it.javaClass.simpleName}") }
+            alertSession = null
             s.removeListener(listener)
             runCatching { s.stop() }
             session = null
+            addressFilters = null
+            filterLsd = null
             handles.clear()
             byHandle.clear()
             privateIds.clear()
@@ -288,6 +328,21 @@ class Libtorrent4jEngine(
             emit(TorrentEvent.Error(id, if (source == TorrentSource.FromResumeData) TorrentErrorKind.MISSING_DATA else TorrentErrorKind.INVALID_SOURCE))
             return
         }
+        // A v2 or hybrid torrent (from a .torrent, resume data or a magnet) is never handed to the session; intake
+        // refuses them first (TorrentPaths.checkSource), this holds for anything that got past it.
+        when (hasV2(p)) {
+            false -> Unit
+            true -> {
+                log("v2 refused at add")
+                emit(TorrentEvent.Error(id, TorrentErrorKind.UNSUPPORTED_V2))
+                return
+            }
+            null -> {
+                log("v2 check failed at add")
+                emit(TorrentEvent.Error(id, TorrentErrorKind.ENGINE_ERROR))
+                return
+            }
+        }
         // Trackers: a .torrent's own (TorrentInfo.bdecode reads only its info dictionary), then only http, https and
         // udp ones from any source (a magnet's tr=, resume data on a restore, the file): no WebSocket path.
         var refusedTrackers = 0
@@ -332,6 +387,9 @@ class Libtorrent4jEngine(
                 flags.and_(TorrentFlags.PAUSED.inv()).and_(TorrentFlags.STOP_WHEN_READY.inv()).or_(TorrentFlags.DEFAULT_DONT_DOWNLOAD)
             }
         flags = discoveryFlags(flags, kind)
+        // The session's address filter applies to this torrent's peers, web seeds and trackers, whatever resume data
+        // says ("apply_ip_filter" is read from it).
+        flags = flags.or_(TorrentFlags.APPLY_IP_FILTER)
         p.setFlags(flags)
         // No file is wanted until the manager approved the list: libtorrent then creates no empty file, folder or
         // symlink under the torrent's own names. For a magnet the list is longer than any accepted torrent; libtorrent
@@ -342,7 +400,12 @@ class Libtorrent4jEngine(
         // A private-tab torrent joins a session whose local peer discovery is already off: libtorrent answers an LSD
         // announce for any torrent that is not BEP 27 private, whatever its own DISABLE_LSD flag. One that may use the
         // DHT joins a session whose DHT node already runs (when the setting is on).
-        applySessionDiscovery(adding = kind)
+        if (!applySessionDiscovery(adding = kind)) {
+            // The address filter for the session with this torrent in it could not be set.
+            applySessionDiscovery()
+            emit(TorrentEvent.Error(id, TorrentErrorKind.ENGINE_ERROR))
+            return
+        }
         ec.clear()
         val h = s.swig().add_torrent(p, ec)
         if (ec.failed() || h == null || !h.is_valid()) {
@@ -363,6 +426,51 @@ class Libtorrent4jEngine(
     }
 
     private fun hasInfo(p: add_torrent_params): Boolean = runCatching { p.ti_ptr()?.is_valid() == true }.getOrDefault(false)
+
+    /** [p] carries a v2 info-hash (its own, or its details'); null: it could not be read. */
+    private fun hasV2(p: add_torrent_params): Boolean? =
+        runCatching { p.getInfo_hashes().has_v2() || (hasInfo(p) && p.ti_ptr().info_hashes().has_v2()) }.getOrNull()
+
+    /**
+     * Builds the session address filter for [blockedRanges]. Throws when an address does not parse: the caller must
+     * not run a session without it.
+     */
+    private fun addressFilter(lsd: Boolean): ip_filter {
+        val f = ip_filter()
+        val ec = error_code()
+        val blocked = ip_filter.access_flags.blocked.swigValue().toLong()
+        for ((first, last) in blockedRanges(lsd)) {
+            ec.clear()
+            val a = address.from_string(first, ec)
+            check(!ec.failed()) { "address filter: unparsable range" }
+            val b = address.from_string(last, ec)
+            check(!ec.failed()) { "address filter: unparsable range" }
+            f.add_rule(a, b, blocked)
+        }
+        return f
+    }
+
+    /**
+     * Sets the address filter that matches the session's local peers now ([SessionDiscovery.lsd]) when it is not the
+     * one set. Engine thread. A failure pauses every torrent (none runs under the wrong filter) and returns false;
+     * the next call tries again.
+     */
+    private fun applyAddressFilter(s: SessionManager): Boolean {
+        val lsd = appliedSession?.lsd == true
+        if (lsd == filterLsd) return true
+        try {
+            s.swig().set_ip_filter(addressFilters!!.getValue(lsd))
+        } catch (e: Throwable) {
+            if (e is VirtualMachineError && e !is OutOfMemoryError) throw e
+            filterLsd = null
+            handles.values.forEach { h -> runCatching { h.pause() } }
+            log("address filter not set: ${e.javaClass.simpleName}, paused ${handles.size}")
+            return false
+        }
+        filterLsd = lsd
+        log("address filter set n=${blockedRanges(lsd).size}")
+        return true
+    }
 
     private fun addTrackers(p: add_torrent_params, announce: TorrentTrackers.Announce) {
         if (announce.urls.isEmpty()) return
@@ -421,18 +529,21 @@ class Libtorrent4jEngine(
 
     /**
      * Session-wide DHT and local peer discovery follow the torrents in the session ([SessionDiscovery.of]).
-     * [adding]: counts one torrent about to be added. Only a change is applied.
+     * [adding]: counts one torrent about to be added. Only a change is applied. The address filter follows local
+     * peers ([applyAddressFilter]); false: it could not be set.
      */
-    private fun applySessionDiscovery(adding: Kind? = null) {
-        val s = session ?: return
+    private fun applySessionDiscovery(adding: Kind? = null): Boolean {
+        val s = session ?: return true
         val d = sessionDiscovery(adding)
-        if (d == appliedSession) return
-        val p = SettingsPack()
-        p.setEnableDht(d.dht)
-        p.setEnableLsd(d.lsd)
-        s.applySettings(p)
-        appliedSession = d
-        log("session discovery dht=${d.dht} lsd=${d.lsd}")
+        if (d != appliedSession) {
+            val p = SettingsPack()
+            p.setEnableDht(d.dht)
+            p.setEnableLsd(d.lsd)
+            s.applySettings(p)
+            appliedSession = d
+            log("session discovery dht=${d.dht} lsd=${d.lsd}")
+        }
+        return applyAddressFilter(s)
     }
 
     private fun discoveryOf(kind: Kind, dht: Boolean = settings.dht, pex: Boolean = settings.pex, lsd: Boolean = settings.lsd): TorrentDiscovery =
@@ -511,24 +622,30 @@ class Libtorrent4jEngine(
 
     override fun remove(id: EngineId, deleteFiles: Boolean) {
         post {
-            val h = handles.remove(id.value) ?: return@post
-            privateIds -= id.value
-            bep27Ids -= id.value
-            runCatching { byHandle.remove(h.swig().id()) }
-            pendingResume.remove(h.swig().id())?.complete(null)
-            latest.remove(id)
-            searchStart.remove(id.value)
-            peerSearch.forget(id.value)
-            finishes.forget(id.value)
-            _snapshots.value = latest.toMap()
-            sampleTimeline(id.value, h, clock())
-            timeline.removed(id.value, clock())
+            val h = forget(id) ?: return@post
             val s = session ?: return@post
             if (deleteFiles) s.remove(h, session_handle.delete_files) else s.remove(h)
             // Local peers come back only once the last private-tab torrent is out of the session; the DHT node stops
             // once only BEP 27 torrents are left.
             applySessionDiscovery()
         }
+    }
+
+    /** Drops every trace of [id] on the engine thread (not the session's torrent itself); its handle, or null. */
+    private fun forget(id: EngineId): TorrentHandle? {
+        val h = handles.remove(id.value) ?: return null
+        privateIds -= id.value
+        bep27Ids -= id.value
+        runCatching { byHandle.remove(h.swig().id()) }
+        pendingResume.remove(h.swig().id())?.complete(null)
+        latest.remove(id)
+        searchStart.remove(id.value)
+        peerSearch.forget(id.value)
+        finishes.forget(id.value)
+        _snapshots.value = latest.toMap()
+        sampleTimeline(id.value, h, clock())
+        timeline.removed(id.value, clock())
+        return h
     }
 
     override fun approveFiles(id: EngineId, renames: Map<Int, String>) {
@@ -575,14 +692,21 @@ class Libtorrent4jEngine(
     override fun setLimits(downBps: Int, upBps: Int) {
         post {
             settings = settings.copy(downBps = downBps, upBps = upBps)
-            session?.applySettings(pack(settings))
+            session?.let {
+                it.applySettings(pack(settings))
+                applyAddressFilter(it)
+            }
         }
     }
 
     override fun setDiscovery(dht: Boolean, pex: Boolean, lsd: Boolean) {
         post {
             settings = settings.copy(dht = dht, pex = pex, lsd = lsd)
-            session?.applySettings(pack(settings))
+            // The LAN ranges of the address filter follow "local peers".
+            session?.let {
+                it.applySettings(pack(settings))
+                applyAddressFilter(it)
+            }
             handles.forEach { (key, h) ->
                 val d = discoveryOf(kindOf(key), dht, pex, lsd)
                 if (d.pex) h.unsetFlags(TorrentFlags.DISABLE_PEX) else h.setFlags(TorrentFlags.DISABLE_PEX)
@@ -615,6 +739,8 @@ class Libtorrent4jEngine(
                 SessionSetting.ENABLE_UPNP -> p.setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), value as Boolean)
                 SessionSetting.ENABLE_NATPMP -> p.setBoolean(settings_pack.bool_types.enable_natpmp.swigValue(), value as Boolean)
                 SessionSetting.SSRF_MITIGATION -> p.setBoolean(settings_pack.bool_types.ssrf_mitigation.swigValue(), value as Boolean)
+                SessionSetting.APPLY_IP_FILTER_TO_TRACKERS ->
+                    p.setBoolean(settings_pack.bool_types.apply_ip_filter_to_trackers.swigValue(), value as Boolean)
                 SessionSetting.ENABLE_DHT -> p.setEnableDht(value as Boolean)
                 SessionSetting.ENABLE_LSD -> p.setEnableLsd(value as Boolean)
                 SessionSetting.MAX_METADATA_SIZE -> p.setMaxMetadataSize(value as Int)
@@ -660,6 +786,32 @@ class Libtorrent4jEngine(
                 // Pause right here, before the post: torrent_handle calls are thread-safe and the alert's handle is
                 // valid during this callback. The fewer pieces requested under unchecked names, the better.
                 alertHandle.pause()
+                // A btih magnet can still turn out v2 or hybrid: libtorrent accepts details whose SHA-256, cut to 20
+                // bytes, is the btih. Its info-hashes were updated from the details before this alert was posted.
+                val v2 = runCatching { alertHandle.swig().info_hashes().has_v2() }.getOrNull()
+                if (v2 != false) {
+                    // Out of the session here, still on this thread: remove_torrent is a thread-safe session call
+                    // (queued to libtorrent's network thread), so the peers go without waiting for the engine thread.
+                    // No file exists yet (nothing is wanted before approval): nothing to delete. The handle maps are
+                    // engine-thread state and are cleared in the post.
+                    val removed =
+                        runCatching {
+                            val s = alertSession
+                            s?.swig()?.remove_torrent(alertHandle.swig())
+                            s != null
+                        }.onFailure { log("v2 remove failed: ${it.javaClass.simpleName}") }
+                            .getOrDefault(false)
+                    post {
+                        val id = byHandle[key] ?: return@post
+                        val h = forget(id) ?: return@post
+                        // Not removed above (no session for that thread, or the call failed): remove it here.
+                        if (!removed) session?.remove(h)
+                        log(if (v2 == true) "v2 after details, removed" else "v2 check failed after details, removed")
+                        applySessionDiscovery()
+                        emit(TorrentEvent.Error(id, if (v2 == true) TorrentErrorKind.UNSUPPORTED_V2 else TorrentErrorKind.ENGINE_ERROR))
+                    }
+                    return
+                }
                 val at = clock()
                 post {
                     val id = byHandle[key] ?: return@post
@@ -1061,6 +1213,7 @@ internal enum class SessionSetting(val type: KClass<*>) {
     ENABLE_UPNP(Boolean::class),
     ENABLE_NATPMP(Boolean::class),
     SSRF_MITIGATION(Boolean::class),
+    APPLY_IP_FILTER_TO_TRACKERS(Boolean::class),
     ENABLE_DHT(Boolean::class),
     ENABLE_LSD(Boolean::class),
     MAX_METADATA_SIZE(Int::class),
@@ -1086,9 +1239,13 @@ internal fun sessionSettings(s: EngineSettings, d: SessionDiscovery): List<Pair<
         add(SessionSetting.LISTEN_INTERFACES to "0.0.0.0:${s.listenPort},[::]:${s.listenPort}")
         add(SessionSetting.ENABLE_UPNP to false)
         add(SessionSetting.ENABLE_NATPMP to false)
-        // libtorrent's default, stated so it cannot drift: a torrent may not point tracker or web seed requests at
-        // this phone's own loopback services (only /announce paths there, no web seed query strings).
+        // libtorrent's default, stated so it cannot drift. It is no guard on its own: it only checks loopback, a
+        // tracker there only by an "/announce" path prefix ("/announce/../x" passes), and a web seed only on IPv4
+        // ([::1] is never checked); it also refuses web seed query strings. The guard is the session address filter
+        // ([blockedRanges], set by Libtorrent4jEngine), which libtorrent consults first for peers, web seeds and
+        // (with the next setting, also stated so it cannot drift) trackers.
         add(SessionSetting.SSRF_MITIGATION to true)
+        add(SessionSetting.APPLY_IP_FILTER_TO_TRACKERS to true)
         add(SessionSetting.ENABLE_DHT to d.dht)
         add(SessionSetting.ENABLE_LSD to d.lsd)
         add(SessionSetting.MAX_METADATA_SIZE to TorrentLimits.MAX_METADATA_BYTES)
@@ -1102,3 +1259,37 @@ internal fun sessionSettings(s: EngineSettings, d: SessionDiscovery): List<Pair<
         add(SessionSetting.ANNOUNCE_TO_ALL_TRACKERS to true)
         add(SessionSetting.ANNOUNCE_TO_ALL_TIERS to true)
     }
+
+/** This device and "no address": never a peer, web seed or tracker. */
+private val ALWAYS_V4 = listOf("0.0.0.0" to "0.255.255.255", "127.0.0.0" to "127.255.255.255")
+private val ALWAYS_V6 = listOf("::" to "::", "::1" to "::1")
+
+/** The home network and carrier NAT: blocked unless local peers are on (the set of libtorrent's aux::is_local). */
+private val LOCAL_V4 =
+    listOf(
+        "10.0.0.0" to "10.255.255.255",
+        "172.16.0.0" to "172.31.255.255",
+        "192.168.0.0" to "192.168.255.255",
+        "169.254.0.0" to "169.254.255.255",
+        "100.64.0.0" to "100.127.255.255",
+    )
+private val LOCAL_V6 =
+    listOf(
+        "fe80::" to "febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+        "fec0::" to "feff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+        "fc00::" to "fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+    )
+
+/**
+ * The address ranges of the session's address filter (first and last address as text), which libtorrent checks
+ * before it connects to a peer or web seed and before an http tracker request. [lsd]: local peers on, so the home
+ * network stays reachable. Pure (no libtorrent class), so a test can read it.
+ *
+ * Every IPv4 range is also given as IPv4-mapped IPv6 (::ffff:a.b.c.d): libtorrent's ip_filter::access sends any IPv6
+ * address to its IPv6 table without unmapping it, and a dual-stack socket reaches the IPv4 address behind it.
+ */
+internal fun blockedRanges(lsd: Boolean): List<Pair<String, String>> {
+    val v4 = if (lsd) ALWAYS_V4 else ALWAYS_V4 + LOCAL_V4
+    val v6 = if (lsd) ALWAYS_V6 else ALWAYS_V6 + LOCAL_V6
+    return v4 + v6 + v4.map { (first, last) -> "::ffff:$first" to "::ffff:$last" }
+}
