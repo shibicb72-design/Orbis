@@ -1094,18 +1094,18 @@ private class GeckoBrowserSession(
                 reconciler.onPageStart()
                 applyActive()
                 // url is not written here (see onLocationChange).
-                _state.update { it.afterPageStart(url) }
+                _state.update { it.afterPageStart(url, SystemClock.elapsedRealtime()) }
                 _state.update { it.copy(readerable = false) }
                 visits.onPageStart()
             }
 
             override fun onPageStop(session: GeckoSession, success: Boolean) {
-                _state.update { it.afterPageStop(success) }
+                _state.update { it.afterPageStop(success, SystemClock.elapsedRealtime()) }
                 visits.onPageStop(success)?.let { host?.onVisit(this@GeckoBrowserSession, it.url, it.title) }
             }
 
             override fun onProgressChange(session: GeckoSession, progress: Int) {
-                _state.update { it.copy(progress = progress) }
+                _state.update { it.afterProgressChange(progress, SystemClock.elapsedRealtime()) }
             }
 
             // The lock follows this report, never the URL scheme. Expected after the location change, and again when
@@ -1758,6 +1758,8 @@ private class GeckoBrowserSession(
             }
 
             override fun onExternalResponse(session: GeckoSession, response: WebResponse) {
+                // For the slow-load notices: this load became a download; it did not fail to finish.
+                _state.update { it.afterDownloadResponse() }
                 val download = GeckoIncomingDownload(response)
                 val owner = host
                 if (owner == null) {
@@ -2812,6 +2814,7 @@ private class GeckoBrowserSession(
 
     override fun goBack(): Boolean {
         if (closed || !_state.value.canGoBack) return false
+        _state.update { it.afterUserEndedLoad() }
         prepareHistoryStep(-1)
         tabHistory.onStepStarted(-1)
         session.goBack()
@@ -2820,6 +2823,7 @@ private class GeckoBrowserSession(
 
     override fun goForward(): Boolean {
         if (closed || !_state.value.canGoForward) return false
+        _state.update { it.afterUserEndedLoad() }
         prepareHistoryStep(1)
         tabHistory.onStepStarted(1)
         session.goForward()
@@ -2828,6 +2832,7 @@ private class GeckoBrowserSession(
 
     override fun reload() {
         if (closed) return
+        _state.update { it.afterUserEndedLoad() }
         val target = reloadTarget(_state.value)
         when (target) {
             // The banner's Reload and the toolbar's are this one call.
@@ -2844,7 +2849,9 @@ private class GeckoBrowserSession(
     }
 
     override fun stop() {
-        if (!closed) session.stop()
+        if (closed) return
+        _state.update { it.afterUserEndedLoad() }
+        session.stop()
     }
 
     private fun applyTrackingProtection(on: Boolean) {
