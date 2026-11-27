@@ -21,6 +21,10 @@ const val POPUP_LINES_PER_PAGE = 20
  *   its page had committed, with [LoadEnded.NO].
  * A load whose page committed is written at its page stop, or at the user's stop, at once. Redirect requests of a load
  * belong to that load.
+ *
+ * The engine's blank document (about:blank: a new session's own, or the start page) is not a load. The caller says so with
+ * [blank]: its request ends a load in flight (it replaced it) and opens nothing; its page start, commit and page stop write
+ * nothing and never end, start or time another load, so a load asked before or while it ran keeps its own start time.
  */
 class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
     private var open = false
@@ -31,9 +35,16 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
     private var popups = 0
     private var dead = false
 
-    /** A top-level load request (a redirect hop has [redirect] true). */
-    fun onLoadRequest(redirect: Boolean, nowMs: Long) {
+    /** A blank document has started and its page stop has not come yet. Cleared by that stop or by the next page start that is not blank. */
+    private var blankRunning = false
+
+    /** A top-level load request (a redirect hop has [redirect] true). A [blank] one replaces the load in flight and opens none. */
+    fun onLoadRequest(redirect: Boolean, nowMs: Long, blank: Boolean = false) {
         if (dead) return
+        if (blank) {
+            endReplaced(nowMs)
+            return
+        }
         if (redirect && open) {
             redirected = true
             return
@@ -43,8 +54,13 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
     }
 
     /** The engine reported the page start. One without a load request (history, restore) opens its own load. */
-    fun onPageStart(nowMs: Long) {
+    fun onPageStart(nowMs: Long, blank: Boolean = false) {
         if (dead) return
+        if (blank) {
+            blankRunning = true
+            return
+        }
+        blankRunning = false
         when {
             !open -> begin(nowMs, started = true)
             !started -> started = true
@@ -55,8 +71,8 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
     }
 
     /** The engine committed a location. One with no page start is same-document (hash, pushState): not a load. */
-    fun onCommit() {
-        if (!open) return
+    fun onCommit(blank: Boolean = false) {
+        if (blank || blankRunning || !open) return
         if (!started) {
             open = false
             return
@@ -69,6 +85,11 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
 
     /** The page stopped; [success] false for an abort or a failure the error callback did not report. */
     fun onPageStop(success: Boolean, nowMs: Long) {
+        // The blank document's stop is not a load's end.
+        if (blankRunning) {
+            blankRunning = false
+            return
+        }
         // A stop of an earlier load can arrive after a new request: the new load has not started.
         if (!open || !started) return
         if (success) {

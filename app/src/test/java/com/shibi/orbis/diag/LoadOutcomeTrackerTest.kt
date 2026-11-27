@@ -280,4 +280,110 @@ class LoadOutcomeTrackerTest {
             kinds(),
         )
     }
+
+    // The engine's blank document (about:blank) is not a load: no line, and no effect on a load asked before or while it ran.
+    private fun blankTrio(start: Long, stop: Long) {
+        t.onPageStart(start, blank = true)
+        t.onCommit(blank = true)
+        t.onPageStop(true, stop)
+    }
+
+    @Test
+    fun aNewTabWithNoAddress_theBlankDocumentWritesNoLine() {
+        blankTrio(0, 2)
+        assertEquals(emptyList<LoadEnd>(), ends)
+        t.onClosed(5_000)
+        assertEquals(emptyList<LoadEnd>(), ends)
+    }
+
+    @Test
+    fun orderA_requestThenBlankThenPage_oneLine_timedFromTheRequest() {
+        t.onLoadRequest(false, 0)
+        blankTrio(91, 92)
+        assertEquals(emptyList<LoadEnd>(), ends)
+        t.onPageStart(198)
+        t.onCommit()
+        t.onPageStop(true, 236)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 236, ended = LoadEnded.YES)), ends)
+    }
+
+    @Test
+    fun orderB_blankThenRequestThenPage_oneLine() {
+        blankTrio(0, 2)
+        t.onLoadRequest(false, 10)
+        t.onPageStart(20)
+        t.onCommit()
+        t.onPageStop(true, 110)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 100, ended = LoadEnded.YES)), ends)
+    }
+
+    @Test
+    fun requestBlankThenError_oneErrorLine_noCommitted() {
+        t.onLoadRequest(false, 0)
+        blankTrio(5, 6)
+        t.onPageStart(7)
+        t.onError(ErrorCategory.NETWORK, 50)
+        assertEquals(listOf("error-network"), kinds())
+        assertEquals(50L, ends.single().ms)
+    }
+
+    @Test
+    fun requestBlankThenDownload_oneLine_andABlankAfterTheDownloadAddsNone() {
+        t.onLoadRequest(false, 0)
+        blankTrio(5, 6)
+        t.onDownload(30)
+        assertEquals(listOf("download"), kinds())
+        blankTrio(31, 33)
+        assertEquals(listOf("download"), kinds())
+    }
+
+    @Test
+    fun requestBlankThenRedirect_oneRedirectedLine() {
+        t.onLoadRequest(false, 0)
+        blankTrio(5, 6)
+        t.onLoadRequest(true, 40)
+        t.onPageStart(41)
+        t.onCommit()
+        t.onPageStop(true, 90)
+        assertEquals(listOf(LoadEnd(LoadKind.REDIRECTED, 90)), ends)
+    }
+
+    @Test
+    fun aLoadInFlightThenTheStartPage_endsOnce_theBlankWritesNothing_theNextLoadWritesItsOwnLine() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onLoadRequest(false, 300, blank = true)
+        assertEquals(listOf(LoadEnd(LoadKind.UNFINISHED, 300)), ends)
+        blankTrio(301, 303)
+        t.onClosed(9_000)
+        assertEquals(listOf(LoadEnd(LoadKind.UNFINISHED, 300)), ends)
+    }
+
+    @Test
+    fun theStartPageAfterACommittedLoad_endsItEndedNo_andNothingForTheBlank() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onCommit()
+        t.onLoadRequest(false, 300, blank = true)
+        blankTrio(301, 303)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 300, ended = LoadEnded.NO)), ends)
+        t.onLoadRequest(false, 500)
+        t.onPageStart(510)
+        t.onCommit()
+        t.onPageStop(true, 600)
+        assertEquals(
+            listOf(LoadEnd(LoadKind.COMMITTED, 300, ended = LoadEnded.NO), LoadEnd(LoadKind.COMMITTED, 100, ended = LoadEnded.YES)),
+            ends,
+        )
+    }
+
+    @Test
+    fun aBlankStartWithNoStop_doesNotHoldTheNextLoad() {
+        t.onPageStart(0, blank = true)
+        t.onLoadRequest(false, 10)
+        t.onPageStart(20)
+        t.onCommit()
+        t.onPageStop(true, 120)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 110, ended = LoadEnded.YES)), ends)
+    }
 }

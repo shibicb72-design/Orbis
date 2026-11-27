@@ -1053,7 +1053,7 @@ private class GeckoBrowserSession(
                     applyImportedScript(url, reloadIfChanged = true)
                     tabHistory.onCommit(url)
                     onCommitForDesktop(url)
-                    loadOutcome.onCommit()
+                    loadOutcome.onCommit(blank = url == "about:blank")
                 }
                 // Gecko hands every web page its tracking permission record; ALLOW means a stored (normal) exception.
                 trackingPermission = perms.firstOrNull { it.permission == GeckoSession.PermissionDelegate.PERMISSION_TRACKING }
@@ -1099,7 +1099,7 @@ private class GeckoBrowserSession(
                     isOwnFallbackLoad(pendingFallbackLoad, request.uri, request.hasUserGesture, request.isDirectNavigation)
                 if (fallbackLoad) pendingFallbackLoad = null
                 val direct = request.isDirectNavigation && !fallbackLoad
-                loadOutcome.onLoadRequest(request.isRedirect, outcomeNow())
+                loadOutcome.onLoadRequest(request.isRedirect, outcomeNow(), blank = request.uri == "about:blank")
                 // A shared file must not send the tab to the web by itself (meta refresh); a tapped link still works,
                 // and so does the server redirect that follows it.
                 if (blocksImportAutoNavigation(
@@ -1246,7 +1246,7 @@ private class GeckoBrowserSession(
                 _state.update { it.afterPageStart(url) }
                 _state.update { it.copy(readerable = false) }
                 visits.onPageStart()
-                loadOutcome.onPageStart(outcomeNow())
+                loadOutcome.onPageStart(outcomeNow(), blank = url == "about:blank")
             }
 
             override fun onPageStop(session: GeckoSession, success: Boolean) {
