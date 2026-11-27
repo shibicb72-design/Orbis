@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The slow-load notices (ui/browser/SlowLoadNotice.kt). English only. -->
+    <string name="slow_load_taking_long" translatable="false">This page is taking a long time to load.</string>
+    <string name="slow_load_did_not_finish" translatable="false">This page did not finish loading.</string>
+    <string name="slow_load_stop" translatable="false">Stop</string>
+    <string name="slow_load_reload" translatable="false">Reload</string>
+    <string name="slow_load_close" translatable="false">Close</string>
+</resources>
