@@ -69,6 +69,9 @@ internal fun megabytes(kb: Long): Long = (kb + 512) / 1024
 internal fun memoryTabOrder(tabs: List<TabOverview>): List<TabOverview> =
     tabs.sortedWith(compareBy<TabOverview, Long?>(nullsFirst()) { it.lastLookedAt }.thenBy { it.id })
 
+/** The chart's right edge: the later of [now] and the newest sample, so a sample newer than the screen's clock is still drawn. Pure. */
+internal fun chartEnd(now: Long, history: List<MemorySample>): Long = maxOf(now, history.maxOfOrNull { it.at } ?: now)
+
 /** How long ago, as (unit, n): 0 just now, 1 minutes, 2 hours, 3 days. Pure. */
 internal fun lookedAgo(now: Long, at: Long): Pair<Int, Long> {
     val minutes = ((now - at).coerceAtLeast(0L)) / 60_000
@@ -167,11 +170,12 @@ internal fun MemorySection(
                     Spacer(Modifier.width(6.dp))
                 }
             }
-            val points = history.filter { it.at > now - range.millis && it.at <= now }
+            val end = chartEnd(now, history)
+            val points = history.filter { it.at > end - range.millis && it.at <= end }
             if (points.isEmpty()) {
                 Text(stringResource(R.string.memory_chart_empty), style = MaterialTheme.typography.bodySmall)
             } else {
-                MemoryChart(points, now - range.millis, now)
+                MemoryChart(points, end - range.millis, end)
             }
             Row {
                 Spacer(Modifier.weight(1f))
