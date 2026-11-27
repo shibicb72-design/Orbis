@@ -73,16 +73,21 @@ data class TorrentEntry(
     /**
      * Finished but not saved to Download/Orbis yet: seeding, or a finished torrent that is paused (by the user or
      * Android) or waiting for Wi-Fi. Removing it without deleting ("Save and remove") saves it first; the end of
-     * private browsing deletes a private one (OD-3).
+     * private browsing deletes a private one (OD-3). A finished row refused as v2 ([TorrentErrorKind.UNSUPPORTED_V2])
+     * counts too: its files exist only inside Orbis, so "Save and remove" must stay possible.
      */
     val finishedUnsaved: Boolean
-        get() = status !in UNSAVED_EXCLUDED && (status == TorrentStatus.SEEDING || isFinished)
+        get() = if (status == TorrentStatus.FAILED) {
+            errorKind == TorrentErrorKind.UNSUPPORTED_V2 && isFinished
+        } else {
+            status !in UNSAVED_EXCLUDED && (status == TorrentStatus.SEEDING || isFinished)
+        }
 
     // Deliberately no name: a torrent name must not end up in a log line.
     override fun toString(): String = "TorrentEntry(status=$status, private=$isPrivate)"
 
     private companion object {
-        /** Already saved, being saved, or failed (Retry handles a failed copy). */
+        /** Already saved, being saved, or removed. FAILED is handled in [finishedUnsaved] (Retry handles a failed copy). */
         val UNSAVED_EXCLUDED = setOf(TorrentStatus.PUBLISHING, TorrentStatus.COMPLETED, TorrentStatus.FAILED, TorrentStatus.REMOVED)
     }
 }

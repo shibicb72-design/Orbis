@@ -114,7 +114,12 @@ data class TorrentConfirmModel(
                     waitsForWifi = offWifi && wifiOnly,
                 )
             if (request is IntakeRequest.Magnet) {
-                val link = MagnetLink.parse(request.uri) ?: return base.copy(unnamed = TorrentUnnamed.MAGNET_LINK, error = IntakeRefusal.BAD_MAGNET)
+                val link =
+                    when (val checked = MagnetLink.check(request.uri)) {
+                        is MagnetLink.Check.Ok -> checked.link
+                        MagnetLink.Check.V2 -> return base.copy(unnamed = TorrentUnnamed.MAGNET_LINK, error = IntakeRefusal.UNSUPPORTED_V2)
+                        MagnetLink.Check.Invalid -> return base.copy(unnamed = TorrentUnnamed.MAGNET_LINK, error = IntakeRefusal.BAD_MAGNET)
+                    }
                 return base.copy(nameText = link.displayName, unnamed = TorrentUnnamed.MAGNET_LINK, downloadEnabled = true)
             }
             return when (body) {
@@ -137,9 +142,15 @@ data class TorrentConfirmModel(
     }
 }
 
-/** The preview of bytes in hand. Off the main thread: a 4 MiB file is a lot to walk. */
-suspend fun torrentBodyOf(bytes: ByteArray): TorrentBody.Ready =
-    withContext(Dispatchers.Default) { TorrentBody.Ready(bytes, TorrentPreview.fromTorrent(bytes) ?: TorrentPreview.UNKNOWN) }
+/** The preview of bytes in hand; a v2 or hybrid torrent is [TorrentBody.Failed]. Off the main thread: a 4 MiB file is a lot to walk. */
+suspend fun torrentBodyOf(bytes: ByteArray): TorrentBody =
+    withContext(Dispatchers.Default) {
+        when (val outcome = TorrentPreview.analyze(bytes)) {
+            is TorrentPreview.Outcome.Ok -> TorrentBody.Ready(bytes, outcome.preview)
+            TorrentPreview.Outcome.V2 -> TorrentBody.Failed(IntakeRefusal.UNSUPPORTED_V2)
+            TorrentPreview.Outcome.Unusable -> TorrentBody.Ready(bytes, TorrentPreview.UNKNOWN)
+        }
+    }
 
 /**
  * The one way a torrent is added: the sheet reads what needs reading, shows [TorrentConfirmModel], and only its Download
@@ -168,13 +179,18 @@ fun TorrentIntakeSheet(
                 is IntakeRequest.TorrentUri -> readUri(request.uri)
                 is IntakeRequest.TorrentBytes -> TorrentIntakeReader.Result.Ok(request.bytes)
                 is IntakeRequest.Magnet -> {
-                    if (MagnetLink.parse(request.uri) == null) log(IntakeLog.refused(IntakeRefusal.BAD_MAGNET))
+                    when (MagnetLink.check(request.uri)) {
+                        is MagnetLink.Check.Ok -> Unit
+                        MagnetLink.Check.V2 -> log("v2 refused")
+                        MagnetLink.Check.Invalid -> log(IntakeLog.refused(IntakeRefusal.BAD_MAGNET))
+                    }
                     return@LaunchedEffect
                 }
             }
         body =
             when (read) {
-                is TorrentIntakeReader.Result.Ok -> torrentBodyOf(read.bytes)
+                is TorrentIntakeReader.Result.Ok ->
+                    torrentBodyOf(read.bytes).also { if (it is TorrentBody.Failed) log("v2 refused") }
                 is TorrentIntakeReader.Result.Failed -> {
                     log(IntakeLog.refused(read.reason))
                     TorrentBody.Failed(read.reason)
@@ -193,8 +209,13 @@ fun TorrentIntakeSheet(
             // Cheap and pure: the same check the manager makes, so nothing it would refuse is even handed over.
             val refused = TorrentPaths.checkSource(source)
             if (refused != null) {
-                val reason = if (refused == TorrentErrorKind.UNSAFE_METADATA) IntakeRefusal.TOO_LARGE else IntakeRefusal.BAD_MAGNET
-                log(IntakeLog.refused(reason))
+                val reason =
+                    when (refused) {
+                        TorrentErrorKind.UNSAFE_METADATA -> IntakeRefusal.TOO_LARGE
+                        TorrentErrorKind.UNSUPPORTED_V2 -> IntakeRefusal.UNSUPPORTED_V2
+                        else -> IntakeRefusal.BAD_MAGNET
+                    }
+                log(if (reason == IntakeRefusal.UNSUPPORTED_V2) "v2 refused" else IntakeLog.refused(reason))
                 body = TorrentBody.Failed(reason)
                 return@download
             }
@@ -272,6 +293,7 @@ fun TorrentConfirmSheet(model: TorrentConfirmModel, onDownload: () -> Unit, onCa
                         when (error) {
                             IntakeRefusal.TOO_LARGE -> R.string.torrents_sheet_too_large
                             IntakeRefusal.BAD_MAGNET -> R.string.torrents_sheet_bad_magnet
+                            IntakeRefusal.UNSUPPORTED_V2 -> R.string.torrents_unsupported_v2
                             else -> R.string.torrents_sheet_read_failed
                         },
                     ),
