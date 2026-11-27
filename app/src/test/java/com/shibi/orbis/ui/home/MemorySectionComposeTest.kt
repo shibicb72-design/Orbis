@@ -210,6 +210,22 @@ class MemorySectionComposeTest {
         assertEquals(1, deletes)
     }
 
+    @Test
+    fun aSampleNewerThanTheScreensClockIsOnTheChart() {
+        val sample = MemorySample(now + 5_000L, 500 * 1024L, 300 * 1024L, 150 * 1024L, 50 * 1024L, 4, 2)
+        show(history = listOf(sample))
+        assertTrue(rule.onAllNodes(hasContentDescription("Memory used by Orbis: lowest 500 MB, highest 500 MB")).fetchSemanticsNodes().isNotEmpty())
+        assertEquals(0, rule.onAllNodesWithText("No memory history yet.").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun theChartEndIsTheLaterOfNowAndTheNewestSample() {
+        fun s(at: Long) = MemorySample(at, 1L, 1L, 0L, 0L, 1, 1)
+        assertEquals(now, chartEnd(now, emptyList()))
+        assertEquals(now, chartEnd(now, listOf(s(now - minute), s(now - 2 * minute))))
+        assertEquals(now + 5_000L, chartEnd(now, listOf(s(now - minute), s(now + 5_000L))))
+    }
+
     private fun hasContentDescription(value: String) =
         androidx.compose.ui.test.SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf(value))
 

@@ -18,6 +18,9 @@ internal const val MEMORY_SAMPLE_INTERVAL_MILLIS = 15 * 60 * 1000L
 /** Opening the dashboard stores a sample only when the newest one is at least this old (Android's own limit). */
 internal const val MEMORY_DASHBOARD_SAMPLE_GAP_MILLIS = SYSTEM_MEMORY_RATE_LIMIT_MILLIS
 
+/** Opening the dashboard takes no new reading when one succeeded less than this long ago and no sample is due. */
+internal const val MEMORY_DASHBOARD_READ_FLOOR_MILLIS = 30_000L
+
 /** The sample for [reading] with the tab counts [tabs]. Numbers only. Pure. */
 internal fun sampleOf(reading: MemoryReading, tabs: NormalTabCounts): MemorySample =
     MemorySample(
@@ -55,6 +58,7 @@ class MemorySampler(
     private var foreground = false
     private var loop: Job? = null
     private var reading: Job? = null
+    private var lastReadAt: Long? = null
 
     /** Orbis came to the front (true) or left it (false). The periodic sampling runs only in between. */
     fun onForeground(value: Boolean) {
@@ -87,6 +91,8 @@ class MemorySampler(
         if (!foreground) return
         val last = history.lastSampleAt
         val store = last == null || clock() - last >= MEMORY_DASHBOARD_SAMPLE_GAP_MILLIS
+        val age = lastReadAt?.let { clock() - it }
+        if (!store && _latest.value != null && age != null && age in 0L until MEMORY_DASHBOARD_READ_FLOOR_MILLIS) return
         if (reading?.isActive == true) return
         reading = scope.launch { measure(store) }
     }
@@ -104,6 +110,7 @@ class MemorySampler(
                 r
             } ?: return
         _latest.value = result
+        lastReadAt = clock()
         // Orbis may have left the front while the reading ran: then nothing is stored.
         if (store && foreground) history.add(sampleOf(result, tabCounts()))
     }
