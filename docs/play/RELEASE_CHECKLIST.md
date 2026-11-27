@@ -57,6 +57,7 @@ gradlew.bat :app:assembleR8check    # the same shrunk build, own app id, debug-s
   commit the artifacts and `CHECKSUMS.sha256` (`docs/security/NATIVE-VERSIONS.md`, `native/libtorrent4j/README.md`).
 - Before every release: run the Engine currency workflow by hand (Actions > Engine currency > Run workflow, or
   `gh workflow run engine-currency.yml --ref main`); it must be green.
+  The workflow also runs on every push to main, so the run on the release commit is the push run.
 - GitHub turns scheduled workflows off in a public repository after 60 days with no repository activity. If the
   Actions tab shows "This scheduled workflow is disabled", press **Enable workflow** (or
   `gh workflow enable engine-currency.yml`) and run it once by hand.

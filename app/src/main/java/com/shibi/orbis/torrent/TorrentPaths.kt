@@ -59,12 +59,14 @@ object TorrentPaths {
                 when {
                     source.uri.length > TorrentLimits.MAX_MAGNET_CHARS -> TorrentErrorKind.UNSAFE_METADATA
                     !source.uri.startsWith("magnet:?", ignoreCase = true) -> TorrentErrorKind.INVALID_SOURCE
+                    MagnetLink.check(source.uri) === MagnetLink.Check.V2 -> TorrentErrorKind.UNSUPPORTED_V2
                     else -> null
                 }
             is TorrentSource.TorrentFile ->
                 when {
                     source.bytes.size > TorrentLimits.MAX_TORRENT_FILE_BYTES -> TorrentErrorKind.UNSAFE_METADATA
                     source.bytes.isEmpty() -> TorrentErrorKind.INVALID_SOURCE
+                    TorrentPreview.analyze(source.bytes) === TorrentPreview.Outcome.V2 -> TorrentErrorKind.UNSUPPORTED_V2
                     else -> null
                 }
             TorrentSource.FromResumeData -> null

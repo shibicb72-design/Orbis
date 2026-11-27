@@ -76,6 +76,7 @@
     <string name="torrents_sheet_reading">Reading the torrent file…</string>
     <string name="torrents_sheet_too_large">This torrent file is too large</string>
     <string name="torrents_sheet_read_failed">This torrent file could not be read</string>
+    <string name="torrents_unsupported_v2" translatable="false">This torrent uses the v2 format. Orbis cannot open v2 torrents yet.</string>
     <string name="torrents_sheet_bad_magnet">This magnet link can\'t be used</string>
     <string name="torrents_added">Added to Downloads</string>
     <string name="torrents_added_view">View</string>

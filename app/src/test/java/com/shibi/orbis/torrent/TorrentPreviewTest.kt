@@ -4,6 +4,8 @@ import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** A tiny bencode writer for the tests: Long, String, ByteArray, List and Map (keys sorted as the format wants). */
@@ -66,18 +68,34 @@ class TorrentPreviewTest {
     }
 
     @Test
-    fun v2FileTree() {
-        val tree =
-            mapOf(
-                "Sintel" to
-                    mapOf(
-                        "movie.mp4" to mapOf("" to mapOf("length" to 1000L, "pieces root" to ByteArray(32))),
-                        "sub" to mapOf("en.srt" to mapOf("" to mapOf("length" to 24L))),
-                    ),
-            )
-        val p = TorrentPreview.fromTorrent(torrent(mapOf("name" to "Sintel", "file tree" to tree, "meta version" to 2, "piece length" to 16_384)))!!
-        assertEquals(1024L, p.totalBytes)
-        assertEquals(2, p.fileCount)
+    fun v2FileTreeOnlyIsRefusedAsV2() {
+        val tree = mapOf("Sintel" to mapOf("movie.mp4" to mapOf("" to mapOf("length" to 1000L, "pieces root" to ByteArray(32)))))
+        val bytes = torrent(mapOf("name" to "Sintel", "file tree" to tree, "piece length" to 16_384))
+        assertSame(TorrentPreview.Outcome.V2, TorrentPreview.analyze(bytes))
+        assertNull(TorrentPreview.fromTorrent(bytes))
+    }
+
+    @Test
+    fun firstOfTwoInfoKeysDecidesAsInLibtorrent() {
+        val v2Info = "d12:meta versioni2e4:name1:te"
+        val v1Info = "d6:lengthi1e4:name1:t12:piece lengthi16384e6:pieces20:" + "a".repeat(20) + "e"
+        val v2First = "d4:info$v2Info" + "4:info$v1Info" + "e"
+        val v1First = "d4:info$v1Info" + "4:info$v2Info" + "e"
+        assertSame(TorrentPreview.Outcome.V2, TorrentPreview.analyze(v2First.toByteArray(Charsets.ISO_8859_1)))
+        assertTrue(TorrentPreview.analyze(v1First.toByteArray(Charsets.ISO_8859_1)) is TorrentPreview.Outcome.Ok)
+    }
+
+    @Test
+    fun hybridWithMetaVersionIsRefusedAsV2() {
+        val files = listOf(mapOf("length" to 100L, "path" to listOf("a.mkv")))
+        val bytes = torrent(mapOf("name" to "Sintel", "files" to files, "meta version" to 2, "piece length" to 16_384, "pieces" to pieces))
+        assertSame(TorrentPreview.Outcome.V2, TorrentPreview.analyze(bytes))
+        assertNull(TorrentPreview.fromTorrent(bytes))
+    }
+
+    @Test
+    fun nonTorrentIsUnusableNotV2() {
+        assertSame(TorrentPreview.Outcome.Unusable, TorrentPreview.analyze("nope".toByteArray()))
     }
 
     @Test
