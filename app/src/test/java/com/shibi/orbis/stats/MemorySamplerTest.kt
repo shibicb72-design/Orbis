@@ -120,69 +120,84 @@ class MemorySamplerTest {
     @Test
     fun anOpeningTenSecondsAfterAReadingTakesNoNewReading() = runTest {
         val s = setup()
-        s.sampler.onForeground(true)
-        s.sampler.onDashboardOpened(); runCurrent()
-        val first = s.sampler.latest.value
-        assertEquals(1, reads)
-        advanceTimeBy(10_000); runCurrent()
-        s.sampler.onDashboardOpened(); runCurrent()
-        assertEquals(1, reads)
-        assertEquals(first, s.sampler.latest.value)
-        s.scope.cancel()
+        try {
+            s.sampler.onForeground(true)
+            s.sampler.onDashboardOpened(); runCurrent()
+            val first = s.sampler.latest.value
+            assertEquals(1, reads)
+            advanceTimeBy(10_000); runCurrent()
+            s.sampler.onDashboardOpened(); runCurrent()
+            assertEquals(1, reads)
+            assertEquals(first, s.sampler.latest.value)
+        } finally {
+            s.scope.cancel()
+        }
     }
 
     @Test
     fun anOpeningThirtySecondsAfterAReadingReadsAgain() = runTest {
         val s = setup()
-        s.sampler.onForeground(true)
-        s.sampler.onDashboardOpened(); runCurrent()
-        advanceTimeBy(30_000); runCurrent()
-        s.sampler.onDashboardOpened(); runCurrent()
-        assertEquals(2, reads)
-        s.scope.cancel()
+        try {
+            s.sampler.onForeground(true)
+            s.sampler.onDashboardOpened(); runCurrent()
+            advanceTimeBy(30_000); runCurrent()
+            s.sampler.onDashboardOpened(); runCurrent()
+            assertEquals(2, reads)
+        } finally {
+            s.scope.cancel()
+        }
     }
 
     @Test
     fun afterTheHistoryIsClearedTheNextOpeningReadsAndStoresAtOnce() = runTest {
         val s = setup()
-        s.sampler.onForeground(true)
-        s.sampler.onDashboardOpened(); runCurrent()
-        s.history.clear(); runCurrent()
-        assertTrue(s.history.samples().isEmpty())
-        advanceTimeBy(10_000); runCurrent()
-        s.sampler.onDashboardOpened(); runCurrent()
-        assertEquals(2, reads)
-        assertEquals(1, s.history.samples().size)
-        s.scope.cancel()
+        try {
+            s.sampler.onForeground(true)
+            s.sampler.onDashboardOpened(); runCurrent()
+            s.history.clear(); runCurrent()
+            assertTrue(s.history.samples().isEmpty())
+            advanceTimeBy(10_000); runCurrent()
+            s.sampler.onDashboardOpened(); runCurrent()
+            assertEquals(2, reads)
+            assertEquals(1, s.history.samples().size)
+        } finally {
+            s.scope.cancel()
+        }
     }
 
     @Test
     fun aFailedReadingDoesNotStartTheFloor() = runTest {
         val s = setup()
-        s.sampler.onForeground(true)
-        readFails = true
-        s.sampler.onDashboardOpened(); runCurrent()
-        assertEquals(1, reads)
-        assertNull(s.sampler.latest.value)
-        readFails = false
-        advanceTimeBy(10_000); runCurrent()
-        s.sampler.onDashboardOpened(); runCurrent()
-        assertEquals(2, reads)
-        assertNotNull(s.sampler.latest.value)
-        s.scope.cancel()
+        try {
+            s.sampler.onForeground(true)
+            readFails = true
+            s.sampler.onDashboardOpened(); runCurrent()
+            assertEquals(1, reads)
+            assertNull(s.sampler.latest.value)
+            readFails = false
+            advanceTimeBy(10_000); runCurrent()
+            s.sampler.onDashboardOpened(); runCurrent()
+            assertEquals(2, reads)
+            assertNotNull(s.sampler.latest.value)
+        } finally {
+            s.scope.cancel()
+        }
     }
 
     @Test
     fun anOpeningFiveSecondsAfterTheFifteenMinuteReadingTakesNoNewReading() = runTest {
         val s = setup()
-        s.sampler.onForeground(true)
-        advanceTimeBy(15 * minute + 1); runCurrent()
-        assertEquals(1, reads)
-        advanceTimeBy(5_000); runCurrent()
-        s.sampler.onDashboardOpened(); runCurrent()
-        assertEquals(1, reads)
-        assertNotNull(s.sampler.latest.value)
-        s.scope.cancel()
+        try {
+            s.sampler.onForeground(true)
+            advanceTimeBy(15 * minute + 1); runCurrent()
+            assertEquals(1, reads)
+            advanceTimeBy(5_000); runCurrent()
+            s.sampler.onDashboardOpened(); runCurrent()
+            assertEquals(1, reads)
+            assertNotNull(s.sampler.latest.value)
+        } finally {
+            s.scope.cancel()
+        }
     }
 
     @Test
