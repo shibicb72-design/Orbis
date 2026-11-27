@@ -1,0 +1,13 @@
+﻿diff --git a/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt b/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
+index 8453811..c0a8cf5 100644
+--- a/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
++++ b/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
+@@ -56,7 +56,7 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
+     /** The engine reported the page start. One without a load request (history, restore) opens its own load. */
+     fun onPageStart(nowMs: Long, blank: Boolean = false) {
+         if (dead) return
+-        if (blank) {
++        if (blank && nowMs < 0) {
+             blankRunning = true
+             return
+         }
