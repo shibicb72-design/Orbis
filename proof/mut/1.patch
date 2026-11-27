@@ -1,0 +1,13 @@
+diff --git a/app/src/main/java/com/shibi/orbis/stats/MemorySampler.kt b/app/src/main/java/com/shibi/orbis/stats/MemorySampler.kt
+index 1a9fbee..9ee67be 100644
+--- a/app/src/main/java/com/shibi/orbis/stats/MemorySampler.kt
++++ b/app/src/main/java/com/shibi/orbis/stats/MemorySampler.kt
+@@ -19,7 +19,7 @@ internal const val MEMORY_SAMPLE_INTERVAL_MILLIS = 15 * 60 * 1000L
+ internal const val MEMORY_DASHBOARD_SAMPLE_GAP_MILLIS = SYSTEM_MEMORY_RATE_LIMIT_MILLIS
+ 
+ /** Opening the dashboard takes no new reading when one succeeded less than this long ago and no sample is due. */
+-internal const val MEMORY_DASHBOARD_READ_FLOOR_MILLIS = 30_000L
++internal const val MEMORY_DASHBOARD_READ_FLOOR_MILLIS = 0L
+ 
+ /** The sample for [reading] with the tab counts [tabs]. Numbers only. Pure. */
+ internal fun sampleOf(reading: MemoryReading, tabs: NormalTabCounts): MemorySample =

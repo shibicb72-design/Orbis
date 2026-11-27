@@ -1,0 +1,159 @@
+name: Mutation proof
+
+# Proof run only, never merged. Applies one patch per matrix entry (proof/mut/<n>.patch) and runs the memory sampler and section tests;
+# also counts the lint warnings. Same pinned actions as android.yml. No secret, no upload.
+on: pull_request
+
+permissions:
+  contents: read
+
+jobs:
+  mut:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        n: [0, 1, 2]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install SDK packages
+        run: |
+          if [ -z "${ANDROID_HOME:-}" ]; then
+            ANDROID_HOME="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
+            export ANDROID_HOME
+          fi
+          if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          else
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install "platforms;android-37.2" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - name: Apply the mutation
+        run: |
+          if [ "${{ matrix.n }}" != "0" ]; then
+            git apply "proof/mut/${{ matrix.n }}.patch"
+            git diff --stat
+          else
+            echo "n=0: control, no patch"
+          fi
+
+      - name: Run the memory tests
+        run: |
+          chmod +x gradlew
+          set +e
+          ./gradlew :app:testDebugUnitTest --tests "com.shibi.orbis.stats.MemorySamplerTest" --tests "com.shibi.orbis.ui.home.MemorySectionComposeTest" --stacktrace
+          echo "gradle exit code: $?"
+          exit 0
+
+      - name: Verdict
+        env:
+          N: ${{ matrix.n }}
+        run: |
+          cat > "$RUNNER_TEMP/verdict.py" <<'PY'
+          import glob, os, sys
+          import xml.etree.ElementTree as ET
+          n = int(os.environ["N"])
+          named = {
+              1: "MemorySamplerTest.anOpeningTenSecondsAfterAReadingTakesNoNewReading",
+              2: "MemorySectionComposeTest.aSampleNewerThanTheScreensClockIsOnTheChart",
+          }
+          files = glob.glob("app/build/test-results/testDebugUnitTest/*.xml")
+          count = 0
+          failed = []
+          for f in files:
+              for tc in ET.parse(f).getroot().iter("testcase"):
+                  count += 1
+                  if tc.find("failure") is not None or tc.find("error") is not None:
+                      failed.append(tc.get("classname").rsplit(".", 1)[-1] + "." + tc.get("name"))
+          ok = True
+          if not files:
+              line = f"MUT {n} NOT COMPILED" if n else "MUT 0 CONTROL FAIL no result XML"
+              ok = False
+          elif n == 0:
+              if not failed and count > 0:
+                  line = f"MUT 0 CONTROL PASS tests={count}"
+              else:
+                  line = f"MUT 0 CONTROL FAIL tests={count} failed={failed}"
+                  ok = False
+          else:
+              want = named[n]
+              # test names may carry "()" or backticks; compare on the plain name
+              norm = lambda s: s.replace("()", "").replace("`", "")
+              hit = [x for x in failed if norm(x) == want]
+              if hit:
+                  line = f"MUT {n} KILLED by {hit[0]}"
+              elif not failed:
+                  line = f"MUT {n} SURVIVED"
+                  ok = False
+              else:
+                  line = f"MUT {n} KILLED BY ANOTHER TEST {' '.join(failed)}"
+                  ok = False
+          print(line)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as s:
+              s.write(line + "\n\n")
+          print(f"(tests run: {count}; failed: {len(failed)})")
+          sys.exit(0 if ok else 1)
+          PY
+          python3 -I "$RUNNER_TEMP/verdict.py"
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install SDK packages
+        run: |
+          if [ -z "${ANDROID_HOME:-}" ]; then
+            ANDROID_HOME="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
+            export ANDROID_HOME
+          fi
+          if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          else
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install "platforms;android-37.2" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - name: Lint and count warnings
+        run: |
+          chmod +x gradlew
+          set +e
+          ./gradlew :app:lintDebug --stacktrace
+          echo "gradle exit code: $?"
+          set -e
+          report=app/build/reports/lint-results-debug.xml
+          if [ -f "$report" ]; then
+            n=$(grep -o 'severity="Warning"' "$report" | wc -l)
+            line="lint_warnings=$n"
+            echo "$line" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            line="lint_warnings=NOT MEASURED"
+            echo "$line" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "lint report not at $report; lint-results files found:"
+            find app/build -name 'lint-results*' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi

@@ -1,0 +1,13 @@
+diff --git a/app/src/main/java/com/shibi/orbis/ui/home/MemorySection.kt b/app/src/main/java/com/shibi/orbis/ui/home/MemorySection.kt
+index 7608051..e701ad8 100644
+--- a/app/src/main/java/com/shibi/orbis/ui/home/MemorySection.kt
++++ b/app/src/main/java/com/shibi/orbis/ui/home/MemorySection.kt
+@@ -171,7 +171,7 @@ internal fun MemorySection(
+                 }
+             }
+             val end = chartEnd(now, history)
+-            val points = history.filter { it.at > end - range.millis && it.at <= end }
++            val points = history.filter { it.at > now - range.millis && it.at <= now }
+             if (points.isEmpty()) {
+                 Text(stringResource(R.string.memory_chart_empty), style = MaterialTheme.typography.bodySmall)
+             } else {
