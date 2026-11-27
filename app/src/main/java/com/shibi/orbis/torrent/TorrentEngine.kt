@@ -205,6 +205,8 @@ data class TorrentSnapshot(
 enum class TorrentErrorKind {
     INVALID_SOURCE,
     UNSAFE_METADATA,
+    /** A v2 or hybrid torrent: refused until libtorrent >= 2.1.3 is bundled (see docs/security/NATIVE-VERSIONS.md). */
+    UNSUPPORTED_V2,
     NO_SPACE,
     FILE_ERROR,
     ENGINE_ERROR,

@@ -40,7 +40,7 @@ sealed interface IntakeRequest {
 }
 
 /** Why an intake did not reach the sheet's Download button. Logged by name only. */
-enum class IntakeRefusal { TOO_LARGE, BAD_MAGNET, NOT_CONTENT, OWN_PROVIDER, READ_FAILED, TIMEOUT }
+enum class IntakeRefusal { TOO_LARGE, BAD_MAGNET, NOT_CONTENT, OWN_PROVIDER, READ_FAILED, TIMEOUT, UNSUPPORTED_V2 }
 
 /** The intake lines of the torrent log: kinds, enum names and booleans only. */
 object IntakeLog {

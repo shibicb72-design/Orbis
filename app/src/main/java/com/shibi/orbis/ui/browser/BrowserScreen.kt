@@ -976,7 +976,7 @@ private fun BrowserContent(
                         onClose = { readerArticle = null },
                     )
                 }
-                SnackbarHost(snackbars, Modifier.align(Alignment.BottomCenter))
+                SnackbarHost(snackbars, Modifier.align(Alignment.BottomCenter)) { OrbisSnackbar(it) }
                 if (fullScreen && !inPip) {
                     val pipContext = LocalContext.current
                     val pipSupported = remember { pipContext.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE) }
@@ -1097,6 +1097,14 @@ private fun BrowserContent(
         onUndo = { noticeUrl -> session?.let { undoAutoDesktop(container.browserSettings, it, noticeUrl, state.url) } },
     )
     AutoDesktopDroppedNotice(session = session, snackbars = snackbars)
+    SlowLoadNotice(
+        tabId = selectedTab.id,
+        session = session,
+        snackbars = snackbars,
+        hiddenByLock = pageHidden,
+        inPictureInPicture = inPip,
+        log = { container.debugLog.log("SlowLoad", it) },
+    )
 
     if (showSiteSettings && session != null && isWebUrl(state.url)) {
         val s0 = session

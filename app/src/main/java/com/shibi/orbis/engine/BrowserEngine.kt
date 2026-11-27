@@ -226,6 +226,30 @@ data class SessionState(
      * dismissed by Gecko, the queue, a crash), or the content process died.
      */
     val navigationsCancelled: Int = 0,
+    /** The running or last top-level load, for the slow-load notices (ui/browser/SlowLoadNotice.kt). */
+    val loadWatch: LoadWatch = LoadWatch(),
+)
+
+/**
+ * What the slow-load notices know about one top-level load. Memory only; a new one starts at each page start. Times are
+ * SystemClock.elapsedRealtime milliseconds.
+ */
+data class LoadWatch(
+    /** When the load started or its progress value last changed. */
+    val progressAt: Long = 0L,
+    /**
+     * A new address was committed after the load started (onLocationChange). A download, a link another app opens and
+     * a 204 answer end without one.
+     */
+    val committed: Boolean = false,
+    /** The engine's flag at the stop (GeckoView: the status was NS_OK); null while it runs or before any load. */
+    val endedWell: Boolean? = null,
+    /** When it stopped. */
+    val endedAt: Long = 0L,
+    /** The user ended or replaced it since it started: Stop, Reload, Back, Forward or a new address. */
+    val endedByUser: Boolean = false,
+    /** The engine handed a response of this load to Orbis as a download (onExternalResponse). */
+    val download: Boolean = false,
 )
 
 // The one definition of how engine events change the session state, so the counters are maintained in one place and
@@ -239,8 +263,8 @@ data class SessionState(
  */
 internal fun SessionState.isFreshSessionBlank(url: String): Boolean = contentGone && url == "about:blank"
 
-/** [url] is the address Gecko reports for the start; null only in tests that do not care about it. */
-internal fun SessionState.afterPageStart(url: String? = null): SessionState =
+/** [url] is the address Gecko reports for the start; null only in tests that do not care about it. [now]: see [LoadWatch]. */
+internal fun SessionState.afterPageStart(url: String? = null, now: Long = 0L): SessionState =
     if (url != null && isFreshSessionBlank(url)) {
         this
     } else {
@@ -256,17 +280,38 @@ internal fun SessionState.afterPageStart(url: String? = null): SessionState =
             contentGone = false,
             findResult = null,
             loadStarts = loadStarts + 1,
+            loadWatch = LoadWatch(progressAt = now),
         )
     }
 
-internal fun SessionState.afterPageStop(success: Boolean): SessionState =
+internal fun SessionState.afterPageStop(success: Boolean, now: Long = 0L): SessionState =
     copy(
         isLoading = false,
         progress = if (success) 100 else 0,
         secure = secure || secureBeforeLoad,
         secureBeforeLoad = false,
         loadEnds = loadEnds + 1,
+        loadWatch = loadWatch.copy(endedWell = success, endedAt = now),
     )
+
+/**
+ * Gecko's progress value for the running load; [now] is kept only when the value changed to below 100. Gecko sends 100
+ * just before every stop (a failed one too) and when a redirect ends the first request: that is not the page moving.
+ */
+internal fun SessionState.afterProgressChange(progress: Int, now: Long): SessionState =
+    when {
+        progress == this.progress -> this
+        progress >= 100 -> copy(progress = progress)
+        else -> copy(progress = progress, loadWatch = loadWatch.copy(progressAt = now))
+    }
+
+/** A response of the running or last load became a download: that load is never reported as unfinished. */
+internal fun SessionState.afterDownloadResponse(): SessionState =
+    if (loadWatch.download) this else copy(loadWatch = loadWatch.copy(download = true))
+
+/** The user stopped, reloaded or stepped back or forward: the running or last load is not reported as unfinished. */
+internal fun SessionState.afterUserEndedLoad(): SessionState =
+    if (loadWatch.endedByUser) this else copy(loadWatch = loadWatch.copy(endedByUser = true))
 
 /**
  * The page committed [url]. Gecko's security report stays only within the same web origin (a fragment or pushState
@@ -280,6 +325,7 @@ internal fun SessionState.afterLocationChange(url: String): SessionState {
         secure = secure && origin != null && origin == siteOriginOf(this.url),
         secureBeforeLoad = false,
         contentGone = false,
+        loadWatch = if (isLoading) loadWatch.copy(committed = true) else loadWatch,
     )
 }
 
@@ -339,10 +385,10 @@ internal fun SessionState.afterRestoreRequested(): SessionState = if (!crashed) 
 
 /**
  * The user asked for a navigation (an address, Home, a shared file): whatever was lost is given up, and the next
- * page's events count, including about:blank for the start page.
+ * page's events count, including about:blank for the start page. A load still running is ended by the user.
  */
 internal fun SessionState.afterNavigationRequested(): SessionState =
-    if (!contentGone && !crashed) this else copy(crashed = false, contentGone = false)
+    (if (!contentGone && !crashed) this else copy(crashed = false, contentGone = false)).afterUserEndedLoad()
 
 enum class ContentProcessGone { KILL, CRASH }
 
