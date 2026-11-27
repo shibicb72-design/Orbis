@@ -165,6 +165,25 @@ class TorrentPathsTest {
     }
 
     @Test
+    fun v2AndHybridSourcesAreRefusedAtIntake() {
+        val v2 = "a".repeat(64)
+        val hex = "08ada5a7a6183aae1e09d831df6748d566095a10"
+        assertEquals(TorrentErrorKind.UNSUPPORTED_V2, TorrentPaths.checkSource(TorrentSource.Magnet("magnet:?xt=urn:btmh:1220$v2")))
+        assertEquals(TorrentErrorKind.UNSUPPORTED_V2, TorrentPaths.checkSource(TorrentSource.Magnet("magnet:?xt=urn:btih:$hex&xt=urn:btmh:1220$v2")))
+        assertNull(TorrentPaths.checkSource(TorrentSource.Magnet("magnet:?xt=urn:btih:$hex")))
+        val pieces = ByteArray(20)
+        val tree = mapOf("a" to mapOf("" to mapOf("length" to 1L)))
+        val v2Only = bencode(mapOf("info" to mapOf("name" to "t", "file tree" to tree, "piece length" to 16_384)))
+        val hybrid = bencode(mapOf("info" to mapOf("name" to "t", "pieces" to pieces, "files" to listOf(mapOf("length" to 1L, "path" to listOf("a"))), "meta version" to 2, "piece length" to 16_384)))
+        val v1Single = bencode(mapOf("info" to mapOf("name" to "t", "pieces" to pieces, "length" to 1L, "piece length" to 16_384)))
+        val v1Multi = bencode(mapOf("info" to mapOf("name" to "t", "pieces" to pieces, "files" to listOf(mapOf("length" to 1L, "path" to listOf("a"))), "piece length" to 16_384)))
+        assertEquals(TorrentErrorKind.UNSUPPORTED_V2, TorrentPaths.checkSource(TorrentSource.TorrentFile(v2Only)))
+        assertEquals(TorrentErrorKind.UNSUPPORTED_V2, TorrentPaths.checkSource(TorrentSource.TorrentFile(hybrid)))
+        assertNull(TorrentPaths.checkSource(TorrentSource.TorrentFile(v1Single)))
+        assertNull(TorrentPaths.checkSource(TorrentSource.TorrentFile(v1Multi)))
+    }
+
+    @Test
     fun magnetDisplayNameIsDecodedAndSafe() {
         assertEquals("Big Buck Bunny", TorrentPaths.magnetDisplayName("magnet:?xt=urn:btih:abc&dn=Big+Buck+Bunny"))
         assertEquals("evil.txt", TorrentPaths.magnetDisplayName("magnet:?xt=urn:btih:abc&dn=..%2F..%2Fevil.txt"))

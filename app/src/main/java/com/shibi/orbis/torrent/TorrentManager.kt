@@ -425,9 +425,13 @@ class TorrentManager(
         }
     }
 
-    /** What [clearSettled] takes off the list: every finished row, and every failed one but PUBLISH_FAILED. */
+    /**
+     * What [clearSettled] takes off the list: every finished row, and every failed one but PUBLISH_FAILED and a
+     * finished UNSUPPORTED_V2 (their finished files exist only inside Orbis; an unfinished v2 row leaves with its payload).
+     */
     private fun leavesOnClear(e: TorrentEntry): Boolean =
-        e.status == TorrentStatus.COMPLETED || e.status == TorrentStatus.FAILED && e.errorKind != TorrentErrorKind.PUBLISH_FAILED
+        e.status == TorrentStatus.COMPLETED ||
+            e.status == TorrentStatus.FAILED && e.errorKind != TorrentErrorKind.PUBLISH_FAILED && !e.finishedUnsaved
 
     private fun forgetSessionState() {
         engine.forgetSessionState()

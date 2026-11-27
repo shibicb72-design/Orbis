@@ -36,6 +36,16 @@ class TorrentConfirmModelTest {
         assertNull(m.error)
     }
 
+    @Test
+    fun v2AndHybridAreRefusedWithNoDownload() {
+        val v2 = TorrentConfirmModel.of(IntakeRequest.Magnet("magnet:?xt=urn:btmh:1220${"a".repeat(64)}", isPrivate = false), TorrentBody.Reading, ipNoteSeen = true)
+        assertEquals(IntakeRefusal.UNSUPPORTED_V2, v2.error)
+        assertFalse(v2.downloadEnabled)
+        val torrent = TorrentConfirmModel.of(IntakeRequest.TorrentBytes(ByteArray(1), isPrivate = false), TorrentBody.Failed(IntakeRefusal.UNSUPPORTED_V2), ipNoteSeen = true)
+        assertEquals(IntakeRefusal.UNSUPPORTED_V2, torrent.error)
+        assertFalse(torrent.downloadEnabled)
+    }
+
     @Test(timeout = 20_000)
     fun wifiOnlyOnMobileDataWaitsForWifiAndIsNoMobileDataNote() {
         val req = IntakeRequest.Magnet(magnet, isPrivate = false)
