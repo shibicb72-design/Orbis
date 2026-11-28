@@ -1,6 +1,6 @@
 # Orbis privacy policy (draft)
 
-Last updated: November 22, 2026.
+Last updated: November 27, 2026.
 
 Orbis is a web browser. It has no account and shows no ads. The people who make Orbis receive no data about you
 or your browsing, and there is no crash reporting. Cast talks only to a device on your local network.
@@ -26,6 +26,8 @@ your fingerprint or face data stays with Android. Orbis is available in English 
 ## What leaves your phone, and when
 - **Websites you visit** receive what any browser sends them (your IP address, the page request, cookies they set).
   Tracking protection and, if you install it, uBlock Origin block many third-party trackers.
+  Orbis turns on Enhanced Tracking Protection (Strict) by default. Scripts, fonts and video players that large
+  companies host for other sites still load, unless you turn on "Also block content trackers" in Settings.
 - **Search suggestions** (optional, on by default, never in private tabs): what you type in the address bar is sent to
   the search engine you chose, as you type.
 - **Search** goes to the search engine you chose. If you add a search engine of your own, it receives what you search
