@@ -184,6 +184,8 @@ private class HeldClose(
     val selectedId: Long,
     val blankId: Long,
     val used: Map<Long, Long>,
+    /** When each closed tab was last looked at (the one on screen: the time of the close); a tab with no time has no entry. */
+    val looked: Map<Long, Long>,
 )
 
 /**
@@ -962,6 +964,13 @@ class TabManager(
             }
         val orderBefore = list.map { it.id }
         val usedBefore = closing.associate { it.id to (lastUsed[it.id] ?: 0L) }
+        // Read before dispose() forgets them. The tab on screen is looked at now, as overview() would show it.
+        val lookedBefore = HashMap<Long, Long>()
+        val closedAt = clock()
+        for (tab in closing) {
+            val at = if (tab.id == selectedId && foreground) closedAt else lookedAt[tab.id]
+            if (at != null) lookedBefore[tab.id] = at
+        }
         val groupsBefore = groupList.toList()
         val selectedBefore = (if (privateSelected) lastNormalSelectedId else selectedId) ?: closing.first().id
         // Most recently used first; tabs never shown since start tie, and the later one in the list counts as newer.
@@ -983,7 +992,7 @@ class TabManager(
             selectedId = blank.id
             ensureSession(blank.id)?.session?.setActive(foreground)
         }
-        held = HeldClose(orderBefore, closed, entries, groupsBefore, selectedBefore, blank.id, usedBefore)
+        held = HeldClose(orderBefore, closed, entries, groupsBefore, selectedBefore, blank.id, usedBefore, lookedBefore)
         heldExpiry =
             scope.launch {
                 delay(closeAllUndoMillis)
@@ -1015,6 +1024,7 @@ class TabManager(
         }
         val backIds = back.mapTo(HashSet()) { it.id }
         for ((id, at) in h.used) if (id in backIds && at > 0L) lastUsed[id] = at
+        for ((id, at) in h.looked) if (id in backIds) lookedAt[id] = at
         // The Recently closed entries of the tabs that are open again go.
         val restoredEntries = h.entries.filterKeys { it in backIds }.values
         _recentlyClosed.value = _recentlyClosed.value.filterNot { e -> restoredEntries.any { it === e } }
