@@ -33,8 +33,23 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Over this many tabs, new ones are refused (memory: every open tab is a Gecko session). */
-const val MAX_TABS = 50
+/**
+ * A safety ceiling, not a working limit: over this many tabs, new ones are refused. Well before it the user is warned
+ * (see [TABS_WARN_EVERY]); no tab is ever closed or put to sleep for them.
+ */
+const val MAX_TABS = 500
+
+/** The user is told how many tabs are open when the count reaches 51, 101, 151 ... (every this many, plus one). */
+const val TABS_WARN_EVERY = 50
+
+/** How many tab groups may exist. Groups had the old tab limit as theirs; it stays 50. */
+const val MAX_TAB_GROUPS = 50
+
+/** How long "Close all tabs" can be undone. */
+const val CLOSE_ALL_UNDO_MILLIS = 10_000L
+
+/** A warning counts as new again only when the number of tabs has been this many below its threshold. */
+private const val WARN_REARM_BELOW = 10
 
 private const val PERSIST_DEBOUNCE_MILLIS = 1_000L
 
@@ -75,6 +90,27 @@ data class TabUi(
 
 /** One-shot messages for the UI. */
 enum class TabEvent { TAB_LIMIT }
+
+/**
+ * Decides when "N tabs are open" is shown. The thresholds are [every] + 1, 2 * [every] + 1, ... Each is told once when
+ * the count reaches it; it is told again only after the count has been at least [WARN_REARM_BELOW] below it. Pure
+ * bookkeeping; the manager feeds it the tab count after every change.
+ */
+internal class TabCountWatch(private val every: Int = TABS_WARN_EVERY) {
+    private val told = HashSet<Int>()
+
+    /** The count is now [count]. True when a threshold was reached that has not been told yet. */
+    fun update(count: Int): Boolean {
+        told.removeAll { count <= it - WARN_REARM_BELOW }
+        var fresh = false
+        var threshold = every + 1
+        while (threshold <= count) {
+            if (told.add(threshold)) fresh = true
+            threshold += every
+        }
+        return fresh
+    }
+}
 
 /** A closed normal tab that can be reopened with its back/forward history. Memory only; never a private tab. */
 data class ClosedTab(val url: String, val title: String, val desktopMode: Boolean, val savedState: String?)
@@ -118,6 +154,21 @@ internal fun LinkMenuRequest.pageMenu(): PageContextMenu? =
     )
 
 /**
+ * What "Close all tabs" closed, kept for Undo: every tab id as it was in the list ([orderBefore], private ones too), the
+ * closed normal [tabs] (no session, with their page state), the [entries] of them that went into Recently closed, the
+ * [groups] as they were, the normal tab that was selected, and the blank tab the close made.
+ */
+private class HeldClose(
+    val orderBefore: List<Long>,
+    val tabs: MutableList<Tab>,
+    val entries: MutableMap<Long, ClosedTab>,
+    val groups: List<TabGroup>,
+    val selectedId: Long,
+    val blankId: Long,
+    val used: Map<Long, Long>,
+)
+
+/**
  * Owns the tabs and their sessions. Main thread only (it is the [SessionHost] of every session it creates).
  *
  * It never opens or loads anything by itself: a session is created only by [openSelected], [select], [newTab],
@@ -144,6 +195,8 @@ class TabManager(
     private val releaseImport: (String) -> Unit = {},
     /** The torrent log (intake lines only: kinds, enum names, booleans). */
     private val torrentLog: (String) -> Unit = {},
+    private val maxGroups: Int = MAX_TAB_GROUPS,
+    private val closeAllUndoMillis: Long = CLOSE_ALL_UNDO_MILLIS,
 ) : SessionHost {
     private val list = ArrayList<Tab>()
     private var selectedId: Long
@@ -212,6 +265,21 @@ class TabManager(
 
     private val _events = Channel<TabEvent>(Channel.BUFFERED)
     val events: Flow<TabEvent> = _events.receiveAsFlow()
+
+    private val countWatch = TabCountWatch()
+    private val manyTabs = Channel<Int>(Channel.BUFFERED)
+
+    /** The number of open tabs (normal and private) each time it reaches 51, 101, 151 ... See [TabCountWatch]. */
+    val manyTabsWarnings: Flow<Int> = manyTabs.receiveAsFlow()
+
+    /** When each tab was last the selected one: a counter, memory only. Orders "Close all tabs" for Recently closed. */
+    private val lastUsed = HashMap<Long, Long>()
+    private var useClock = 0L
+    private var lastShownId = -1L
+
+    /** What "Close all tabs" closed, while it can still be undone (see [closeAllNormalUndoable]). */
+    private var held: HeldClose? = null
+    private var heldExpiry: Job? = null
 
     private val _pendingDownload = MutableStateFlow<PendingDownload?>(null)
     val pendingDownload: StateFlow<PendingDownload?> = _pendingDownload.asStateFlow()
@@ -285,6 +353,8 @@ class TabManager(
                 nextGroupId = maxOf(nextGroupId, (snapshot.groups.maxOfOrNull { it.id } ?: 0L) + 1)
                 settleGroups()
                 publish()
+                // Restored tabs are not news: no warning at start-up, however many there are.
+                countWatch.update(list.size)
                 log("restored ${list.size} tabs")
             }
             _ready.value = true
@@ -342,14 +412,20 @@ class TabManager(
         _tabs.value = list.map { TabUi(it.id, it.title, it.url, it.id == selectedId, it.isPrivate, it.groupId) }
         _groups.value = groupList.toList()
         if (!sel.isPrivate) lastNormalSelectedId = sel.id
+        if (sel.id != lastShownId) {
+            lastShownId = sel.id
+            lastUsed[sel.id] = ++useClock
+        }
         _selected.value = sel
     }
 
-    private fun changed() {
+    /** [warn] false for a change that only gives the user back tabs they already had (Undo): no "N tabs are open". */
+    private fun changed(warn: Boolean = true) {
         pristine = false
         settleGroups()
         publish()
         schedulePersist()
+        if (countWatch.update(list.size) && warn) manyTabs.trySend(list.size)
     }
 
     /** Applies the group rules after any change: each group's tabs next to each other, no group without a tab. */
@@ -621,6 +697,7 @@ class TabManager(
         val privateId = tab.id.takeIf { tab.isPrivate }
         observers.remove(tab.id)?.cancel()
         noticeObservers.remove(tab.id)?.cancel()
+        lastUsed.remove(tab.id)
         _autoDesktopNotices.value = _autoDesktopNotices.value - tab.id
         tab.session?.let {
             it.host = null
@@ -693,6 +770,13 @@ class TabManager(
             return null
         }
         _recentlyClosed.value = _recentlyClosed.value - entry
+        // A tab of the last "Close all tabs" that the user reopened by hand must not come back a second time on Undo.
+        held?.let { h ->
+            h.entries.entries.firstOrNull { it.value == entry }?.let { hit ->
+                h.entries.remove(hit.key)
+                h.tabs.removeAll { it.id == hit.key }
+            }
+        }
         val id = nextId++
         list.firstOrNull { it.id == selectedId }?.session?.setActive(false)
         list += Tab(id, null, entry.title, entry.url, entry.desktopMode, entry.savedState, null)
@@ -734,6 +818,8 @@ class TabManager(
     /** Forgets the recently closed tabs (their addresses and history). */
     fun forgetClosed() {
         _recentlyClosed.value = emptyList()
+        // What Undo could bring back is the same data: forgetting means forgetting.
+        dropHeld()
     }
 
     /** Closes every private tab; the engine's private data is dropped once, with the last of them. */
@@ -771,6 +857,112 @@ class TabManager(
         changed()
         // Not ready yet: the write is skipped, and restore() writes once the stored list has been read.
         if (_ready.value) flush()
+    }
+
+    /**
+     * "Close all tabs" from the tab switcher: closes every normal tab, leaves exactly one fresh blank normal tab (selected,
+     * unless a private tab was selected) and keeps private tabs and their sessions untouched. Returns how many tabs it
+     * closed, 0 with nothing done when fewer than two normal tabs are open.
+     *
+     * Unlike [closeAllNormal] (Clear browsing data) it can be undone for [closeAllUndoMillis] with [undoCloseAll], and it
+     * does not forget the Recently closed list: the [RECENTLY_CLOSED_LIMIT] most recently used web tabs go into it at once,
+     * newest first, as if they had been closed one by one. The closed tabs are held in memory only (with the page state they
+     * had); if the app is killed in that time they stay closed. The stored tab list is rewritten at once.
+     */
+    fun closeAllNormalUndoable(): Int {
+        val closing = list.filter { !it.isPrivate }
+        // One tab is not "all": a double tap on the entry must not close the blank tab it just made and lose the Undo.
+        if (closing.size < 2) return 0
+        val privateSelected = list.firstOrNull { it.id == selectedId }?.isPrivate == true
+        dropHeld()
+        // The page state is read before the sessions are closed; a tab that was never shown keeps its stored one.
+        val closed =
+            closing.mapTo(ArrayList()) {
+                it.copy(session = null, savedState = runCatching { it.session?.savedState() }.getOrNull() ?: it.savedState)
+            }
+        val orderBefore = list.map { it.id }
+        val usedBefore = closing.associate { it.id to (lastUsed[it.id] ?: 0L) }
+        val groupsBefore = groupList.toList()
+        val selectedBefore = (if (privateSelected) lastNormalSelectedId else selectedId) ?: closing.first().id
+        // Most recently used first; tabs never shown since start tie, and the later one in the list counts as newer.
+        val recent =
+            closed.withIndex()
+                .filter { isWebUrl(it.value.url) }
+                .sortedWith(compareByDescending<IndexedValue<Tab>> { lastUsed[it.value.id] ?: 0L }.thenByDescending { it.index })
+                .take(RECENTLY_CLOSED_LIMIT)
+                .map { it.value }
+        val entries = LinkedHashMap<Long, ClosedTab>()
+        for (tab in recent) entries[tab.id] = ClosedTab(tab.url, tab.title, tab.desktopMode, tab.savedState)
+        _recentlyClosed.value = (entries.values + _recentlyClosed.value).take(RECENTLY_CLOSED_LIMIT)
+        for (tab in closing) dispose(tab)
+        list.removeAll { !it.isPrivate }
+        val blank = Tab(nextId++, null, "", "", false, null, null)
+        list += blank
+        lastNormalSelectedId = blank.id
+        if (!privateSelected) {
+            selectedId = blank.id
+            ensureSession(blank.id)?.session?.setActive(foreground)
+        }
+        held = HeldClose(orderBefore, closed, entries, groupsBefore, selectedBefore, blank.id, usedBefore)
+        heldExpiry =
+            scope.launch {
+                delay(closeAllUndoMillis)
+                held = null
+            }
+        changed()
+        if (_ready.value) flush()
+        return closing.size
+    }
+
+    /**
+     * Brings back what the last [closeAllNormalUndoable] closed, if it is still within [closeAllUndoMillis]: the same
+     * order (private tabs where they were), the same groups, each tab with the page state it had, and the same selected
+     * tab (unless a private tab is selected now). Tabs are asleep except the selected one. The blank tab it made is
+     * removed when it has not been used; a used one stays, after them. False when there is nothing to undo.
+     */
+    fun undoCloseAll(): Boolean {
+        val h = held ?: return false
+        dropHeld()
+        val blank = list.firstOrNull { it.id == h.blankId }
+        val unusedBlank = blank?.takeIf { isBlank(it) }
+        val room = maxTabs - (list.size - (if (unusedBlank != null) 1 else 0))
+        val back = h.tabs.take(room.coerceAtLeast(0))
+        if (back.size < h.tabs.size) notifyLimit()
+        if (back.isEmpty()) return false
+        if (unusedBlank != null) {
+            dispose(unusedBlank)
+            list.remove(unusedBlank)
+        }
+        val backIds = back.mapTo(HashSet()) { it.id }
+        for ((id, at) in h.used) if (id in backIds && at > 0L) lastUsed[id] = at
+        // The Recently closed entries of the tabs that are open again go.
+        val restoredEntries = h.entries.filterKeys { it in backIds }.values
+        _recentlyClosed.value = _recentlyClosed.value.filterNot { e -> restoredEntries.any { it === e } }
+        val current = list.associateBy { it.id }
+        val backById = back.associateBy { it.id }
+        val before = h.orderBefore.toHashSet()
+        val merged = ArrayList<Tab>(list.size + back.size)
+        for (id in h.orderBefore) (backById[id] ?: current[id])?.let { merged += it }
+        for (tab in list) if (tab.id !in before) merged += tab
+        val previous = list.firstOrNull { it.id == selectedId }
+        list.clear()
+        list += merged
+        for (g in h.groups) if (groupList.none { it.id == g.id } && back.any { it.groupId == g.id }) groupList += g
+        if (previous?.isPrivate != true) {
+            val target = back.firstOrNull { it.id == h.selectedId } ?: back.first()
+            if (previous != null && previous.id != target.id) previous.session?.setActive(false)
+            selectedId = target.id
+            ensureSession(target.id)?.session?.setActive(foreground)
+        }
+        changed(warn = false)
+        if (_ready.value) flush()
+        return true
+    }
+
+    private fun dropHeld() {
+        held = null
+        heldExpiry?.cancel()
+        heldExpiry = null
     }
 
     // ---- backup --------------------------------------------------------------------------------------------
@@ -826,13 +1018,13 @@ class TabManager(
     /**
      * A new group of the open tabs [tabIds] (unknown ids are ignored), gathered at the place of the first of them in
      * list order. A tab already in another group leaves it. Null, and nothing changes, when [name] is not valid (see
-     * [tabGroupName]), when no listed tab is open, when any of them is private, or at [MAX_TABS] groups.
+     * [tabGroupName]), when no listed tab is open, when any of them is private, or at [MAX_TAB_GROUPS] groups.
      */
     fun createGroup(tabIds: List<Long>, name: String, color: TabGroupColor): Long? {
         val clean = tabGroupName(name) ?: return null
         val members = tabIds.distinct().mapNotNull { id -> list.firstOrNull { it.id == id } }
         if (members.isEmpty() || members.any { it.isPrivate }) return null
-        if (groupList.size >= maxTabs) return null
+        if (groupList.size >= maxGroups) return null
         val groupId = nextGroupId++
         groupList += TabGroup(groupId, clean, color, collapsed = false)
         for (member in members) {

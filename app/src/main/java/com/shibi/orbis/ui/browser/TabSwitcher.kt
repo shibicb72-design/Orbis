@@ -110,6 +110,9 @@ internal fun tabSheetReturnFocus(outcome: TabSheetOutcome): ReturnFocus =
         TabSheetOutcome.NEW_TAB -> ReturnFocus.NEW_TAB_ADDRESS
     }
 
+/** "Close all tabs" is offered with two or more normal tabs; with one, closing it is the same as the row's close button. */
+internal fun canCloseAllTabs(tabs: List<TabUi>): Boolean = tabs.count { !it.isPrivate } >= 2
+
 /** One cell of the switcher grid: a group's header row, or a tab card (with its group, when it has one). */
 internal sealed interface SwitcherEntry {
     val key: Any
@@ -158,6 +161,8 @@ internal fun TabSwitcher(
     onNewPrivateTab: () -> Unit,
     onClosePrivateTabs: () -> Unit,
     onDismiss: () -> Unit,
+    /** "Close all tabs": closes every normal tab. Null hides the entry. It is shown only with two or more normal tabs. */
+    onCloseAllTabs: (() -> Unit)? = null,
     onEnded: (TabSheetOutcome) -> Unit = {},
     /** Page previews by tab id; a tab without one shows its site's letter. */
     thumbnails: Map<Long, ImageBitmap> = emptyMap(),
@@ -224,6 +229,12 @@ internal fun TabSwitcher(
             if (tabs.any { it.isPrivate }) {
                 TextButton(onClick = { end(TabSheetOutcome.CLOSED_PRIVATE, onClosePrivateTabs) }) {
                     Text(stringResource(R.string.private_close_all))
+                }
+            }
+            // The sheet stays open (like closing one row): the blank tab and the "N tabs closed / Undo" bar show in it.
+            if (onCloseAllTabs != null && canCloseAllTabs(tabs)) {
+                TextButton(onClick = onCloseAllTabs) {
+                    Text(stringResource(R.string.tabs_close_all))
                 }
             }
         }
