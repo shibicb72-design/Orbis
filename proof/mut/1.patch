@@ -1,0 +1,12 @@
+diff --git a/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt b/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
+index 4279362..5d337f4 100644
+--- a/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
++++ b/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
+@@ -1024,7 +1024,6 @@ class TabManager(
+         }
+         val backIds = back.mapTo(HashSet()) { it.id }
+         for ((id, at) in h.used) if (id in backIds && at > 0L) lastUsed[id] = at
+-        for ((id, at) in h.looked) if (id in backIds) lookedAt[id] = at
+         // The Recently closed entries of the tabs that are open again go.
+         val restoredEntries = h.entries.filterKeys { it in backIds }.values
+         _recentlyClosed.value = _recentlyClosed.value.filterNot { e -> restoredEntries.any { it === e } }

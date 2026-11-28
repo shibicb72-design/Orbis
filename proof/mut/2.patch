@@ -1,0 +1,32 @@
+diff --git a/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt b/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
+index 4279362..77895ed 100644
+--- a/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
++++ b/app/src/main/java/com/shibi/orbis/tabs/TabManager.kt
+@@ -964,13 +964,6 @@ class TabManager(
+             }
+         val orderBefore = list.map { it.id }
+         val usedBefore = closing.associate { it.id to (lastUsed[it.id] ?: 0L) }
+-        // Read before dispose() forgets them. The tab on screen is looked at now, as overview() would show it.
+-        val lookedBefore = HashMap<Long, Long>()
+-        val closedAt = clock()
+-        for (tab in closing) {
+-            val at = if (tab.id == selectedId && foreground) closedAt else lookedAt[tab.id]
+-            if (at != null) lookedBefore[tab.id] = at
+-        }
+         val groupsBefore = groupList.toList()
+         val selectedBefore = (if (privateSelected) lastNormalSelectedId else selectedId) ?: closing.first().id
+         // Most recently used first; tabs never shown since start tie, and the later one in the list counts as newer.
+@@ -984,6 +977,13 @@ class TabManager(
+         for (tab in recent) entries[tab.id] = ClosedTab(tab.url, tab.title, tab.desktopMode, tab.savedState)
+         _recentlyClosed.value = (entries.values + _recentlyClosed.value).take(RECENTLY_CLOSED_LIMIT)
+         for (tab in closing) dispose(tab)
++        // Read before dispose() forgets them. The tab on screen is looked at now, as overview() would show it.
++        val lookedBefore = HashMap<Long, Long>()
++        val closedAt = clock()
++        for (tab in closing) {
++            val at = if (tab.id == selectedId && foreground) closedAt else lookedAt[tab.id]
++            if (at != null) lookedBefore[tab.id] = at
++        }
+         list.removeAll { !it.isPrivate }
+         val blank = Tab(nextId++, null, "", "", false, null, null)
+         list += blank
