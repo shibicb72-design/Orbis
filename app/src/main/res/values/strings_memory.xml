@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The dashboard's Memory section (mem24-2). -->
+    <string name="memory_title" translatable="false">Memory</string>
+    <string name="memory_used" translatable="false">Memory used by Orbis</string>
+    <string name="memory_measured_at" translatable="false">measured at %1$s</string>
+    <string name="memory_measuring" translatable="false">Measuring…</string>
+    <string name="memory_rate_limited" translatable="false">Android updates this at most every 5 minutes.</string>
+    <string name="memory_app" translatable="false">Orbis app</string>
+    <string name="memory_web" translatable="false">Web pages</string>
+    <string name="memory_other" translatable="false">Other browser processes</string>
+    <string name="memory_mb" translatable="false">%1$d MB</string>
+    <string name="memory_processes_title" translatable="false">Largest web-page processes</string>
+    <string name="memory_processes_note" translatable="false">Each process holds the tabs of one site. Orbis cannot tell which site: the browser engine does not say.</string>
+    <string name="memory_process_row" translatable="false">Web-page process %1$d</string>
+    <string name="memory_show_all" translatable="false">Show all</string>
+    <string name="memory_show_fewer" translatable="false">Show fewer</string>
+    <string name="memory_tabs_title" translatable="false">Open tabs</string>
+    <string name="memory_tab_private" translatable="false">Private tab</string>
+    <string name="memory_tab_untitled" translatable="false">New tab</string>
+    <string name="memory_state_awake" translatable="false">awake</string>
+    <string name="memory_state_asleep" translatable="false">asleep</string>
+    <string name="memory_state_playing" translatable="false">playing</string>
+    <string name="memory_tab_detail" translatable="false">%1$s · %2$s</string>
+    <string name="memory_looked_now" translatable="false">last looked at just now</string>
+    <string name="memory_looked_minutes" translatable="false">last looked at %1$d min ago</string>
+    <string name="memory_looked_hours" translatable="false">last looked at %1$d h ago</string>
+    <plurals name="memory_looked_days" translatable="false">
+        <item quantity="one">last looked at %1$d day ago</item>
+        <item quantity="other">last looked at %1$d days ago</item>
+    </plurals>
+    <string name="memory_looked_unknown" translatable="false">last looked at: not known</string>
+    <string name="memory_close" translatable="false">Close</string>
+    <string name="memory_range_day" translatable="false">24 hours</string>
+    <string name="memory_range_week" translatable="false">7 days</string>
+    <string name="memory_range_month" translatable="false">30 days</string>
+    <string name="memory_chart_empty" translatable="false">No memory history yet.</string>
+    <string name="memory_chart_description" translatable="false">Memory used by Orbis: lowest %1$d MB, highest %2$d MB</string>
+    <string name="memory_delete_history" translatable="false">Delete memory history</string>
+    <string name="memory_delete_title" translatable="false">Delete memory history?</string>
+    <string name="memory_delete_body" translatable="false">The memory chart starts again from now. Nothing else is deleted.</string>
+    <string name="memory_delete" translatable="false">Delete</string>
+</resources>
