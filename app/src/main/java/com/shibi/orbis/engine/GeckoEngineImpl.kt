@@ -871,6 +871,28 @@ private class GeckoBrowserSession(
 
     private fun outcomeNow(): Long = SystemClock.elapsedRealtime()
 
+    // PROOF ONLY (never in #164): logcat trace of every tracker call. No url, host, title or name.
+    private var traceAsked: String? = null
+
+    private fun traceState(): String =
+        try {
+            listOf("open", "started", "committed").joinToString(" ") { n ->
+                val f = LoadOutcomeTracker::class.java.getDeclaredField(n)
+                f.isAccessible = true
+                "$n=${f.get(loadOutcome)}"
+            }
+        } catch (e: Throwable) {
+            "state=?"
+        }
+
+    private fun trace(name: String, blank: Boolean? = null, uri: String? = null, redirect: Boolean? = null, success: Boolean? = null) {
+        val same = if (uri == null) "na" else (uri == traceAsked).toString()
+        android.util.Log.d(
+            "OrbisLoadTrace",
+            "$name tab=${tabNumberForLog()} blank=${blank ?: "na"} sameAsAsked=$same redirect=${redirect ?: "na"} success=${success ?: "na"} ${traceState()}",
+        )
+    }
+
     private fun tabNumberForLog(): Long {
         host?.tabFacts(this)?.number?.takeIf { it > 0L }?.let { lastTabNumber = it }
         return lastTabNumber
@@ -1053,6 +1075,7 @@ private class GeckoBrowserSession(
                     applyImportedScript(url, reloadIfChanged = true)
                     tabHistory.onCommit(url)
                     onCommitForDesktop(url)
+                    trace("commit", blank = url == "about:blank", uri = url)
                     loadOutcome.onCommit(blank = url == "about:blank")
                 }
                 // Gecko hands every web page its tracking permission record; ALLOW means a stored (normal) exception.
@@ -1099,6 +1122,8 @@ private class GeckoBrowserSession(
                     isOwnFallbackLoad(pendingFallbackLoad, request.uri, request.hasUserGesture, request.isDirectNavigation)
                 if (fallbackLoad) pendingFallbackLoad = null
                 val direct = request.isDirectNavigation && !fallbackLoad
+                trace("loadRequest", blank = request.uri == "about:blank", uri = request.uri, redirect = request.isRedirect)
+                traceAsked = request.uri
                 loadOutcome.onLoadRequest(request.isRedirect, outcomeNow(), blank = request.uri == "about:blank")
                 // A shared file must not send the tab to the web by itself (meta refresh); a tapped link still works,
                 // and so does the server redirect that follows it.
@@ -1215,6 +1240,7 @@ private class GeckoBrowserSession(
                     "GeckoSession",
                     "load error code=0x${error.code.toString(16)} category=0x${error.category.toString(16)}",
                 )
+                trace("error", uri = uri)
                 loadOutcome.onError(outcomeErrorCategory(error.category), outcomeNow())
                 visits.onLoadError()
                 tabHistory.onLoadEndedWithoutCommit()
@@ -1246,12 +1272,14 @@ private class GeckoBrowserSession(
                 _state.update { it.afterPageStart(url, SystemClock.elapsedRealtime()) }
                 _state.update { it.copy(readerable = false) }
                 visits.onPageStart()
+                trace("pageStart", blank = url == "about:blank", uri = url)
                 loadOutcome.onPageStart(outcomeNow(), blank = url == "about:blank")
             }
 
             override fun onPageStop(session: GeckoSession, success: Boolean) {
                 _state.update { it.afterPageStop(success, SystemClock.elapsedRealtime()) }
                 visits.onPageStop(success)?.let { host?.onVisit(this@GeckoBrowserSession, it.url, it.title) }
+                trace("pageStop", success = success)
                 loadOutcome.onPageStop(success, outcomeNow())
             }
 
@@ -1968,6 +1996,7 @@ private class GeckoBrowserSession(
                 owner.onDownload(download, this@GeckoBrowserSession)
                 // No file name or url in the log.
                 debugLog.log("GeckoSession", "download offered")
+                trace("download", uri = response.uri)
                 loadOutcome.onDownload(outcomeNow())
             }
 
@@ -3055,6 +3084,7 @@ private class GeckoBrowserSession(
         if (closed) return
         _state.update { it.afterUserEndedLoad() }
         session.stop()
+        trace("userStop")
         loadOutcome.onUserStop(outcomeNow())
     }
 
