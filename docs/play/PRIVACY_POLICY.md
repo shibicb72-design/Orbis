@@ -48,6 +48,7 @@ your fingerprint or face data stays with Android. Orbis is available in English 
 - **Safe Browsing**: Gecko's built-in protection checks pages against lists from Google's Safe Browsing service.
 - **Engine data updates**: the Gecko engine downloads its own safety and compatibility data from Mozilla's settings service, for example lists of revoked certificates and blocked add-ons. Orbis does not send your browsing history with these requests.
 - **Voice search** uses your phone's speech recognizer (for example Google's); its privacy terms apply.
+- **Protected video (DRM)**: Orbis lets sites play protected video in normal tabs unless you turn it off in Settings. It is never played in private tabs. When a site plays it, the Gecko engine uses Android's own DRM system (Widevine): that system's set-up server is contacted when the DRM system first needs setting up, and that site's licence server for each protected stream. What these requests tell the servers about your phone is decided by the DRM system and is not published. The engine asks the DRM system to use a separate random id for each site, but this may not take effect on your phone.
 - **Updates** are delivered by Google Play.
 - **Cast**: the video or audio address is sent only to the TV or speaker you pick on your local network. Orbis sends
   nothing to Google or any server for Cast. Casting YouTube opens it in the TV's YouTube app, which can show ads and

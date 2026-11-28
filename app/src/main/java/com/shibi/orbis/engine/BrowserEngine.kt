@@ -226,6 +226,8 @@ data class SessionState(
      * dismissed by Gecko, the queue, a crash), or the content process died.
      */
     val navigationsCancelled: Int = 0,
+    /** Protected video (DRM) the page asked for and Orbis refused, for the notice. Memory only. */
+    val protectedVideo: ProtectedVideoRefusal = ProtectedVideoRefusal(),
     /** The running or last top-level load, for the slow-load notices (ui/browser/SlowLoadNotice.kt). */
     val loadWatch: LoadWatch = LoadWatch(),
 )
@@ -463,6 +465,8 @@ interface BrowserSession {
      * notice. Not replayed: only a collector that is listening sees it. Test doubles never emit.
      */
     val autoDesktopKept: Flow<Unit> get() = emptyFlow()
+    /** The protected-video notice for page load [load] has appeared (see [SessionState.protectedVideo]). */
+    fun protectedVideoNoticeShown(load: Int) {}
     /**
      * One event each time a page of a site kept as desktop stayed empty, worked as mobile, and the site went back to
      * mobile; the UI shows a one-line notice. Not replayed. Test doubles never emit.
@@ -581,6 +585,8 @@ interface SitePolicy {
     fun rememberAutoDesktop(url: String, isPrivate: Boolean) {}
     /** The retry did not help: Desktop site off for the site, and no retry there again. */
     fun declineAutoDesktop(url: String, isPrivate: Boolean) {}
+    /** Settings > Play protected video (DRM). False here, so a policy that does not say refuses. */
+    fun protectedVideoOn(): Boolean = false
     /** Desktop site is on for the site because auto desktop kept it (the site sheet's note). */
     fun isAutoDesktop(url: String, isPrivate: Boolean): Boolean = false
     /** A page of an auto-desktop site stayed empty and worked as mobile: the automatic choice goes, not marked declined. */

@@ -1099,6 +1099,17 @@ private fun BrowserContent(
         onShown = { tabs.clearAutoDesktopNotice(selectedTab.id) },
         onUndo = { noticeUrl -> session?.let { undoAutoDesktop(container.browserSettings, it, noticeUrl, state.url) } },
     )
+    // The page state read here is always the selected tab's.
+    ProtectedVideoNotice(
+        tabId = selectedTab.id,
+        tabSelected = session != null,
+        refusal = state.protectedVideo,
+        currentLoad = state.loadStarts,
+        pageHidden = pageHidden,
+        inPip = inPip,
+        snackbars = snackbars,
+        onShown = { load -> session?.protectedVideoNoticeShown(load) },
+    )
     AutoDesktopDroppedNotice(session = session, snackbars = snackbars)
     SlowLoadNotice(
         tabId = selectedTab.id,

@@ -50,6 +50,11 @@ the app. Data a user sends to websites they visit, through a browser, is not col
     user's choice, so no data type is declared.
   - Clear on exit (wipes at the next start), the private-tab lock, tab groups, the menu and toolbar choices and Material
     You are local: they stay on the phone and send nothing.
+  - Protected video (DRM), on by default in normal tabs from 0.8.4, off in private tabs, and switchable off in Settings.
+    When a site plays protected video, the device's DRM system and the browser engine send requests to the DRM set-up
+    server and to that site's licence server. Their contents are not published and may include an identifier of the
+    device or of the DRM installation. Nothing is sent to the developer. Decision of the owner, 2026-11-23: the Data
+    safety form stays at 'No data collected or shared'.
 - **Is all data encrypted in transit?** Yes for Orbis's own requests (search suggestions and add-on
   install use HTTPS, and so does secure DNS). Websites the user opens may use HTTP unless HTTPS-only mode is on. Torrent traffic with peers
   and trackers uses the BitTorrent protocols; peers may or may not support encryption.

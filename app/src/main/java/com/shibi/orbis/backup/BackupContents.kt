@@ -318,6 +318,7 @@ object SettingsAllowList {
                     "force_zoom" to SettingType.Bool,
                     "https_only" to SettingType.OneOf(names(HttpsOnlyMode.entries)),
                     "javascript" to SettingType.Bool,
+                    "protected_video" to SettingType.Bool,
                     "always_desktop" to SettingType.Bool,
                     "open_links_in_apps" to SettingType.Bool,
                     "toolbar_bottom" to SettingType.Bool,

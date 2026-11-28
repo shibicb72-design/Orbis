@@ -774,6 +774,10 @@ private class GeckoBrowserSession(
     /** Host (lowercase) of a pending mobile retry of an empty page: mobile for this tab only until kept or restored. */
     private var retryMobileHost: String? = null
 
+    override fun protectedVideoNoticeShown(load: Int) {
+        _state.update { it.afterProtectedVideoNoticeShown(load) }
+    }
+
     private val queue = PromptQueue()
     override val prompts: StateFlow<SitePrompt?> = queue.head
 
@@ -2559,8 +2563,9 @@ private class GeckoBrowserSession(
     }
 
     /**
-     * Location and camera/microphone go through the user (see above). Every other kind is unchanged: only inaudible
-     * autoplay is allowed, notifications and the rest are denied with no dialog.
+     * Location and camera/microphone go through the user (see above). Protected video follows its setting (see
+     * [protectedVideoAnswer]). Every other kind is unchanged: only inaudible autoplay is allowed, notifications and the
+     * rest are denied with no dialog.
      */
     private fun permissionDelegate() =
         object : GeckoSession.PermissionDelegate {
@@ -2571,7 +2576,20 @@ private class GeckoBrowserSession(
                 if (perm.permission == GeckoSession.PermissionDelegate.PERMISSION_GEOLOCATION) {
                     return geolocationRequest(perm)
                 }
-                val allow = perm.permission == GeckoSession.PermissionDelegate.PERMISSION_AUTOPLAY_INAUDIBLE
+                // Protected video: the setting and the tab's mode decide (no prompt, nothing per site). A refusal is
+                // noted for the browser screen's notice. Without a site policy yet it is refused.
+                val drm =
+                    if (perm.permission == GeckoSession.PermissionDelegate.PERMISSION_MEDIA_KEY_SYSTEM_ACCESS) {
+                        protectedVideoAnswer(
+                            settingOn = sitePolicy()?.protectedVideoOn() == true,
+                            isPrivate = isPrivate || perm.privateMode,
+                        ).also { answer -> _state.update { it.afterProtectedVideoAnswer(answer) } }
+                    } else {
+                        null
+                    }
+                val allow =
+                    perm.permission == GeckoSession.PermissionDelegate.PERMISSION_AUTOPLAY_INAUDIBLE ||
+                        drm == ProtectedVideoAnswer.ALLOW
                 // The kind only: the page address is not logged.
                 debugLog.log(
                     "GeckoSession",

@@ -101,6 +101,36 @@ internal fun LockPrivateTabsRow(prefs: PrivacyPrefs) {
     )
 }
 
+/**
+ * "Play protected video (DRM)": a switch row that toggles anywhere on the row. The engine keeps the answer a page already
+ * got, so after a change on this visit the row also says to reload open pages.
+ */
+@Composable
+internal fun ProtectedVideoRow(site: BrowserSettings) {
+    val on by site.protectedVideo.collectAsStateWithLifecycle()
+    var changed by remember { mutableStateOf(false) }
+    SettingsItem(
+        headlineContent = { Text(stringResource(R.string.protected_video_setting_title)) },
+        supportingContent = {
+            Column {
+                Text(stringResource(R.string.protected_video_setting_summary))
+                if (changed) Text(stringResource(R.string.protected_video_setting_reload))
+            }
+        },
+        trailingContent = { Switch(checked = on, onCheckedChange = null) },
+        modifier =
+            Modifier.fillMaxWidth()
+                .toggleable(
+                    value = on,
+                    role = Role.Switch,
+                    onValueChange = {
+                        site.setProtectedVideo(it)
+                        changed = true
+                    },
+                ),
+    )
+}
+
 @StringRes
 private fun defaultBrowserSummary(status: BrowserRoleStatus): Int =
     when (status) {
@@ -427,6 +457,8 @@ fun SettingsScreen(
                         trailingContent = { Switch(checked = js, onCheckedChange = null) },
                         modifier = Modifier.fillMaxWidth().toggleable(value = js, role = Role.Switch, onValueChange = site::setJavaScript),
                     )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    ProtectedVideoRow(site)
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
                 SettingsItem(

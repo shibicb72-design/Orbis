@@ -87,6 +87,7 @@ class BackupManagerTest {
             setTextZoomPercent(150)
             setHomepage("https://home.example/")
             setJavaScript(false)
+            setProtectedVideo(false)
             setReaderTheme(ReaderTheme.SEPIA)
             pinSite("https://pin.example/", "Pin")
             rememberJavaScript("https://js.example/x", true, isPrivate = false)
@@ -144,6 +145,9 @@ class BackupManagerTest {
             // Every allow-listed setting, read back through the settings classes (so their flows show the new values).
             assertEquals(settingsOf(from), settingsOf(to))
             assertEquals(HttpsOnlyMode.PRIVATE, to.browserSettings.httpsOnly.value)
+            // Protected video was turned off: the restored app has it off too (the default is on).
+            assertFalse(to.browserSettings.protectedVideo.value)
+            assertFalse(to.browserPrefs.protectedVideo)
             // "Also block content trackers" was on: the restored app has it on too (the default is off).
             assertTrue(to.browserSettings.blockContentTrackers.value)
             assertTrue(to.browserPrefs.blockContentTrackers)

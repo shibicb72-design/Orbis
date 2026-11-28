@@ -417,6 +417,7 @@ class BackupManager(
                     "force_zoom" to bool({ b.forceZoom.value }, b::setForceZoom),
                     "https_only" to enum<HttpsOnlyMode>({ b.httpsOnly.value }, b::setHttpsOnly),
                     "javascript" to bool({ b.javaScript.value }, b::setJavaScript),
+                    "protected_video" to bool({ b.protectedVideo.value }, b::setProtectedVideo),
                     "always_desktop" to bool({ b.alwaysDesktop.value }, b::setAlwaysDesktop),
                     "open_links_in_apps" to bool({ b.openLinksInApps.value }, b::setOpenLinksInApps),
                     "toolbar_bottom" to bool({ b.toolbarBottom.value }, b::setToolbarBottom),
