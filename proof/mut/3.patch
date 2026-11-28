@@ -1,0 +1,13 @@
+diff --git a/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt b/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
+index ce06b56..e864a22 100644
+--- a/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
++++ b/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
+@@ -95,7 +95,7 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
+         }
+         // A stop of an earlier load can arrive after a new request: the new load has not started.
+         if (!open || !started) return
+-        if (success && !committed) {
++        if (false) {
+             // No page committed: nothing to write. A download that comes next writes the one line.
+             silentStartedAt = startedAt
+             open = false
