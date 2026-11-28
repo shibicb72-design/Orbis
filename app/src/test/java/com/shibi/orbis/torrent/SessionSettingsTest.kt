@@ -23,6 +23,7 @@ class SessionSettingsTest {
                 SessionSetting.ENABLE_UPNP to false,
                 SessionSetting.ENABLE_NATPMP to false,
                 SessionSetting.SSRF_MITIGATION to true,
+                SessionSetting.APPLY_IP_FILTER_TO_TRACKERS to true,
                 SessionSetting.ENABLE_DHT to true,
                 SessionSetting.ENABLE_LSD to false,
                 SessionSetting.MAX_METADATA_SIZE to TorrentLimits.MAX_METADATA_BYTES,

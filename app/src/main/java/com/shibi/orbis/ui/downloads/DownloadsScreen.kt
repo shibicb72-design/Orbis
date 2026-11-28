@@ -485,6 +485,7 @@ private fun stateText(model: TorrentRowModel): String =
                     TorrentErrorKind.FILE_ERROR -> R.string.torrents_failed_file
                     TorrentErrorKind.INVALID_SOURCE, TorrentErrorKind.ENGINE_ERROR -> R.string.torrents_failed_load
                     TorrentErrorKind.UNSAFE_METADATA -> R.string.torrents_failed_unsafe
+                    TorrentErrorKind.UNSUPPORTED_V2 -> R.string.torrents_unsupported_v2
                     TorrentErrorKind.MISSING_DATA -> R.string.torrents_failed_missing
                     TorrentErrorKind.PUBLISH_FAILED -> R.string.torrents_failed_publish
                 },

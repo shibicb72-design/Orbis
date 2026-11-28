@@ -77,6 +77,7 @@ class TorrentRowModelTest {
                 TorrentErrorKind.PUBLISH_FAILED to retry,
                 TorrentErrorKind.INVALID_SOURCE to setOf(RowAction.REMOVE),
                 TorrentErrorKind.UNSAFE_METADATA to setOf(RowAction.REMOVE),
+                TorrentErrorKind.UNSUPPORTED_V2 to setOf(RowAction.REMOVE),
                 TorrentErrorKind.MISSING_DATA to setOf(RowAction.REMOVE),
             )
         assertEquals(TorrentErrorKind.entries.toSet(), expected.keys)
