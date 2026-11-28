@@ -1,0 +1,12 @@
+diff --git a/app/src/main/java/com/shibi/orbis/engine/DiagExtension.kt b/app/src/main/java/com/shibi/orbis/engine/DiagExtension.kt
+index 3f9dc8b..545ec8f 100644
+--- a/app/src/main/java/com/shibi/orbis/engine/DiagExtension.kt
++++ b/app/src/main/java/com/shibi/orbis/engine/DiagExtension.kt
+@@ -148,7 +148,6 @@ internal class DiagStepper<E : Any>(
+                 stuck = stuck,
+             )
+         if (next == DiagStep.NONE) return
+-        log("diag extension step: ${next.name}")
+         busy = true
+         val asked = wantPrivate
+         control.run(

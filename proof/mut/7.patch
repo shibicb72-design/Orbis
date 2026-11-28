@@ -1,0 +1,12 @@
+diff --git a/app/src/main/java/com/shibi/orbis/engine/DiagExtension.kt b/app/src/main/java/com/shibi/orbis/engine/DiagExtension.kt
+index 8c5b2fc..8526df5 100644
+--- a/app/src/main/java/com/shibi/orbis/engine/DiagExtension.kt
++++ b/app/src/main/java/com/shibi/orbis/engine/DiagExtension.kt
+@@ -186,7 +186,6 @@ internal class DiagStepper<E : Any>(
+                 }
+             DiagStep.DISABLE ->
+                 if (control.enabled(updated)) {
+-                    stuck.add(step)
+                     log("diag extension: enabled stays true")
+                 }
+             else -> Unit

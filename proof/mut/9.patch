@@ -1,0 +1,15 @@
+diff --git a/app/src/main/java/com/shibi/orbis/engine/DiagExtension.kt b/app/src/main/java/com/shibi/orbis/engine/DiagExtension.kt
+index 3f9dc8b..d1ef902 100644
+--- a/app/src/main/java/com/shibi/orbis/engine/DiagExtension.kt
++++ b/app/src/main/java/com/shibi/orbis/engine/DiagExtension.kt
+@@ -175,8 +175,8 @@ internal class DiagStepper<E : Any>(
+         when (step) {
+             DiagStep.SET_PRIVATE -> {
+                 val now = control.allowedInPrivate(updated)
+-                if (now != asked) {
+-                    privateAskedNotTaken = asked
++                if (now != wantPrivate) {
++                    privateAskedNotTaken = wantPrivate
+                     log("diag extension: private-tab permission stays $now")
+                 }
+             }

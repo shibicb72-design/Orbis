@@ -1,0 +1,13 @@
+diff --git a/app/src/main/java/com/shibi/orbis/engine/DiagExtension.kt b/app/src/main/java/com/shibi/orbis/engine/DiagExtension.kt
+index 8c5b2fc..03189a2 100644
+--- a/app/src/main/java/com/shibi/orbis/engine/DiagExtension.kt
++++ b/app/src/main/java/com/shibi/orbis/engine/DiagExtension.kt
+@@ -83,7 +83,7 @@ internal fun diagNextStep(
+     return when {
+         !installed -> if (wantRecording) DiagStep.INSTALL else DiagStep.NONE
+         !wantRecording && enabled && DiagStep.DISABLE !in stuck -> DiagStep.DISABLE
+-        privateBrowsingChangeNeeded(allowedInPrivate, wantedPrivate) && privateAskedNotTaken != wantedPrivate -> DiagStep.SET_PRIVATE
++        privateBrowsingChangeNeeded(allowedInPrivate, wantedPrivate) -> DiagStep.SET_PRIVATE
+         wantRecording && !enabled && DiagStep.ENABLE !in stuck -> DiagStep.ENABLE
+         else -> DiagStep.NONE
+     }
