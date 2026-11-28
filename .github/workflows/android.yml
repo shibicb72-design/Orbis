@@ -46,6 +46,9 @@ jobs:
       - name: YouTube picture-in-picture fix tests
         run: node app/src/test/js/yt-pip.test.js
 
+      - name: Video diagnostics script tests
+        run: node app/src/test/js/diag.test.js
+
       - name: Compat (auto-desktop) script tests
         run: node app/src/test/js/compat.test.js
 

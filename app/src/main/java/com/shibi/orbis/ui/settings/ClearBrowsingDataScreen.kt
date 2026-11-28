@@ -166,6 +166,9 @@ fun ClearBrowsingDataScreen(
             CheckRow(R.string.clear_tabs, R.string.clear_tabs_summary, selection.openTabs, enabled) {
                 selection = selection.copy(openTabs = it)
             }
+            CheckRow(R.string.clear_video_diagnostics, null, selection.videoDiagnostics, enabled) {
+                selection = selection.copy(videoDiagnostics = it)
+            }
 
             if (blocked) {
                 PrivateTabsNotice(onClosePrivate = { tabs.closeAllPrivate() }, enabled = enabled)
@@ -261,6 +264,7 @@ private fun categoryLabel(category: ClearCategory): Int =
         ClearCategory.OPEN_TABS -> R.string.clear_tabs
         ClearCategory.BOOKMARKS -> R.string.clear_bookmarks
         ClearCategory.PASSWORDS -> R.string.clear_passwords
+        ClearCategory.VIDEO_DIAGNOSTICS -> R.string.clear_video_diagnostics
     }
 
 /** The whole row toggles, not just the box. */
