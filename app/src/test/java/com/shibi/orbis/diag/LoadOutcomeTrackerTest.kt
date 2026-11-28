@@ -386,4 +386,65 @@ class LoadOutcomeTrackerTest {
         t.onPageStop(true, 120)
         assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 110, ended = LoadEnded.YES)), ends)
     }
+
+    // A download whose page start and stop come without any commit writes the one download line, never a committed one.
+    @Test
+    fun tA_downloadThenAStartAndSuccessfulStopWithNoCommit_isOneDownloadLine() {
+        t.onLoadRequest(false, 0)
+        t.onDownload(100)
+        t.onPageStart(300)
+        t.onPageStop(true, 328)
+        assertEquals(listOf(LoadEnd(LoadKind.DOWNLOAD, 100)), ends)
+    }
+
+    @Test
+    fun tB_aStartAndSuccessfulStopWithNoCommitThenTheDownload_isOneDownloadLine_timedFromTheRequest() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(10)
+        t.onPageStop(true, 40)
+        assertEquals(emptyList<LoadEnd>(), ends)
+        t.onDownload(60)
+        assertEquals(listOf(LoadEnd(LoadKind.DOWNLOAD, 60)), ends)
+    }
+
+    @Test
+    fun tC_aSilentLoadWithNoRequest_writesNoUnfinishedAtTheNextRequest() {
+        t.onPageStart(0)
+        t.onPageStop(true, 30)
+        t.onLoadRequest(false, 100)
+        t.onPageStart(110)
+        t.onCommit()
+        t.onPageStop(true, 200)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 100)), ends)
+    }
+
+    @Test
+    fun tD_aLoadWithACommit_isStillOneCommittedLine() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(5)
+        t.onCommit()
+        t.onPageStop(true, 50)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 50)), ends)
+    }
+
+    @Test
+    fun tE_aBackLoadWithNoRequest_isStillOneCommittedLine() {
+        t.onPageStart(0)
+        t.onCommit()
+        t.onPageStop(true, 40)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 40)), ends)
+    }
+
+    @Test
+    fun tF_theLoadAfterADownload_hasItsOwnLine() {
+        t.onLoadRequest(false, 0)
+        t.onDownload(100)
+        t.onPageStart(300)
+        t.onPageStop(true, 328)
+        t.onLoadRequest(false, 1000)
+        t.onPageStart(1010)
+        t.onCommit()
+        t.onPageStop(true, 1100)
+        assertEquals(listOf(LoadEnd(LoadKind.DOWNLOAD, 100), LoadEnd(LoadKind.COMMITTED, 100)), ends)
+    }
 }

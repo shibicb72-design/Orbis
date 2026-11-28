@@ -35,6 +35,9 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
     private var popups = 0
     private var dead = false
 
+    /** Start time of a load whose page stopped well with no commit: it wrote nothing; a download that follows takes its start time from here. */
+    private var silentStartedAt: Long? = null
+
     /** A blank document has started and its page stop has not come yet. Cleared by that stop or by the next page start that is not blank. */
     private var blankRunning = false
 
@@ -92,8 +95,11 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
         }
         // A stop of an earlier load can arrive after a new request: the new load has not started.
         if (!open || !started) return
-        if (success) {
-            committed = true
+        if (success && !committed) {
+            // No page committed: nothing to write. A download that comes next writes the one line.
+            silentStartedAt = startedAt
+            open = false
+        } else if (success) {
             finish(LoadEnd(committedKind(), nowMs - startedAt))
         } else if (committed) {
             finish(LoadEnd(committedKind(), nowMs - startedAt, ended = LoadEnded.STOPPED))
@@ -144,6 +150,12 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
 
     private fun endNow(kind: LoadKind, nowMs: Long) {
         if (dead) return
+        val silent = silentStartedAt
+        if (!open && silent != null) {
+            silentStartedAt = null
+            finish(LoadEnd(kind, nowMs - silent))
+            return
+        }
         ensureOpen(nowMs)
         finish(LoadEnd(kind, nowMs - startedAt))
     }
@@ -154,6 +166,7 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
 
     private fun begin(nowMs: Long, started: Boolean) {
         endReplaced(nowMs)
+        silentStartedAt = null
         open = true
         startedAt = nowMs
         this.started = started
