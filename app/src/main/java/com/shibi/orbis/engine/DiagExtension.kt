@@ -150,16 +150,17 @@ internal class DiagStepper<E : Any>(
         if (next == DiagStep.NONE) return
         log("diag extension step: ${next.name}")
         busy = true
+        val asked = wantPrivate
         control.run(
             next,
             current,
-            wantPrivate,
+            asked,
             { updated ->
                 busy = false
                 if (updated != null) {
                     extension = updated
                     onExtension(updated)
-                    noteResult(next, updated)
+                    noteResult(next, updated, asked)
                     apply()
                 }
             },
@@ -170,12 +171,12 @@ internal class DiagStepper<E : Any>(
         )
     }
 
-    private fun noteResult(step: DiagStep, updated: E) {
+    private fun noteResult(step: DiagStep, updated: E, asked: Boolean) {
         when (step) {
             DiagStep.SET_PRIVATE -> {
                 val now = control.allowedInPrivate(updated)
-                if (now != wantPrivate) {
-                    privateAskedNotTaken = wantPrivate
+                if (now != asked) {
+                    privateAskedNotTaken = asked
                     log("diag extension: private-tab permission stays $now")
                 }
             }
