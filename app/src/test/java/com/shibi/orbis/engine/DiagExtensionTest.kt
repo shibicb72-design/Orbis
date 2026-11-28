@@ -44,6 +44,87 @@ class DiagExtensionTest {
         assertEquals(DiagStep.NONE, diagNextStep(true, true, true, wantRecording = true, wantPrivate = true))
     }
 
+    // ---- no step is asked twice without a change ----
+
+    @Test
+    fun aPrivateValueThatWasAskedAndNotTakenIsNotAskedAgain() {
+        // allowed stays true, false wanted, false already asked: nothing more to ask (old code: SET_PRIVATE).
+        assertEquals(DiagStep.NONE, diagNextStep(true, true, true, wantRecording = true, wantPrivate = false, privateAskedNotTaken = false))
+        // Not enabled yet: what follows is ENABLE.
+        assertEquals(DiagStep.ENABLE, diagNextStep(true, false, true, wantRecording = true, wantPrivate = false, privateAskedNotTaken = false))
+        // Another value asked before: this one is asked.
+        assertEquals(DiagStep.SET_PRIVATE, diagNextStep(true, true, true, wantRecording = true, wantPrivate = false, privateAskedNotTaken = true))
+        // Recording off: the same rule.
+        assertEquals(DiagStep.NONE, diagNextStep(true, false, true, wantRecording = false, wantPrivate = true, privateAskedNotTaken = false))
+    }
+
+    @Test
+    fun aStuckEnableOrDisableIsNotAskedAgain() {
+        assertEquals(DiagStep.NONE, diagNextStep(true, false, false, wantRecording = true, wantPrivate = false, stuck = setOf(DiagStep.ENABLE)))
+        assertEquals(DiagStep.NONE, diagNextStep(true, true, false, wantRecording = false, wantPrivate = false, stuck = setOf(DiagStep.DISABLE)))
+        assertEquals(DiagStep.DISABLE, diagNextStep(true, true, false, wantRecording = false, wantPrivate = false, stuck = setOf(DiagStep.ENABLE)))
+    }
+
+    private data class FakeExt(val enabled: Boolean, val allowedInPrivate: Boolean)
+
+    /** An engine that takes install, enable and disable, and takes the private-tab permission only when [takesPrivate]. */
+    private class FakeControl(var takesPrivate: Boolean) : DiagControl<FakeExt> {
+        val calls = mutableListOf<String>()
+        var ext = FakeExt(enabled = true, allowedInPrivate = true)
+
+        override fun enabled(ext: FakeExt) = ext.enabled
+
+        override fun allowedInPrivate(ext: FakeExt) = ext.allowedInPrivate
+
+        override fun run(step: DiagStep, current: FakeExt?, wantPrivate: Boolean, ok: (FakeExt?) -> Unit, fail: (Throwable?) -> Unit) {
+            calls += if (step == DiagStep.SET_PRIVATE) "SET_PRIVATE=$wantPrivate" else step.name
+            check(calls.size < 50) { "step asked 50 times: $calls" }
+            ext =
+                when (step) {
+                    DiagStep.INSTALL -> FakeExt(enabled = false, allowedInPrivate = false)
+                    DiagStep.ENABLE -> ext.copy(enabled = true)
+                    DiagStep.DISABLE -> ext.copy(enabled = false)
+                    DiagStep.SET_PRIVATE -> if (takesPrivate) ext.copy(allowedInPrivate = wantPrivate) else ext
+                    DiagStep.NONE -> ext
+                }
+            ok(ext)
+        }
+    }
+
+    @Test
+    fun anEngineThatKeepsThePrivatePermissionGetsOneSetPrivateCall() {
+        val control = FakeControl(takesPrivate = false)
+        val log = mutableListOf<String>()
+        val stepper = DiagStepper(control, { log += it }) { }
+        stepper.set(recording = true, privateTabs = false)
+        stepper.start(control.ext)
+        stepper.set(recording = true, privateTabs = false)
+        assertEquals(listOf("SET_PRIVATE=false"), control.calls)
+        assertEquals(listOf("diag extension step: SET_PRIVATE", "diag extension: private-tab permission stays true"), log)
+    }
+
+    @Test
+    fun aChangedWantAsksOnceMoreAndNotAgain() {
+        val control = FakeControl(takesPrivate = false)
+        val stepper = DiagStepper(control, { }) { }
+        stepper.set(recording = true, privateTabs = false)
+        stepper.start(control.ext)
+        stepper.set(recording = true, privateTabs = true)
+        stepper.set(recording = true, privateTabs = false)
+        stepper.set(recording = true, privateTabs = false)
+        assertEquals(listOf("SET_PRIVATE=false", "SET_PRIVATE=false"), control.calls)
+    }
+
+    @Test
+    fun anEngineThatTakesThePermissionIsAskedOnceAndEnabledAfterwards() {
+        val control = FakeControl(takesPrivate = true)
+        control.ext = FakeExt(enabled = false, allowedInPrivate = true)
+        val stepper = DiagStepper(control, { }) { }
+        stepper.set(recording = true, privateTabs = false)
+        stepper.start(control.ext)
+        assertEquals(listOf("SET_PRIVATE=false", "ENABLE"), control.calls)
+    }
+
     // ---- the channel ----
 
     @Test

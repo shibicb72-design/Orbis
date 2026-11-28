@@ -65,6 +65,10 @@ internal enum class DiagStep { NONE, INSTALL, DISABLE, SET_PRIVATE, ENABLE }
  * The next change to the diag extension. [installed] false: it is installed only once recording is wanted (never
  * while off). Off comes first, then the private-tab permission, then on, so an extension is never enabled with a
  * private-tab permission it should not have.
+ *
+ * No step is repeated without a change: [privateAskedNotTaken] is the private-tab value that was asked for and that the
+ * returned extension still did not report (null: none); that value is not asked for again. [stuck] holds the ENABLE or
+ * DISABLE step that returned without the wanted state; it is not asked for again. What would follow comes next.
  */
 internal fun diagNextStep(
     installed: Boolean,
@@ -72,14 +76,123 @@ internal fun diagNextStep(
     allowedInPrivate: Boolean,
     wantRecording: Boolean,
     wantPrivate: Boolean,
-): DiagStep =
-    when {
+    privateAskedNotTaken: Boolean? = null,
+    stuck: Set<DiagStep> = emptySet(),
+): DiagStep {
+    val wantedPrivate = wantRecording && wantPrivate
+    return when {
         !installed -> if (wantRecording) DiagStep.INSTALL else DiagStep.NONE
-        !wantRecording && enabled -> DiagStep.DISABLE
-        privateBrowsingChangeNeeded(allowedInPrivate, wantRecording && wantPrivate) -> DiagStep.SET_PRIVATE
-        wantRecording && !enabled -> DiagStep.ENABLE
+        !wantRecording && enabled && DiagStep.DISABLE !in stuck -> DiagStep.DISABLE
+        privateBrowsingChangeNeeded(allowedInPrivate, wantedPrivate) && privateAskedNotTaken != wantedPrivate -> DiagStep.SET_PRIVATE
+        wantRecording && !enabled && DiagStep.ENABLE !in stuck -> DiagStep.ENABLE
         else -> DiagStep.NONE
     }
+}
+
+/** The four controller calls the diag extension needs, and what is read from the extension they return. */
+internal interface DiagControl<E : Any> {
+    fun enabled(ext: E): Boolean
+
+    fun allowedInPrivate(ext: E): Boolean
+
+    /** Runs [step] (not NONE) on [current] (null only for INSTALL) and calls [ok] with the returned extension, or [fail]. */
+    fun run(step: DiagStep, current: E?, wantPrivate: Boolean, ok: (E?) -> Unit, fail: (Throwable?) -> Unit)
+}
+
+/**
+ * Walks the diag extension to the wanted state, one finished step after the other. It holds the memory that stops a
+ * step from being asked again when the engine did not take it. Main thread.
+ */
+internal class DiagStepper<E : Any>(
+    private val control: DiagControl<E>,
+    private val log: (String) -> Unit,
+    private val onExtension: (E) -> Unit,
+) {
+    var extension: E? = null
+    private var looked = false
+    private var busy = false
+    private var wantRecording = false
+    private var wantPrivate = false
+    private var privateAskedNotTaken: Boolean? = null
+    private val stuck = mutableSetOf<DiagStep>()
+
+    /** The earlier run's extension is known ([current] null: none installed). */
+    fun start(current: E?) {
+        extension = current
+        looked = true
+        apply()
+    }
+
+    fun set(recording: Boolean, privateTabs: Boolean) {
+        val priv = recording && privateTabs
+        if (recording != wantRecording || priv != wantPrivate) {
+            privateAskedNotTaken = null
+            stuck.clear()
+        }
+        wantRecording = recording
+        wantPrivate = priv
+        apply()
+    }
+
+    private fun apply() {
+        if (!looked || busy) return
+        val current = extension
+        val next =
+            diagNextStep(
+                installed = current != null,
+                enabled = current?.let(control::enabled) == true,
+                allowedInPrivate = current?.let(control::allowedInPrivate) == true,
+                wantRecording = wantRecording,
+                wantPrivate = wantPrivate,
+                privateAskedNotTaken = privateAskedNotTaken,
+                stuck = stuck,
+            )
+        if (next == DiagStep.NONE) return
+        log("diag extension step: ${next.name}")
+        busy = true
+        control.run(
+            next,
+            current,
+            wantPrivate,
+            { updated ->
+                busy = false
+                if (updated != null) {
+                    extension = updated
+                    onExtension(updated)
+                    noteResult(next, updated)
+                    apply()
+                }
+            },
+            {
+                busy = false
+                log("diag extension change failed: ${it?.javaClass?.simpleName}")
+            },
+        )
+    }
+
+    private fun noteResult(step: DiagStep, updated: E) {
+        when (step) {
+            DiagStep.SET_PRIVATE -> {
+                val now = control.allowedInPrivate(updated)
+                if (now != wantPrivate) {
+                    privateAskedNotTaken = wantPrivate
+                    log("diag extension: private-tab permission stays $now")
+                }
+            }
+            DiagStep.ENABLE ->
+                if (!control.enabled(updated)) {
+                    stuck.add(step)
+                    log("diag extension: enabled stays false")
+                }
+            DiagStep.DISABLE ->
+                if (control.enabled(updated)) {
+                    stuck.add(step)
+                    log("diag extension: enabled stays true")
+                }
+            else -> Unit
+        }
+    }
+}
 
 /** Blocked requests on the page shown now, by kind. Starts again when the page address changes. Main thread. */
 internal class PageBlockCounter {
@@ -100,9 +213,12 @@ internal class PageBlockCounter {
 /**
  * The built-in video diagnostics extension (assets/extensions/diag). It is installed only the first time recording is
  * switched on and is enabled exactly while recording is on (EnableSource.APP), so its content script is not in any page
- * while recording is off. It is allowed in private tabs only while "Also record private tabs" is on. Its script waits
- * for the app's "record" answer before it listens to anything; the app answers only through [DiagSink.mayRecord].
- * The manifest version stays "1.0": a new version would make the engine reinstall it enabled. Main thread.
+ * while recording is off. The app asks the engine to allow it in private tabs only while "Also record private tabs" is
+ * on, and asks for each value once (see [DiagStepper]); the engine may keep the permission at true. Then the script is
+ * present in a private page but listens to nothing and sends only its `hello`: it waits for the app's "record" answer
+ * before it listens to anything, and the app answers only through [DiagSink.mayRecord], which is false for a private
+ * tab while its switch is off. The manifest version stays "1.0": a new version would make the engine reinstall it
+ * enabled. Main thread.
  */
 internal class DiagExtensionHolder(private val log: (String) -> Unit) {
     var sink: DiagSink? = null
@@ -112,10 +228,37 @@ internal class DiagExtensionHolder(private val log: (String) -> Unit) {
 
     private var runtime: GeckoRuntime? = null
     private var extension: WebExtension? = null
-    private var looked = false
-    private var busy = false
-    private var wantRecording = false
-    private var wantPrivate = false
+    private val stepper =
+        DiagStepper(
+            object : DiagControl<WebExtension> {
+                override fun enabled(ext: WebExtension) = ext.metaData?.enabled == true
+
+                override fun allowedInPrivate(ext: WebExtension) = ext.metaData?.allowedInPrivateBrowsing == true
+
+                override fun run(
+                    step: DiagStep,
+                    current: WebExtension?,
+                    wantPrivate: Boolean,
+                    ok: (WebExtension?) -> Unit,
+                    fail: (Throwable?) -> Unit,
+                ) {
+                    val controller = runtime?.webExtensionController ?: return fail(null)
+                    val result: GeckoResult<WebExtension> =
+                        when (step) {
+                            DiagStep.INSTALL -> controller.ensureBuiltIn(ASSET_URL, ID)
+                            DiagStep.DISABLE -> controller.disable(current!!, WebExtensionController.EnableSource.APP)
+                            DiagStep.SET_PRIVATE -> controller.setAllowedInPrivateBrowsing(current!!, wantPrivate)
+                            DiagStep.ENABLE -> controller.enable(current!!, WebExtensionController.EnableSource.APP)
+                            DiagStep.NONE -> return
+                        }
+                    result.accept({ ok(it) }, { fail(it) })
+                }
+            },
+            log,
+        ) { updated ->
+            extension = updated
+            attachAll(updated)
+        }
     private val sessions = WeakHashMap<GeckoSession, DiagTab>()
     private var selected: GeckoSession? = null
 
@@ -126,21 +269,13 @@ internal class DiagExtensionHolder(private val log: (String) -> Unit) {
             { list ->
                 extension = list.orEmpty().firstOrNull { it.id == ID }
                 extension?.let(::attachAll)
-                looked = true
-                apply()
+                stepper.start(extension)
             },
-            {
-                looked = true
-                apply()
-            },
+            { stepper.start(extension) },
         )
     }
 
-    fun set(recording: Boolean, privateTabs: Boolean) {
-        wantRecording = recording
-        wantPrivate = recording && privateTabs
-        apply()
-    }
+    fun set(recording: Boolean, privateTabs: Boolean) = stepper.set(recording, privateTabs)
 
     fun register(session: GeckoSession, tab: DiagTab) {
         sessions[session] = tab
