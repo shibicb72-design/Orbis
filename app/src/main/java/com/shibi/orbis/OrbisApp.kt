@@ -108,6 +108,7 @@ class OrbisApp : Application() {
     val startedActivities =
         StartedActivities { foreground ->
             container.tabs.setForeground(foreground)
+            container.videoDiagnostics.onForeground(foreground)
             if (foreground) {
                 downloadForeground?.onAppForeground()
                 torrentForeground?.onAppForeground()
@@ -352,6 +353,7 @@ class OrbisApp : Application() {
             )
         youtubeAds.load()
         engine.onYoutubeAdEvent = { youtubeAds.onEvent(it) }
+        val videoDiagnostics = createVideoDiagnostics(engine, ubo, doh, browserSettings)
         // Everything here runs on the main thread (appScope is Main). Site permissions and uBO are not touched.
         val clearTargets =
             object : ClearTargets {
@@ -376,6 +378,8 @@ class OrbisApp : Application() {
                 override fun clearBookmarks() = bookmarks.clearAll()
 
                 override fun clearPasswords() = clearSavedLogins(logins)
+
+                override fun clearVideoDiagnostics() = videoDiagnostics.deleteLog()
 
                 override fun hasPrivateTabs() = tabs.hasPrivateTabs
 
@@ -485,6 +489,8 @@ class OrbisApp : Application() {
                 privacyPrefs = privacyPrefs,
                 backup = backup,
             )
+        container.videoDiagnostics = videoDiagnostics
+        appScope.launch { container.pictureInPicture.collect { videoDiagnostics.onPictureInPicture(it) } }
         // A tab that starts playing brings up the media notification (and keeps playback alive in the background).
         appScope.launch {
             container.media.current
@@ -543,6 +549,60 @@ class OrbisApp : Application() {
             kotlinx.coroutines.delay(ADDON_UPDATE_DELAY_MILLIS)
             addons.checkForUpdatesIfDue()
         }
+    }
+
+    /**
+     * Settings > Video diagnostics. Loads the log and applies its 7-day limits now, before anything reads it, then again
+     * on a timer while Orbis runs; sets the engine's page script to match the switch.
+     */
+    private fun createVideoDiagnostics(
+        engine: BrowserEngine,
+        ubo: UboOnboardingController,
+        doh: DohSettings,
+        browserSettings: BrowserSettings,
+    ): com.shibi.orbis.diagnostics.VideoDiagnostics {
+        val io = java.util.concurrent.Executors.newSingleThreadExecutor()
+        val diagnostics =
+            com.shibi.orbis.diagnostics.VideoDiagnostics(
+                prefs =
+                    com.shibi.orbis.diagnostics.SharedPreferencesVideoDiagPrefs(
+                        getSharedPreferences(com.shibi.orbis.diagnostics.SharedPreferencesVideoDiagPrefs.FILE_NAME, MODE_PRIVATE),
+                    ),
+                log =
+                    com.shibi.orbis.diagnostics.VideoDiagLog(
+                        com.shibi.orbis.diagnostics.FileDiagLogFile(File(filesDir, com.shibi.orbis.diagnostics.FileDiagLogFile.FILE_NAME)),
+                        io = { io.execute(it) },
+                    ),
+                clock = java.time.Clock.systemDefaultZone(),
+                elapsed = SystemClock::elapsedRealtime,
+                environment = {
+                    val uboInstalled =
+                        when (ubo.state.value) {
+                            is com.shibi.orbis.ubo.UboState.Installed -> "yes"
+                            com.shibi.orbis.ubo.UboState.NotInstalled -> "no"
+                            else -> "not known yet"
+                        }
+                    listOf(
+                        "Orbis ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}), engine GeckoView ${org.mozilla.geckoview.BuildConfig.MOZ_APP_VERSION}",
+                        "Phone: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}, Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})",
+                        "uBlock Origin installed: $uboInstalled",
+                        "Tracking protection: strict",
+                        "Secure DNS: ${if (doh.config.value.resolverUrl != null) "on" else "off"}. HTTPS-only: ${browserSettings.httpsOnly.value.name.lowercase()}",
+                    )
+                },
+                hostOf = { com.shibi.orbis.engine.hostOfUrl(it) },
+                network = com.shibi.orbis.diagnostics.AndroidDiagNetwork(this),
+                applyEngine = engine::setVideoDiagnostics,
+            )
+        engine.videoDiagnostics = diagnostics
+        diagnostics.start()
+        appScope.launch {
+            while (true) {
+                val wait = diagnostics.checkAge() ?: DIAG_CHECK_MILLIS
+                kotlinx.coroutines.delay(wait.coerceIn(1_000L, DIAG_CHECK_MILLIS))
+            }
+        }
+        return diagnostics
     }
 
     override fun onTerminate() {
@@ -642,4 +702,10 @@ class AppContainer(
 
     /** A password Orbis copied, cleared from the clipboard after a minute (memory only). */
     val sensitiveClip = com.shibi.orbis.passwords.SensitiveClip()
+
+    /** Settings > Video diagnostics; set by the app right after creation. */
+    lateinit var videoDiagnostics: com.shibi.orbis.diagnostics.VideoDiagnostics
 }
+
+/** How often, at most, the video diagnostics' 7-day limits are looked at while Orbis runs. */
+private const val DIAG_CHECK_MILLIS = 60L * 60 * 1000

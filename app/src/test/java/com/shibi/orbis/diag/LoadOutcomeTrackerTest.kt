@@ -1,0 +1,528 @@
+package com.shibi.orbis.diag
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+class LoadOutcomeTrackerTest {
+    private val ends = mutableListOf<LoadEnd>()
+    private val t = LoadOutcomeTracker { ends += it }
+
+    private fun kinds() = ends.map { if (it.error != null) "error-${it.error.text}" else it.kind.text }
+
+    @Test
+    fun aNormalLoad_oneCommittedLine_atThePageStop_endedYes() {
+        t.onLoadRequest(redirect = false, nowMs = 100)
+        t.onPageStart(110)
+        t.onCommit()
+        assertEquals(emptyList<LoadEnd>(), ends)
+        t.onPageStop(true, 400)
+        // Written at once: no report is needed.
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 300, ended = LoadEnded.YES)), ends)
+        // Nothing more is written for the same load.
+        t.onClosed(9_000)
+        assertEquals(1, ends.size)
+    }
+
+    @Test
+    fun aCommittedLine_isNotWaitingForTheNextLoad() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onCommit()
+        t.onPageStop(true, 20)
+        assertEquals(listOf("committed"), kinds())
+        t.onLoadRequest(false, 5_000)
+        assertEquals(listOf("committed"), kinds())
+    }
+
+    @Test
+    fun aLoadReplacedAfterItsCommit_isCommittedEndedNo_thenTheNewLoadsOwnLine() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onCommit()
+        t.onLoadRequest(false, 300)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 300, ended = LoadEnded.NO)), ends)
+        t.onPageStart(310)
+        t.onCommit()
+        t.onPageStop(true, 500)
+        assertEquals(
+            listOf(LoadEnd(LoadKind.COMMITTED, 300, ended = LoadEnded.NO), LoadEnd(LoadKind.COMMITTED, 200, ended = LoadEnded.YES)),
+            ends,
+        )
+    }
+
+    @Test
+    fun aTabClosedAfterTheCommitBeforeTheStop_isEndedNo_once() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onCommit()
+        t.onClosed(250)
+        t.onPageStop(true, 260)
+        t.onClosed(300)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 250, ended = LoadEnded.NO)), ends)
+    }
+
+    @Test
+    fun aKillAfterTheCommitBeforeTheStop_isEndedNo() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onCommit()
+        t.onInterrupted(90)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 90, ended = LoadEnded.NO)), ends)
+    }
+
+    @Test
+    fun theUsersStopAfterTheCommit_isEndedStopped_andTheLatePageStopAddsNothing() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onCommit()
+        t.onUserStop(700)
+        t.onPageStop(false, 705)
+        t.onPageStop(true, 710)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 700, ended = LoadEnded.STOPPED)), ends)
+    }
+
+    @Test
+    fun aFailedPageStopAfterTheCommit_isEndedStopped() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onCommit()
+        t.onPageStop(false, 60)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 60, ended = LoadEnded.STOPPED)), ends)
+    }
+
+    @Test
+    fun aFailedPageStopBeforeAnyCommit_isStoppedWithNoEnded() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onPageStop(false, 60)
+        assertEquals(listOf(LoadEnd(LoadKind.STOPPED, 60)), ends)
+    }
+
+    @Test
+    fun aRedirectChain_isOneRedirectedLine() {
+        t.onLoadRequest(false, 0)
+        t.onLoadRequest(true, 10)
+        t.onLoadRequest(true, 20)
+        t.onPageStart(25)
+        // Gecko may report the start again for the target of a redirect: the same load.
+        t.onPageStart(30)
+        t.onCommit()
+        t.onPageStop(true, 90)
+        assertEquals(listOf(LoadEnd(LoadKind.REDIRECTED, 90)), ends)
+    }
+
+    @Test
+    fun aRedirectChainReplacedAfterItsCommit_isRedirectedEndedNo() {
+        t.onLoadRequest(false, 0)
+        t.onLoadRequest(true, 10)
+        t.onPageStart(25)
+        t.onCommit()
+        t.onLoadRequest(false, 80)
+        assertEquals(listOf(LoadEnd(LoadKind.REDIRECTED, 80, ended = LoadEnded.NO)), ends)
+    }
+
+    @Test
+    fun aLoadReplacedByAnother_isUnfinished_andTheNewOneHasItsOwnLine() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(5)
+        t.onLoadRequest(false, 300)
+        assertEquals(listOf(LoadEnd(LoadKind.UNFINISHED, 300)), ends)
+        t.onPageStart(310)
+        t.onCommit()
+        t.onPageStop(true, 500)
+        assertEquals(listOf("unfinished", "committed"), kinds())
+    }
+
+    @Test
+    fun aPageStartWithNoRequest_replacesTheLoadBeforeIt() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        // Back or Forward: no load request.
+        t.onPageStart(200)
+        assertEquals(listOf("unfinished"), kinds())
+    }
+
+    @Test
+    fun aTabClosedMidLoad_isUnfinished_once() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(5)
+        t.onClosed(250)
+        assertEquals(listOf(LoadEnd(LoadKind.UNFINISHED, 250)), ends)
+        // A question answered after the close writes nothing.
+        t.onRefused(300)
+        t.onLoadRequest(false, 400)
+        t.onClosed(500)
+        assertEquals(1, ends.size)
+    }
+
+    @Test
+    fun aDownload_isOneLine_andItsLateStopIsIgnored() {
+        t.onLoadRequest(false, 0)
+        t.onDownload(80)
+        t.onPageStop(false, 90)
+        assertEquals(listOf(LoadEnd(LoadKind.DOWNLOAD, 80)), ends)
+    }
+
+    @Test
+    fun anAppHandOff_isOneLine() {
+        t.onLoadRequest(false, 0)
+        t.onAppHandOff(15)
+        t.onPageStop(false, 20)
+        assertEquals(listOf(LoadEnd(LoadKind.APP, 15)), ends)
+    }
+
+    @Test
+    fun aRefusedLoad_isOneLine() {
+        t.onLoadRequest(false, 0)
+        t.onRefused(3)
+        assertEquals(listOf(LoadEnd(LoadKind.REFUSED, 3)), ends)
+    }
+
+    @Test
+    fun anError_isOneLine_evenWhenTheStopFollows() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(5)
+        t.onError(ErrorCategory.NETWORK, 60)
+        t.onPageStop(false, 61)
+        assertEquals(listOf("error-network"), kinds())
+        assertEquals(60L, ends.single().ms)
+    }
+
+    @Test
+    fun theStopOfAnEarlierLoad_doesNotEndTheNewOne() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onError(ErrorCategory.CONTENT, 10)
+        t.onLoadRequest(false, 20)
+        t.onPageStop(false, 21)
+        assertEquals(listOf("error-content"), kinds())
+        t.onPageStart(30)
+        t.onCommit()
+        t.onPageStop(true, 80)
+        assertEquals(listOf("error-content", "committed"), kinds())
+    }
+
+    @Test
+    fun theUserStopping_aSlowLoad_isStopped_once() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(5)
+        t.onUserStop(700)
+        t.onPageStop(false, 705)
+        assertEquals(listOf(LoadEnd(LoadKind.STOPPED, 700)), ends)
+    }
+
+    @Test
+    fun aSameDocumentCommit_isNotALoad() {
+        t.onLoadRequest(false, 0)
+        t.onCommit()
+        t.onLoadRequest(false, 10)
+        t.onClosed(20)
+        // Only the second request counts, and it never started: unfinished.
+        assertEquals(listOf("unfinished"), kinds())
+    }
+
+    @Test
+    fun aKill_endsTheLoadInFlight_andTheTabLivesOn() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onInterrupted(90)
+        assertEquals(listOf("unfinished"), kinds())
+        t.onLoadRequest(false, 100)
+        t.onPageStart(101)
+        t.onCommit()
+        t.onPageStop(true, 150)
+        assertEquals(listOf("unfinished", "committed"), kinds())
+    }
+
+    @Test
+    fun popupsAreCountedFromTheLastCommittedLoad() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onCommit()
+        assertEquals(1, t.nextPopupLine())
+        assertEquals(2, t.nextPopupLine())
+        assertEquals(3, t.nextPopupLine())
+        t.onLoadRequest(false, 100)
+        t.onPageStart(101)
+        t.onCommit()
+        assertEquals(1, t.nextPopupLine())
+    }
+
+    @Test
+    fun popupLinesStopAfterTwenty_andACommitStartsTheCountAgain() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onCommit()
+        for (n in 1..20) assertEquals(n, t.nextPopupLine())
+        assertEquals(20, POPUP_LINES_PER_PAGE)
+        assertNull(t.nextPopupLine())
+        assertNull(t.nextPopupLine())
+        t.onLoadRequest(false, 100)
+        t.onPageStart(101)
+        t.onCommit()
+        assertEquals(1, t.nextPopupLine())
+    }
+
+    @Test
+    fun everyKindIsReachableAndEachLoadWritesOneLine() {
+        // committed, redirected, download, app, refused, stopped, unfinished, error: eight loads, eight lines.
+        t.onLoadRequest(false, 0); t.onPageStart(1); t.onCommit(); t.onPageStop(true, 2)
+        t.onLoadRequest(false, 10); t.onLoadRequest(true, 11); t.onPageStart(12); t.onCommit(); t.onPageStop(true, 13)
+        t.onLoadRequest(false, 20); t.onDownload(21)
+        t.onLoadRequest(false, 30); t.onAppHandOff(31)
+        t.onLoadRequest(false, 40); t.onRefused(41)
+        t.onLoadRequest(false, 50); t.onPageStart(51); t.onUserStop(52)
+        t.onLoadRequest(false, 60); t.onPageStart(61); t.onLoadRequest(false, 62)
+        t.onPageStart(63); t.onError(ErrorCategory.SECURITY, 64)
+        assertEquals(
+            listOf("committed", "redirected", "download", "app", "refused", "stopped", "unfinished", "error-security"),
+            kinds(),
+        )
+    }
+
+    // The engine's blank document (about:blank) is not a load: no line, and no effect on a load asked before or while it ran.
+    private fun blankTrio(start: Long, stop: Long) {
+        t.onPageStart(start, blank = true)
+        t.onCommit(blank = true)
+        t.onPageStop(true, stop)
+    }
+
+    @Test
+    fun aNewTabWithNoAddress_theBlankDocumentWritesNoLine() {
+        blankTrio(0, 2)
+        assertEquals(emptyList<LoadEnd>(), ends)
+        t.onClosed(5_000)
+        assertEquals(emptyList<LoadEnd>(), ends)
+    }
+
+    @Test
+    fun orderA_requestThenBlankThenPage_oneLine_timedFromTheRequest() {
+        t.onLoadRequest(false, 0)
+        blankTrio(91, 92)
+        assertEquals(emptyList<LoadEnd>(), ends)
+        t.onPageStart(198)
+        t.onCommit()
+        t.onPageStop(true, 236)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 236, ended = LoadEnded.YES)), ends)
+    }
+
+    @Test
+    fun orderB_blankThenRequestThenPage_oneLine() {
+        blankTrio(0, 2)
+        t.onLoadRequest(false, 10)
+        t.onPageStart(20)
+        t.onCommit()
+        t.onPageStop(true, 110)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 100, ended = LoadEnded.YES)), ends)
+    }
+
+    @Test
+    fun requestBlankThenError_oneErrorLine_noCommitted() {
+        t.onLoadRequest(false, 0)
+        blankTrio(5, 6)
+        t.onPageStart(7)
+        t.onError(ErrorCategory.NETWORK, 50)
+        assertEquals(listOf("error-network"), kinds())
+        assertEquals(50L, ends.single().ms)
+    }
+
+    @Test
+    fun requestBlankThenDownload_oneLine_andABlankAfterTheDownloadAddsNone() {
+        t.onLoadRequest(false, 0)
+        blankTrio(5, 6)
+        t.onDownload(30)
+        assertEquals(listOf("download"), kinds())
+        blankTrio(31, 33)
+        assertEquals(listOf("download"), kinds())
+    }
+
+    @Test
+    fun requestBlankThenRedirect_oneRedirectedLine() {
+        t.onLoadRequest(false, 0)
+        blankTrio(5, 6)
+        t.onLoadRequest(true, 40)
+        t.onPageStart(41)
+        t.onCommit()
+        t.onPageStop(true, 90)
+        assertEquals(listOf(LoadEnd(LoadKind.REDIRECTED, 90)), ends)
+    }
+
+    @Test
+    fun aLoadInFlightThenTheStartPage_endsOnce_theBlankWritesNothing_theNextLoadWritesItsOwnLine() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onLoadRequest(false, 300, blank = true)
+        assertEquals(listOf(LoadEnd(LoadKind.UNFINISHED, 300)), ends)
+        blankTrio(301, 303)
+        t.onClosed(9_000)
+        assertEquals(listOf(LoadEnd(LoadKind.UNFINISHED, 300)), ends)
+    }
+
+    @Test
+    fun theStartPageAfterACommittedLoad_endsItEndedNo_andNothingForTheBlank() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(1)
+        t.onCommit()
+        t.onLoadRequest(false, 300, blank = true)
+        blankTrio(301, 303)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 300, ended = LoadEnded.NO)), ends)
+        t.onLoadRequest(false, 500)
+        t.onPageStart(510)
+        t.onCommit()
+        t.onPageStop(true, 600)
+        assertEquals(
+            listOf(LoadEnd(LoadKind.COMMITTED, 300, ended = LoadEnded.NO), LoadEnd(LoadKind.COMMITTED, 100, ended = LoadEnded.YES)),
+            ends,
+        )
+    }
+
+    @Test
+    fun aBlankStartWithNoStop_doesNotHoldTheNextLoad() {
+        t.onPageStart(0, blank = true)
+        t.onLoadRequest(false, 10)
+        t.onPageStart(20)
+        t.onCommit()
+        t.onPageStop(true, 120)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 110, ended = LoadEnded.YES)), ends)
+    }
+
+    // A download whose page start and stop come without any commit writes the one download line, never a committed one.
+    @Test
+    fun tA_downloadThenAStartAndSuccessfulStopWithNoCommit_isOneDownloadLine() {
+        t.onLoadRequest(false, 0)
+        t.onDownload(100)
+        t.onPageStart(300)
+        t.onPageStop(true, 328)
+        assertEquals(listOf(LoadEnd(LoadKind.DOWNLOAD, 100)), ends)
+    }
+
+    @Test
+    fun tB_aStartAndSuccessfulStopWithNoCommitThenTheDownload_isOneDownloadLine_timedFromTheRequest() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(10)
+        t.onPageStop(true, 40)
+        assertEquals(emptyList<LoadEnd>(), ends)
+        t.onDownload(60)
+        assertEquals(listOf(LoadEnd(LoadKind.DOWNLOAD, 60)), ends)
+    }
+
+    @Test
+    fun tC_aSilentLoadWithNoRequest_writesNoUnfinishedAtTheNextRequest() {
+        t.onPageStart(0)
+        t.onPageStop(true, 30)
+        t.onLoadRequest(false, 100)
+        t.onPageStart(110)
+        t.onCommit()
+        t.onPageStop(true, 200)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 100)), ends)
+    }
+
+    @Test
+    fun tD_aLoadWithACommit_isStillOneCommittedLine() {
+        t.onLoadRequest(false, 0)
+        t.onPageStart(5)
+        t.onCommit()
+        t.onPageStop(true, 50)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 50)), ends)
+    }
+
+    @Test
+    fun tE_aBackLoadWithNoRequest_isStillOneCommittedLine() {
+        t.onPageStart(0)
+        t.onCommit()
+        t.onPageStop(true, 40)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 40)), ends)
+    }
+
+    @Test
+    fun tF_theLoadAfterADownload_hasItsOwnLine() {
+        t.onLoadRequest(false, 0)
+        t.onDownload(100)
+        t.onPageStart(300)
+        t.onPageStop(true, 328)
+        t.onLoadRequest(false, 1000)
+        t.onPageStart(1010)
+        t.onCommit()
+        t.onPageStop(true, 1100)
+        assertEquals(listOf(LoadEnd(LoadKind.DOWNLOAD, 100), LoadEnd(LoadKind.COMMITTED, 100)), ends)
+    }
+
+    // A page start that comes first (a tapped link, a pop-up's page) owns the next request for the same address.
+    private fun rq(nowMs: Long, same: Boolean) = t.onLoadRequest(false, nowMs, sameAsStart = same)
+
+    @Test
+    fun tG_pageStartThenItsOwnRequestThenTheDownload_isOneDownloadLine() {
+        t.onPageStart(0)
+        rq(2, true)
+        t.onDownload(40)
+        t.onPageStop(true, 150)
+        assertEquals(listOf(LoadEnd(LoadKind.DOWNLOAD, 40)), ends)
+    }
+
+    @Test
+    fun tH_pageStartThenItsOwnRequestThenTheCommit_isOneCommittedLine() {
+        t.onPageStart(0)
+        rq(22, true)
+        t.onCommit()
+        t.onPageStop(true, 100)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 100)), ends)
+    }
+
+    @Test
+    fun tI_aRequestForAnotherAddress_replacesTheStartedLoad() {
+        t.onPageStart(0)
+        rq(300, false)
+        t.onPageStart(310)
+        t.onCommit()
+        t.onPageStop(true, 500)
+        assertEquals(listOf(LoadEnd(LoadKind.UNFINISHED, 300), LoadEnd(LoadKind.COMMITTED, 200)), ends)
+    }
+
+    @Test
+    fun tJ_oneRequestPerLoad_theSecondSameAddressRequestReplaces() {
+        t.onPageStart(0)
+        rq(2, true)
+        rq(300, true)
+        t.onPageStart(310)
+        t.onCommit()
+        t.onPageStop(true, 500)
+        assertEquals(listOf(LoadEnd(LoadKind.UNFINISHED, 300), LoadEnd(LoadKind.COMMITTED, 200)), ends)
+    }
+
+    @Test
+    fun tK_aLoadOpenedByARequest_isNeverJoined() {
+        rq(0, false)
+        t.onPageStart(5)
+        rq(300, true)
+        assertEquals(listOf(LoadEnd(LoadKind.UNFINISHED, 300)), ends)
+    }
+
+    @Test
+    fun tL_afterTheCommit_aRequestReplaces() {
+        t.onPageStart(0)
+        t.onCommit()
+        rq(50, true)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 50, ended = LoadEnded.NO)), ends)
+    }
+
+    @Test
+    fun tM_pageStartOwnRequestStopWithNoCommitThenTheDownload_isOneDownloadLine() {
+        t.onPageStart(0)
+        rq(2, true)
+        t.onPageStop(true, 30)
+        t.onDownload(60)
+        assertEquals(listOf(LoadEnd(LoadKind.DOWNLOAD, 60)), ends)
+    }
+
+    @Test
+    fun tN_aRedirectAfterTheJoinedRequest_isOneRedirectedLine() {
+        t.onPageStart(0)
+        rq(2, true)
+        t.onLoadRequest(redirect = true, nowMs = 20)
+        t.onPageStart(25)
+        t.onCommit()
+        t.onPageStop(true, 90)
+        assertEquals(listOf(LoadEnd(LoadKind.REDIRECTED, 90)), ends)
+    }
+}

@@ -1,0 +1,16 @@
+{
+  "manifest_version": 2,
+  "name": "Orbis Video Diagnostics",
+  "version": "1.0",
+  "description": "Notes how video and audio elements play, for the log in Settings > Video diagnostics. Only on while that log is recording. Sends nothing except to the Orbis app.",
+  "browser_specific_settings": { "gecko": { "id": "diag@orbis.shibi.com" } },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "permissions": ["nativeMessaging", "nativeMessagingFromContent", "geckoViewAddons"]
+}

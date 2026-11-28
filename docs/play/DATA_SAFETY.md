@@ -50,6 +50,7 @@ the app. Data a user sends to websites they visit, through a browser, is not col
     user's choice, so no data type is declared.
   - Clear on exit (wipes at the next start), the private-tab lock, tab groups, the menu and toolbar choices and Material
     You are local: they stay on the phone and send nothing.
+  - Video diagnostics (optional, off by default) writes a log to the app's private storage only. The app never transmits it. A user may copy or save it and send it by their own means. This does not change "No data collected or shared".
 - **Is all data encrypted in transit?** Yes for Orbis's own requests (search suggestions and add-on
   install use HTTPS, and so does secure DNS). Websites the user opens may use HTTP unless HTTPS-only mode is on. Torrent traffic with peers
   and trackers uses the BitTorrent protocols; peers may or may not support encryption.

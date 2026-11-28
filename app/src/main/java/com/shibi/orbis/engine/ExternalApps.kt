@@ -36,6 +36,17 @@ internal fun schemeOf(uri: String): String? {
     return if (s.all { it.isLetterOrDigit() || it == '+' || it == '-' || it == '.' } && s.first().isLetter()) s.lowercase() else null
 }
 
+/** The Error log's kind of a link for another app. The scheme text itself is never logged: only this kind. */
+internal fun appLinkKindOf(uri: String): com.shibi.orbis.diag.AppLinkKind =
+    when (schemeOf(uri)) {
+        "intent" -> com.shibi.orbis.diag.AppLinkKind.INTENT
+        "market" -> com.shibi.orbis.diag.AppLinkKind.MARKET
+        "tel" -> com.shibi.orbis.diag.AppLinkKind.TEL
+        "mailto" -> com.shibi.orbis.diag.AppLinkKind.MAILTO
+        "sms", "smsto" -> com.shibi.orbis.diag.AppLinkKind.SMS
+        else -> com.shibi.orbis.diag.AppLinkKind.OTHER
+    }
+
 /** Whether a top-level load of [uri] is for another app (tel:, mailto:, intent:, market:, an app's own scheme). */
 internal fun isExternalScheme(uri: String): Boolean {
     val s = schemeOf(uri) ?: return false

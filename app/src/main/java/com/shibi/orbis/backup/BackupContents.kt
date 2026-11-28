@@ -50,8 +50,8 @@ import org.json.JSONObject
  * store or prefs class uses, and counts what it drops as skipped. [BackupManager] collects and applies the sections.
  *
  * Never in any section: cookies and sign-ins, site data, cache, downloads and torrents, private tabs, tab saved state,
- * privacy stats, the error log, thumbnails, Cast pins, the stored backup password, add-on data and prefs, and anything
- * of uBlock Origin beyond whether it is installed.
+ * privacy stats, the error log, the video diagnostics log and its switches, thumbnails, Cast pins, the stored backup
+ * password, add-on data and prefs, and anything of uBlock Origin beyond whether it is installed.
  */
 
 /** Section names, in the order a restore applies them (settings first: per-site choices depend on their defaults). */
