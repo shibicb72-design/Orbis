@@ -197,4 +197,99 @@ class TabLookedAtTest {
         m.newPrivateTab()
         assertEquals(NormalTabCounts(open = 2, awake = 1), m.normalTabCounts())
     }
+
+    // ---- Undo of "Close all tabs" gives back each tab's "last looked at" ----
+
+    /** Three tabs looked at at 2 s, 3 s and (the one on screen, the third) later. Returns the manager and the ids. */
+    private fun threeTabs(store: LookedMemoryStore = LookedMemoryStore()): Pair<TabManager, List<Long>> {
+        val m = manager(store)
+        val a = m.selected.value.id
+        now = 2_000_000L
+        val b = m.newTab()!!
+        now = 3_000_000L
+        val c = m.newTab()!!
+        assertEquals(2_000_000L, m.lookedAt(a))
+        assertEquals(3_000_000L, m.lookedAt(b))
+        return m to listOf(a, b, c)
+    }
+
+    @Test
+    fun undoGivesBackWhenEachTabWasLastLookedAt() {
+        try {
+            val (m, ids) = threeTabs()
+            val (a, b, c) = ids
+            now = 4_000_000L
+            assertEquals(3, m.closeAllNormalUndoable())
+            now = 4_003_000L
+            scheduler.advanceTimeBy(3_000L)
+            assertTrue(m.undoCloseAll())
+            assertEquals(listOf(a, b, c), m.overview().map { it.id })
+            assertEquals("a tab that was not on screen has the time it had", 2_000_000L, m.lookedAt(a))
+            assertEquals("a tab that was not on screen has the time it had", 3_000_000L, m.lookedAt(b))
+            assertTrue("the tab that was on screen has the time of the close or later", m.lookedAt(c)!! >= 4_000_000L)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun afterUndoTheStoredTabListHoldsTheTimes() {
+        try {
+            val store = LookedMemoryStore()
+            val (m, ids) = threeTabs(store)
+            val (a, b, _) = ids
+            now = 4_000_000L
+            assertEquals(3, m.closeAllNormalUndoable())
+            now = 4_003_000L
+            scheduler.advanceTimeBy(3_000L)
+            assertTrue(m.undoCloseAll())
+            m.save()
+            val stored = store.snapshot!!.tabs.associate { it.id to it.lastLookedAt }
+            assertEquals(2_000_000L, stored[a])
+            assertEquals(3_000_000L, stored[b])
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun aTabThatDoesNotComeBackGetsNoTime() {
+        try {
+            val store = LookedMemoryStore()
+            val m = TabManager(
+                factory = { LookedFakeSession(it).also { s -> sessions += s } },
+                store = store,
+                scope = scope,
+                log = {},
+                io = dispatcher,
+                clock = { now },
+                maxTabs = 5,
+            )
+            m.restore()
+            scheduler.advanceUntilIdle()
+            m.openSelected()
+            val a = m.selected.value.id
+            now = 2_000_000L
+            val b = m.newTab()!!
+            now = 3_000_000L
+            val c = m.newTab()!!
+            m.newPrivateTab()!!
+            m.newPrivateTab()!!
+            now = 4_000_000L
+            assertEquals(3, m.closeAllNormalUndoable())
+            // Room for two of the three only: one more private tab takes a place while Undo is open.
+            m.newPrivateTab()!!
+            now = 4_003_000L
+            scheduler.advanceTimeBy(3_000L)
+            assertTrue(m.undoCloseAll())
+            val back = m.overview().map { it.id }
+            assertTrue(a in back && b in back)
+            assertFalse(c in back)
+            assertEquals(2_000_000L, m.lookedAt(a))
+            assertEquals(3_000_000L, m.lookedAt(b))
+            assertTrue(m.overview().none { it.id == c })
+        } finally {
+            scope.cancel()
+        }
+    }
 }
