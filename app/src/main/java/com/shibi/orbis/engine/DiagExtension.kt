@@ -298,45 +298,6 @@ internal class DiagExtensionHolder(private val log: (String) -> Unit) {
         session?.let { tabEvent(it, DiagTabEvent.IN_FRONT) }
     }
 
-    private fun apply() {
-        val rt = runtime ?: return
-        if (!looked || busy) return
-        val controller = rt.webExtensionController
-        val current = extension
-        val next =
-            diagNextStep(
-                installed = current != null,
-                enabled = current?.metaData?.enabled == true,
-                allowedInPrivate = current?.metaData?.allowedInPrivateBrowsing == true,
-                wantRecording = wantRecording,
-                wantPrivate = wantPrivate,
-            )
-        val step: GeckoResult<WebExtension>? =
-            when (next) {
-                DiagStep.NONE -> null
-                DiagStep.INSTALL -> controller.ensureBuiltIn(ASSET_URL, ID)
-                DiagStep.DISABLE -> controller.disable(current!!, WebExtensionController.EnableSource.APP)
-                DiagStep.SET_PRIVATE -> controller.setAllowedInPrivateBrowsing(current!!, wantPrivate)
-                DiagStep.ENABLE -> controller.enable(current!!, WebExtensionController.EnableSource.APP)
-            }
-        if (step == null) return
-        busy = true
-        step.accept(
-            { updated ->
-                busy = false
-                if (updated != null) {
-                    extension = updated
-                    attachAll(updated)
-                    apply()
-                }
-            },
-            {
-                busy = false
-                log("diag extension change failed: ${it?.javaClass?.simpleName}")
-            },
-        )
-    }
-
     private fun attachAll(ext: WebExtension) {
         for ((session, tab) in sessions.entries.toList()) attach(session, tab, ext)
     }
