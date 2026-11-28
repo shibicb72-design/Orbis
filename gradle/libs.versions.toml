@@ -24,7 +24,7 @@ appcompat = "1.8.0"
 mozillaAc = "161.0"
 geckoview = "161.0.20261118180411"
 # QR scanner: CameraX (Google Maven) and ZXing core (Maven Central), latest stable on 2026-11-08.
-camerax = "1.6.2"
+camerax = "1.7.0"
 # Custom Tabs service and intent helpers (Google Maven), latest stable on 2026-11-09.
 androidxBrowser = "1.10.0"
 zxing = "3.5.4"
