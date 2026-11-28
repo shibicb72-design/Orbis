@@ -1,0 +1,13 @@
+diff --git a/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt b/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
+index 3c2ba05..f887834 100644
+--- a/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
++++ b/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
+@@ -57,7 +57,7 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
+             redirected = true
+             return
+         }
+-        if (sameAsStart && open && started && !committed && !requested) {
++        if (open && started && !committed && !requested) {
+             requested = true
+             return
+         }

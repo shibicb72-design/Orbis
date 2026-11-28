@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        n: [0, 1, 2, 3]
+        n: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -70,6 +70,10 @@ jobs:
               1: "LoadOutcomeTrackerTest.tA_downloadThenAStartAndSuccessfulStopWithNoCommit_isOneDownloadLine",
               2: "LoadOutcomeTrackerTest.tB_aStartAndSuccessfulStopWithNoCommitThenTheDownload_isOneDownloadLine_timedFromTheRequest",
               3: "LoadOutcomeTrackerTest.tD_aLoadWithACommit_isStillOneCommittedLine",
+              4: "LoadOutcomeTrackerTest.tG_pageStartThenItsOwnRequestThenTheDownload_isOneDownloadLine",
+              5: "LoadOutcomeTrackerTest.tI_aRequestForAnotherAddress_replacesTheStartedLoad",
+              6: "LoadOutcomeTrackerTest.tJ_oneRequestPerLoad_theSecondSameAddressRequestReplaces",
+              7: "LoadOutcomeTrackerTest.tL_afterTheCommit_aRequestReplaces",
           }
           files = glob.glob("app/build/test-results/testDebugUnitTest/*.xml")
           count = 0

@@ -879,7 +879,7 @@ private class GeckoBrowserSession(
 
     private fun traceState(): String =
         try {
-            listOf("open", "started", "committed").joinToString(" ") { n ->
+            listOf("open", "started", "committed", "requested").joinToString(" ") { n ->
                 val f = LoadOutcomeTracker::class.java.getDeclaredField(n)
                 f.isAccessible = true
                 "$n=${f.get(loadOutcome)}"
@@ -888,11 +888,11 @@ private class GeckoBrowserSession(
             "state=?"
         }
 
-    private fun trace(name: String, blank: Boolean? = null, uri: String? = null, redirect: Boolean? = null, success: Boolean? = null) {
+    private fun trace(name: String, blank: Boolean? = null, uri: String? = null, redirect: Boolean? = null, success: Boolean? = null, sameAsStart: Boolean? = null) {
         val same = if (uri == null) "na" else (uri == traceAsked).toString()
         android.util.Log.d(
             "OrbisLoadTrace",
-            "$name tab=${tabNumberForLog()} blank=${blank ?: "na"} sameAsAsked=$same redirect=${redirect ?: "na"} success=${success ?: "na"} ${traceState()}",
+            "$name tab=${tabNumberForLog()} blank=${blank ?: "na"} sameAsAsked=$same redirect=${redirect ?: "na"} sameAsStart=${sameAsStart ?: "na"} success=${success ?: "na"} ${traceState()}",
         )
     }
 
@@ -1125,7 +1125,7 @@ private class GeckoBrowserSession(
                     isOwnFallbackLoad(pendingFallbackLoad, request.uri, request.hasUserGesture, request.isDirectNavigation)
                 if (fallbackLoad) pendingFallbackLoad = null
                 val direct = request.isDirectNavigation && !fallbackLoad
-                trace("loadRequest", blank = request.uri == "about:blank", uri = request.uri, redirect = request.isRedirect)
+                trace("loadRequest", blank = request.uri == "about:blank", uri = request.uri, redirect = request.isRedirect, sameAsStart = request.uri == outcomeStartUrl)
                 traceAsked = request.uri
                 loadOutcome.onLoadRequest(
                     request.isRedirect,
