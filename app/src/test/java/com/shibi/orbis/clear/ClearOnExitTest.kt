@@ -47,6 +47,10 @@ private class Recorder : ClearTargets, ClearOnExitHooks {
         calls += "passwords"
     }
 
+    override fun clearVideoDiagnostics() {
+        calls += "video"
+    }
+
     override fun hasPrivateTabs(): Boolean = false
 
     override suspend fun clearEngine(cookiesAndSiteData: Boolean, cache: Boolean): Boolean {
@@ -112,6 +116,8 @@ class ClearOnExitTest {
             assertFalse(s.recorder.ready)
             advanceUntilIdle()
             assertEquals(1, s.recorder.count("history"))
+            // The video diagnostics log goes with history (Settings > Video diagnostics).
+            assertEquals(1, s.recorder.count("video"))
             assertEquals(1, s.recorder.count("discardTabs"))
             assertEquals(1, s.recorder.count("engine"))
             assertEquals(setOf("example.com"), s.recorder.engineExceptions)
@@ -150,9 +156,9 @@ class ClearOnExitTest {
             s.recorder.calls.clear()
             s.clearOnExit.onActivityCreated(hasSavedState = false)
             // Closed before the activity can show them.
-            assertEquals(listOf("closeOpenTabs", "history"), s.recorder.calls)
+            assertEquals(listOf("closeOpenTabs", "history", "video"), s.recorder.calls)
             advanceUntilIdle()
-            assertEquals(listOf("closeOpenTabs", "history", "engine"), s.recorder.calls)
+            assertEquals(listOf("closeOpenTabs", "history", "video", "engine"), s.recorder.calls)
         }
 
     @Test
@@ -203,7 +209,7 @@ class ClearOnExitTest {
             s.clearOnExit.onAppStart()
             s.clearOnExit.onActivityCreated(hasSavedState = false)
             advanceUntilIdle()
-            assertEquals(listOf("history", "discardTabs", "engine", "closeOpenTabs", "restore"), s.recorder.calls)
+            assertEquals(listOf("history", "video", "discardTabs", "engine", "closeOpenTabs", "restore"), s.recorder.calls)
             assertTrue(s.logs.contains("ClearOnExit: tabs failed: IOException"))
         }
 
@@ -243,7 +249,7 @@ class ClearOnExitTest {
     fun row2ForceStoppedThenLauncherWipes() =
         runTest(StandardTestDispatcher()) {
             val s = launcherAfterFullClose()
-            assertEquals(listOf("history", "discardTabs", "engine", "restore"), s.recorder.calls)
+            assertEquals(listOf("history", "video", "discardTabs", "engine", "restore"), s.recorder.calls)
         }
 
     @Test
@@ -289,7 +295,7 @@ class ClearOnExitTest {
             val s = Setup(this, enabled = true)
             s.clearOnExit.onAppStart()
             val opened = link(s, browserTaskInRecents = false, mainHasSavedState = false)
-            assertEquals(listOf("history", "discardTabs", "engine", "restore"), s.recorder.calls)
+            assertEquals(listOf("history", "video", "discardTabs", "engine", "restore"), s.recorder.calls)
             // Opened after the wipe, with the (empty) tab list ready.
             assertTrue(opened)
         }

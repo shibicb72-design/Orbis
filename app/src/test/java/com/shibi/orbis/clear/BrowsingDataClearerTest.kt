@@ -44,6 +44,13 @@ private class RecordingTargets : ClearTargets {
     override fun clearBookmarks() = record("bookmarks")
     override fun clearPasswords() = record("passwords")
 
+    /** Only recorded when a test asks, so the other tests' call lists stay as they were. */
+    var recordVideo = false
+
+    override fun clearVideoDiagnostics() {
+        if (recordVideo) record("video")
+    }
+
     override fun hasPrivateTabs(): Boolean {
         privateChecks++
         if (privateCheckThrows) throw IllegalStateException("tabs unavailable")
@@ -67,6 +74,7 @@ private fun selectionOf(mask: Int) =
         openTabs = mask and 16 != 0,
         bookmarks = mask and 32 != 0,
         passwords = mask and 64 != 0,
+        videoDiagnostics = mask and 128 != 0,
     )
 
 /** The calls a selection must produce, written out independently of the implementation: fixed order, engine last. */
@@ -98,6 +106,8 @@ class BrowsingDataClearerTest {
         assertFalse(d.openTabs)
         assertFalse(d.bookmarks)
         assertFalse(d.passwords)
+        // Video diagnostics log: its own line, ticked by default (ruling K4).
+        assertTrue(d.videoDiagnostics)
         assertFalse(d.isEmpty)
     }
 
@@ -111,16 +121,29 @@ class BrowsingDataClearerTest {
     @Test
     fun categoriesListTheTickedOnesInPanelOrder() {
         assertEquals(
-            listOf(ClearCategory.HISTORY, ClearCategory.COOKIES_AND_SITE_DATA, ClearCategory.CACHE),
+            listOf(ClearCategory.HISTORY, ClearCategory.COOKIES_AND_SITE_DATA, ClearCategory.CACHE, ClearCategory.VIDEO_DIAGNOSTICS),
             ClearSelection().categories,
         )
         assertEquals(
             ClearCategory.entries,
-            ClearSelection(true, true, true, true, true, true, true).categories,
+            ClearSelection(true, true, true, true, true, true, true, true).categories,
         )
         assertTrue(selectionOf(0).categories.isEmpty())
         assertTrue(selectionOf(0).isEmpty)
     }
+
+    @Test
+    fun videoDiagnosticsLogIsDeletedOnlyWhenTicked() =
+        runTest {
+            val t = RecordingTargets().apply { recordVideo = true }
+            assertEquals(ClearOutcome.Done, clearer(t).run(selectionOf(128)))
+            assertEquals(listOf("video"), t.calls)
+            t.calls.clear()
+            clearer(t).run(selectionOf(1))
+            assertEquals(listOf("history"), t.calls)
+            t.throwOn["video"] = IllegalStateException("disk")
+            assertEquals(ClearOutcome.Incomplete(setOf(ClearCategory.VIDEO_DIAGNOSTICS), emptySet()), clearer(t).run(selectionOf(128)))
+        }
 
     // ---- pure helpers, every combination ----
 

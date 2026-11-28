@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings > Video diagnostics (brief diag15-1; the words are Fable's ruling K8). English only. -->
+<resources>
+    <string name="video_diag_title" translatable="false">Video diagnostics</string>
+    <string name="video_diag_intro" translatable="false">Video diagnostics helps find out why a video stops or will not play. While it is on, Orbis keeps a log on this phone of how videos played: times, stops, errors, the type of connection and a few settings. It does not record page addresses or titles. Orbis never sends the log anywhere. You can read it below, copy it, save it as a file, or delete it.</string>
+    <string name="video_diag_record" translatable="false">Record video diagnostics</string>
+    <string name="video_diag_record_summary" translatable="false">Turns itself off after 7 days.</string>
+    <string name="video_diag_site_names" translatable="false">Include site names</string>
+    <string name="video_diag_site_names_summary" translatable="false">Adds the site\'s name, such as example.com, to new entries only. Entries already in the log stay as they are.</string>
+    <string name="video_diag_private" translatable="false">Also record private tabs</string>
+    <string name="video_diag_private_summary" translatable="false">Private tabs are left out unless this is on. Turns off again when recording is turned off.</string>
+    <string name="video_diag_off_with_log" translatable="false">Recording is off. The log stays here until you delete it, or for 7 days after its last entry.</string>
+    <!-- Not in K8: the size and age of the log (brief S1). Needs Fable's approval. -->
+    <string name="video_diag_size_age" translatable="false">Size: %1$s. Last entry: %2$s.</string>
+    <string name="video_diag_copy" translatable="false">Copy</string>
+    <string name="video_diag_save" translatable="false">Save as text file</string>
+    <string name="video_diag_delete" translatable="false">Delete log</string>
+    <string name="video_diag_copied" translatable="false">Copied</string>
+    <string name="video_diag_saved" translatable="false">Saved</string>
+    <string name="video_diag_save_failed" translatable="false">Could not save the file.</string>
+    <string name="video_diag_empty" translatable="false">The log is empty.</string>
+    <!-- Clear browsing data: its own line. -->
+    <string name="clear_video_diagnostics" translatable="false">Video diagnostics log</string>
+</resources>

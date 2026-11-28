@@ -1,0 +1,13 @@
+diff --git a/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt b/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
+index ce06b56..fa254bb 100644
+--- a/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
++++ b/app/src/main/java/com/shibi/orbis/diag/LoadOutcomeTracker.kt
+@@ -153,7 +153,7 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
+         val silent = silentStartedAt
+         if (!open && silent != null) {
+             silentStartedAt = null
+-            finish(LoadEnd(kind, nowMs - silent))
++            finish(LoadEnd(kind, 0L))
+             return
+         }
+         ensureOpen(nowMs)

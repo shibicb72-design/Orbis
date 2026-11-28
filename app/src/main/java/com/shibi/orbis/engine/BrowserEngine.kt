@@ -88,6 +88,15 @@ interface BrowserEngine {
     fun setWebsiteColorScheme(dark: Boolean?) {}
     /** Darkens light pages that have no dark design (a built-in extension; images and videos keep their colours). */
     fun setForceDark(on: Boolean) {}
+    /** Where video diagnostics (Settings) receives what pages and tabs report; see DiagExtensionHolder. */
+    var videoDiagnostics: DiagSink?
+        get() = null
+        set(@Suppress("UNUSED_PARAMETER") value) {}
+    /**
+     * Video diagnostics: its page script is enabled exactly while [recording], and allowed in private tabs only with
+     * [privateTabs]. Applies now and to a runtime created later.
+     */
+    fun setVideoDiagnostics(recording: Boolean, privateTabs: Boolean) {}
     /** Per-site desktop and JavaScript choices, read before each top-level load. */
     fun setSitePolicy(policy: SitePolicy) {}
     /**
@@ -651,4 +660,13 @@ interface SessionHost {
     fun onVisit(session: BrowserSession, url: String, title: String)
     /** The page that [onVisit] reported for [url] got or changed its title. Never creates a visit. */
     fun onVisitTitle(session: BrowserSession, url: String, title: String)
+    /** For the Error log only (numbers and flags, never text): where [session] stands in the tab list. Test doubles: none. */
+    fun tabFacts(session: BrowserSession): TabFacts = TabFacts.NONE
+}
+
+/** [number] is the tab's own id (0 when the session has no tab); [open] tabs in all; [awake] of them hold a session. */
+data class TabFacts(val number: Long, val selected: Boolean, val open: Int, val awake: Int) {
+    companion object {
+        val NONE = TabFacts(number = 0L, selected = false, open = 0, awake = 0)
+    }
 }

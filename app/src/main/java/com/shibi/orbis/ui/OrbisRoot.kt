@@ -58,6 +58,7 @@ private object Routes {
     const val History = "history"
     const val Settings = "settings"
     const val ErrorLog = "settings/error_log"
+    const val VideoDiagnostics = "settings/video_diagnostics"
     const val Ubo = "settings/ubo"
     const val Addons = "settings/addons"
     const val SitePermissions = "settings/site_permissions"
@@ -251,6 +252,7 @@ fun OrbisRoot(container: AppContainer) {
                     onSetForceZoom = container.browserSettings::setForceZoom,
                     onBack = { nav.popBackStack() },
                     onOpenErrorLog = { nav.navigate(Routes.ErrorLog) },
+                    onOpenVideoDiagnostics = { nav.navigate(Routes.VideoDiagnostics) },
                     onOpenUbo = { nav.navigate(Routes.Ubo) },
                     onOpenSitePermissions = { nav.navigate(Routes.SitePermissions) },
                     onOpenClearData = { nav.navigate(Routes.ClearData) },
@@ -316,6 +318,12 @@ fun OrbisRoot(container: AppContainer) {
             composable(Routes.ErrorLog) {
                 DebugLogScreen(
                     container = container,
+                    onBack = { nav.popBackStack() },
+                )
+            }
+            composable(Routes.VideoDiagnostics) {
+                com.shibi.orbis.diagnostics.VideoDiagnosticsScreen(
+                    diagnostics = container.videoDiagnostics,
                     onBack = { nav.popBackStack() },
                 )
             }
