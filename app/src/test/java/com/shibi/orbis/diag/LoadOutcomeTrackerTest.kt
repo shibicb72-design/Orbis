@@ -447,4 +447,82 @@ class LoadOutcomeTrackerTest {
         t.onPageStop(true, 1100)
         assertEquals(listOf(LoadEnd(LoadKind.DOWNLOAD, 100), LoadEnd(LoadKind.COMMITTED, 100)), ends)
     }
+
+    // A page start that comes first (a tapped link, a pop-up's page) owns the next request for the same address.
+    private fun rq(nowMs: Long, same: Boolean) = t.onLoadRequest(false, nowMs, sameAsStart = same)
+
+    @Test
+    fun tG_pageStartThenItsOwnRequestThenTheDownload_isOneDownloadLine() {
+        t.onPageStart(0)
+        rq(2, true)
+        t.onDownload(40)
+        t.onPageStop(true, 150)
+        assertEquals(listOf(LoadEnd(LoadKind.DOWNLOAD, 40)), ends)
+    }
+
+    @Test
+    fun tH_pageStartThenItsOwnRequestThenTheCommit_isOneCommittedLine() {
+        t.onPageStart(0)
+        rq(22, true)
+        t.onCommit()
+        t.onPageStop(true, 100)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 100)), ends)
+    }
+
+    @Test
+    fun tI_aRequestForAnotherAddress_replacesTheStartedLoad() {
+        t.onPageStart(0)
+        rq(300, false)
+        t.onPageStart(310)
+        t.onCommit()
+        t.onPageStop(true, 500)
+        assertEquals(listOf(LoadEnd(LoadKind.UNFINISHED, 300), LoadEnd(LoadKind.COMMITTED, 200)), ends)
+    }
+
+    @Test
+    fun tJ_oneRequestPerLoad_theSecondSameAddressRequestReplaces() {
+        t.onPageStart(0)
+        rq(2, true)
+        rq(300, true)
+        t.onPageStart(310)
+        t.onCommit()
+        t.onPageStop(true, 500)
+        assertEquals(listOf(LoadEnd(LoadKind.UNFINISHED, 300), LoadEnd(LoadKind.COMMITTED, 200)), ends)
+    }
+
+    @Test
+    fun tK_aLoadOpenedByARequest_isNeverJoined() {
+        rq(0, false)
+        t.onPageStart(5)
+        rq(300, true)
+        assertEquals(listOf(LoadEnd(LoadKind.UNFINISHED, 300)), ends)
+    }
+
+    @Test
+    fun tL_afterTheCommit_aRequestReplaces() {
+        t.onPageStart(0)
+        t.onCommit()
+        rq(50, true)
+        assertEquals(listOf(LoadEnd(LoadKind.COMMITTED, 50, ended = LoadEnded.NO)), ends)
+    }
+
+    @Test
+    fun tM_pageStartOwnRequestStopWithNoCommitThenTheDownload_isOneDownloadLine() {
+        t.onPageStart(0)
+        rq(2, true)
+        t.onPageStop(true, 30)
+        t.onDownload(60)
+        assertEquals(listOf(LoadEnd(LoadKind.DOWNLOAD, 60)), ends)
+    }
+
+    @Test
+    fun tN_aRedirectAfterTheJoinedRequest_isOneRedirectedLine() {
+        t.onPageStart(0)
+        rq(2, true)
+        t.onLoadRequest(redirect = true, nowMs = 20)
+        t.onPageStart(25)
+        t.onCommit()
+        t.onPageStop(true, 90)
+        assertEquals(listOf(LoadEnd(LoadKind.REDIRECTED, 90)), ends)
+    }
 }
