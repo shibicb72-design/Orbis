@@ -115,10 +115,10 @@ class TabBackupHooksTest {
     }
 
     @Test(timeout = 10_000)
-    fun at48OpenTabsFiveOfferedAddsTwo() {
+    fun twoBelowTheCeilingFiveOfferedAddsTwo() {
         val m = manager()
-        repeat(47) { m.newTab("https://open$it.example/") }
-        assertEquals(48, m.tabs.value.size)
+        repeat(MAX_TABS - 3) { m.newTab("https://open$it.example/") }
+        assertEquals(MAX_TABS - 2, m.tabs.value.size)
         val added = m.addRestoredTabs((1..5).map { tab("https://new$it.example/") }, emptyList())
         assertEquals(2, added)
         assertEquals(MAX_TABS, m.tabs.value.size)
