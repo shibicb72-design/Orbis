@@ -866,6 +866,9 @@ private class GeckoBrowserSession(
      */
     private val loadOutcome = LoadOutcomeTracker { end -> logLoadEnd(end) }
 
+    /** The url of the newest page start: memory only, compared with the next load request, never logged. */
+    private var outcomeStartUrl: String? = null
+
     /** The tab number last seen for this session: a closing tab's host is already gone when its session closes. */
     private var lastTabNumber = 0L
 
@@ -1099,7 +1102,12 @@ private class GeckoBrowserSession(
                     isOwnFallbackLoad(pendingFallbackLoad, request.uri, request.hasUserGesture, request.isDirectNavigation)
                 if (fallbackLoad) pendingFallbackLoad = null
                 val direct = request.isDirectNavigation && !fallbackLoad
-                loadOutcome.onLoadRequest(request.isRedirect, outcomeNow(), blank = request.uri == "about:blank")
+                loadOutcome.onLoadRequest(
+                    request.isRedirect,
+                    outcomeNow(),
+                    blank = request.uri == "about:blank",
+                    sameAsStart = request.uri == outcomeStartUrl,
+                )
                 // A shared file must not send the tab to the web by itself (meta refresh); a tapped link still works,
                 // and so does the server redirect that follows it.
                 if (blocksImportAutoNavigation(
@@ -1246,6 +1254,7 @@ private class GeckoBrowserSession(
                 _state.update { it.afterPageStart(url, SystemClock.elapsedRealtime()) }
                 _state.update { it.copy(readerable = false) }
                 visits.onPageStart()
+                outcomeStartUrl = url
                 loadOutcome.onPageStart(outcomeNow(), blank = url == "about:blank")
             }
 

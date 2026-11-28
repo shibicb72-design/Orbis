@@ -19,6 +19,8 @@ const val POPUP_LINES_PER_PAGE = 20
  * - at the user's stop, or when the page stops;
  * - when another load replaces it, or the tab closes, before it ended: `unfinished`, or what it already was when
  *   its page had committed, with [LoadEnded.NO].
+ * A page start that comes first (a tapped link, a pop-up's page) owns the next load request for the same address, when
+ * the page has not committed and the load has had no request: that request is the load's own and writes nothing.
  * A load whose page committed is written at its page stop, or at the user's stop, at once. Redirect requests of a load
  * belong to that load.
  *
@@ -35,6 +37,9 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
     private var popups = 0
     private var dead = false
 
+    /** This load has had a load request of its own (a page start's own request counts once). */
+    private var requested = false
+
     /** Start time of a load whose page stopped well with no commit: it wrote nothing; a download that follows takes its start time from here. */
     private var silentStartedAt: Long? = null
 
@@ -42,7 +47,7 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
     private var blankRunning = false
 
     /** A top-level load request (a redirect hop has [redirect] true). A [blank] one replaces the load in flight and opens none. */
-    fun onLoadRequest(redirect: Boolean, nowMs: Long, blank: Boolean = false) {
+    fun onLoadRequest(redirect: Boolean, nowMs: Long, blank: Boolean = false, sameAsStart: Boolean = false) {
         if (dead) return
         if (blank) {
             endReplaced(nowMs)
@@ -52,7 +57,11 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
             redirected = true
             return
         }
-        begin(nowMs, started = false)
+        if (sameAsStart && open && started && !committed && !requested) {
+            requested = true
+            return
+        }
+        begin(nowMs, started = false, requested = true)
         if (redirect) redirected = true
     }
 
@@ -164,12 +173,13 @@ class LoadOutcomeTracker(private val emit: (LoadEnd) -> Unit) {
         if (!open) begin(nowMs, started = true)
     }
 
-    private fun begin(nowMs: Long, started: Boolean) {
+    private fun begin(nowMs: Long, started: Boolean, requested: Boolean = false) {
         endReplaced(nowMs)
         silentStartedAt = null
         open = true
         startedAt = nowMs
         this.started = started
+        this.requested = requested
         redirected = false
         committed = false
     }
