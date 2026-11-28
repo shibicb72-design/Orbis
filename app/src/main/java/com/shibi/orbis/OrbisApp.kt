@@ -63,8 +63,14 @@ import com.shibi.orbis.history.FileHistoryStore
 import com.shibi.orbis.history.HistoryManager
 import com.shibi.orbis.storage.AtomicTextFile
 import com.shibi.orbis.tabs.FileTabStore
+import com.shibi.orbis.tabs.TAB_SLEEP_CHECK_EVERY_MILLIS
 import com.shibi.orbis.tabs.TabManager
 import com.shibi.orbis.tabs.VisitSink
+import com.shibi.orbis.tabs.isLowMemoryReport
+import com.shibi.orbis.cast.CastPhase
+import com.shibi.orbis.downloads.DownloadStatus
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import com.shibi.orbis.addons.AddonManager
 import com.shibi.orbis.addons.SharedPreferencesAddonPrefs
 import com.shibi.orbis.ubo.SharedPreferencesUboPrefs
@@ -108,6 +114,7 @@ class OrbisApp : Application() {
     val startedActivities =
         StartedActivities { foreground ->
             container.tabs.setForeground(foreground)
+            container.memorySampler?.onForeground(foreground)
             if (foreground) {
                 downloadForeground?.onAppForeground()
                 torrentForeground?.onAppForeground()
@@ -115,7 +122,41 @@ class OrbisApp : Application() {
                 downloadForeground?.onAppBackground()
                 torrentForeground?.onAppBackground()
             }
+            tabSleepOnForeground(foreground)
         }
+
+    /** The sleep check every [TAB_SLEEP_CHECK_EVERY_MILLIS] while Orbis is in front; null in the background. */
+    private var tabSleepTimer: Job? = null
+
+    /** In front: the check every 5 minutes. To the background: the check once, now. */
+    private fun tabSleepOnForeground(foreground: Boolean) {
+        tabSleepTimer?.cancel()
+        tabSleepTimer = null
+        if (!foreground) {
+            sleepUnusedTabs(lowMemory = false)
+            return
+        }
+        tabSleepTimer =
+            appScope.launch {
+                while (true) {
+                    delay(TAB_SLEEP_CHECK_EVERY_MILLIS)
+                    sleepUnusedTabs(lowMemory = false)
+                }
+            }
+    }
+
+    /** One sleep check with the user's setting (Settings > Put unused tabs to sleep). Main thread. */
+    private fun sleepUnusedTabs(lowMemory: Boolean) {
+        if (!::container.isInitialized) return
+        runCatching { container.tabs.sleepUnusedTabs(container.browserSettings.tabSleepAfter.value, lowMemory) }
+            .onFailure { container.debugLog.log("Tabs", "sleep check failed: ${it.javaClass.simpleName}") }
+    }
+
+    /** Android reports that memory is running low: the check at once, with the low-memory time. */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (isLowMemoryReport(level)) sleepUnusedTabs(lowMemory = true)
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -234,6 +275,7 @@ class OrbisApp : Application() {
         engine.logins = LoginBridgeImpl(logins) { browserSettings.offerSavePasswords.value }
         var downloadsRef: DownloadManager? = null
         var torrentsRef: TorrentManager? = null
+        var castRef: CastCoordinator? = null
         // The tab manager creates NO session here: sessions appear only once the browser screen asks for them, which
         // is after the onboarding decision. restore() only reads the stored tab list.
         val tabsFile = File(filesDir, "tabs/tabs.json")
@@ -265,6 +307,11 @@ class OrbisApp : Application() {
                         runCatching { imports.deleteImport(url) }
                             .onFailure { debugLog.log("Import", "not deleted") }
                     }
+                },
+                // Both are created just below; no sleep check runs before then (the tab list is not read yet).
+                downloadRunning = { downloadsRef?.entries?.value?.any { it.status == DownloadStatus.IN_PROGRESS } == true },
+                castActive = {
+                    castRef?.let { it.playback.value != null || it.phase.value == CastPhase.Connecting || it.phase.value == CastPhase.Controls } == true
                 },
             )
         // Selection menu > Search: a new tab (private for a private page) with the user's search engine.
@@ -435,6 +482,7 @@ class OrbisApp : Application() {
                 log = { debugLog.log("ClearOnExit", it) },
             )
         val cast = CastCoordinator(this, appScope, log = { debugLog.log("Cast", it) })
+        castRef = cast
         tabs.onPrivateTabDisposed = { id -> cast.onPrivateTabClosed(id) }
         val privacyPrefs = SharedPreferencesPrivacyPrefs(getSharedPreferences(SharedPreferencesPrivacyPrefs.FILE_NAME, MODE_PRIVATE))
         val backup =
@@ -500,6 +548,22 @@ class OrbisApp : Application() {
             com.shibi.orbis.stats.PrivacyStats(File(filesDir, "privacy_stats.json"), appScope, Dispatchers.IO, log = { debugLog.log("Stats", it) })
         stats.load()
         container.privacyStats = stats
+        // Dashboard memory: Orbis's own processes measured when the dashboard opens and every 15 minutes in front, never
+        // in the background. The history holds numbers only, in its own file beside the statistics, on this phone.
+        val memoryHistory = com.shibi.orbis.stats.MemoryHistory(File(filesDir, "memory_history.json"), appScope, Dispatchers.IO, log = { debugLog.log("Memory", it) })
+        memoryHistory.load()
+        val memoryReader = com.shibi.orbis.stats.MemoryReader.forApp(this)
+        container.memoryHistory = memoryHistory
+        container.memorySampler =
+            com.shibi.orbis.stats.MemorySampler(
+                read = memoryReader::read,
+                tabCounts = { container.tabs.normalTabCounts() },
+                history = memoryHistory,
+                scope = appScope,
+                io = Dispatchers.IO,
+                threadCpuMillis = android.os.SystemClock::currentThreadTimeMillis,
+                log = { debugLog.log("Memory", it) },
+            ).also { if (!startedActivities.noneStarted) it.onForeground(true) }
         container.youtubeAdSavings = youtubeAds
         container.torrents = torrents
         container.torrentSettings = torrentSettings
@@ -559,6 +623,10 @@ class AppContainer(
     val thumbnails: com.shibi.orbis.tabs.TabThumbnails = com.shibi.orbis.tabs.TabThumbnails(),
     /** What Orbis blocked and the data it used (the start page dashboard); set by the app after creation. */
     var privacyStats: com.shibi.orbis.stats.PrivacyStats? = null,
+    /** The dashboard's memory history (numbers only, on this phone); set by the app after creation. */
+    var memoryHistory: com.shibi.orbis.stats.MemoryHistory? = null,
+    /** Measures Orbis's memory for the dashboard, in front only; set by the app after creation. */
+    var memorySampler: com.shibi.orbis.stats.MemorySampler? = null,
     /** Estimated time saved from blocked YouTube ads; set by the app after creation. Cleared with browsing history. */
     var youtubeAdSavings: com.shibi.orbis.youtube.YoutubeAdSavings? = null,
     /** Torrent downloads; set by the app after creation. */

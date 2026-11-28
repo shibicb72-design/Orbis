@@ -37,6 +37,7 @@ class BrowserSettingsTest {
         override var forceDark: Boolean = false
         override var magnetHandler: MagnetHandler = MagnetHandler.ORBIS
         override var torrentIpNoteSeen: Boolean = false
+        override var tabSleepAfter: com.shibi.orbis.tabs.TabSleepAfter = com.shibi.orbis.tabs.TabSleepAfter.AFTER_1_HOUR
     }
 
     @Test

@@ -78,7 +78,10 @@ data class Tab(
     val groupId: Long? = null,
 )
 
-/** What the tab switcher draws. [groupId] is the tab's [TabGroup], or null. */
+/**
+ * What the tab switcher draws. [groupId] is the tab's [TabGroup], or null. [asleep]: a tab that is not selected and has no
+ * engine session (put to sleep, or restored and not shown yet); opening it reloads it.
+ */
 data class TabUi(
     val id: Long,
     val title: String,
@@ -86,7 +89,26 @@ data class TabUi(
     val selected: Boolean,
     val isPrivate: Boolean = false,
     val groupId: Long? = null,
+    val asleep: Boolean = false,
 )
+
+/** What Orbis knows about a tab's page without measuring anything: playing media, open (awake), or not loaded (asleep). */
+enum class TabActivity { PLAYING, AWAKE, ASLEEP }
+
+/**
+ * One row of the dashboard's tab list. A private tab has an empty [title]: its title is never handed out here.
+ * [lastLookedAt] is when the user last looked at it (now, for the tab on screen); null when not since before the update.
+ */
+data class TabOverview(
+    val id: Long,
+    val title: String,
+    val isPrivate: Boolean,
+    val activity: TabActivity,
+    val lastLookedAt: Long?,
+)
+
+/** How many normal tabs are open and how many of them are awake. Private tabs are not counted. */
+data class NormalTabCounts(val open: Int, val awake: Int)
 
 /** One-shot messages for the UI. */
 enum class TabEvent { TAB_LIMIT }
@@ -166,6 +188,8 @@ private class HeldClose(
     val selectedId: Long,
     val blankId: Long,
     val used: Map<Long, Long>,
+    /** When each closed tab was last looked at (the one on screen: the time of the close); a tab with no time has no entry. */
+    val looked: Map<Long, Long>,
 )
 
 /**
@@ -195,8 +219,14 @@ class TabManager(
     private val releaseImport: (String) -> Unit = {},
     /** The torrent log (intake lines only: kinds, enum names, booleans). */
     private val torrentLog: (String) -> Unit = {},
+    /** Wall-clock time, for when each tab was last looked at. */
+    private val clock: () -> Long = System::currentTimeMillis,
     private val maxGroups: Int = MAX_TAB_GROUPS,
     private val closeAllUndoMillis: Long = CLOSE_ALL_UNDO_MILLIS,
+    /** True while any download is in progress: then no tab is put to sleep (the tab it came from is not known). */
+    private val downloadRunning: () -> Boolean = { false },
+    /** True while a cast is active or connecting: then no tab is put to sleep (the tab it came from is not known). */
+    private val castActive: () -> Boolean = { false },
 ) : SessionHost {
     private val list = ArrayList<Tab>()
     private var selectedId: Long
@@ -214,6 +244,21 @@ class TabManager(
 
     /** False while the app is in the background: even the selected session is then inactive. */
     private var foreground = true
+
+    /**
+     * When the user last looked at each tab: stamped while the tab is the selected one with Orbis in front, so it holds
+     * the moment it was last on screen. Stored with the tab list for normal tabs; a private tab's time is memory only.
+     */
+    private val lookedAt = HashMap<Long, Long>()
+
+    /** The tab id that was selected at the last [noteLooked]; it is stamped once more when it stops being selected. */
+    private var lookedSelectedId: Long? = null
+
+    /** When each tab's current session was opened (clock time). Memory only; gone when the session closes. */
+    private val awakeSince = HashMap<Long, Long>()
+
+    /** Tabs [sleepUnusedTabs] put to sleep that have not been woken since; only for the "tab woken" log line. */
+    private val slept = HashSet<Long>()
 
     private val observers = HashMap<Long, Job>()
     private val noticeObservers = HashMap<Long, Job>()
@@ -343,8 +388,10 @@ class TabManager(
                 }
             if (pristine && snapshot != null && snapshot.tabs.isNotEmpty()) {
                 list.clear()
+                lookedAt.clear()
                 for (p in snapshot.tabs) {
                     list += Tab(p.id, null, p.title, p.url, p.desktop, p.savedState, null, groupId = p.groupId)
+                    p.lastLookedAt?.let { lookedAt[p.id] = it }
                 }
                 groupList.clear()
                 groupList += snapshot.groups
@@ -364,7 +411,7 @@ class TabManager(
         }
     }
 
-    private fun snapshot(): TabsSnapshot = persistableSnapshot(list, selectedId, lastNormalSelectedId, groupList)
+    private fun snapshot(): TabsSnapshot = persistableSnapshot(list, selectedId, lastNormalSelectedId, groupList, lookedAt::get)
 
     private fun enqueueWrite() {
         // Before the stored list has been read, the in-memory one is just a placeholder: never overwrite with it.
@@ -409,7 +456,12 @@ class TabManager(
 
     private fun publish() {
         val sel = list.firstOrNull { it.id == selectedId } ?: list.first().also { selectedId = it.id }
-        _tabs.value = list.map { TabUi(it.id, it.title, it.url, it.id == selectedId, it.isPrivate, it.groupId) }
+        noteLooked(sel.id)
+        _tabs.value =
+            list.map {
+                val isSelected = it.id == selectedId
+                TabUi(it.id, it.title, it.url, isSelected, it.isPrivate, it.groupId, asleep = !isSelected && it.session == null)
+            }
         _groups.value = groupList.toList()
         if (!sel.isPrivate) lastNormalSelectedId = sel.id
         if (sel.id != lastShownId) {
@@ -417,6 +469,18 @@ class TabManager(
             lastUsed[sel.id] = ++useClock
         }
         _selected.value = sel
+    }
+
+    /** Stamps the tab on screen (and the one that just left the screen) with now. Only while Orbis is in front. */
+    private fun noteLooked(selected: Long) {
+        if (!foreground) {
+            lookedSelectedId = null
+            return
+        }
+        val now = clock()
+        lookedSelectedId?.takeIf { it != selected && indexOf(it) >= 0 }?.let { lookedAt[it] = now }
+        lookedAt[selected] = now
+        lookedSelectedId = selected
     }
 
     /** [warn] false for a change that only gives the user back tabs they already had (Undo): no "N tabs are open". */
@@ -466,10 +530,12 @@ class TabManager(
         val opened = tab.copy(session = session)
         list[i] = opened
         observe(id, session)
+        if (slept.remove(id)) log("tab woken")
         return opened
     }
 
     private fun observe(id: Long, session: BrowserSession) {
+        awakeSince[id] = clock()
         // autoDesktopKept is not replayed, so every session is collected from the moment it joins the list (started
         // undispatched: no event can fall between creation and the first collect). Background tabs get their mark too.
         noticeObservers[id]?.cancel()
@@ -568,6 +634,12 @@ class TabManager(
      * at foreground priority. Every other operation here activates the selected session only while [foreground].
      */
     fun setForeground(value: Boolean, keepPlayingMedia: Boolean = true) {
+        // The selected tab was on screen until now (going to the background) or is from now on (coming to the front).
+        if (value != foreground) {
+            val now = clock()
+            if (list.any { it.id == selectedId }) lookedAt[selectedId] = now
+            lookedSelectedId = selectedId.takeIf { value }
+        }
         foreground = value
         val session = list.firstOrNull { it.id == selectedId }?.session
         // Background playback: a tab playing media stays active when the app goes to the background, so the audio (or a
@@ -579,6 +651,119 @@ class TabManager(
 
     /** The open session of tab [id], or null when it has none yet (restored, not visited). */
     fun sessionOf(id: Long): BrowserSession? = list.firstOrNull { it.id == id }?.session
+
+    /**
+     * Every open tab for the dashboard, in tab order: its state and when it was last looked at. Reads only what the
+     * manager already holds; opens nothing. A private tab comes without its title.
+     */
+    fun overview(): List<TabOverview> {
+        val now = clock()
+        return list.map { tab ->
+            val st = tab.session?.state?.value
+            TabOverview(
+                id = tab.id,
+                title = if (tab.isPrivate) "" else tab.title,
+                isPrivate = tab.isPrivate,
+                activity =
+                    when {
+                        st == null -> TabActivity.ASLEEP
+                        st.media?.playing == true -> TabActivity.PLAYING
+                        else -> TabActivity.AWAKE
+                    },
+                lastLookedAt = if (tab.id == selectedId && foreground) now else lookedAt[tab.id],
+            )
+        }
+    }
+
+    /** The open normal tabs and the awake ones among them, for the memory history. Private tabs are not counted. */
+    fun normalTabCounts(): NormalTabCounts {
+        val normal = list.filter { !it.isPrivate }
+        return NormalTabCounts(open = normal.size, awake = normal.count { it.session != null })
+    }
+
+    // ---- sleep ---------------------------------------------------------------------------------------------
+
+    /**
+     * Puts every tab to sleep that [tabSleepVerdict] allows under [setting] ([lowMemory]: Android reported that memory is
+     * running low). For each such tab the page state is saved first, the verdict is asked again at the moment of closing,
+     * and only then is the session closed. The tab stays in the list with its title, address, group and the saved state;
+     * showing it wakes it the way a restored tab wakes. Returns how many tabs were put to sleep. Nothing happens before
+     * the stored tab list has been read.
+     */
+    fun sleepUnusedTabs(setting: TabSleepAfter, lowMemory: Boolean = false): Int {
+        if (!_ready.value) return 0
+        var count = 0
+        for (id in list.map { it.id }) {
+            val tab = list.firstOrNull { it.id == id } ?: continue
+            if (tabSleepVerdict(sleepFacts(tab), clock(), setting, lowMemory) != TabSleepVerdict.SLEEP) continue
+            val session = tab.session ?: continue
+            val saved = runCatching { session.savedState() }.getOrNull() ?: continue
+            // Asked again now: the page may have started something while its state was read.
+            val i = indexOf(id)
+            if (i < 0 || list[i].session !== session) continue
+            if (tabSleepVerdict(sleepFacts(list[i]), clock(), setting, lowMemory) != TabSleepVerdict.SLEEP) continue
+            putToSleep(i, saved)
+            count++
+        }
+        if (count > 0) {
+            log("tabs put to sleep: $count (awake now: ${list.count { it.session != null }})")
+            publish()
+            schedulePersist()
+        }
+        return count
+    }
+
+    /** What the sleep check knows about [tab], read only from what the manager and the session already hold. */
+    private fun sleepFacts(tab: Tab): TabSleepFacts {
+        val session = tab.session
+        val st = session?.state?.value
+        val holds = session?.let { runCatching { it.sleepHolds() }.getOrNull() } ?: SleepHolds.NONE
+        val selectedTab = list.firstOrNull { it.id == selectedId }
+        return TabSleepFacts(
+            isPrivate = tab.isPrivate,
+            isSelected = tab.id == selectedId,
+            hasSession = session != null,
+            hasSavedState = session != null && runCatching { session.savedState() }.getOrNull() != null,
+            lastLookedAt = lookedAt[tab.id],
+            awakeSince = awakeSince[tab.id],
+            openerOfSelected = selectedTab != null && selectedTab.openerTabId == tab.id,
+            playing = st?.media?.playing == true,
+            loading = st?.isLoading == true,
+            fullScreen = st?.fullScreen == true,
+            // Picture-in-picture always shows the selected tab, which never sleeps.
+            pictureInPicture = false,
+            cameraOrMicrophoneInUse = holds.captureGranted,
+            casting = castActive(),
+            pageDialogOpen = session?.prompts?.value != null,
+            orbisQuestionOpen =
+                _pendingDownload.value?.sourceTabId == tab.id ||
+                    _pendingTorrentIntake.value?.sourceTabId == tab.id ||
+                    _linkMenu.value?.tabId == tab.id,
+            uploadRunning = holds.fileHanded,
+            downloadRunning = downloadRunning(),
+        )
+    }
+
+    /** Closes the session of the tab at [index] and keeps the tab, with [saved] as its page state (as a restored tab). */
+    private fun putToSleep(index: Int, saved: String) {
+        val tab = list[index]
+        observers.remove(tab.id)?.cancel()
+        noticeObservers.remove(tab.id)?.cancel()
+        awakeSince.remove(tab.id)
+        // As for a tab restored from disk: the saved history may still lead back to an opened file, so the file is kept
+        // (the day-old sweep and Clear browsing data remove it), and the history flags start again with the next session.
+        importsShown.remove(tab.id)
+        importLoading.remove(tab.id)
+        lastCanGoBack.remove(tab.id)
+        lastCanGoForward.remove(tab.id)
+        historyPending.remove(tab.id)
+        list[index] = tab.copy(session = null, savedState = saved)
+        slept += tab.id
+        tab.session?.let {
+            it.host = null
+            it.close()
+        }
+    }
 
     fun select(id: Long) {
         if (indexOf(id) < 0) return
@@ -695,6 +880,9 @@ class TabManager(
     /** Ends [tab]'s session and drops what the UI still holds for it (a pending download, its link menu, its file). */
     private fun dispose(tab: Tab) {
         val privateId = tab.id.takeIf { tab.isPrivate }
+        lookedAt.remove(tab.id)
+        awakeSince.remove(tab.id)
+        slept.remove(tab.id)
         observers.remove(tab.id)?.cancel()
         noticeObservers.remove(tab.id)?.cancel()
         lastUsed.remove(tab.id)
@@ -882,6 +1070,13 @@ class TabManager(
             }
         val orderBefore = list.map { it.id }
         val usedBefore = closing.associate { it.id to (lastUsed[it.id] ?: 0L) }
+        // Read before dispose() forgets them. The tab on screen is looked at now, as overview() would show it.
+        val lookedBefore = HashMap<Long, Long>()
+        val closedAt = clock()
+        for (tab in closing) {
+            val at = if (tab.id == selectedId && foreground) closedAt else lookedAt[tab.id]
+            if (at != null) lookedBefore[tab.id] = at
+        }
         val groupsBefore = groupList.toList()
         val selectedBefore = (if (privateSelected) lastNormalSelectedId else selectedId) ?: closing.first().id
         // Most recently used first; tabs never shown since start tie, and the later one in the list counts as newer.
@@ -903,7 +1098,7 @@ class TabManager(
             selectedId = blank.id
             ensureSession(blank.id)?.session?.setActive(foreground)
         }
-        held = HeldClose(orderBefore, closed, entries, groupsBefore, selectedBefore, blank.id, usedBefore)
+        held = HeldClose(orderBefore, closed, entries, groupsBefore, selectedBefore, blank.id, usedBefore, lookedBefore)
         heldExpiry =
             scope.launch {
                 delay(closeAllUndoMillis)
@@ -935,6 +1130,7 @@ class TabManager(
         }
         val backIds = back.mapTo(HashSet()) { it.id }
         for ((id, at) in h.used) if (id in backIds && at > 0L) lastUsed[id] = at
+        for ((id, at) in h.looked) if (id in backIds) lookedAt[id] = at
         // The Recently closed entries of the tabs that are open again go.
         val restoredEntries = h.entries.filterKeys { it in backIds }.values
         _recentlyClosed.value = _recentlyClosed.value.filterNot { e -> restoredEntries.any { it === e } }
@@ -1365,6 +1561,8 @@ internal fun persistableSnapshot(
     selectedId: Long,
     lastNormalSelectedId: Long?,
     groups: List<TabGroup> = emptyList(),
+    /** When each tab was last looked at; the backup passes none. */
+    lookedAt: (Long) -> Long? = { null },
 ): TabsSnapshot {
     val normal = tabs.filter { !it.isPrivate }
     if (normal.isEmpty()) return TabsSnapshot(emptyList(), -1L)
@@ -1374,7 +1572,7 @@ internal fun persistableSnapshot(
             ?: normal.first()
     val persisted =
         normal.map {
-            PersistedTab(it.id, it.url, it.title, it.desktopMode, it.session?.savedState() ?: it.savedState, it.groupId)
+            PersistedTab(it.id, it.url, it.title, it.desktopMode, it.session?.savedState() ?: it.savedState, it.groupId, lookedAt(it.id))
         }
     val arranged = arrangeGroups(persisted, groups, { it.groupId }, { it.copy(groupId = null) })
     return TabsSnapshot(tabs = arranged.items, selectedId = selected.id, groups = arranged.groups)

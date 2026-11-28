@@ -813,6 +813,9 @@ private class GeckoBrowserSession(
      * is right after the copy.
      */
     private val privateUploads = ArrayList<File>()
+    /** Since this session opened: camera/microphone granted, a file handed to the page. Memory only (see sleepHolds). */
+    private var captureGranted = false
+    private var fileHanded = false
 
     val geckoSession: GeckoSession get() = session
 
@@ -2164,6 +2167,7 @@ private class GeckoBrowserSession(
                             },
                             respond = { uris ->
                                 if (uris == null) copyJob?.cancel()
+                                if (!uris.isNullOrEmpty()) fileHanded = true
                                 complete(
                                     result,
                                     if (uris == null) {
@@ -2490,6 +2494,7 @@ private class GeckoBrowserSession(
         when (planMediaRequest(kinds) { permissionPolicy.lookup(keyOf(it)) }) {
             MediaPlan.GRANT -> {
                 debugLog.log("GeckoSession", "camera/microphone allowed")
+                captureGranted = true
                 answer.grant(chosenVideo, chosenAudio)
             }
 
@@ -2508,6 +2513,7 @@ private class GeckoBrowserSession(
                 val first =
                     mediaCoalescer.join(ask) { allow ->
                         debugLog.log("GeckoSession", "camera/microphone ${if (allow) "allowed" else "denied"}")
+                        if (allow) captureGranted = true
                         if (allow) answer.grant(chosenVideo, chosenAudio) else answer.reject()
                     }
                 if (first) {
@@ -3007,6 +3013,8 @@ private class GeckoBrowserSession(
     }
 
     override fun savedState(): String? = latestSessionState?.toString()
+
+    override fun sleepHolds() = com.shibi.orbis.tabs.SleepHolds(captureGranted, fileHanded)
 
     override fun close() {
         if (closed) return

@@ -16,6 +16,8 @@ downloads and torrents) stay inside Orbis and are deleted when private browsing 
 "Save to Downloads" first stays; a private file download has no such action (Share it first to keep a copy). You can delete everything in Settings > Clear
 browsing data; the estimate is cleared with browsing history.
 
+Memory use: for the dashboard, Orbis keeps a history on your phone of how much memory it used and how many tabs were open (numbers only, for 30 days). It is not sent anywhere. You can delete it on the dashboard.
+
 Tab groups, the order of the menu and the toolbar button you chose, the theme (including Material You, which takes
 its colours from your wallpaper), search engines you add, and the secure DNS, clear on exit and private-tab lock
 settings are also stored only on your phone. Clear on exit and the private-tab lock are local: nothing is sent

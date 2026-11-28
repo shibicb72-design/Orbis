@@ -560,6 +560,8 @@ interface BrowserSession {
     fun setActive(active: Boolean)
     /** The latest engine session-state blob (history, scroll, form data), or null before the first one. */
     fun savedState(): String?
+    /** What this session has done that keeps its tab awake until it closes. Test doubles hold nothing. */
+    fun sleepHolds(): com.shibi.orbis.tabs.SleepHolds = com.shibi.orbis.tabs.SleepHolds.NONE
     /** Dismisses every pending prompt, then closes the engine session. Idempotent. */
     fun close()
 }

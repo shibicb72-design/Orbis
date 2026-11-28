@@ -416,6 +416,7 @@ class BackupManager(
                     "text_zoom_percent" to int({ b.textZoomPercent.value }, b::setTextZoomPercent),
                     "force_zoom" to bool({ b.forceZoom.value }, b::setForceZoom),
                     "https_only" to enum<HttpsOnlyMode>({ b.httpsOnly.value }, b::setHttpsOnly),
+                    "tab_sleep_after" to enum<com.shibi.orbis.tabs.TabSleepAfter>({ b.tabSleepAfter.value }, b::setTabSleepAfter),
                     "javascript" to bool({ b.javaScript.value }, b::setJavaScript),
                     "always_desktop" to bool({ b.alwaysDesktop.value }, b::setAlwaysDesktop),
                     "open_links_in_apps" to bool({ b.openLinksInApps.value }, b::setOpenLinksInApps),

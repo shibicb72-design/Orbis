@@ -1036,6 +1036,7 @@ private fun BrowserContent(
                                         uboActive = (uboState as? com.shibi.orbis.ubo.UboState.Installed)?.enabled == true,
                                         onReset = { confirmReset = true },
                                     )
+                                    MemoryDashboardSection(container)
                                     if (confirmReset) {
                                         androidx.compose.material3.AlertDialog(
                                             onDismissRequest = { confirmReset = false },
@@ -1045,6 +1046,7 @@ private fun BrowserContent(
                                                 TextButton(onClick = {
                                                     stats.reset()
                                                     savings?.clear()
+                                                    container.memoryHistory?.clear()
                                                     confirmReset = false
                                                 }) { Text(stringResource(R.string.stats_reset)) }
                                             },
@@ -1481,4 +1483,40 @@ private fun FindBar(
             }
         }
     }
+}
+
+/**
+ * The dashboard's Memory section with its data: a reading when it comes on screen (taken off the main thread), the open
+ * tabs, and the stored history. The "time ago" texts move on once a minute while it is shown.
+ */
+@Composable
+private fun MemoryDashboardSection(container: com.shibi.orbis.AppContainer) {
+    val sampler = container.memorySampler ?: return
+    val history = container.memoryHistory ?: return
+    val tabs = container.tabs
+    val reading by sampler.latest.collectAsStateWithLifecycle()
+    val historyVersion by history.version.collectAsStateWithLifecycle()
+    val tabList by tabs.tabs.collectAsStateWithLifecycle()
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(sampler) { sampler.onDashboardOpened() }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(60_000)
+            now = System.currentTimeMillis()
+        }
+    }
+    var range by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(com.shibi.orbis.ui.home.MemoryRange.DAY) }
+    val overview = remember(tabList, now, reading) { tabs.overview() }
+    val samples = remember(historyVersion, now) { history.samples() }
+    com.shibi.orbis.ui.home.MemorySection(
+        reading = reading,
+        tabs = overview,
+        history = samples,
+        now = now,
+        range = range,
+        onRange = { range = it },
+        onSelectTab = { tabs.select(it) },
+        onCloseTab = { tabs.close(it) },
+        onDeleteHistory = { history.clear() },
+    )
 }

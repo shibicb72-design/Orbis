@@ -317,6 +317,7 @@ object SettingsAllowList {
                     "text_zoom_percent" to SettingType.IntIn(TEXT_ZOOM_STEPS.first()..TEXT_ZOOM_STEPS.last()),
                     "force_zoom" to SettingType.Bool,
                     "https_only" to SettingType.OneOf(names(HttpsOnlyMode.entries)),
+                    "tab_sleep_after" to SettingType.OneOf(names(com.shibi.orbis.tabs.TabSleepAfter.entries)),
                     "javascript" to SettingType.Bool,
                     "always_desktop" to SettingType.Bool,
                     "open_links_in_apps" to SettingType.Bool,

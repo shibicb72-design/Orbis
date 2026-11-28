@@ -37,7 +37,7 @@
     <string name="stats_since">Counting since %1$s</string>
     <string name="stats_reset">Reset</string>
     <string name="stats_reset_title">Reset privacy stats?</string>
-    <string name="stats_reset_body">The counts start again from zero, including ad breaks avoided on YouTube. Nothing else is deleted.</string>
+    <string name="stats_reset_body">The counts start again from zero, including ad breaks avoided on YouTube, and the memory history is deleted. Nothing else is deleted.</string>
     <!-- English only. Do not add translations for these. -->
     <string name="stats_duration_zero" translatable="false">0 min</string>
     <string name="stats_duration_hm" translatable="false">%1$d h %2$d min</string>

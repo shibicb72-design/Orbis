@@ -5,6 +5,8 @@ the app. Data a user sends to websites they visit, through a browser, is not col
 
 - **Does your app collect or share any of the required user data types?** No.
   - Orbis sends nothing to its developers. Browsing data, passwords and settings stay on the device.
+  - The dashboard's memory history (how much memory Orbis used and how many tabs were open; numbers only, 30 days) is
+    kept on the device only and is never sent. It changes no answer.
   - Cast sends the media address only to the TV or speaker the user picks on the local network. It does not use the
     Google Cast SDK, and it sends nothing to Google or any server. Casting YouTube opens that video in the TV's
     YouTube app, which can show ads and is subject to YouTube's own terms on the TV. That is the TV app, not Orbis.

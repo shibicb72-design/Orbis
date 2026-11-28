@@ -15,6 +15,11 @@ data class PersistedTab(
     val desktop: Boolean,
     val savedState: String?,
     val groupId: Long? = null,
+    /**
+     * When the user last looked at the tab (epoch milliseconds), for the dashboard's tab list. Null for a tab stored
+     * before Orbis kept this time: it counts as not looked at since before the update.
+     */
+    val lastLookedAt: Long? = null,
 )
 
 /** [groups] lists only groups with at least one tab, and each group's tabs are next to each other in [tabs]. */
@@ -22,7 +27,10 @@ data class TabsSnapshot(val tabs: List<PersistedTab>, val selectedId: Long, val 
 
 /** Pure JSON codec for the tab list. Never throws: bad input decodes to null. */
 object TabCodec {
-    /** 2 added `"groups"` and the per-tab `"group"`. A version 1 file has neither. */
+    /**
+     * 2 added `"groups"` and the per-tab `"group"`. A version 1 file has neither. The optional per-tab `"looked"` (a
+     * time) came later without a version change: a file without it still loads, and older code ignores it.
+     */
     private const val VERSION = 2
 
     /** The first version that stores tab groups. */
@@ -57,6 +65,7 @@ object TabCodec {
             o.put("desktop", tab.desktop)
             if (i in keepState) o.put("state", tab.savedState)
             tab.groupId?.let { o.put("group", it) }
+            tab.lastLookedAt?.let { o.put("looked", it) }
             array.put(o)
         }
         val groups = JSONArray()
@@ -104,6 +113,7 @@ object TabCodec {
                 desktop = !o.isNull("desktop") && o.optBoolean("desktop", false),
                 savedState = state,
                 groupId = if (groups.isEmpty() || o.isNull("group")) null else o.optLong("group", -1L).takeIf { it > 0 },
+                lastLookedAt = if (o.isNull("looked")) null else o.optLong("looked", -1L).takeIf { it > 0 },
             )
         }
         if (tabs.isEmpty()) return null

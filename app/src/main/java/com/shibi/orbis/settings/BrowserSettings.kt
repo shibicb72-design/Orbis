@@ -7,6 +7,7 @@ import com.shibi.orbis.engine.hostOfUrl
 import com.shibi.orbis.home.PinnedSite
 import com.shibi.orbis.home.TOP_SITES_LIMIT
 import com.shibi.orbis.passwords.NeverSavePrefs
+import com.shibi.orbis.tabs.TabSleepAfter
 import org.json.JSONArray
 import org.json.JSONObject
 import com.shibi.orbis.engine.isWebUrl
@@ -84,6 +85,9 @@ interface BrowserPrefs {
 
     /** The user confirmed a torrent while the full "peers can see your IP address" note was on the sheet. */
     var torrentIpNoteSeen: Boolean
+
+    /** Settings > Put unused tabs to sleep. "After 1 hour" when never chosen (Shibi, 2026-11-24). */
+    var tabSleepAfter: TabSleepAfter
 }
 
 /** [ORBIS]: the torrent confirm sheet (the default). [OTHER_APP]: as before torrents, another app is asked to open it. */
@@ -179,6 +183,12 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         get() = HttpsOnlyMode.entries.firstOrNull { it.name == prefs.getString(KEY_HTTPS_ONLY, null) } ?: HttpsOnlyMode.ALL
         set(value) {
             prefs.edit { putString(KEY_HTTPS_ONLY, value.name) }
+        }
+
+    override var tabSleepAfter: TabSleepAfter
+        get() = TabSleepAfter.entries.firstOrNull { it.name == prefs.getString(KEY_TAB_SLEEP_AFTER, null) } ?: TabSleepAfter.AFTER_1_HOUR
+        set(value) {
+            prefs.edit { putString(KEY_TAB_SLEEP_AFTER, value.name) }
         }
 
     override var darkMode: DarkMode
@@ -337,6 +347,7 @@ class SharedPreferencesBrowserPrefs(private val prefs: SharedPreferences) : Brow
         private const val KEY_READER_THEME = "reader_theme"
         private const val KEY_NEVER_SAVE = "never_save_logins"
         private const val KEY_HTTPS_ONLY = "https_only"
+        private const val KEY_TAB_SLEEP_AFTER = "tab_sleep_after"
         private const val KEY_OPEN_IN_APPS = "open_links_in_apps"
         private const val KEY_TOOLBAR_BOTTOM = "toolbar_bottom"
         private const val KEY_COPY_DOWNLOADS = "copy_to_download_folder"
@@ -378,6 +389,16 @@ class BrowserSettings(private val prefs: BrowserPrefs) : SitePolicy {
     fun setHttpsOnly(mode: HttpsOnlyMode) {
         prefs.httpsOnly = mode
         _httpsOnly.value = mode
+    }
+
+    private val _tabSleepAfter = MutableStateFlow(prefs.tabSleepAfter)
+
+    /** Settings > Put unused tabs to sleep. The sleep check reads it each time it runs. */
+    val tabSleepAfter: StateFlow<TabSleepAfter> = _tabSleepAfter.asStateFlow()
+
+    fun setTabSleepAfter(after: TabSleepAfter) {
+        prefs.tabSleepAfter = after
+        _tabSleepAfter.value = after
     }
 
     private val _blockContentTrackers = MutableStateFlow(prefs.blockContentTrackers)

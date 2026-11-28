@@ -380,6 +380,16 @@ internal fun TabSwitcher(
                                         modifier = Modifier.clearAndSetSemantics { this[SemanticsProperties.TestTag] = CURRENT_TAB_LABEL_TAG },
                                     )
                                 }
+                                if (tab.asleep && !masked) {
+                                    // A sleeping tab (or one restored and not shown yet) reloads when opened. Read out with the card.
+                                    Text(
+                                        stringResource(R.string.tab_sleep_asleep_mark),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.testTag(tabAsleepTag(tab.id)),
+                                    )
+                                }
                                 Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             val closeDescription =
@@ -496,3 +506,5 @@ internal const val CURRENT_TAB_LABEL_TAG = "current_tab_label"
 internal fun tabRowTag(id: Long) = "tab_row_$id"
 
 internal fun tabCloseTag(id: Long) = "tab_close_$id"
+
+internal fun tabAsleepTag(id: Long) = "tab_asleep_$id"

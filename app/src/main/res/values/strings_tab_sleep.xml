@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sleeping tabs (sleep25-1). English only. -->
+<resources>
+    <string name="tab_sleep_title" translatable="false">Put unused tabs to sleep</string>
+    <string name="tab_sleep_after_15_minutes" translatable="false">After 15 minutes</string>
+    <string name="tab_sleep_after_1_hour" translatable="false">After 1 hour</string>
+    <string name="tab_sleep_after_1_day" translatable="false">After 1 day</string>
+    <string name="tab_sleep_never" translatable="false">Never</string>
+    <string name="tab_sleep_note" translatable="false">A sleeping tab frees memory and reloads when you open it. Text you typed into a page and did not send may be lost.</string>
+    <string name="tab_sleep_asleep_mark" translatable="false">Asleep</string>
+</resources>
